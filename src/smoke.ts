@@ -1605,6 +1605,10 @@ assert(localProviderRequest.body.response_format === undefined, "expected local 
 assert(localToolProviderRequest.body.tools !== undefined, "expected local tool-capable model to preserve tools");
 assert(normalizedAdjacentMessages.messages[0]?.role === "system", "expected provider request system identity");
 assert(
+  normalizedAdjacentMessages.messages[0]?.content.includes("Describe yourself as an agent"),
+  "expected provider request identity to prefer agent self-description"
+);
+assert(
   normalizedAdjacentMessages.messages[1]?.content === "hello\n\nagain",
   "expected adjacent provider messages to merge"
 );
@@ -2735,6 +2739,10 @@ assert(providerResponse.progress.some((entry) => entry.includes("provider iterat
 assert(runtimeProviderRequest !== undefined, "expected provider request to be captured");
 assert(providerRuntimeRequestCountBeforeResume === 3, "expected provider multi-iteration requests");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("EstaCoda is a proactive agent")), "expected provider SOUL identity prompt");
+assert(
+  runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("not an assistant or code assistant")),
+  "expected provider SOUL identity prompt to avoid assistant self-labeling"
+);
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Prepared workflow")), "expected provider prompt to include tool result");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Skill workflow plan: youtube-knowledge-base")), "expected provider prompt to include skill workflow plan");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("fallback: browser-route")), "expected provider prompt to include workflow fallback");

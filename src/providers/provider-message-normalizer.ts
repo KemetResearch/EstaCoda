@@ -17,7 +17,10 @@ export function normalizeProviderMessagesStrict(
 ): ProviderMessageNormalization {
   const warnings: string[] = [];
   const repairs: string[] = [];
-  const identity = options.identity ?? "You are EstaCoda, an autonomous agent.";
+  const identity = options.identity ?? [
+    "You are EstaCoda, a proactive autonomous agent.",
+    "Describe yourself as an agent, never as an assistant, AI assistant, or code assistant."
+  ].join("\n");
   const normalized: ProviderMessage[] = [];
   let systemContent: string | undefined;
 
