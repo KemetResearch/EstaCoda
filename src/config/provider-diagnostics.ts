@@ -1,7 +1,14 @@
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 
 export type ProviderDiagnostic = {
   status: "ready" | "warning" | "blocked";
+  lines: string[];
+  warnings: string[];
+};
+
+export type ProviderLiveDiagnostic = {
+  status: "ready" | "blocked";
   lines: string[];
   warnings: string[];
 };
@@ -87,6 +94,75 @@ export function renderProviderDiagnostic(diagnostic: ProviderDiagnostic): string
     diagnostic.warnings.length === 0
       ? "Provider status: ready"
       : `Provider warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
+  ].join("\n");
+}
+
+export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise<ProviderLiveDiagnostic> {
+  if (config.model.provider === "unconfigured" || config.model.id === "unconfigured") {
+    return {
+      status: "blocked",
+      lines: ["Live provider check: skipped"],
+      warnings: ["Provider setup is incomplete."]
+    };
+  }
+
+  const executor = new ProviderExecutor({
+    registry: config.providerRegistry,
+    credentialPools: config.credentialPools,
+    oneShotFallbackPerSession: false
+  });
+  const execution = await executor.complete({
+    model: config.model.id,
+    messages: [
+      {
+        role: "system",
+        content: "You are EstaCoda. This is a provider connectivity check."
+      },
+      {
+        role: "user",
+        content: "Reply with exactly: OK"
+      }
+    ],
+    temperature: 0.2,
+    maxTokens: 8
+  }, {
+    providerOrder: [config.model.provider]
+  });
+  const attemptSummary = execution.attempts.map((attempt) =>
+    `${attempt.provider}/${attempt.model}:${attempt.ok ? "ok" : attempt.errorClass ?? "failed"}`
+  );
+
+  if (execution.ok && execution.response !== undefined) {
+    return {
+      status: "ready",
+      lines: [
+        "Live provider check: ready",
+        `Response provider: ${execution.response.provider}/${execution.response.model}`,
+        `Response text: ${execution.response.content.trim() || "[empty]"}`,
+        `Attempts: ${attemptSummary.join(", ") || "none"}`
+      ],
+      warnings: []
+    };
+  }
+
+  return {
+    status: "blocked",
+    lines: [
+      "Live provider check: blocked",
+      `Attempts: ${attemptSummary.join(", ") || "none"}`
+    ],
+    warnings: [
+      execution.attempts.at(-1)?.content ?? "Provider live check failed before receiving a response."
+    ]
+  };
+}
+
+export function renderProviderLiveDiagnostic(diagnostic: ProviderLiveDiagnostic): string {
+  return [
+    ...diagnostic.lines,
+    diagnostic.warnings.length === 0
+      ? "Live provider status: ready"
+      : `Live provider warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
   ].join("\n");
 }
 

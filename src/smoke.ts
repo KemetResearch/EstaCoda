@@ -388,6 +388,19 @@ const cliReadyProviderSetup = await runCliCommand({
   workspaceRoot: cliReadyProviderWorkspace,
   homeDir: cliReadyProviderHome
 });
+const cliReadyProviderLiveDoctor = await runCliCommand({
+  argv: ["doctor", "--live"],
+  workspaceRoot: cliReadyProviderWorkspace,
+  homeDir: cliReadyProviderHome,
+  providerFetch: async () => fakeFetchResponse(200, {
+    choices: [{ message: { content: "OK" } }],
+    usage: {
+      prompt_tokens: 5,
+      completion_tokens: 1,
+      total_tokens: 6
+    }
+  })
+});
 const cliWebEnable = await runCliCommand({
   argv: ["web", "enable", "--max-content-chars", "12000"],
   workspaceRoot: cliWorkspace,
@@ -1477,6 +1490,9 @@ assert(cliMissingProviderSetup.output.includes("Missing API key environment vari
 assert(cliMissingProviderDoctor.exitCode === 1, "expected missing key doctor to fail");
 assert(cliMissingProviderDoctor.output.includes("Missing API key environment variable ESTACODA_SMOKE_MISSING_KEY"), "expected missing key doctor warning");
 assert(cliReadyProviderSetup.output.includes("Provider status: ready"), "expected ready provider setup diagnostic");
+assert(cliReadyProviderLiveDoctor.exitCode === 0, "expected ready provider live doctor to pass");
+assert(cliReadyProviderLiveDoctor.output.includes("Live provider check: ready"), "expected live doctor provider check");
+assert(cliReadyProviderLiveDoctor.output.includes("Response text: OK"), "expected live doctor response text");
 assert(cliWebEnable.output.includes("Web extraction enabled"), "expected CLI web enable output");
 assert(cliWebStatus.output.includes("Web extraction: enabled"), "expected CLI web status output");
 assert(cliWebStatus.output.includes("Max content chars: 12000"), "expected CLI web max content output");

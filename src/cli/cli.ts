@@ -13,7 +13,13 @@ import {
 import { runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import type { ToolDefinition } from "../contracts/tool.js";
-import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
+import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
+import {
+  diagnoseProviderConfig,
+  diagnoseProviderLive,
+  renderProviderDiagnostic,
+  renderProviderLiveDiagnostic
+} from "../config/provider-diagnostics.js";
 import { runTelegramGateway } from "../channels/gateway-runner.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 
@@ -32,6 +38,7 @@ export type CliOptions = {
   tools?: ToolDefinition[];
   prompt?: Prompt;
   telegramFetch?: TelegramFetch;
+  providerFetch?: ProviderFetchLike;
 };
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
@@ -53,7 +60,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "tools":
       return tools(options);
     case "doctor":
-      return doctor(options);
+      return doctor(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -177,10 +184,13 @@ async function tools(options: CliOptions): Promise<CliCommandResult> {
   };
 }
 
-async function doctor(options: CliOptions): Promise<CliCommandResult> {
+async function doctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
   const config = await loadRuntimeConfig(options);
   const onboarding = await getOnboardingStatus(options);
   const providerDiagnostic = await diagnoseProviderConfig(config);
+  const liveProviderDiagnostic = hasFlag(args, "--live")
+    ? await diagnoseProviderLive(config)
+    : undefined;
   const warnings = [];
 
   if (config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
@@ -192,10 +202,11 @@ async function doctor(options: CliOptions): Promise<CliCommandResult> {
   }
 
   warnings.push(...providerDiagnostic.warnings);
+  warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
 
   return {
     handled: true,
-    exitCode: warnings.length === 0 ? 0 : 1,
+    exitCode: warnings.length === 0 && liveProviderDiagnostic?.status !== "blocked" ? 0 : 1,
     output: [
       "EstaCoda doctor",
       `Model: ${config.model.provider}/${config.model.id}`,
@@ -205,9 +216,11 @@ async function doctor(options: CliOptions): Promise<CliCommandResult> {
       `Credential pools: ${config.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
       "",
       renderProviderDiagnostic(providerDiagnostic),
+      liveProviderDiagnostic === undefined ? undefined : "",
+      liveProviderDiagnostic === undefined ? undefined : renderProviderLiveDiagnostic(liveProviderDiagnostic),
       "",
       warnings.length === 0 ? "Status: ready" : `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`
-    ].join("\n")
+    ].filter((line) => line !== undefined).join("\n")
   };
 }
 
@@ -632,6 +645,7 @@ function help(): string {
     "  estacoda gateway Start channel gateway",
     "  estacoda model   Show current model",
     "  estacoda tools   Show available tools by toolset",
-    "  estacoda doctor  Check setup health"
+    "  estacoda doctor  Check setup health",
+    "  estacoda doctor --live  Make a tiny live provider call"
   ].join("\n");
 }
