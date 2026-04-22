@@ -2856,6 +2856,137 @@ assert(providerRuntimeEvents.some((event) => event.kind === "tool-plan" && event
 assert(providerRuntimeEvents.some((event) => event.kind === "tool-plan" && event.plan.status === "executed"), "expected executed tool-plan event");
 assert(providerRuntimeEvents.some((event) => event.kind === "artifact-created" && event.artifact.path === "src/sample.ts"), "expected artifact-created event");
 
+const focusedToolProviderRegistry = new ProviderRegistry();
+const focusedToolProviderRequests: ProviderRequest[] = [];
+focusedToolProviderRegistry.register({
+  id: "deepseek",
+  name: "Focused tool provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    focusedToolProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (focusedToolProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "focused-file-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: "src/sample.ts"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Focused file-read final answer."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    focusedToolProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Focused file-read final answer.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const focusedToolRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "focused-provider-tool-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: focusedToolProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const focusedToolEvents: RuntimeEvent[] = [];
+const focusedToolResponse = await focusedToolRuntime.handle({
+  text: "Read src/sample.ts with the workspace file tool and summarize what it exports.",
+  channel: "cli",
+  trustedWorkspace: true,
+  onEvent: (event) => {
+    focusedToolEvents.push(event);
+  }
+});
+
+assert(focusedToolProviderRequests.length === 2, "expected focused provider tool E2E to continue after file.read");
+const focusedProviderTools = focusedToolProviderRequests[0]?.tools as Array<{ function: { name: string } }> | undefined;
+assert(
+  focusedProviderTools?.some((tool) => tool.function.name === "file_read") === true,
+  "expected focused provider tool E2E to expose file_read schema"
+);
+assert(
+  focusedToolProviderRequests[1]?.messages.some((message) => message.content.includes("export const answer = 42")),
+  "expected focused provider continuation to include file.read result"
+);
+assert(
+  focusedToolResponse.toolExecutions.some((execution) => execution.tool.name === "file.read" && execution.result?.ok === true),
+  "expected focused provider tool E2E to execute file.read"
+);
+assert(
+  focusedToolResponse.toolPlans.some((plan) => plan.tool === "file.read" && plan.status === "executed"),
+  "expected focused provider tool E2E to mark file.read plan executed"
+);
+assert(
+  focusedToolResponse.text.includes("Focused file-read final answer."),
+  "expected focused provider tool E2E final provider answer"
+);
+assert(
+  focusedToolEvents.some((event) => event.kind === "provider-tool-call") &&
+    focusedToolEvents.some((event) => event.kind === "tool-result" && event.tool === "file.read" && event.ok === true),
+  "expected focused provider tool E2E to emit provider tool-call and tool-result events"
+);
+
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
 await mkdir(join(compressionWorkspace, "src"));
 await writeFile(join(compressionWorkspace, "src", "large.txt"), "compress me\n".repeat(1200), "utf8");
