@@ -41,6 +41,7 @@ import { normalizeProviderMessagesStrict } from "./providers/provider-message-no
 import { ProviderRegistry } from "./providers/provider-registry.js";
 import { buildFallbackChain, routeProvider } from "./providers/provider-router.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
+import { IntentRouter } from "./runtime/intent-router.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
@@ -260,6 +261,11 @@ await memory.saveToDirectory(memorySaveDir);
 const savedMemory = await readFile(join(memorySaveDir, "MEMORY.md"), "utf8");
 
 const youtubeMatches = skills.matchPrompt("Build a knowledge base from this YouTube URL.");
+const intentRouter = new IntentRouter({ skillRegistry: skills });
+const generalRoute = intentRouter.route("Say hello as EstaCoda and summarize what you can do in one short paragraph.");
+const telegramMediaRoute = intentRouter.route("I sent the image in Telegram chat, can you inspect it?");
+const asciiVideoRoute = intentRouter.route("Create a 10 second ASCII logo animation.");
+const genericKnowledgeRoute = intentRouter.route("Build a knowledge base from this folder.");
 const availableTools = await tools.listAvailable();
 const compressed = trajectory.compress();
 const renderedMemory = renderMemorySnapshot(memory.snapshot());
@@ -1958,6 +1964,20 @@ assert(
 assert(
   !youtubeMatches.some((skill) => skill.name === "ascii-video"),
   "expected generic video wording not to match ascii-video"
+);
+assert(generalRoute.labels.includes("general"), "expected hello prompt to stay general");
+assert(generalRoute.suggestedSkills.length === 0, "expected hello prompt to avoid specialist skill routing");
+assert(
+  telegramMediaRoute.suggestedSkills.some((skill) => skill.name === "telegram-media-analysis"),
+  "expected Telegram media prompt to route to media analysis skill"
+);
+assert(
+  asciiVideoRoute.suggestedSkills.some((skill) => skill.name === "ascii-video"),
+  "expected ASCII animation prompt to route to ascii-video skill"
+);
+assert(
+  !genericKnowledgeRoute.suggestedSkills.some((skill) => skill.name === "youtube-knowledge-base"),
+  "expected generic knowledge-base prompt not to route to YouTube skill without video evidence"
 );
 assert(
   memory.read("MEMORY.md").includes("promote repeated patterns into skills"),

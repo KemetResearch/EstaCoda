@@ -5,6 +5,7 @@ export type IntentLabel =
   | "youtube-video"
   | "knowledge-base"
   | "telegram-media"
+  | "media-generation"
   | "pdf-document"
   | "codebase-task"
   | "web-research"

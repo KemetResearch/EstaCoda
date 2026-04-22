@@ -36,7 +36,11 @@ export class IntentRouter {
     const normalized = normalize(prompt);
     const labels = detectLabels(normalized);
     const suggestedToolsets = toolsetsFor(labels);
-    const promptMatchedSkills = this.#skillRegistry.matchPrompt(prompt);
+    const promptMatchedSkills = labels.length === 0
+      ? []
+      : this.#skillRegistry
+        .matchPrompt(prompt)
+        .filter((skill) => skillMatchesIntent(skill, labels));
     const intentMatchedSkills = this.#skillRegistry
       .list()
       .filter((skill) => skillMatchesIntent(skill, labels));
@@ -56,7 +60,7 @@ export class IntentRouter {
 function detectLabels(normalized: string): IntentLabel[] {
   const labels: IntentLabel[] = [];
 
-  if (hasAny(normalized, ["youtube.com", "youtu.be", "youtube", "video", "transcript"])) {
+  if (hasAny(normalized, ["youtube.com", "youtu.be", "youtube", "transcript"])) {
     labels.push("youtube-video");
   }
 
@@ -64,7 +68,11 @@ function detectLabels(normalized: string): IntentLabel[] {
     labels.push("knowledge-base");
   }
 
-  if (hasAny(normalized, ["telegram", "chat", "uploaded", "sent it", "image", "photo", "voice note"])) {
+  if (hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo"])) {
+    labels.push("media-generation");
+  }
+
+  if (isChannelMediaReference(normalized)) {
     labels.push("telegram-media");
   }
 
@@ -107,6 +115,10 @@ function toolsetsFor(labels: IntentLabel[]): ToolsetName[] {
       toolsets.push("telegram", "media", "files");
     }
 
+    if (label === "media-generation") {
+      toolsets.push("media", "files", "shell-write", "web", "browser", "research");
+    }
+
     if (label === "pdf-document") {
       toolsets.push("media", "files", "research");
     }
@@ -133,11 +145,15 @@ function toolsetsFor(labels: IntentLabel[]): ToolsetName[] {
 
 function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[]): boolean {
   if (skill.name === "youtube-knowledge-base") {
-    return labels.includes("youtube-video") || labels.includes("knowledge-base");
+    return labels.includes("youtube-video");
   }
 
   if (skill.name === "telegram-media-analysis") {
     return labels.includes("telegram-media");
+  }
+
+  if (skill.name === "ascii-video") {
+    return labels.includes("media-generation");
   }
 
   return false;
@@ -177,6 +193,14 @@ function rationaleFor(labels: IntentLabel[], skills: Array<LoadedSkill | SkillDe
 
 function hasAny(value: string, needles: string[]): boolean {
   return needles.some((needle) => value.includes(needle));
+}
+
+function isChannelMediaReference(normalized: string): boolean {
+  const channelSignals = ["telegram", "channel", "chat", "uploaded", "sent it", "sent the", "shared here"];
+  const mediaSignals = ["image", "photo", "pdf", "document", "file", "audio", "video", "voice note", "attachment"];
+
+  return hasAny(normalized, ["voice note"]) ||
+    (hasAny(normalized, channelSignals) && hasAny(normalized, mediaSignals));
 }
 
 function normalize(value: string): string {
