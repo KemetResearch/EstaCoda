@@ -3282,6 +3282,210 @@ assert(
   "expected multi-step provider E2E to execute file.write before dependent file.read"
 );
 
+const editWorkflowPath = "agent-edit-proof.md";
+const editOriginalContent = "EstaCoda can edit files after reading them.\n";
+const editUpdatedContent = "EstaCoda can precisely replace file text after reading it.\n";
+await writeFile(join(contextWorkspace, editWorkflowPath), editOriginalContent, "utf8");
+const editProviderRegistry = new ProviderRegistry();
+const editProviderRequests: ProviderRequest[] = [];
+editProviderRegistry.register({
+  id: "deepseek",
+  name: "Edit workflow provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    editProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (editProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "edit-workflow-initial-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (editProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "edit-workflow-replace",
+        name: "file_replace",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath,
+          oldText: editOriginalContent,
+          newText: editUpdatedContent
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (editProviderRequests.length === 3) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "edit-workflow-final-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Verified agent-edit-proof.md after exact text replacement."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    editProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Verified agent-edit-proof.md after exact text replacement.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const editRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "edit-provider-tool-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: editProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const editEvents: RuntimeEvent[] = [];
+const editResponse = await editRuntime.handle({
+  text: "Read agent-edit-proof.md, replace its sentence with a more precise one, then read it back and verify the exact contents.",
+  channel: "cli",
+  trustedWorkspace: true,
+  onEvent: (event) => {
+    editEvents.push(event);
+  }
+});
+const editFinalContent = await readFile(join(contextWorkspace, editWorkflowPath), "utf8");
+
+assert(editProviderRequests.length === 4, "expected edit workflow to require read, replace, read, and final turns");
+assert(
+  editProviderRequests[0]?.tools?.some((tool) =>
+    typeof tool === "object" &&
+    tool !== null &&
+    "function" in tool &&
+    (tool as { function?: { name?: string } }).function?.name === "file_replace"
+  ) === true,
+  "expected edit workflow to expose file_replace schema"
+);
+assert(
+  editProviderRequests[1]?.messages.some((message) => message.content.includes(editOriginalContent.trim())),
+  "expected edit workflow replacement turn to include original file contents"
+);
+assert(
+  editProviderRequests[2]?.messages.some((message) => message.content.includes(`Updated ${editWorkflowPath}`)),
+  "expected edit workflow final read turn to include replacement result"
+);
+assert(
+  editProviderRequests[3]?.messages.some((message) => message.content.includes(editUpdatedContent.trim())),
+  "expected edit workflow final answer turn to include edited file contents"
+);
+assert(editFinalContent === editUpdatedContent, "expected edit workflow to persist exact replacement");
+assert(
+  editResponse.toolExecutions.some((execution) => execution.tool.name === "file.replace" && execution.result?.ok === true) &&
+    editResponse.toolExecutions.filter((execution) => execution.tool.name === "file.read" && execution.result?.ok === true).length === 2,
+  "expected edit workflow to execute file.replace and two file.read calls"
+);
+assert(
+  editResponse.toolPlans.some((plan) => plan.tool === "file.replace" && plan.status === "executed"),
+  "expected edit workflow to mark file.replace plan executed"
+);
+assert(
+  editResponse.text.includes("Verified agent-edit-proof.md"),
+  "expected edit workflow final verification answer"
+);
+const editExecutionOrder = editEvents
+  .filter((event) => event.kind === "tool-result")
+  .map((event) => event.tool);
+assert(
+  editExecutionOrder.join(" -> ") === "file.read -> file.replace -> file.read",
+  "expected edit workflow to execute read, replace, and read-back in order"
+);
+
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
 await mkdir(join(compressionWorkspace, "src"));
 await writeFile(join(compressionWorkspace, "src", "large.txt"), "compress me\n".repeat(1200), "utf8");

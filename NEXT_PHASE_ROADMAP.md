@@ -6,6 +6,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 
 - Live provider inference works with Kimi.
 - Live provider tool-calling works for `file.read`.
+- Live multi-step provider workflows work for `file.write` -> `file.read` -> final verification.
 - Provider-safe tool aliases work, for example `file_read` maps to `file.read`.
 - Trusted workspace execution works without repeated permission prompts.
 - Tool results are packetized into continuation prompts.
@@ -24,12 +25,15 @@ This phase turns the first working provider-backed agent loop into a reliable He
 
 ### 1. Multi-Step Agent Tasks
 
-Status: core loop exists, needs broader real-world hardening.
+Status: core write/read loop works, edit/replace and recovery behavior need hardening.
 
 Next acceptance checks:
-- Provider can write a file with `file.write`.
-- Provider can read it back with `file.read`.
-- Provider can verify final state from tool results.
+- Done: provider can write a file with `file.write`.
+- Done: provider can read it back with `file.read`.
+- Done: provider can verify final state from tool results.
+- Provider can edit a file with `file.replace`.
+- Provider can read the edited file back with `file.read`.
+- Provider can verify the edit from tool results.
 - Failed or malformed tool calls produce recoverable feedback.
 - Terminal activity shows each tool step clearly.
 
@@ -75,12 +79,14 @@ Next acceptance checks:
 
 ## Immediate Next Step
 
-Harden a normal multi-step provider workflow:
+Harden a normal file edit provider workflow:
 
-1. Provider requests `file.write`.
-2. EstaCoda writes a file in the trusted workspace.
-3. Provider requests `file.read`.
-4. EstaCoda returns the written content.
-5. Provider produces a final verification answer from the read result.
+1. Provider requests `file.read`.
+2. EstaCoda reads the original file.
+3. Provider requests `file.replace`.
+4. EstaCoda applies an exact replacement in the trusted workspace.
+5. Provider requests `file.read`.
+6. EstaCoda returns the edited content.
+7. Provider produces a final verification answer from the read result.
 
 This should run through the normal agent loop, not a special doctor command.
