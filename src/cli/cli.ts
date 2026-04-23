@@ -1,3 +1,5 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createTelegramPairingCode,
   loadRuntimeConfig,
@@ -22,6 +24,7 @@ import {
 } from "../config/provider-diagnostics.js";
 import { runTelegramGateway } from "../channels/gateway-runner.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
+import type { Runtime } from "../runtime/create-runtime.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -39,6 +42,7 @@ export type CliOptions = {
   prompt?: Prompt;
   telegramFetch?: TelegramFetch;
   providerFetch?: ProviderFetchLike;
+  runtime?: Runtime;
 };
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
@@ -191,6 +195,12 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const liveProviderDiagnostic = hasFlag(args, "--live")
     ? await diagnoseProviderLive(config)
     : undefined;
+  const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
+    ? await diagnoseLiveToolCall({
+        runtime: options.runtime,
+        workspaceRoot: options.workspaceRoot
+      })
+    : undefined;
   const warnings = [];
 
   if (config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
@@ -203,10 +213,15 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
 
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
+  warnings.push(...(liveToolDiagnostic?.warnings ?? []));
 
   return {
     handled: true,
-    exitCode: warnings.length === 0 && liveProviderDiagnostic?.status !== "blocked" ? 0 : 1,
+    exitCode: warnings.length === 0 &&
+      liveProviderDiagnostic?.status !== "blocked" &&
+      liveToolDiagnostic?.status !== "blocked"
+      ? 0
+      : 1,
     output: [
       "EstaCoda doctor",
       `Model: ${config.model.provider}/${config.model.id}`,
@@ -218,10 +233,94 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       renderProviderDiagnostic(providerDiagnostic),
       liveProviderDiagnostic === undefined ? undefined : "",
       liveProviderDiagnostic === undefined ? undefined : renderProviderLiveDiagnostic(liveProviderDiagnostic),
+      liveToolDiagnostic === undefined ? undefined : "",
+      liveToolDiagnostic === undefined ? undefined : renderLiveToolDiagnostic(liveToolDiagnostic),
       "",
       warnings.length === 0 ? "Status: ready" : `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`
     ].filter((line) => line !== undefined).join("\n")
   };
+}
+
+type LiveToolDiagnostic = {
+  status: "ready" | "blocked";
+  lines: string[];
+  warnings: string[];
+};
+
+async function diagnoseLiveToolCall(input: {
+  runtime: Runtime | undefined;
+  workspaceRoot: string;
+}): Promise<LiveToolDiagnostic> {
+  if (input.runtime === undefined) {
+    return {
+      status: "blocked",
+      lines: ["Live tool check: skipped"],
+      warnings: ["Runtime was not provided to the doctor command."]
+    };
+  }
+
+  const doctorDir = join(input.workspaceRoot, ".estacoda", "doctor");
+  const probePath = join(doctorDir, "live-tool-smoke.ts");
+  const relativeProbePath = ".estacoda/doctor/live-tool-smoke.ts";
+  const expectedName = "estacodaDoctorToolSmoke";
+  const expectedValue = "live-tool-ok";
+
+  await mkdir(doctorDir, { recursive: true });
+  await writeFile(probePath, `export const ${expectedName} = '${expectedValue}';\n`, "utf8");
+
+  try {
+    const response = await input.runtime.handle({
+      text: `Use the file.read tool to read ${relativeProbePath}, then tell me the exported constant name and value.`,
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const fileRead = response.toolExecutions.find((execution) => execution.tool.name === "file.read");
+    const usedProviderToolCall = response.providerExecution?.toolCalls.some((toolCall) =>
+      toolCall.name === "file_read" || toolCall.name === "file.read"
+    ) === true;
+    const finalAnswerIncludedProbe = response.text.includes(expectedName) && response.text.includes(expectedValue);
+    const warnings: string[] = [];
+
+    if (response.providerExecution?.ok !== true) {
+      warnings.push("Provider did not complete successfully during the live tool check.");
+    }
+
+    if (!usedProviderToolCall) {
+      warnings.push("Provider did not request the file_read tool.");
+    }
+
+    if (fileRead?.result?.ok !== true) {
+      warnings.push("file.read did not execute successfully during the live tool check.");
+    }
+
+    if (!finalAnswerIncludedProbe) {
+      warnings.push("Final provider answer did not include the probe constant name and value.");
+    }
+
+    return {
+      status: warnings.length === 0 ? "ready" : "blocked",
+      lines: [
+        `Live tool check: ${warnings.length === 0 ? "ready" : "blocked"}`,
+        `Probe file: ${relativeProbePath}`,
+        `Provider: ${response.providerExecution?.response?.provider ?? "unknown"}/${response.providerExecution?.response?.model ?? "unknown"}`,
+        `Provider requested file_read: ${usedProviderToolCall ? "yes" : "no"}`,
+        `file.read executed: ${fileRead?.result?.ok === true ? "yes" : "no"}`,
+        `Final answer used tool result: ${finalAnswerIncludedProbe ? "yes" : "no"}`
+      ],
+      warnings
+    };
+  } finally {
+    await rm(probePath, { force: true });
+  }
+}
+
+function renderLiveToolDiagnostic(diagnostic: LiveToolDiagnostic): string {
+  return [
+    ...diagnostic.lines,
+    diagnostic.warnings.length === 0
+      ? "Live tool status: ready"
+      : `Live tool warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
+  ].join("\n");
 }
 
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -646,6 +745,7 @@ function help(): string {
     "  estacoda model   Show current model",
     "  estacoda tools   Show available tools by toolset",
     "  estacoda doctor  Check setup health",
-    "  estacoda doctor --live  Make a tiny live provider call"
+    "  estacoda doctor --live  Make a tiny live provider call",
+    "  estacoda doctor --live-tools  Verify live provider tool-calling"
   ].join("\n");
 }

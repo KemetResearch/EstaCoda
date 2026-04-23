@@ -51,7 +51,8 @@ const runtime = await createRuntime({
 const command = await runCliCommand({
   argv,
   workspaceRoot,
-  tools: runtime.tools()
+  tools: runtime.tools(),
+  runtime
 });
 
 if (command.handled) {

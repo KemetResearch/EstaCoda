@@ -407,6 +407,108 @@ const cliReadyProviderLiveDoctor = await runCliCommand({
     }
   })
 });
+const cliReadyProviderLiveToolDoctor = await runCliCommand({
+  argv: ["doctor", "--live-tools"],
+  workspaceRoot: cliReadyProviderWorkspace,
+  homeDir: cliReadyProviderHome,
+  runtime: {
+    sessionDb,
+    sessionId: "cli-live-tool-doctor-smoke",
+    describe: () => "doctor smoke runtime",
+    tools: () => [],
+    skills: () => [],
+    latestResumeNote: async () => undefined,
+    trustWorkspace: async () => undefined,
+    isWorkspaceTrusted: async () => true,
+    revokeWorkspaceTrust: async () => true,
+    handle: async () => {
+      const probeContent = await readFile(
+        join(cliReadyProviderWorkspace, ".estacoda", "doctor", "live-tool-smoke.ts"),
+        "utf8"
+      );
+
+      return {
+        label: "𓂀 EstaCoda",
+        text: "The exported constant is estacodaDoctorToolSmoke with value live-tool-ok.",
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.35,
+          suggestedToolsets: [],
+          suggestedSkills: [],
+          confirmationRequired: false,
+          rationale: "doctor smoke"
+        },
+        securityDecision: "allow",
+        toolExecutions: [
+          {
+            tool: {
+              name: "file.read",
+              description: "Read a text file inside the active workspace.",
+              inputSchema: {},
+              riskClass: "read-only-local",
+              toolsets: ["files"],
+              progressLabel: "reading file",
+              maxResultSizeChars: 10_000
+            },
+            decision: "allow",
+            riskClass: "read-only-local",
+            result: {
+              ok: true,
+              content: probeContent
+            }
+          }
+        ],
+        toolPlans: [
+          {
+            id: "cli-live-tool-doctor-file-read",
+            tool: "file.read",
+            input: {
+              path: ".estacoda/doctor/live-tool-smoke.ts"
+            },
+            source: "provider-tool-call",
+            status: "executed"
+          }
+        ],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        providerExecution: {
+          ok: true,
+          fallbackUsed: false,
+          attempts: [
+            {
+              provider: "deepseek",
+              model: "deepseek-chat",
+              ok: true,
+              content: "ok"
+            }
+          ],
+          response: {
+            ok: true,
+            content: "The exported constant is estacodaDoctorToolSmoke with value live-tool-ok.",
+            provider: "deepseek",
+            model: "deepseek-chat"
+          },
+          toolCalls: [
+            {
+              id: "cli-live-tool-doctor-file-read",
+              name: "file_read",
+              argumentsText: JSON.stringify({
+                path: ".estacoda/doctor/live-tool-smoke.ts"
+              })
+            }
+          ]
+        },
+        progress: []
+      };
+    }
+  }
+});
+const cliLiveToolProbeRemoved = await stat(
+  join(cliReadyProviderWorkspace, ".estacoda", "doctor", "live-tool-smoke.ts")
+).then(() => false, () => true);
 const cliWebEnable = await runCliCommand({
   argv: ["web", "enable", "--max-content-chars", "12000"],
   workspaceRoot: cliWorkspace,
@@ -1563,6 +1665,10 @@ assert(cliModel.output.includes("Browser backend: local-cdp"), "expected CLI mod
 assert(cliTools.output.includes("Tools:"), "expected CLI tools output");
 assert(cliDoctor.output.includes("EstaCoda doctor"), "expected CLI doctor output");
 assert(cliDoctor.output.includes("Provider health:"), "expected CLI doctor provider diagnostic");
+assert(cliReadyProviderLiveToolDoctor.output.includes("Live tool check: ready"), "expected CLI live tool doctor output");
+assert(cliReadyProviderLiveToolDoctor.output.includes("Provider requested file_read: yes"), "expected CLI live tool doctor provider tool request");
+assert(cliReadyProviderLiveToolDoctor.output.includes("file.read executed: yes"), "expected CLI live tool doctor file execution");
+assert(cliLiveToolProbeRemoved, "expected CLI live tool doctor probe file cleanup");
 assert(cliHelp.output.includes("estacoda setup"), "expected CLI help output");
 assert(webExtract?.result?.ok === true, "expected web.extract to succeed with fake fetch");
 assert(webExtract.result.content.includes("Smoke Web"), "expected web.extract to parse title");
