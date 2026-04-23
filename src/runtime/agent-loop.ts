@@ -309,14 +309,23 @@ export class AgentLoop {
       securityDecision
     });
 
-    const toolExecutions = await this.#executeSkillWorkflow({
+    if (selectedSkill !== undefined && !intent.confirmationRequired) {
+      await this.#recordWorkflowPlan(compileSkillWorkflowPlan(selectedSkill));
+    }
+
+    const useDeterministicSkillWorkflow = this.#providerExecutor === undefined ||
+      this.#model === undefined ||
+      this.#model.provider === "unconfigured";
+    const toolExecutions = useDeterministicSkillWorkflow
+      ? await this.#executeSkillWorkflow({
       selectedSkill,
       intent,
       trustedWorkspace,
       signal: input.signal,
       text: routedText,
       onEvent: input.onEvent
-    });
+      })
+      : [];
     const recordedArtifactIds = new Set<string>();
     const artifacts = await this.#recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
     const toolPlans: ToolCallPlan[] = [];
@@ -531,8 +540,6 @@ export class AgentLoop {
     const stepMap = new Map(plan.steps.map((step, index) => [step.id, { step, index }]));
     const visited = new Set<string>();
     let stepIndex = 0;
-
-    await this.#recordWorkflowPlan(plan);
 
     while (stepIndex < plan.steps.length && executions.length < 4) {
       if (isAborted(input.signal)) {

@@ -2850,9 +2850,12 @@ assert(
   runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("not an assistant or code assistant")),
   "expected provider SOUL identity prompt to avoid assistant self-labeling"
 );
-assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Prepared workflow")), "expected provider prompt to include tool result");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Skill workflow plan: youtube-knowledge-base")), "expected provider prompt to include skill workflow plan");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("fallback: browser-route")), "expected provider prompt to include workflow fallback");
+assert(
+  runtimeProviderRequests[0]?.messages.every((message) => !message.content.includes("Prepared workflow")) === true,
+  "expected provider-backed skill execution to avoid deterministic pre-provider workflow execution"
+);
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Frozen memory snapshot")), "expected provider prompt frozen memory context");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("Compact skills index")), "expected provider prompt skills index");
 assert(runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("§ CACHED SYSTEM CONTEXT")), "expected provider prompt cached system context section");
@@ -2886,7 +2889,7 @@ assert(
 );
 assert(
   runtimeProviderRequests[1]?.messages.some((message) => message.content.includes("Prepared workflow")),
-  "expected provider continuation to include executed workflow result"
+  "expected provider continuation to include workflow output after provider tool execution"
 );
 assert(
   runtimeProviderRequests[1]?.messages.some((message) => message.content.includes("Artifacts:") && message.content.includes("src/sample.ts")),
