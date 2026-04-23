@@ -1331,7 +1331,10 @@ export class AgentLoop {
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
-      maxTokens: 1_200
+      maxTokens: 1_200,
+      tools: this.#model.supportsTools && this.#providerTools.length > 0
+        ? this.#providerTools
+        : undefined
     }), {
       requireTools: this.#model.supportsTools,
       requireVision: false,

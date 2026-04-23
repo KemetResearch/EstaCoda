@@ -2870,7 +2870,15 @@ assert(
   runtimeProviderRequests[0]?.messages.some((message) => message.content.includes("workflow_plan: Create a concise execution plan")),
   "expected provider prompt to include provider-safe tool name"
 );
-assert(runtimeProviderRequests[1]?.tools === undefined, "expected provider continuation to avoid another tool loop");
+assert(
+  runtimeProviderRequests[1]?.tools?.some((tool) =>
+    typeof tool === "object" &&
+    tool !== null &&
+    "function" in tool &&
+    (tool as { function?: { name?: string } }).function?.name === "workflow_plan"
+  ) === true,
+  "expected provider continuation to keep tool schemas available for multi-step workflows"
+);
 assert(
   runtimeProviderRequests[1]?.messages.some((message) => message.content.includes("EstaCoda executed the requested tools")),
   "expected provider continuation to include tool result packet"
