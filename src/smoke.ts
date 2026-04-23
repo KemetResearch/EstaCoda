@@ -3093,6 +3093,178 @@ assert(
   "expected focused provider tool E2E to emit provider tool-call and tool-result events"
 );
 
+const multiStepProviderRegistry = new ProviderRegistry();
+const multiStepProviderRequests: ProviderRequest[] = [];
+const multiStepPath = "agent-proof.md";
+const multiStepContent = "EstaCoda can write, read, and verify workspace files through provider tool calls.\n";
+multiStepProviderRegistry.register({
+  id: "deepseek",
+  name: "Multi-step tool provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    multiStepProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (multiStepProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "multi-step-file-write",
+        name: "file_write",
+        argumentsText: JSON.stringify({
+          path: multiStepPath,
+          content: multiStepContent
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (multiStepProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "multi-step-file-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: multiStepPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Verified agent-proof.md after writing and reading it back."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    multiStepProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Verified agent-proof.md after writing and reading it back.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const multiStepRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "multi-step-provider-tool-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: multiStepProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const multiStepEvents: RuntimeEvent[] = [];
+const multiStepResponse = await multiStepRuntime.handle({
+  text: "Create agent-proof.md with a one-sentence proof that EstaCoda can use tools, then read it back and verify the content.",
+  channel: "cli",
+  trustedWorkspace: true,
+  onEvent: (event) => {
+    multiStepEvents.push(event);
+  }
+});
+const multiStepWrittenContent = await readFile(join(contextWorkspace, multiStepPath), "utf8");
+
+assert(multiStepProviderRequests.length === 3, "expected multi-step provider tool E2E to require write, read, and final turns");
+assert(
+  multiStepProviderRequests[0]?.tools !== undefined &&
+    multiStepProviderRequests[0].tools.some((tool) =>
+      typeof tool === "object" &&
+      tool !== null &&
+      "function" in tool &&
+      (tool as { function?: { name?: string } }).function?.name === "file_write"
+    ),
+  "expected multi-step provider tool E2E to expose file_write schema"
+);
+assert(
+  multiStepProviderRequests[1]?.messages.some((message) => message.content.includes(`Wrote ${multiStepPath}`)),
+  "expected multi-step provider continuation to include file.write result"
+);
+assert(
+  multiStepProviderRequests[2]?.messages.some((message) => message.content.includes(multiStepContent.trim())),
+  "expected multi-step provider final continuation to include file.read result"
+);
+assert(multiStepWrittenContent === multiStepContent, "expected multi-step provider E2E to write requested content");
+assert(
+  multiStepResponse.toolExecutions.some((execution) => execution.tool.name === "file.write" && execution.result?.ok === true) &&
+    multiStepResponse.toolExecutions.some((execution) => execution.tool.name === "file.read" && execution.result?.ok === true),
+  "expected multi-step provider E2E to execute file.write and file.read"
+);
+assert(
+  multiStepResponse.toolPlans.some((plan) => plan.tool === "file.write" && plan.status === "executed") &&
+    multiStepResponse.toolPlans.some((plan) => plan.tool === "file.read" && plan.status === "executed"),
+  "expected multi-step provider E2E to mark write and read plans executed"
+);
+assert(
+  multiStepResponse.text.includes("Verified agent-proof.md"),
+  "expected multi-step provider E2E final verification answer"
+);
+assert(
+  multiStepEvents.some((event) => event.kind === "tool-result" && event.tool === "file.write" && event.ok === true) &&
+    multiStepEvents.some((event) => event.kind === "tool-result" && event.tool === "file.read" && event.ok === true),
+  "expected multi-step provider E2E to emit write and read tool-result events"
+);
+
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
 await mkdir(join(compressionWorkspace, "src"));
 await writeFile(join(compressionWorkspace, "src", "large.txt"), "compress me\n".repeat(1200), "utf8");
