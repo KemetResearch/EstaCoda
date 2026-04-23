@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -27,13 +28,16 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     await options.runtime.trustWorkspace();
   }
 
+  const activityRenderer = new ToolActivityRenderer({
+    tools: options.runtime.tools()
+  });
   const eventLines: string[] = [];
   const response = await options.runtime.handle({
     text: parsed.prompt,
     channel: "cli",
     trustedWorkspace: parsed.trustWorkspace ? true : undefined,
     onEvent: (event) => {
-      const rendered = renderOneShotEvent(event);
+      const rendered = renderOneShotEvent(event, activityRenderer);
 
       if (rendered !== undefined) {
         eventLines.push(rendered);
@@ -89,7 +93,10 @@ function parseOneShotArgs(argv: string[]): {
   };
 }
 
-function renderOneShotEvent(event: RuntimeEvent): string | undefined {
+function renderOneShotEvent(
+  event: RuntimeEvent,
+  activityRenderer: ToolActivityRenderer
+): string | undefined {
   switch (event.kind) {
     case "agent-start":
       return `thinking: ${event.input}`;
@@ -98,15 +105,15 @@ function renderOneShotEvent(event: RuntimeEvent): string | undefined {
     case "skill":
       return `skill: ${event.name}`;
     case "tool-start":
-      return `tool: ${event.tool}`;
+      return activityRenderer.render(event);
     case "tool-result":
-      return `tool result: ${event.tool} ${event.ok === false ? "failed" : "ok"}`;
+      return activityRenderer.render(event);
     case "provider-attempt":
       return event.fallback
         ? `provider fallback: ${event.provider}/${event.model}`
         : `provider: ${event.provider}/${event.model}`;
     case "provider-tool-call":
-      return `provider tool call: ${event.name ?? "unknown"}`;
+      return `${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}`;
     case "provider-result":
       return event.ok
         ? `provider ready: ${event.provider}/${event.model}`

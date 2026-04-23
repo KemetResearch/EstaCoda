@@ -3,7 +3,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
-import { ToolActivityRenderer } from "./tool-activity-renderer.js";
+import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -218,7 +218,7 @@ function renderRuntimeEvent(
       output.write(event.text);
       return;
     case "provider-tool-call":
-      output.write(`\nprovider tool call: ${event.name ?? "unknown"}\n`);
+      output.write(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
       return;
     case "provider-result":
       if (event.ok) {
