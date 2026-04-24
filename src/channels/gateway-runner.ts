@@ -5,7 +5,8 @@ import type { ChannelAuthPolicy } from "../contracts/channel.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
-import { ChannelGateway, InMemoryChannelSessionStore } from "./channel-gateway.js";
+import { ChannelApprovalStore } from "./channel-approval-store.js";
+import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands } from "./channel-gateway.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
 
 export type GatewayRunOptions = {
@@ -56,8 +57,10 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const authPolicy = telegramAuthPolicy(telegram.allowedUserIds ?? [], telegram.allowedChatIds ?? []);
   const sessionDbPath = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda", "sessions.sqlite");
   const mediaRoot = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda", "channel-media");
+  const approvalStorePath = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda", "channel-approvals.json");
   await mkdir(dirname(sessionDbPath), { recursive: true });
   const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+  const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
   const adapter = new TelegramAdapter({
     botToken,
     defaultChatId: telegram.defaultChatId,
@@ -68,6 +71,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const gateway = new ChannelGateway({
     adapters: [adapter],
     sessionStore: new InMemoryChannelSessionStore(),
+    approvalStore,
     authPolicy,
     trustedWorkspace: true,
     pair: async (message) => {
@@ -90,7 +94,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     onStopRequested: async () => {
       await adapter.stop();
     },
-    runtimeForSession: async ({ sessionId }) => createRuntime({
+    runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({
       theme: kemetBlueTheme,
       model: config.model,
       workspaceRoot: options.workspaceRoot,
@@ -105,6 +109,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
       providerRegistry: config.providerRegistry,
       credentialPools: config.credentialPools,
       auxiliaryProviders: config.auxiliaryProviders,
+      securityPolicy,
       browser: config.browser,
       telegramReady: config.channels.telegram.ready,
       enableWebNetwork: config.web.enableNetwork,
@@ -115,6 +120,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   let processed = 0;
 
   await gateway.start();
+  await adapter.setCommands(telegramGatewayCommands());
 
   try {
     do {

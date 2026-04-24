@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactStore } from "./artifacts/artifact-store.js";
 import { createLocalCdpBrowserBackend, createMockBrowserBackend, type CdpWebSocketEvent, type CdpWebSocketLike } from "./browser/browser-backend.js";
+import { ChannelApprovalStore } from "./channels/channel-approval-store.js";
 import { ChannelGateway, InMemoryChannelSessionStore } from "./channels/channel-gateway.js";
 import { MockChannelAdapter } from "./channels/mock-channel-adapter.js";
 import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-adapter.js";
@@ -54,14 +55,14 @@ import { builtinTools } from "./tools/builtin-tools.js";
 import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
 import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
-import { ToolExecutor } from "./tools/tool-executor.js";
+import { ToolExecutor, type ToolExecutionRecord } from "./tools/tool-executor.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
 import { createWebTools } from "./tools/web-tools.js";
 import { createWorkspaceTools } from "./tools/workspace-tools.js";
 import { TrajectoryRecorder } from "./trajectory/trajectory-recorder.js";
 import { runPythonWorker } from "./workers/python-worker.js";
-import { capabilityFirstDefaults } from "./contracts/security.js";
+import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "./contracts/security.js";
 
 const tools = new ToolRegistry();
 const skills = new SkillRegistry();
@@ -1844,6 +1845,10 @@ assert(gatewayStatusLocked.exitCode === 1, "expected gateway status to fail with
 assert(gatewayStatusLocked.output.includes("Missing: ESTACODA_GATEWAY_TELEGRAM_TOKEN"), "expected gateway missing token output");
 assert(gatewayStartOnce.exitCode === 0, "expected gateway start once to succeed");
 assert(gatewayStartOnce.output.includes("Messages processed: 1"), "expected gateway start once message count");
+assert(
+  gatewayRequests.some((request) => request.url.endsWith("/setMyCommands")),
+  "expected gateway start to sync Telegram bot commands"
+);
 assert(gatewayStopOnce.exitCode === 0, `expected gateway stop command to succeed: ${gatewayStopOnce.output}`);
 assert(gatewayStopOnce.output.includes("Messages processed: 1"), "expected gateway stop command message count");
 assert(gatewayMediaOnce.exitCode === 0, "expected gateway media message to succeed");
@@ -3709,8 +3714,10 @@ assertThrows(
 );
 
 const workspaceToolsDir = await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-tools-"));
+const canonicalWorkspaceToolsDir = await realpath(workspaceToolsDir).catch(() => workspaceToolsDir);
 await mkdir(join(workspaceToolsDir, "src"));
 await writeFile(join(workspaceToolsDir, "src", "tooling.ts"), "export const toolName = 'EstaCoda';\n", "utf8");
+await symlink(join(workspaceToolsDir, "src", "tooling.ts"), join(workspaceToolsDir, "src", "tooling-link.ts"));
 await writeFile(join(workspaceToolsDir, ".env"), "SECRET=value", "utf8");
 const workspaceTools = new ToolRegistry();
 for (const tool of createWorkspaceTools({ workspaceRoot: workspaceToolsDir })) {
@@ -3722,7 +3729,8 @@ const workspaceToolExecutor = new ToolExecutor({
     decide: () => "allow"
   },
   sessionDb,
-  trajectoryRecorder: trajectory
+  trajectoryRecorder: trajectory,
+  workspaceRoot: workspaceToolsDir
 });
 const workspaceFileRead = await workspaceToolExecutor.executeTool({
   tool: "file.read",
@@ -3775,6 +3783,39 @@ const blockedSecretRead = await workspaceToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const workspaceFileReadNormalized = await workspaceToolExecutor.executeTool({
+  tool: "file.read",
+  input: {
+    path: "src/../src/tooling.ts"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileReadAbsolute = await workspaceToolExecutor.executeTool({
+  tool: "file.read",
+  input: {
+    path: join(workspaceToolsDir, "src", "tooling.ts")
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileReadSymlink = await workspaceToolExecutor.executeTool({
+  tool: "file.read",
+  input: {
+    path: "src/tooling-link.ts"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileWriteSamePath = await workspaceToolExecutor.executeTool({
+  tool: "file.write",
+  input: {
+    path: "src/generated.ts",
+    content: "export const generated = false;\n"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 
 assert(workspaceFileRead?.result?.ok === true, "expected file.read to succeed");
 assert(
@@ -3788,18 +3829,34 @@ assert(
 );
 assert(workspaceFileWrite?.result?.ok === true, "expected file.write to succeed");
 assert(workspaceFileReplace?.result?.ok === true, "expected file.replace to succeed");
+assert(workspaceFileWriteSamePath?.result?.ok === true, "expected file.write rewrite to succeed");
 assert(workspaceTerminalRun?.result?.ok === true, "expected terminal.run to succeed");
 assert(
   workspaceTerminalRun.result.content.includes(workspaceToolsDir),
   "expected terminal.run to execute inside workspace"
 );
 assert(blockedSecretRead?.result?.ok === false, "expected file.read to block sensitive path");
+assert(
+  workspaceFileRead?.targetKey === workspaceFileReadNormalized?.targetKey &&
+    workspaceFileRead?.targetKey === workspaceFileReadAbsolute?.targetKey,
+  "expected equivalent file paths to share one canonical target key"
+);
+assert(
+  workspaceFileRead?.targetKey === workspaceFileReadSymlink?.targetKey,
+  "expected symlinked file paths to canonicalize to the same target key"
+);
+assert(
+  workspaceFileWrite?.targetKey !== workspaceFileReplace?.targetKey &&
+    workspaceFileWrite?.targetKey !== workspaceFileRead?.targetKey,
+  "expected different file operations on the same path to keep distinct target keys"
+);
 
 const trustedPolicyExecutor = new ToolExecutor({
   registry: workspaceTools,
   securityPolicy: capabilityFirstDefaults,
   sessionDb,
-  trajectoryRecorder: trajectory
+  trajectoryRecorder: trajectory,
+  workspaceRoot: workspaceToolsDir
 });
 const trustedPolicyRead = await trustedPolicyExecutor.executeTool({
   tool: "file.read",
@@ -3881,7 +3938,8 @@ const processToolExecutor = new ToolExecutor({
     decide: () => "allow"
   },
   sessionDb,
-  trajectoryRecorder: trajectory
+  trajectoryRecorder: trajectory,
+  workspaceRoot: workspaceToolsDir
 });
 const quickProcess = await processToolExecutor.executeTool({
   tool: "process.start",
@@ -3916,6 +3974,36 @@ const stoppedProcess = await processToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const secondWorkspaceDir = await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-tools-2-"));
+const secondWorkspaceTools = new ToolRegistry();
+for (const tool of createWorkspaceTools({ workspaceRoot: secondWorkspaceDir })) {
+  secondWorkspaceTools.register(tool);
+}
+const secondWorkspaceExecutor = new ToolExecutor({
+  registry: secondWorkspaceTools,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory,
+  workspaceRoot: secondWorkspaceDir
+});
+const secondWorkspaceTerminalRun = await secondWorkspaceExecutor.executeTool({
+  tool: "terminal.run",
+  input: {
+    command: "pwd"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const similarCommandTerminalRun = await workspaceToolExecutor.executeTool({
+  tool: "terminal.run",
+  input: {
+    command: "pwd && echo done"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 
 assert(quickProcess?.result?.ok === true, "expected quick process to start");
 assert(quickProcessLogs?.result !== undefined, "expected process.logs result");
@@ -3930,6 +4018,24 @@ assert(
   "expected process.list to include long process"
 );
 assert(stoppedProcess?.result?.ok === true, "expected process.stop to succeed");
+assert(
+  workspaceTerminalRun?.targetKey?.includes(`cwd=${canonicalWorkspaceToolsDir}`) === true &&
+    workspaceTerminalRun?.targetKey?.includes("exec=pwd") === true,
+  "expected terminal target key to include cwd and executable"
+);
+assert(
+  workspaceTerminalRun?.targetKey !== secondWorkspaceTerminalRun?.targetKey,
+  "expected the same command in a different cwd to produce a different target key"
+);
+assert(
+  workspaceTerminalRun?.targetKey !== similarCommandTerminalRun?.targetKey,
+  "expected similar commands to keep distinct target keys"
+);
+assert(
+  quickProcess?.targetKey?.includes(`cwd=${canonicalWorkspaceToolsDir}`) === true &&
+    quickProcess?.targetKey?.includes("exec=printf") === true,
+  "expected process.start target key to include cwd and executable"
+);
 
 const runtime = await createRuntime({
   theme: kemetBlueTheme,
@@ -5856,6 +5962,10 @@ assert(
 
 const mockChannel = new MockChannelAdapter({ kind: "telegram" });
 const channelSessionStore = new InMemoryChannelSessionStore();
+const channelApprovalStore = new ChannelApprovalStore({
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-channel-approvals-")), "approvals.json"),
+  idFactory: sequenceId()
+});
 const channelRuntimeRequests: Array<{
   sessionId: string;
   input: string;
@@ -5864,6 +5974,7 @@ const channelRuntimeRequests: Array<{
 const channelGateway = new ChannelGateway({
   adapters: [mockChannel],
   sessionStore: channelSessionStore,
+  approvalStore: channelApprovalStore,
   authPolicy: {
     mode: "allowlist",
     allowedUserIds: ["user-1"],
@@ -5965,6 +6076,11 @@ const channelHelpResult = await channelGateway.receive({
   id: "message-help",
   text: "/help"
 });
+const channelCommandsResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-commands",
+  text: "/commands"
+});
 const channelNewResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-new",
@@ -5980,6 +6096,10 @@ let releaseChannelTurn: (() => void) | undefined;
 const cancelMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const cancelGateway = new ChannelGateway({
   adapters: [cancelMockChannel],
+  approvalStore: new ChannelApprovalStore({
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-cancel-approvals-")), "approvals.json"),
+    idFactory: sequenceId()
+  }),
   authPolicy: {
     mode: "allowlist",
     allowedUserIds: ["user-1"]
@@ -6035,6 +6155,10 @@ let gatewayStopRequested = false;
 const stopMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const stopGateway = new ChannelGateway({
   adapters: [stopMockChannel],
+  approvalStore: new ChannelApprovalStore({
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-stop-approvals-")), "approvals.json"),
+    idFactory: sequenceId()
+  }),
   authPolicy: {
     mode: "allowlist",
     allowedUserIds: ["user-1"]
@@ -6072,6 +6196,7 @@ assert(channelResult.sessionId === channelRepeatResult.sessionId, "expected chan
 assert(channelStatusResult.replyText.includes(channelResult.sessionId), "expected channel /status to report session");
 assert(channelResumeResult.replyText.includes("channel interrupted task"), "expected channel /resume to report latest resume note");
 assert(channelHelpResult.replyText.includes("/new"), "expected channel /help commands");
+assert(channelCommandsResult.replyText.includes("/approve"), "expected channel /commands to list approval command");
 assert(channelNewResult.sessionId !== channelResult.sessionId, "expected channel /new to rotate session");
 assert(channelAfterNewResult.sessionId === channelNewResult.sessionId, "expected messages after /new to use fresh session");
 assert(channelCancelSignal?.aborted === true, "expected channel /stop to abort active turn");
@@ -6102,6 +6227,357 @@ assert(deniedChannelResult.replyText.includes("not paired"), "expected denied ch
 assert(
   mockChannel.deliveries.some((delivery) => delivery.type === "text" && delivery.text?.includes("not paired")),
   "expected denied channel text delivery"
+);
+
+let approvalRuns = 0;
+const approvalMockChannel = new MockChannelAdapter({ kind: "telegram" });
+const approvalStore = new ChannelApprovalStore({
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-approval-store-")), "approvals.json"),
+  idFactory: sequenceId()
+});
+const destructiveTargetSummary = "rm -rf build-cache";
+const destructiveTargetKey = "terminal.run:rm -rf build-cache";
+const otherDestructiveTargetSummary = "rm -rf dist-cache";
+const otherDestructiveTargetKey = "terminal.run:rm -rf dist-cache";
+const approvalReplyFor = (decision: SecurityDecision) =>
+  decision === "allow" ? "Dangerous command completed." : "This action needs approval before I can continue.";
+const approvalToolExecutionFor = (
+  decision: SecurityDecision,
+  targetSummary: string,
+  targetKey: string
+): ToolExecutionRecord => ({
+  tool: {
+    name: "terminal.run",
+    description: "Run shell command",
+    inputSchema: {},
+    riskClass: "destructive-local",
+    toolsets: ["shell-write"],
+    progressLabel: "running command",
+    maxResultSizeChars: 2000
+  },
+  decision,
+  riskClass: "destructive-local" as const,
+  targetKey,
+  targetSummary,
+  result: decision === "allow"
+    ? {
+        ok: true,
+        content: "command ok"
+      }
+    : undefined
+});
+const createApprovalRuntimeFor = (rationale: string) =>
+  async ({ sessionId, securityPolicy }: { sessionId: string; securityPolicy: SecurityPolicy }) => fakeRuntime({
+    sessionId,
+    handle: async (input) => {
+      const text = input.text.includes("different target")
+        ? otherDestructiveTargetSummary
+        : destructiveTargetSummary;
+      const key = text === otherDestructiveTargetSummary ? otherDestructiveTargetKey : destructiveTargetKey;
+      const decision = securityPolicy.decide({
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: key,
+        targetSummary: text,
+        description: "run tool terminal.run",
+        context: {
+          trustedWorkspace: input.trustedWorkspace ?? false,
+          targetConversationIsActive: true
+        }
+      });
+
+      return {
+        label: "EstaCoda",
+        text: approvalReplyFor(decision),
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.9,
+          suggestedSkills: [],
+          suggestedToolsets: ["shell-write"],
+          confirmationRequired: false,
+          rationale
+        },
+        securityDecision: decision,
+        toolExecutions: [approvalToolExecutionFor(decision, text, key)],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      };
+    }
+  });
+const approvalGateway = new ChannelGateway({
+  adapters: [approvalMockChannel],
+  approvalStore,
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["user-1"]
+  },
+  runtimeForSession: async ({ sessionId, securityPolicy }) => fakeRuntime({
+    sessionId,
+    handle: async (input) => {
+      approvalRuns += 1;
+      const decision = securityPolicy.decide({
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: destructiveTargetKey,
+        targetSummary: destructiveTargetSummary,
+        description: "run tool terminal.run",
+        context: {
+          trustedWorkspace: input.trustedWorkspace ?? false,
+          targetConversationIsActive: true
+        }
+      });
+
+      return {
+        label: "EstaCoda",
+        text: decision === "allow" ? "Dangerous command completed." : "This action needs approval before I can continue.",
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.9,
+          suggestedSkills: [],
+          suggestedToolsets: ["shell-write"],
+          confirmationRequired: false,
+          rationale: "approval smoke"
+        },
+        securityDecision: decision,
+        toolExecutions: [approvalToolExecutionFor(decision, destructiveTargetSummary, destructiveTargetKey)],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      };
+    }
+  })
+});
+const approvalMessage = {
+  ...channelMessage,
+  id: "message-approval",
+  text: "Run the dangerous shell command"
+};
+const approvalInitial = await approvalGateway.receive(approvalMessage);
+const approvalApprove = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-approve",
+  text: "/approve always"
+});
+const approvalStatus = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-status",
+  text: "/approvals"
+});
+const approvalFollowUp = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-follow-up",
+  text: "Run it again"
+});
+const persistentApprovals = await approvalStore.listForSession(channelMessage.sessionKey);
+const approvalRevoke = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-revoke",
+  text: `/revoke ${persistentApprovals[0]?.id ?? "missing"}`
+});
+const approvalAfterRevoke = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-after-revoke",
+  text: "Run it again after revoke"
+});
+const approvalReset = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-reset",
+  text: "/new"
+});
+const approvalAfterReset = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-after-reset",
+  text: "Run it again after reset"
+});
+
+assert(approvalInitial.replyText.includes("needs approval"), "expected approval gateway first response to block");
+assert(
+  approvalMockChannel.deliveries.some((delivery) => delivery.type === "text" && delivery.text?.includes(`Target: ${destructiveTargetSummary}`)),
+  "expected approval prompt delivery"
+);
+assert(approvalApprove.replyText.includes("persistently"), "expected /approve always confirmation");
+assert(approvalStatus.replyText.includes("Persistent approvals:"), "expected /approvals response");
+assert(approvalStatus.replyText.includes(destructiveTargetSummary), "expected /approvals target summary");
+assert(approvalStatus.replyText.includes("Session approvals:"), "expected /approvals session heading");
+assert(approvalFollowUp.replyText.includes("Dangerous command completed"), "expected session approval to allow rerun");
+assert(persistentApprovals.length === 1, "expected persistent approval to be stored");
+assert(persistentApprovals[0]?.targetKey === destructiveTargetKey, "expected persistent approval target key");
+assert(approvalRevoke.replyText.includes("Revoked persistent approval"), "expected /revoke confirmation");
+assert(approvalAfterRevoke.replyText.includes("needs approval"), "expected revoked approval to stop allowing rerun");
+assert(approvalReset.replyText.includes("Started a fresh EstaCoda session"), "expected approval session reset");
+assert(
+  approvalAfterReset.replyText.includes("needs approval"),
+  "expected pending approvals to require approval after /new"
+);
+assert(approvalRuns >= 4, "expected approval gateway to rerun the original message after approval");
+
+const approvalStatusAfterReset = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-status-after-reset",
+  text: "/approvals"
+});
+assert(
+  approvalStatusAfterReset.replyText.includes("Persistent approvals:\nnone"),
+  "expected revoked persistent approval to be removed from status"
+);
+
+const restartMockChannel = new MockChannelAdapter({ kind: "telegram" });
+const restartGateway = new ChannelGateway({
+  adapters: [restartMockChannel],
+  approvalStore,
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["user-1"]
+  },
+  runtimeForSession: createApprovalRuntimeFor("approval restart smoke")
+});
+const restartInitial = await restartGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-initial",
+  text: "Run the dangerous shell command after restart"
+});
+const restartApprove = await restartGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-approve",
+  text: "/approve always"
+});
+const restartStatus = await restartGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-status",
+  text: "/approvals"
+});
+const restartedGateway = new ChannelGateway({
+  adapters: [new MockChannelAdapter({ kind: "telegram" })],
+  approvalStore,
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["user-1"]
+  },
+  runtimeForSession: createApprovalRuntimeFor("approval restarted gateway smoke")
+});
+const afterRestart = await restartedGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-followup",
+  text: "Run the dangerous shell command after gateway restart"
+});
+const afterRestartNew = await restartedGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-new",
+  text: "/new"
+});
+const afterRestartStatus = await restartedGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-status-after-new",
+  text: "/approvals"
+});
+const similarDifferentTarget = await restartedGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-different-target",
+  text: "Run the dangerous shell command against a different target"
+});
+const differentChat = await restartedGateway.receive({
+  ...channelMessage,
+  id: "message-approval-restart-different-chat",
+  sessionKey: {
+    ...channelMessage.sessionKey,
+    chatId: "telegram-chat-2"
+  },
+  sender: {
+    ...channelMessage.sender
+  },
+  text: "Run the dangerous shell command in a different chat"
+});
+
+assert(restartInitial.replyText.includes("needs approval"), "expected restart approval initial block");
+assert(restartApprove.replyText.includes("persistently"), "expected restart persistent approval confirmation");
+assert(restartStatus.replyText.includes(`match=${destructiveTargetKey}`), "expected /approvals to show strict match key");
+assert(afterRestart.replyText.includes("Dangerous command completed"), "expected persistent approval to survive restart");
+assert(afterRestartNew.replyText.includes("Started a fresh EstaCoda session"), "expected /new after restart");
+assert(
+  afterRestartStatus.replyText.includes(`match=${destructiveTargetKey}`),
+  "expected /new to preserve persistent approvals"
+);
+assert(similarDifferentTarget.replyText.includes("needs approval"), "expected different target key to require fresh approval");
+assert(differentChat.replyText.includes("needs approval"), "expected different chat to require fresh approval");
+
+const sessionApprovalMockChannel = new MockChannelAdapter({ kind: "telegram" });
+const sessionApprovalStore = new ChannelApprovalStore({
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-session-approval-store-")), "approvals.json"),
+  idFactory: sequenceId()
+});
+const sessionApprovalGateway = new ChannelGateway({
+  adapters: [sessionApprovalMockChannel],
+  approvalStore: sessionApprovalStore,
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["user-1"]
+  },
+  runtimeForSession: async ({ sessionId, securityPolicy }) => fakeRuntime({
+    sessionId,
+    handle: async (input) => {
+      const decision = securityPolicy.decide({
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: destructiveTargetKey,
+        targetSummary: destructiveTargetSummary,
+        description: "run tool terminal.run",
+        context: {
+          trustedWorkspace: input.trustedWorkspace ?? false,
+          targetConversationIsActive: true
+        }
+      });
+
+      return {
+        label: "EstaCoda",
+        text: approvalReplyFor(decision),
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.9,
+          suggestedSkills: [],
+          suggestedToolsets: ["shell-write"],
+          confirmationRequired: false,
+          rationale: "approval session smoke"
+        },
+        securityDecision: decision,
+        toolExecutions: [approvalToolExecutionFor(decision, destructiveTargetSummary, destructiveTargetKey)],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      };
+    }
+  })
+});
+await sessionApprovalGateway.receive({
+  ...channelMessage,
+  id: "message-session-approval-initial",
+  text: "Run dangerous command with session approval"
+});
+await sessionApprovalGateway.receive({
+  ...channelMessage,
+  id: "message-session-approval-approve",
+  text: "/approve session"
+});
+const sessionApprovalStatus = await sessionApprovalGateway.receive({
+  ...channelMessage,
+  id: "message-session-approval-status",
+  text: "/approvals"
+});
+assert(
+  sessionApprovalStatus.replyText.includes("scope=session") && sessionApprovalStatus.replyText.includes("Persistent approvals:\nnone"),
+  "expected /approvals to distinguish session approvals from persistent approvals"
 );
 
 const telegramRequests: Array<{
@@ -6177,6 +6653,18 @@ await telegramAdapter.delivery.sendText({
   platform: "telegram",
   chatId: "1254738091"
 }, "Hello from EstaCoda");
+await telegramAdapter.setCommands([
+  { command: "/help", description: "Show help" },
+  { command: "/status", description: "Show status" }
+]);
+await telegramAdapter.delivery.sendProgress({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  kind: "agent-start",
+  sessionId: "telegram-smoke",
+  input: "hello"
+});
 await telegramAdapter.delivery.sendProgress({
   platform: "telegram",
   chatId: "1254738091"
@@ -6224,8 +6712,16 @@ assert(
   "expected Telegram sendMessage text request"
 );
 assert(
+  telegramRequests.some((request) => request.url.endsWith("/sendChatAction") && request.body.action === "typing"),
+  "expected Telegram typing action"
+);
+assert(
   telegramRequests.some((request) => request.url.endsWith("/sendMessage") && String(request.body.text).includes("preparing web.extract")),
   "expected Telegram progress message"
+);
+assert(
+  telegramRequests.some((request) => request.url.endsWith("/setMyCommands")),
+  "expected Telegram command sync request"
 );
 assert(
   telegramRequests.some((request) => request.url.endsWith("/sendMessage") && String(request.body.text).includes("Artifact ready")),

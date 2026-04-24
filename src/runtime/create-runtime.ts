@@ -25,6 +25,7 @@ import { createOpenAICompatibleProvider } from "../providers/openai-compatible-p
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { routeProvider } from "../providers/provider-router.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
+import type { SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { CredentialPoolRegistry } from "../providers/credential-pool.js";
@@ -85,6 +86,7 @@ export type RuntimeOptions = {
   currentPlatform?: string;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
+  securityPolicy?: SecurityPolicy;
 };
 
 export type Runtime = {
@@ -281,11 +283,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
+  const securityPolicy = options.securityPolicy ?? capabilityFirstDefaults;
   const toolExecutor = new ToolExecutor({
     registry: toolRegistry,
-    securityPolicy: capabilityFirstDefaults,
+    securityPolicy,
     sessionDb,
-    trajectoryRecorder
+    trajectoryRecorder,
+    workspaceRoot
   });
   const delegationManager = new DelegationManager({
     sessionDb,
@@ -319,7 +323,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const agentLoop = new AgentLoop({
     responseLabel: options.theme.branding.responseLabel,
     intentRouter,
-    securityPolicy: capabilityFirstDefaults,
+    securityPolicy,
     trajectoryRecorder,
     sessionDb,
     sessionId,

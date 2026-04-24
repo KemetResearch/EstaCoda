@@ -13,6 +13,9 @@ export type SecurityContext = {
 export type SecurityRequest = {
   riskClass: ToolRiskClass;
   description: string;
+  toolName?: string;
+  targetKey?: string;
+  targetSummary?: string;
   context: SecurityContext;
 };
 

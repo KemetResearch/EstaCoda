@@ -31,6 +31,11 @@ export type TelegramAdapterOptions = {
   now?: () => Date;
 };
 
+export type TelegramCommand = {
+  command: string;
+  description: string;
+};
+
 type TelegramApiResponse<T> = {
   ok: boolean;
   result?: T;
@@ -106,6 +111,11 @@ export class TelegramAdapter implements ChannelAdapter {
       await this.#sendMessage(sessionKey.chatId, text);
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
+      if (event.kind === "agent-start" || event.kind === "provider-attempt") {
+        await this.#sendChatAction(sessionKey.chatId, "typing");
+        return;
+      }
+
       const rendered = renderProgress(event);
 
       if (rendered.length > 0) {
@@ -175,6 +185,22 @@ export class TelegramAdapter implements ChannelAdapter {
       chat_id: chatId,
       text,
       disable_web_page_preview: true
+    });
+  }
+
+  async setCommands(commands: TelegramCommand[]): Promise<void> {
+    await this.#call("setMyCommands", {
+      commands: commands.map((command) => ({
+        command: command.command.startsWith("/") ? command.command.slice(1) : command.command,
+        description: command.description
+      }))
+    });
+  }
+
+  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo"): Promise<void> {
+    await this.#call("sendChatAction", {
+      chat_id: chatId,
+      action
     });
   }
 

@@ -1,3 +1,5 @@
+import { realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
@@ -25,6 +27,8 @@ export type ToolExecutionRecord = {
   tool: ToolDefinition;
   decision: SecurityDecision;
   riskClass: ToolRiskClass;
+  targetKey?: string;
+  targetSummary?: string;
   result?: ToolResult;
 };
 
@@ -33,6 +37,7 @@ export type ToolExecutorOptions = {
   securityPolicy: SecurityPolicy;
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
+  workspaceRoot?: string;
 };
 
 export class ToolExecutor {
@@ -40,12 +45,14 @@ export class ToolExecutor {
   readonly #securityPolicy: SecurityPolicy;
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorder: TrajectoryRecorder;
+  readonly #workspaceRoot: string;
 
   constructor(options: ToolExecutorOptions) {
     this.#registry = options.registry;
     this.#securityPolicy = options.securityPolicy;
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorder = options.trajectoryRecorder;
+    this.#workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
   }
 
   async executeFirstAvailable(request: ToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {
@@ -74,8 +81,13 @@ export class ToolExecutor {
     }
 
     const riskClass = classifyEffectiveRisk(tool, request.input);
+    const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
+    const targetSummary = summarizeSecurityTarget(tool.name, request.input);
     const decision = this.#securityPolicy.decide({
       riskClass,
+      toolName: tool.name,
+      targetKey,
+      targetSummary,
       description: `run tool ${tool.name}`,
       context: {
         trustedWorkspace: request.trustedWorkspace,
@@ -99,7 +111,9 @@ export class ToolExecutor {
       return {
         tool: toDefinition(tool),
         decision,
-        riskClass
+        riskClass,
+        targetKey,
+        targetSummary
       };
     }
 
@@ -148,6 +162,8 @@ export class ToolExecutor {
       tool: toDefinition(tool),
       decision,
       riskClass,
+      targetKey,
+      targetSummary,
       result
     };
   }
@@ -169,6 +185,51 @@ export class ToolExecutor {
     }
 
     return available;
+  }
+
+  async #buildSecurityTargetKey(toolName: string, input: Record<string, unknown>): Promise<string | undefined> {
+    const canonicalRoot = await realpath(this.#workspaceRoot).catch(() => this.#workspaceRoot);
+
+    if (toolName === "terminal.run" || toolName === "process.start") {
+      if (typeof input.command !== "string") {
+        return undefined;
+      }
+
+      const command = normalizeCommandKey(input.command);
+      const executable = extractExecutable(command);
+      return `${toolName}:cwd=${normalizePathKey(canonicalRoot)}:exec=${executable}:cmd=${command}`;
+    }
+
+    if (toolName.startsWith("file.")) {
+      const rawPath = typeof input.path === "string"
+        ? input.path
+        : typeof input.file_path === "string"
+          ? input.file_path
+          : undefined;
+      if (rawPath === undefined) {
+        return undefined;
+      }
+
+      const allowMissingLeaf = toolName === "file.write";
+      const canonicalTarget = await canonicalWorkspaceTarget(this.#workspaceRoot, canonicalRoot, rawPath, { allowMissingLeaf });
+      return canonicalTarget === undefined
+        ? `${toolName}:path:${normalizePathKey(rawPath)}`
+        : `${toolName}:path:${normalizePathKey(canonicalTarget)}`;
+    }
+
+    if (typeof input.url === "string") {
+      return `${toolName}:url:${normalizeUrlKey(input.url)}`;
+    }
+
+    if (typeof input.path === "string") {
+      return `${toolName}:path:${normalizePathKey(input.path)}`;
+    }
+
+    if (typeof input.file_path === "string") {
+      return `${toolName}:path:${normalizePathKey(input.file_path)}`;
+    }
+
+    return undefined;
   }
 }
 
@@ -206,4 +267,85 @@ function toDefinition(tool: ToolDefinition): ToolDefinition {
     maxResultSizeChars: tool.maxResultSizeChars,
     requiredConfig: tool.requiredConfig === undefined ? undefined : [...tool.requiredConfig]
   };
+}
+
+function summarizeSecurityTarget(toolName: string, input: Record<string, unknown>): string | undefined {
+  if ((toolName === "terminal.run" || toolName === "process.start") && typeof input.command === "string") {
+    return truncateSecuritySummary(input.command);
+  }
+
+  if (typeof input.path === "string") {
+    return truncateSecuritySummary(input.path);
+  }
+
+  if (typeof input.url === "string") {
+    return truncateSecuritySummary(input.url);
+  }
+
+  if (typeof input.file_path === "string") {
+    return truncateSecuritySummary(input.file_path);
+  }
+
+  return undefined;
+}
+
+function truncateSecuritySummary(value: string): string {
+  const trimmed = value.trim().replace(/\s+/gu, " ");
+  return trimmed.length <= 120 ? trimmed : `${trimmed.slice(0, 117)}...`;
+}
+
+function normalizeCommandKey(value: string): string {
+  return value.trim().replace(/\s+/gu, " ");
+}
+
+function normalizePathKey(value: string): string {
+  const normalized = value.trim().replace(/\/+/gu, "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function normalizeUrlKey(value: string): string {
+  return value.trim();
+}
+
+function extractExecutable(command: string): string {
+  const [head = "unknown"] = command.split(/\s+/u);
+  return head;
+}
+
+async function canonicalWorkspaceTarget(
+  configuredRoot: string,
+  canonicalRoot: string,
+  rawPath: string,
+  options: { allowMissingLeaf?: boolean } = {}
+): Promise<string | undefined> {
+  const candidate = isAbsolute(rawPath) ? resolve(rawPath) : resolve(configuredRoot, rawPath);
+  if (!isWithinAnyRoot([configuredRoot, canonicalRoot], candidate)) {
+    return undefined;
+  }
+
+  try {
+    const resolved = await realpath(candidate);
+    return isWithinRoot(canonicalRoot, resolved) ? resolved : undefined;
+  } catch {
+    if (options.allowMissingLeaf !== true) {
+      return undefined;
+    }
+
+    try {
+      const resolvedParent = await realpath(dirname(candidate));
+      const finalTarget = resolve(resolvedParent, basename(candidate));
+      return isWithinRoot(canonicalRoot, finalTarget) ? finalTarget : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function isWithinRoot(root: string, candidate: string): boolean {
+  const diff = relative(root, candidate);
+  return diff === "" || (!diff.startsWith("..") && !isAbsolute(diff));
+}
+
+function isWithinAnyRoot(roots: string[], candidate: string): boolean {
+  return roots.some((root) => isWithinRoot(root, candidate));
 }
