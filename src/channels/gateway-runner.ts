@@ -100,10 +100,12 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
       sessionId,
       profileId: "default",
       sessionDb,
+      externalSkillRoots: config.skills.externalDirs,
       providerRegistry: config.providerRegistry,
       credentialPools: config.credentialPools,
       auxiliaryProviders: config.auxiliaryProviders,
       browser: config.browser,
+      telegramReady: config.channels.telegram.ready,
       enableWebNetwork: config.web.enableNetwork,
       webMaxContentChars: config.web.maxContentChars
     })

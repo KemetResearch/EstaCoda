@@ -1,6 +1,13 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LoadedSkill, SkillDefinition, SkillPermissionExpectation, SkillSourceKind } from "../contracts/skill.js";
+import type {
+  LoadedSkill,
+  SkillDefinition,
+  SkillPermissionExpectation,
+  SkillSourceKind,
+  SkillVisibilityRules
+} from "../contracts/skill.js";
+import type { ToolsetName } from "../contracts/tool.js";
 
 export type SkillLoadResult = {
   skills: LoadedSkill[];
@@ -94,7 +101,12 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     required_toolsets?: string[];
     permission_expectations?: string[];
     additional_files?: string[];
+    visibility?: Record<string, unknown>;
   };
+  const inferredVisibility = mergeVisibilityRules(
+    parseVisibilityRules(definition.visibility),
+    inferHermesVisibility(definition.metadata)
+  );
 
   assertString(definition.name, "name");
   assertString(definition.description, "description");
@@ -112,6 +124,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     metadata: definition.metadata,
     whenToUse: stringArrayOrDefault(definition.whenToUse ?? definition.when_to_use, [definition.description]),
     requiredToolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]),
+    visibility: inferredVisibility,
     inputs: definition.inputs,
     outputs: definition.outputs,
     workflow: Array.isArray(definition.workflow) && definition.workflow.length > 0
@@ -173,6 +186,87 @@ function inferHermesCategory(metadata: unknown): string | undefined {
   }
 
   return hermes.category;
+}
+
+function inferHermesVisibility(metadata: unknown): SkillVisibilityRules | undefined {
+  if (!isRecord(metadata)) {
+    return undefined;
+  }
+
+  const hermes = metadata.hermes;
+  if (!isRecord(hermes)) {
+    return undefined;
+  }
+
+  return normalizeVisibilityRules({
+    requiresToolsets: hermes.requiresToolsets ?? hermes.requires_toolsets,
+    fallbackForToolsets: hermes.fallbackForToolsets ?? hermes.fallback_for_toolsets,
+    requiresTools: hermes.requiresTools ?? hermes.requires_tools,
+    fallbackForTools: hermes.fallbackForTools ?? hermes.fallback_for_tools
+  });
+}
+
+function parseVisibilityRules(value: unknown): SkillVisibilityRules | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return normalizeVisibilityRules({
+    requiresToolsets: value.requiresToolsets,
+    fallbackForToolsets: value.fallbackForToolsets,
+    requiresTools: value.requiresTools,
+    fallbackForTools: value.fallbackForTools
+  });
+}
+
+function normalizeVisibilityRules(value: {
+  requiresToolsets?: unknown;
+  fallbackForToolsets?: unknown;
+  requiresTools?: unknown;
+  fallbackForTools?: unknown;
+}): SkillVisibilityRules | undefined {
+  const normalized: SkillVisibilityRules = {};
+  const requiresToolsets = stringArrayOrEmpty(value.requiresToolsets) as ToolsetName[];
+  const fallbackForToolsets = stringArrayOrEmpty(value.fallbackForToolsets) as ToolsetName[];
+  const requiresTools = stringArrayOrEmpty(value.requiresTools);
+  const fallbackForTools = stringArrayOrEmpty(value.fallbackForTools);
+
+  if (requiresToolsets.length > 0) {
+    normalized.requiresToolsets = requiresToolsets;
+  }
+  if (fallbackForToolsets.length > 0) {
+    normalized.fallbackForToolsets = fallbackForToolsets;
+  }
+  if (requiresTools.length > 0) {
+    normalized.requiresTools = requiresTools;
+  }
+  if (fallbackForTools.length > 0) {
+    normalized.fallbackForTools = fallbackForTools;
+  }
+
+  return Object.keys(normalized).length === 0 ? undefined : normalized;
+}
+
+function mergeVisibilityRules(
+  left: SkillVisibilityRules | undefined,
+  right: SkillVisibilityRules | undefined
+): SkillVisibilityRules | undefined {
+  if (left === undefined) {
+    return right;
+  }
+
+  if (right === undefined) {
+    return left;
+  }
+
+  const merged = normalizeVisibilityRules({
+    requiresToolsets: [...(left.requiresToolsets ?? []), ...(right.requiresToolsets ?? [])],
+    fallbackForToolsets: [...(left.fallbackForToolsets ?? []), ...(right.fallbackForToolsets ?? [])],
+    requiresTools: [...(left.requiresTools ?? []), ...(right.requiresTools ?? [])],
+    fallbackForTools: [...(left.fallbackForTools ?? []), ...(right.fallbackForTools ?? [])]
+  });
+
+  return merged;
 }
 
 function skillPermissionExpectations(value: unknown): SkillPermissionExpectation[] {

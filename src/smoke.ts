@@ -1587,6 +1587,98 @@ assert(
   loadedRuntimeConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi",
   "expected configured auxiliary provider override"
 );
+const externalSkillsHome = await mkdtemp(join(tmpdir(), "estacoda-v2-external-home-"));
+const externalSkillsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-external-workspace-"));
+const homeSharedSkills = join(externalSkillsHome, "shared-skills");
+const envSharedRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-external-env-"));
+const missingExternalRoot = join(externalSkillsWorkspace, "missing-skills");
+process.env.ESTACODA_SKILLS_REPO = envSharedRoot;
+await mkdir(join(homeSharedSkills, "shared-team-skill"), { recursive: true });
+await writeFile(join(homeSharedSkills, "shared-team-skill", "SKILL.md"), `---
+name: shared-team-skill
+description: External shared version.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+permission_expectations:
+  - auto-read
+---
+Shared external instructions.
+`, "utf8");
+await mkdir(join(envSharedRoot, "env-external-skill"), { recursive: true });
+await writeFile(join(envSharedRoot, "env-external-skill", "SKILL.md"), `---
+name: env-external-skill
+description: External env-directory skill.
+version: 0.1.0
+category: general
+required_toolsets:
+  - core
+permission_expectations:
+  - auto-read
+---
+Loaded from \${ESTACODA_SKILLS_REPO}.
+`, "utf8");
+const externalHomePersonalSkillRoot = join(externalSkillsHome, ".estacoda", "skills", "shared-team-skill");
+await mkdir(externalHomePersonalSkillRoot, { recursive: true });
+await writeFile(join(externalHomePersonalSkillRoot, "SKILL.md"), `---
+name: shared-team-skill
+description: Personal override version.
+version: 0.1.0
+category: coding
+required_toolsets:
+  - files
+permission_expectations:
+  - auto-read
+---
+Personal override instructions.
+`, "utf8");
+await writeFile(join(externalSkillsHome, ".estacoda", "config.json"), `${JSON.stringify({
+  skills: {
+    externalDirs: [
+      "~/shared-skills",
+      "${ESTACODA_SKILLS_REPO}",
+      missingExternalRoot
+    ]
+  }
+}, null, 2)}\n`, "utf8");
+const externalDirsConfig = await loadRuntimeConfig({
+  workspaceRoot: externalSkillsWorkspace,
+  homeDir: externalSkillsHome
+});
+const externalDirsRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  workspaceRoot: externalSkillsWorkspace,
+  homeDir: externalSkillsHome,
+  externalSkillRoots: externalDirsConfig.skills.externalDirs,
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  }
+});
+const externalSkillCatalog = externalDirsRuntime.skills();
+const sharedTeamSkill = externalSkillCatalog.find((skill) => skill.name === "shared-team-skill");
+const envExternalSkill = externalSkillCatalog.find((skill) => skill.name === "env-external-skill");
+assert(
+  externalDirsConfig.skills.externalDirs.includes(homeSharedSkills),
+  "expected ~ external skill dir expansion"
+);
+assert(
+  externalDirsConfig.skills.externalDirs.includes(envSharedRoot),
+  "expected ${VAR} external skill dir expansion"
+);
+assert(
+  externalDirsConfig.skills.externalDirs.includes(missingExternalRoot),
+  "expected configured missing external dir to remain listed and be skipped later"
+);
+assert(sharedTeamSkill?.description === "Personal override version.", "expected personal skill to shadow external skill with the same name");
+assert(sharedTeamSkill?.sourceKind === "personal", "expected overridden skill to be marked personal");
+assert(envExternalSkill?.sourceKind === "external", "expected env external skill to load as external");
+assert(renderSlashMenu(externalDirsRuntime).includes("/env-external-skill"), "expected external skill to appear in slash menu");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
 assert(cliInteractiveSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive CLI setup output");
 assert(cliInteractiveSetup.output.includes("export KIMI_API_KEY='interactive-secret'"), "expected interactive shell export");
@@ -2925,6 +3017,184 @@ assert(
   renderedResetSessionLoop.includes("/reset-proof-skill"),
   "expected refreshed session to expose the newly installed skill"
 );
+const visibilityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-visibility-"));
+const visibilitySkillRoot = join(visibilityWorkspace, ".estacoda", "skills");
+await mkdir(join(visibilitySkillRoot, "linux-only-skill"), { recursive: true });
+await writeFile(join(visibilitySkillRoot, "linux-only-skill", "SKILL.md"), `---
+name: linux-only-skill
+description: Linux-only skill for platform visibility checks.
+version: 0.1.0
+category: general
+platforms: [linux]
+required_toolsets:
+  - files
+permission_expectations:
+  - auto-read
+---
+Visible only on Linux.
+`, "utf8");
+await mkdir(join(visibilitySkillRoot, "requires-browser-toolset"), { recursive: true });
+await writeFile(join(visibilitySkillRoot, "requires-browser-toolset", "SKILL.md"), `---
+name: requires-browser-toolset
+description: Requires a browser toolset to be visible.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+metadata:
+  hermes:
+    requires_toolsets: [browser]
+permission_expectations:
+  - auto-read
+---
+Visible only when browser toolset is available.
+`, "utf8");
+await mkdir(join(visibilitySkillRoot, "fallback-browser-toolset"), { recursive: true });
+await writeFile(join(visibilitySkillRoot, "fallback-browser-toolset", "SKILL.md"), `---
+name: fallback-browser-toolset
+description: Hidden when a browser toolset is available.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+metadata:
+  hermes:
+    fallback_for_toolsets: [browser]
+permission_expectations:
+  - auto-read
+---
+Visible only before browser support is configured.
+`, "utf8");
+await mkdir(join(visibilitySkillRoot, "requires-browser-tool"), { recursive: true });
+await writeFile(join(visibilitySkillRoot, "requires-browser-tool", "SKILL.md"), `---
+name: requires-browser-tool
+description: Requires browser.navigate to be visible.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+metadata:
+  hermes:
+    requires_tools: [browser.navigate]
+permission_expectations:
+  - auto-read
+---
+Visible only when browser.navigate is available.
+`, "utf8");
+await mkdir(join(visibilitySkillRoot, "fallback-browser-tool"), { recursive: true });
+await writeFile(join(visibilitySkillRoot, "fallback-browser-tool", "SKILL.md"), `---
+name: fallback-browser-tool
+description: Hidden when browser.navigate is available.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+metadata:
+  hermes:
+    fallback_for_tools: [browser.navigate]
+permission_expectations:
+  - auto-read
+---
+Visible only before browser.navigate is configured.
+`, "utf8");
+const visibilityProviderRequests: ProviderRequest[] = [];
+const visibilityProviderRegistry = new ProviderRegistry();
+const visibilityHome = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-visibility-home-"));
+visibilityProviderRegistry.register({
+  id: "deepseek",
+  name: "Visibility smoke provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  complete: async (request) => {
+    visibilityProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Visibility smoke provider response.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const filteredSkillRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "filtered-skill-runtime",
+  profileId: "smoke",
+  workspaceRoot: visibilityWorkspace,
+  homeDir: visibilityHome,
+  providerRegistry: visibilityProviderRegistry,
+  currentPlatform: "darwin",
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const filteredSkillNames = filteredSkillRuntime.skills().map((skill) => skill.name);
+await filteredSkillRuntime.handle({
+  text: "hello",
+  channel: "cli",
+  trustedWorkspace: true
+});
+const filteredSkillPrompt = visibilityProviderRequests.at(-1)?.messages.map((message) => message.content).join("\n\n") ?? "";
+assert(filteredSkillNames.includes("fallback-browser-toolset"), "expected fallback_for_toolsets skill to stay visible without browser");
+assert(filteredSkillNames.includes("fallback-browser-tool"), "expected fallback_for_tools skill to stay visible without browser.navigate");
+assert(filteredSkillNames.includes("requires-browser-toolset") === false, "expected requires_toolsets skill to stay hidden without browser");
+assert(filteredSkillNames.includes("requires-browser-tool") === false, "expected requires_tools skill to stay hidden without browser.navigate");
+assert(filteredSkillNames.includes("linux-only-skill") === false, "expected incompatible platform skill to stay hidden");
+assert(filteredSkillNames.includes("telegram-media-analysis") === false, "expected telegram skill to stay hidden without channel readiness");
+assert(filteredSkillNames.includes("youtube-knowledge-base") === false, "expected browser/web knowledge-base skill to stay hidden without browser");
+assert(filteredSkillNames.includes("ascii-video") === false, "expected browser/media render skill to stay hidden without browser");
+assert(filteredSkillPrompt.includes("fallback-browser-toolset"), "expected provider prompt skills index to include visible fallback toolset skill");
+assert(filteredSkillPrompt.includes("fallback-browser-tool"), "expected provider prompt skills index to include visible fallback tool skill");
+assert(filteredSkillPrompt.includes("requires-browser-toolset") === false, "expected provider prompt to hide browser-required toolset skill");
+assert(filteredSkillPrompt.includes("requires-browser-tool") === false, "expected provider prompt to hide browser-required tool skill");
+assert(filteredSkillPrompt.includes("linux-only-skill") === false, "expected provider prompt to hide incompatible platform skill");
+assert(filteredSkillPrompt.includes("telegram-media-analysis") === false, "expected provider prompt to hide telegram skill when channel is unavailable");
+const availableSkillRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "available-skill-runtime",
+  profileId: "smoke",
+  workspaceRoot: visibilityWorkspace,
+  homeDir: visibilityHome,
+  enableWebNetwork: true,
+  telegramReady: true,
+  browserBackend: createMockBrowserBackend({
+    title: "Visibility Browser",
+    text: "Browser capability enabled."
+  }),
+  currentPlatform: "linux",
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  }
+});
+const availableSkillNames = availableSkillRuntime.skills().map((skill) => skill.name);
+assert(availableSkillNames.includes("linux-only-skill"), "expected compatible platform skill to appear");
+assert(availableSkillNames.includes("requires-browser-toolset"), "expected requires_toolsets skill to appear when browser is available");
+assert(availableSkillNames.includes("requires-browser-tool"), "expected requires_tools skill to appear when browser.navigate is available");
+assert(availableSkillNames.includes("fallback-browser-toolset") === false, "expected fallback_for_toolsets skill to hide when browser is available");
+assert(availableSkillNames.includes("fallback-browser-tool") === false, "expected fallback_for_tools skill to hide when browser.navigate is available");
+assert(availableSkillNames.includes("telegram-media-analysis"), "expected telegram skill to appear when channel is ready");
+assert(availableSkillNames.includes("youtube-knowledge-base"), "expected youtube skill to appear when browser/web are available");
+assert(availableSkillNames.includes("ascii-video"), "expected ascii-video skill to appear when browser/web are available");
 assert(
   (await sessionDb.listMessages(runtime.sessionId)).some(
     (message) => message.role === "tool" && message.content.includes("Prepared workflow")
@@ -3103,6 +3373,10 @@ const providerRuntime = await createRuntime({
   workspaceRoot: contextWorkspace,
   providerRegistry: runtimeProviderRegistry,
   enableWebNetwork: true,
+  browserBackend: createMockBrowserBackend({
+    title: "Provider Runtime Browser",
+    text: "Provider runtime browser fallback content."
+  }),
   webFetch: async () => ({
     ok: true,
     status: 200,

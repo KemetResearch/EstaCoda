@@ -7,6 +7,7 @@ import type { SkillRegistry } from "./skill-registry.js";
 
 export type SkillToolsOptions = {
   registry: SkillRegistry;
+  visibleRegistry?: SkillRegistry;
   personalSkillsRoot: string;
   projectSkillsRoot?: string;
 };
@@ -28,7 +29,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
       run: async (input: { category?: string }) => {
-        const catalog = options.registry.catalog()
+        const catalog = (options.visibleRegistry ?? options.registry).catalog()
           .filter((skill) => input.category === undefined || skill.category === input.category);
 
         return {
@@ -291,6 +292,7 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     category: skill.category ?? "general",
     whenToUse: skill.whenToUse,
     requiredToolsets: skill.requiredToolsets,
+    visibility: skill.visibility,
     workflow: skill.workflow,
     permissionExpectations: skill.permissionExpectations,
     examples: skill.examples,

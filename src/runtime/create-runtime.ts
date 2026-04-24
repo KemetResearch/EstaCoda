@@ -2,6 +2,7 @@ import type { AuxiliaryProviderConfig, ModelProfile } from "../contracts/provide
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { SkillCatalogEntry } from "../contracts/skill.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
@@ -32,6 +33,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
 import { builtinTools } from "../tools/builtin-tools.js";
 import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
@@ -78,6 +80,8 @@ export type RuntimeOptions = {
     launchCommand?: string;
     autoLaunch: boolean;
   };
+  telegramReady?: boolean;
+  currentPlatform?: string;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
 };
@@ -104,7 +108,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const personalSkillsRoot = options.personalSkillsRoot ?? new URL("../../skills/personal", import.meta.url).pathname;
+  const personalSkillsRoot = options.personalSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
   const projectSkillsRoot = options.projectSkillsRoot ?? `${workspaceRoot}/.estacoda/skills`;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
@@ -168,31 +172,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       skillRegistry.register(skill);
     }
   }
-  const sessionSkillRegistry = new SkillRegistry();
-  for (const skill of skillRegistry.list()) {
-    sessionSkillRegistry.register(skill);
-  }
-  const sessionSkillCatalog = sessionSkillRegistry.catalog();
-
   for (const tool of builtinTools) {
     toolRegistry.register(tool);
   }
-  for (const tool of createSkillTools({ registry: skillRegistry, personalSkillsRoot, projectSkillsRoot })) {
-    toolRegistry.register(tool);
-  }
+  const browserBackend = options.browserBackend ?? createBrowserBackendFromConfig({
+    backend: options.browser?.backend ?? "unconfigured",
+    cdpUrl: options.browser?.cdpUrl,
+    launchCommand: options.browser?.launchCommand,
+    autoLaunch: options.browser?.autoLaunch,
+    fetch: options.cdpFetch,
+    webSocketFactory: options.cdpWebSocketFactory
+  });
   for (const tool of createPythonTools({ workspaceRoot })) {
     toolRegistry.register(tool);
   }
   for (const tool of createWebTools({
     fetch: options.webFetch,
-    browserBackend: options.browserBackend ?? createBrowserBackendFromConfig({
-      backend: options.browser?.backend ?? "unconfigured",
-      cdpUrl: options.browser?.cdpUrl,
-      launchCommand: options.browser?.launchCommand,
-      autoLaunch: options.browser?.autoLaunch,
-      fetch: options.cdpFetch,
-      webSocketFactory: options.cdpWebSocketFactory
-    }),
+    browserBackend,
     enableNetwork: options.enableWebNetwork,
     maxContentChars: options.webMaxContentChars
   })) {
@@ -227,6 +223,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolRegistry.register(tool);
   }
   toolRegistry.register(createMemoryTool(memoryStore));
+  const browserAvailable = await browserBackend.isAvailable();
+  const toolAvailability = await toolRegistry.snapshot();
+  const skillVisibilityContext = createSkillVisibilityContext({
+    availableTools: toolAvailability.available,
+    browserAvailable,
+    telegramReady: options.telegramReady === true,
+    webEnabled: options.enableWebNetwork === true,
+    platform: options.currentPlatform ?? process.platform
+  });
+  const sessionSkillRegistry = new SkillRegistry();
+  for (const skill of skillRegistry.list()) {
+    if (evaluateSkillVisibility(skill, skillVisibilityContext).visible) {
+      sessionSkillRegistry.register(skill);
+    }
+  }
+  const sessionSkillCatalog = sessionSkillRegistry.catalog();
+  for (const tool of createSkillTools({
+    registry: skillRegistry,
+    visibleRegistry: sessionSkillRegistry,
+    personalSkillsRoot,
+    projectSkillsRoot
+  })) {
+    toolRegistry.register(tool);
+  }
 
   const userMemoryRoot = options.userMemoryRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/memory/default`;
   const projectMemoryRoot = options.projectMemoryRoot ?? `${workspaceRoot}/.estacoda/memory`;
@@ -372,7 +392,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `provider fallbacks: ${providerRoute === undefined ? 0 : providerRoute.fallbacks.length}`,
         `auxiliary routes: ${auxiliaryRoutes.length === 0 ? "unavailable" : summarizeAuxiliaryRoutes(auxiliaryRoutes)}`,
         `tools: ${toolRegistry.list().length}`,
-        `skills: ${skillRegistry.list().length}`,
+        `skills: ${sessionSkillCatalog.length}`,
         `project context files: ${projectContext.files.length}`,
         `project context bytes: ${renderedProjectContext.length}`,
         `trust store: ${trustStore.path}`,
@@ -390,6 +410,77 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ].join("\n");
     }
   };
+}
+
+function createSkillVisibilityContext(input: {
+  availableTools: ToolDefinition[];
+  browserAvailable: boolean;
+  telegramReady: boolean;
+  webEnabled: boolean;
+  platform: string;
+}) {
+  const availableTools = new Set(
+    input.availableTools
+      .filter((tool) => isSkillVisibleToolUsable(tool.name, input))
+      .map((tool) => tool.name)
+  );
+  const availableToolsets = new Set<ToolsetName>();
+
+  for (const tool of input.availableTools) {
+    if (!availableTools.has(tool.name)) {
+      continue;
+    }
+
+    for (const toolset of tool.toolsets) {
+      availableToolsets.add(toolset);
+    }
+  }
+
+  setToolsetAvailability(availableToolsets, "web", input.webEnabled && availableTools.has("web.extract"));
+  setToolsetAvailability(availableToolsets, "browser", input.browserAvailable && availableTools.has("browser.navigate"));
+  setToolsetAvailability(availableToolsets, "telegram", input.telegramReady);
+  setToolsetAvailability(availableToolsets, "shell-readonly", availableTools.has("terminal.run"));
+  setToolsetAvailability(
+    availableToolsets,
+    "shell-write",
+    availableTools.has("terminal.run") || availableTools.has("process.start") || availableTools.has("execute_code")
+  );
+
+  return {
+    platform: input.platform,
+    availableToolsets,
+    availableTools
+  };
+}
+
+function isSkillVisibleToolUsable(
+  toolName: string,
+  input: {
+    availableTools: ToolDefinition[];
+    browserAvailable: boolean;
+    telegramReady: boolean;
+    webEnabled: boolean;
+    platform: string;
+  }
+): boolean {
+  if (toolName === "web.extract") {
+    return input.webEnabled;
+  }
+
+  if (toolName === "browser.navigate" || toolName === "browser.status") {
+    return input.browserAvailable;
+  }
+
+  return true;
+}
+
+function setToolsetAvailability(availableToolsets: Set<ToolsetName>, toolset: ToolsetName, available: boolean) {
+  if (available) {
+    availableToolsets.add(toolset);
+    return;
+  }
+
+  availableToolsets.delete(toolset);
 }
 
 function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderRegistry {

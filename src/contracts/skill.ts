@@ -52,6 +52,13 @@ export type SkillEvaluation = {
   expectedOutcome?: string;
 };
 
+export type SkillVisibilityRules = {
+  requiresToolsets?: ToolsetName[];
+  fallbackForToolsets?: ToolsetName[];
+  requiresTools?: string[];
+  fallbackForTools?: string[];
+};
+
 export type SkillDefinition = {
   name: string;
   description: string;
@@ -62,6 +69,7 @@ export type SkillDefinition = {
   metadata?: Record<string, unknown>;
   whenToUse: string[];
   requiredToolsets: ToolsetName[];
+  visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
   workflow: SkillWorkflowStep[];

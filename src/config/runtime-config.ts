@@ -43,6 +43,9 @@ export type EstaCodaConfig = {
     launchCommand?: string;
     autoLaunch?: boolean;
   };
+  skills?: {
+    externalDirs?: string[];
+  };
   channels?: {
     telegram?: TelegramChannelConfig;
   };
@@ -78,6 +81,9 @@ export type LoadedRuntimeConfig = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
+  };
+  skills: {
+    externalDirs: string[];
   };
   channels: {
     telegram: TelegramChannelConfig & {
@@ -173,6 +179,9 @@ export async function loadRuntimeConfig(options: {
       launchCommand: config.browser?.launchCommand,
       autoLaunch: config.browser?.autoLaunch ?? false
     },
+    skills: {
+      externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir)
+    },
     channels: {
       telegram: {
         ...telegram,
@@ -208,6 +217,10 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     browser: {
       ...(merged.browser ?? {}),
       ...(config.browser ?? {})
+    },
+    skills: {
+      ...(merged.skills ?? {}),
+      externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs
     },
     channels: {
       ...(merged.channels ?? {}),
@@ -597,6 +610,35 @@ export function defaultEnvKey(provider: ProviderId): string {
     default:
       return "OPENAI_COMPATIBLE_API_KEY";
   }
+}
+
+function expandConfiguredPaths(paths: string[], homeDir?: string): string[] {
+  return [...new Set(
+    paths
+      .map((path) => expandConfiguredPath(path, homeDir))
+      .filter((path) => path.length > 0)
+  )];
+}
+
+function expandConfiguredPath(path: string, homeDir?: string): string {
+  const trimmed = path.trim();
+
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  const envExpanded = trimmed.replace(/\$\{([A-Za-z0-9_]+)\}/g, (match, name: string) => process.env[name] ?? match);
+
+  if (envExpanded === "~") {
+    return homeDir ?? process.env.HOME ?? envExpanded;
+  }
+
+  if (envExpanded.startsWith("~/")) {
+    const base = homeDir ?? process.env.HOME;
+    return base === undefined ? envExpanded : join(base, envExpanded.slice(2));
+  }
+
+  return envExpanded;
 }
 
 function shellQuote(value: string): string {

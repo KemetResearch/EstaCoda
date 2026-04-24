@@ -52,10 +52,12 @@ async function buildRuntime(input: {
     workspaceRoot,
     sessionId: input.sessionId,
     sessionDb: input.sessionDb,
+    externalSkillRoots: latestConfig.skills.externalDirs,
     providerRegistry: latestConfig.providerRegistry,
     credentialPools: latestConfig.credentialPools,
     auxiliaryProviders: latestConfig.auxiliaryProviders,
     browser: latestConfig.browser,
+    telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
     webMaxContentChars: latestConfig.web.maxContentChars
   });
