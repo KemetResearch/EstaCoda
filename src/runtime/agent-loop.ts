@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
@@ -10,6 +12,7 @@ import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js"
 import type { SessionDB } from "../contracts/session.js";
 import type {
   LoadedSkill,
+  SkillConfigField,
   SkillDefinition,
   SkillCatalogEntry,
   SkillWorkflowPlan,
@@ -83,6 +86,7 @@ export type AgentLoopOptions = {
     memory?: string;
   };
   skillsIndex?: SkillCatalogEntry[];
+  skillConfig?: Record<string, Record<string, unknown>>;
   maxProviderIterations?: number;
   budgets?: Partial<AgentLoopBudgets>;
 };
@@ -93,6 +97,26 @@ export type AgentLoopBudgets = {
   maxRepeatedToolFailures: number;
   maxProviderWallClockMs: number;
   maxConcurrentSafeTools: number;
+};
+
+type SkillSetupContext = {
+  skillDirectory?: string;
+  requiredEnvironmentVariables: Array<{
+    name: string;
+    present: boolean;
+  }>;
+  requiredCredentialFiles: Array<{
+    path: string;
+    present: boolean;
+    resolvedPath?: string;
+  }>;
+  configFields: Array<{
+    key: string;
+    description?: string;
+    required?: boolean;
+    value?: unknown;
+    source: "config" | "default" | "missing";
+  }>;
 };
 
 export class AgentLoop {
@@ -116,6 +140,7 @@ export class AgentLoop {
   readonly #soul: string | undefined;
   readonly #frozenMemory: { user?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
+  readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #budgets: AgentLoopBudgets;
 
   constructor(options: AgentLoopOptions) {
@@ -139,6 +164,7 @@ export class AgentLoop {
     this.#soul = options.soul;
     this.#frozenMemory = options.frozenMemory;
     this.#skillsIndex = options.skillsIndex ?? [];
+    this.#skillConfig = options.skillConfig ?? {};
     this.#budgets = {
       maxProviderIterations: options.budgets?.maxProviderIterations ?? options.maxProviderIterations ?? 4,
       maxProviderToolCalls: options.budgets?.maxProviderToolCalls ?? 12,
@@ -256,6 +282,9 @@ export class AgentLoop {
     const selectedSkillResources = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
       ? undefined
       : selectedSkill.resources;
+    const selectedSkillSetup = selectedSkill === undefined
+      ? undefined
+      : resolveSkillSetup(selectedSkill, this.#skillConfig[selectedSkill.name]);
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "intent-routed",
@@ -353,6 +382,7 @@ export class AgentLoop {
       selectedSkill,
       selectedSkillInstructions,
       selectedSkillResources,
+      selectedSkillSetup,
       intent,
       securityDecision,
       toolExecutions,
@@ -961,6 +991,7 @@ export class AgentLoop {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
+    selectedSkillSetup: SkillSetupContext | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1229,6 +1260,7 @@ export class AgentLoop {
       selectedSkill: LoadedSkill | SkillDefinition | undefined;
       selectedSkillInstructions: string | undefined;
       selectedSkillResources: LoadedSkill["resources"] | undefined;
+      selectedSkillSetup: SkillSetupContext | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1255,7 +1287,8 @@ export class AgentLoop {
       soul: this.#soul,
       frozenMemory: this.#frozenMemory,
       skillsIndex: this.#skillsIndex,
-      selectedSkillResources: input.selectedSkillResources
+      selectedSkillResources: input.selectedSkillResources,
+      selectedSkillSetup: input.selectedSkillSetup
     });
     await this.#recordPromptAssembly(prompt.budget);
 
@@ -1319,6 +1352,7 @@ export class AgentLoop {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
+    selectedSkillSetup: SkillSetupContext | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1352,7 +1386,8 @@ export class AgentLoop {
       soul: this.#soul,
       frozenMemory: this.#frozenMemory,
       skillsIndex: this.#skillsIndex,
-      selectedSkillResources: input.selectedSkillResources
+      selectedSkillResources: input.selectedSkillResources,
+      selectedSkillSetup: input.selectedSkillSetup
     });
     await this.#recordPromptAssembly(prompt.budget);
 
@@ -2003,4 +2038,95 @@ function humanProviderIssue(errorClass: string | undefined): string {
     default:
       return errorClass;
   }
+}
+
+function resolveSkillSetup(
+  skill: LoadedSkill | SkillDefinition,
+  configuredValues: Record<string, unknown> | undefined
+): SkillSetupContext {
+  return {
+    skillDirectory: isLoadedSkill(skill) ? dirname(skill.sourcePath) : undefined,
+    requiredEnvironmentVariables: (skill.requiredEnvironmentVariables ?? []).map((name) => ({
+      name,
+      present: typeof process.env[name] === "string" && process.env[name]!.length > 0
+    })),
+    requiredCredentialFiles: (skill.requiredCredentialFiles ?? []).map((path) => ({
+      path,
+      present: credentialFileExists(path),
+      resolvedPath: expandUserEnvPath(path)
+    })),
+    configFields: (skill.configFields ?? []).map((field) => {
+      const configuredValue = resolveConfiguredSkillValue(configuredValues, field.key);
+      if (configuredValue !== undefined) {
+        return {
+          key: field.key,
+          description: field.description,
+          required: field.required,
+          value: configuredValue,
+          source: "config" as const
+        };
+      }
+
+      if (field.defaultValue !== undefined) {
+        return {
+          key: field.key,
+          description: field.description,
+          required: field.required,
+          value: field.defaultValue,
+          source: "default" as const
+        };
+      }
+
+      return {
+        key: field.key,
+        description: field.description,
+        required: field.required,
+        source: "missing" as const
+      };
+    })
+  };
+}
+
+function credentialFileExists(path: string): boolean {
+  const resolved = expandUserEnvPath(path);
+  return existsSync(resolved);
+}
+
+function expandUserEnvPath(path: string): string {
+  const withHome = path.startsWith("~/")
+    ? `${process.env.HOME ?? ""}/${path.slice(2)}`
+    : path;
+
+  return withHome.replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");
+}
+
+function resolveConfiguredSkillValue(
+  configuredValues: Record<string, unknown> | undefined,
+  key: string
+): unknown {
+  if (configuredValues === undefined) {
+    return undefined;
+  }
+
+  const variants = new Set<string>([
+    key,
+    toSnakeCase(key),
+    toCamelCase(key)
+  ]);
+
+  for (const variant of variants) {
+    if (configuredValues[variant] !== undefined) {
+      return configuredValues[variant];
+    }
+  }
+
+  return undefined;
+}
+
+function toSnakeCase(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+}
+
+function toCamelCase(value: string): string {
+  return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase());
 }

@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type {
   LoadedSkill,
+  SkillConfigField,
   SkillDefinition,
   SkillPermissionExpectation,
   SkillResourceEntry,
@@ -109,6 +110,8 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     tools?: string[];
     when_to_use?: string[];
     required_toolsets?: string[];
+    required_environment_variables?: string[];
+    required_credential_files?: string[];
     permission_expectations?: string[];
     additional_files?: string[];
     visibility?: Record<string, unknown>;
@@ -117,6 +120,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     parseVisibilityRules(definition.visibility),
     inferHermesVisibility(definition.metadata)
   );
+  const inferredConfigFields = inferHermesConfigFields(definition.metadata);
 
   assertString(definition.name, "name");
   assertString(definition.description, "description");
@@ -134,6 +138,9 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     metadata: definition.metadata,
     whenToUse: stringArrayOrDefault(definition.whenToUse ?? definition.when_to_use, [definition.description]),
     requiredToolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]),
+    requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
+    requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
+    configFields: inferredConfigFields,
     visibility: inferredVisibility,
     inputs: definition.inputs,
     outputs: definition.outputs,
@@ -214,6 +221,37 @@ function inferHermesVisibility(metadata: unknown): SkillVisibilityRules | undefi
     requiresTools: hermes.requiresTools ?? hermes.requires_tools,
     fallbackForTools: hermes.fallbackForTools ?? hermes.fallback_for_tools
   });
+}
+
+function inferHermesConfigFields(metadata: unknown): SkillConfigField[] | undefined {
+  if (!isRecord(metadata)) {
+    return undefined;
+  }
+
+  const hermes = metadata.hermes;
+  if (!isRecord(hermes) || !isRecord(hermes.config)) {
+    return undefined;
+  }
+
+  const configFields: SkillConfigField[] = [];
+  for (const [key, value] of Object.entries(hermes.config)) {
+    if (isRecord(value)) {
+      configFields.push({
+        key,
+        description: isNonEmptyString(value.description) ? value.description : undefined,
+        required: value.required === true,
+        defaultValue: value.default
+      });
+      continue;
+    }
+
+    configFields.push({
+      key,
+      defaultValue: value
+    });
+  }
+
+  return configFields.length === 0 ? undefined : configFields;
 }
 
 function parseVisibilityRules(value: unknown): SkillVisibilityRules | undefined {

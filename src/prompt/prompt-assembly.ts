@@ -33,6 +33,18 @@ export type ProviderPromptInput = {
   routedText: string;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
   selectedSkillInstructions: string | undefined;
+  selectedSkillSetup?: {
+    skillDirectory?: string;
+    requiredEnvironmentVariables: Array<{ name: string; present: boolean }>;
+    requiredCredentialFiles: Array<{ path: string; present: boolean; resolvedPath?: string }>;
+    configFields: Array<{
+      key: string;
+      description?: string;
+      required?: boolean;
+      value?: unknown;
+      source: "config" | "default" | "missing";
+    }>;
+  };
   selectedSkillResources?: SkillResourceEntry[];
   intent: IntentRoute;
   securityDecision: SecurityDecision;
@@ -179,6 +191,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
   const skillInstructions = input.selectedSkillInstructions === undefined
     ? "No skill instruction body was loaded."
     : truncate(input.selectedSkillInstructions, 4_000);
+  const skillSetup = renderSkillSetup(input.selectedSkillSetup);
   const skillResources = renderSkillResources(input.selectedSkillResources);
   const skillWorkflowPlan = input.selectedSkill === undefined
     ? "No skill workflow plan was selected."
@@ -254,6 +267,12 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
         `Skill workflow plan:\n${skillWorkflowPlan}`
       ].join("\n"),
       truncated: input.selectedSkillInstructions !== undefined && input.selectedSkillInstructions.length > skillInstructions.length
+    }),
+    layer({
+      name: "skill-setup",
+      cacheable: false,
+      priority: 3,
+      content: `Skill setup:\n${skillSetup}`
     }),
     layer({
       name: "skill-resources",
@@ -343,7 +362,64 @@ function renderSkillResources(resources: SkillResourceEntry[] | undefined): stri
   return [
     ...sections,
     "",
+    "Resource handling:",
+    "- references: load targeted background files with skill.view when the workflow needs specific context.",
+    "- templates: load the template with skill.view, adapt it, then write the finished output with file.write or file.replace.",
+    "- scripts: inspect the script with skill.view before running it through terminal.run or execute_code under normal sandbox rules.",
+    "- assets: use skill.view for metadata, then route the file through media/document/browser tools if content inspection is needed.",
+    "",
     "Load only the file you need with the skill.view tool using the selected skill name and a specific path."
+  ].join("\n");
+}
+
+function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): string {
+  if (input === undefined) {
+    return "No selected skill setup was loaded.";
+  }
+
+  const envLines = input.requiredEnvironmentVariables.length === 0
+    ? ["No required environment variables declared."]
+    : input.requiredEnvironmentVariables.map((entry) => `- ${entry.name}: ${entry.present ? "present" : "missing"}`);
+  const configLines = input.configFields.length === 0
+    ? ["No skill config fields declared."]
+    : input.configFields.map((field) => {
+      const labels = [
+        field.key,
+        field.source,
+        field.required === true ? "required" : undefined,
+        field.description,
+        field.value === undefined ? undefined : `value=${JSON.stringify(field.value)}`
+      ].filter((value) => value !== undefined);
+      return `- ${labels.join(" · ")}`;
+    });
+
+  const credentialLines = input.requiredCredentialFiles.length === 0
+    ? ["No required credential files declared."]
+    : input.requiredCredentialFiles.map((entry) =>
+        entry.present === true && typeof entry.resolvedPath === "string"
+          ? `- ${entry.path}: present at ${entry.resolvedPath}`
+          : `- ${entry.path}: ${entry.present ? "present" : "missing"}`
+      );
+  const runtimeLines = input.skillDirectory === undefined
+    ? ["No selected skill directory was available."]
+    : [
+        `- skill_dir=${input.skillDirectory}`,
+        "- Use skill_dir as the base path for skill-local references, templates, scripts, and assets when calling terminal.run or execute_code.",
+        "- Credential files marked present above are available at their exact resolved paths; use them by path if the skill workflow needs them, and never print their contents."
+      ];
+
+  return [
+    "Runtime:",
+    ...runtimeLines,
+    "",
+    "Environment:",
+    ...envLines,
+    "",
+    "Credential files:",
+    ...credentialLines,
+    "",
+    "Config:",
+    ...configLines
   ].join("\n");
 }
 

@@ -45,6 +45,7 @@ export type EstaCodaConfig = {
   };
   skills?: {
     externalDirs?: string[];
+    config?: Record<string, Record<string, unknown>>;
   };
   channels?: {
     telegram?: TelegramChannelConfig;
@@ -84,6 +85,7 @@ export type LoadedRuntimeConfig = {
   };
   skills: {
     externalDirs: string[];
+    config: Record<string, Record<string, unknown>>;
   };
   channels: {
     telegram: TelegramChannelConfig & {
@@ -180,7 +182,8 @@ export async function loadRuntimeConfig(options: {
       autoLaunch: config.browser?.autoLaunch ?? false
     },
     skills: {
-      externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir)
+      externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir),
+      config: normalizeSkillConfig(config.skills?.config)
     },
     channels: {
       telegram: {
@@ -220,7 +223,11 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     },
     skills: {
       ...(merged.skills ?? {}),
-      externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs
+      externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs,
+      config: {
+        ...(merged.skills?.config ?? {}),
+        ...(config.skills?.config ?? {})
+      }
     },
     channels: {
       ...(merged.channels ?? {}),
@@ -231,6 +238,20 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       }
     }
   }), {});
+}
+
+function normalizeSkillConfig(value: unknown): Record<string, Record<string, unknown>> {
+  if (value === undefined || typeof value !== "object" || value === null) {
+    return {};
+  }
+
+  const normalized: Record<string, Record<string, unknown>> = {};
+  for (const [skillName, entry] of Object.entries(value)) {
+    if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+      normalized[skillName] = { ...entry };
+    }
+  }
+  return normalized;
 }
 
 export function buildProviderRegistry(config: EstaCodaConfig, options: {

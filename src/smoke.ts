@@ -2180,7 +2180,16 @@ await writeFile(
     "metadata:",
     "  hermes:",
     "    category: research",
+    "    config:",
+    "      audience:",
+    "        description: Preferred audience for the generated summary.",
+    "        default: operators",
+    "      style:",
+    "        description: Style override for the generated summary.",
+    "        required: true",
     "platforms: [darwin, linux]",
+    "required_environment_variables: [HERMES_STYLE_API_TOKEN]",
+    "required_credential_files: [~/.estacoda/credentials/hermes-style.json]",
     "tools: [web, files]",
     "references:",
     "  - references/workflow.md",
@@ -2282,6 +2291,18 @@ assert(
   "expected skill.inspect metadata to include skill resources"
 );
 assert(
+  hermesStyleInspectExecution.result.content.includes("\"requiredEnvironmentVariables\""),
+  "expected skill.inspect metadata to include required env vars"
+);
+assert(
+  hermesStyleInspectExecution.result.content.includes("\"requiredCredentialFiles\""),
+  "expected skill.inspect metadata to include required credential files"
+);
+assert(
+  hermesStyleInspectExecution.result.content.includes("\"configFields\""),
+  "expected skill.inspect metadata to include config fields"
+);
+assert(
   JSON.stringify(skills.get("hermes-style-skill")).includes("templates/summary.md"),
   "expected imported skill to index template resources"
 );
@@ -2351,6 +2372,19 @@ version: 0.1.0
 category: coding
 references:
   - references/spec.md
+required_environment_variables:
+  - ESTACODA_SKILL_SMOKE_TOKEN
+required_credential_files:
+  - ~/.estacoda/credentials/provider-file-proof.json
+metadata:
+  hermes:
+    config:
+      proof_style:
+        description: Preferred style for the proof file.
+        default: concise
+      output_name:
+        description: Output filename override.
+        required: true
 required_toolsets:
   - files
   - core
@@ -2389,6 +2423,7 @@ await writeFile(
   Buffer.from([1, 2, 3, 4])
 );
 const liveSkillProviderRequests: ProviderRequest[] = [];
+process.env.ESTACODA_SKILL_SMOKE_TOKEN = "present-for-smoke";
 const liveSkillProviderRegistry = new ProviderRegistry();
 liveSkillProviderRegistry.register({
   id: "deepseek",
@@ -2499,6 +2534,11 @@ const liveSkillRuntime = await createRuntime({
   workspaceRoot: liveSkillWorkspace,
   personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
   projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
+  skillConfig: {
+    "provider-file-proof": {
+      output_name: "runtime-skill-proof.md"
+    }
+  },
   providerRegistry: liveSkillProviderRegistry,
   model: {
     id: "deepseek-chat",
@@ -2526,6 +2566,11 @@ const refreshedSkillRuntime = await createRuntime({
   workspaceRoot: liveSkillWorkspace,
   personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
   projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
+  skillConfig: {
+    "provider-file-proof": {
+      output_name: "runtime-skill-proof.md"
+    }
+  },
   providerRegistry: liveSkillProviderRegistry,
   model: {
     id: "deepseek-chat",
@@ -2568,12 +2613,27 @@ assert(
   "expected provider-backed skill smoke to include the imported workflow plan"
 );
 assert(
+  liveSkillProviderRequests[0] !== undefined &&
+    (() => {
+      const promptText = liveSkillProviderRequests[0]!.messages.map((message) => message.content).join("\n\n");
+      return promptText.includes("Skill setup:") &&
+        promptText.includes("ESTACODA_SKILL_SMOKE_TOKEN: present") &&
+        promptText.includes("~/.estacoda/credentials/provider-file-proof.json: missing") &&
+        promptText.includes("proofStyle · default") &&
+        promptText.includes("outputName · config · required") &&
+        promptText.includes("value=\"runtime-skill-proof.md\"");
+    })(),
+  "expected provider-backed skill smoke to include resolved skill setup"
+);
+assert(
   liveSkillProviderRequests[0]?.messages.some((message) =>
     message.content.includes("Skill resources:") &&
     message.content.includes("references/spec.md") &&
     message.content.includes("templates/proof-template.md") &&
     message.content.includes("scripts/verify.py") &&
-    message.content.includes("assets/icon.bin")
+    message.content.includes("assets/icon.bin") &&
+    message.content.includes("templates: load the template with skill.view") &&
+    message.content.includes("scripts: inspect the script with skill.view before running it")
   ),
   "expected provider-backed skill smoke to include indexed skill resources"
 );
@@ -2612,6 +2672,834 @@ assert(
 assert(
   liveSkillResponse.text.includes("Provider-backed skill completed and verified runtime-skill-proof.md."),
   "expected provider-backed skill smoke final response"
+);
+const templateSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-template-skill-"));
+const templateSkillRoot = join(templateSkillWorkspace, ".estacoda", "skills", "provider-template-proof");
+await mkdir(join(templateSkillRoot, "references"), { recursive: true });
+await mkdir(join(templateSkillRoot, "templates"), { recursive: true });
+await mkdir(join(templateSkillRoot, "scripts"), { recursive: true });
+await writeFile(join(templateSkillRoot, "SKILL.md"), `---
+name: provider-template-proof
+description: Fill a skill template through the normal provider loop.
+version: 0.1.0
+category: coding
+required_environment_variables:
+  - ESTACODA_TEMPLATE_SMOKE_TOKEN
+required_credential_files:
+  - ~/.estacoda/credentials/provider-template-proof.json
+references:
+  - references/context.md
+required_toolsets:
+  - files
+  - core
+workflow:
+  - id: load-template
+    description: Load the template file with skill.view.
+    toolsets:
+      - core
+  - id: write-output
+    description: Fill the template and write the final file.
+    toolsets:
+      - files
+permission_expectations:
+  - auto-read
+  - ask-before-write
+---
+Load the template, fill it with the requested audience and proof sentence, then write template-proof.md in the workspace.
+`, "utf8");
+await writeFile(
+  join(templateSkillRoot, "references", "context.md"),
+  "Context note: the template should mention the requested audience and proof sentence.",
+  "utf8"
+);
+await writeFile(
+  join(templateSkillRoot, "templates", "proof.md"),
+  "# Template Proof\n\nAudience: {{audience}}\n\nSentence: {{sentence}}\n",
+  "utf8"
+);
+await writeFile(
+  join(templateSkillRoot, "scripts", "unused.py"),
+  "print('this script should not auto-run')\n",
+  "utf8"
+);
+const templateProviderRequests: ProviderRequest[] = [];
+const templateProviderRegistry = new ProviderRegistry();
+templateProviderRegistry.register({
+  id: "deepseek",
+  name: "Template skill provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    templateProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (templateProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "template-skill-view",
+        name: "skill_view",
+        argumentsText: JSON.stringify({
+          name: "provider-template-proof",
+          path: "templates/proof.md"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (templateProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "template-file-write",
+        name: "file_write",
+        argumentsText: JSON.stringify({
+          path: "template-proof.md",
+          content: "# Template Proof\n\nAudience: operators\n\nSentence: EstaCoda fills templates through the normal provider loop.\n"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Template skill loaded proof.md, wrote template-proof.md, and completed successfully."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    templateProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Template skill loaded proof.md, wrote template-proof.md, and completed successfully.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const templateRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-template-skill-smoke",
+  profileId: "smoke",
+  workspaceRoot: templateSkillWorkspace,
+  providerRegistry: templateProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const templateResponse = await templateRuntime.handle({
+  text: "/provider-template-proof Use the template for operators and include the sentence 'EstaCoda fills templates through the normal provider loop.'",
+  channel: "cli",
+  trustedWorkspace: true
+});
+const templateEvents = await sessionDb.listEvents(templateRuntime.sessionId);
+const templateMemory = await readFile(join(templateSkillWorkspace, ".estacoda", "memory", "MEMORY.md"), "utf8");
+assert(templateProviderRequests.length === 3, "expected provider-backed template smoke to use multiple provider iterations");
+assert(
+  templateProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Skill resources:") &&
+    message.content.includes("references/context.md") &&
+    message.content.includes("templates/proof.md") &&
+    message.content.includes("scripts/unused.py")
+  ),
+  "expected template smoke to expose skill package resources"
+);
+assert(
+  templateProviderRequests[0]?.messages.every((message) =>
+    !message.content.includes("Audience: {{audience}}") &&
+    !message.content.includes("Sentence: {{sentence}}") &&
+    !message.content.includes("this script should not auto-run")
+  ) === true,
+  "expected template smoke to avoid eager loading of template or script contents"
+);
+assert(
+  templateProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Skill setup:") &&
+    message.content.includes("ESTACODA_TEMPLATE_SMOKE_TOKEN: missing") &&
+    message.content.includes("~/.estacoda/credentials/provider-template-proof.json: missing")
+  ),
+  "expected template smoke to surface missing setup without hiding the skill"
+);
+assert(
+  templateProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("# provider-template-proof / templates/proof.md") &&
+    message.content.includes("Audience: {{audience}}")
+  ),
+  "expected template smoke to load the template only after explicit skill.view"
+);
+assert(
+  templateResponse.toolPlans.filter((plan) => plan.status === "executed").map((plan) => plan.tool).join(",") === "skill.view,file.write",
+  "expected template smoke to execute skill.view then file.write"
+);
+assert(
+  templateResponse.skillOutcomes.some((outcome) => outcome.skill === "provider-template-proof" && outcome.status === "succeeded"),
+  "expected template smoke to record a successful skill outcome"
+);
+assert(
+  templateEvents.some((event) => event.kind === "memory-write" && event.outcome.skill === "provider-template-proof"),
+  "expected template smoke to emit a memory-write event"
+);
+assert(
+  templateMemory.includes("skill:provider-template-proof") &&
+    templateMemory.includes("skill.view,file.write"),
+  "expected template smoke to persist outcome details to MEMORY.md"
+);
+assert(
+  templateResponse.text.includes("wrote template-proof.md"),
+  "expected template smoke final response"
+);
+const templateOutput = await readFile(join(templateSkillWorkspace, "template-proof.md"), "utf8");
+assert(
+  templateOutput.includes("Audience: operators") &&
+    templateOutput.includes("EstaCoda fills templates through the normal provider loop."),
+  "expected template smoke to write the filled template output"
+);
+
+const scriptSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-script-skill-"));
+const scriptSkillRoot = join(scriptSkillWorkspace, ".estacoda", "skills", "provider-script-proof");
+await mkdir(join(scriptSkillRoot, "scripts"), { recursive: true });
+await writeFile(join(scriptSkillRoot, "SKILL.md"), `---
+name: provider-script-proof
+description: Inspect and run a skill-local script through the normal provider loop.
+version: 0.1.0
+category: coding
+required_toolsets:
+  - files
+  - coding
+  - core
+workflow:
+  - id: inspect-script
+    description: Inspect the local script first.
+    toolsets:
+      - core
+  - id: run-script
+    description: Run the inspected script through terminal.run.
+    toolsets:
+      - coding
+permission_expectations:
+  - auto-read
+  - auto-run
+---
+Inspect the skill-local script, run it, and report the generated proof output.
+`, "utf8");
+await writeFile(
+  join(scriptSkillRoot, "scripts", "generate.py"),
+  "from pathlib import Path\nPath('script-proof.txt').write_text('script-proof-ok\\n', encoding='utf8')\nprint('script-proof-ok')\n",
+  "utf8"
+);
+const scriptProviderRequests: ProviderRequest[] = [];
+const scriptProviderRegistry = new ProviderRegistry();
+scriptProviderRegistry.register({
+  id: "deepseek",
+  name: "Script skill provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    scriptProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (scriptProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "script-skill-view",
+        name: "skill_view",
+        argumentsText: JSON.stringify({
+          name: "provider-script-proof",
+          path: "scripts/generate.py"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (scriptProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "script-terminal-run",
+        name: "terminal_run",
+        argumentsText: JSON.stringify({
+          command: "python3 .estacoda/skills/provider-script-proof/scripts/generate.py"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Script skill inspected generate.py, executed it through terminal.run, and confirmed script-proof-ok."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    scriptProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Script skill inspected generate.py, executed it through terminal.run, and confirmed script-proof-ok.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const scriptRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-script-skill-smoke",
+  profileId: "smoke",
+  workspaceRoot: scriptSkillWorkspace,
+  providerRegistry: scriptProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const scriptResponse = await scriptRuntime.handle({
+  text: "/provider-script-proof Run the script and report what it produced.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+assert(scriptProviderRequests.length === 3, "expected provider-backed script smoke to use multiple provider iterations");
+assert(
+  scriptProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Skill resources:") &&
+    message.content.includes("scripts/generate.py")
+  ),
+  "expected script smoke to expose the script resource"
+);
+assert(
+  scriptProviderRequests[0]?.messages.every((message) =>
+    !message.content.includes("script-proof-ok") &&
+    !message.content.includes("write_text('script-proof-ok")
+  ) === true,
+  "expected script smoke to avoid eager script loading or execution"
+);
+assert(
+  scriptProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("# provider-script-proof / scripts/generate.py") &&
+    message.content.includes("script-proof-ok")
+  ),
+  "expected script smoke to load script content only after explicit skill.view"
+);
+assert(
+  scriptProviderRequests[2]?.messages.some((message) =>
+    message.content.includes("Tool: terminal.run") &&
+    message.content.includes("script-proof-ok")
+  ),
+  "expected script smoke continuation to include terminal.run results"
+);
+assert(
+  scriptResponse.toolPlans.filter((plan) => plan.status === "executed").map((plan) => plan.tool).join(",") === "skill.view,terminal.run",
+  "expected script smoke to execute skill.view then terminal.run"
+);
+assert(
+  scriptResponse.skillOutcomes.some((outcome) => outcome.skill === "provider-script-proof" && outcome.status === "succeeded"),
+  "expected script smoke to record a successful skill outcome"
+);
+assert(
+  (await readFile(join(scriptSkillWorkspace, "script-proof.txt"), "utf8")).includes("script-proof-ok"),
+  "expected script smoke to run the skill-local script and produce output"
+);
+assert(
+  scriptResponse.text.includes("confirmed script-proof-ok"),
+  "expected script smoke final response"
+);
+
+const composedSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-composed-skill-"));
+const composedSkillRoot = join(composedSkillWorkspace, ".estacoda", "skills", "provider-composed-proof");
+const composedCredentialRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-composed-creds-"));
+process.env.ESTACODA_COMPOSED_CRED_ROOT = composedCredentialRoot;
+await mkdir(join(composedSkillRoot, "references"), { recursive: true });
+await mkdir(join(composedSkillRoot, "templates"), { recursive: true });
+await mkdir(join(composedSkillRoot, "scripts"), { recursive: true });
+await writeFile(join(composedCredentialRoot, "provider-composed.json"), JSON.stringify({
+  apiKey: "smoke"
+}), "utf8");
+await writeFile(join(composedSkillRoot, "SKILL.md"), `---
+name: provider-composed-proof
+description: Use references, templates, and scripts together through the normal provider loop.
+version: 0.1.0
+category: coding
+references:
+  - references/spec.md
+required_environment_variables:
+  - ESTACODA_COMPOSED_MODE
+required_credential_files:
+  - \${ESTACODA_COMPOSED_CRED_ROOT}/provider-composed.json
+required_toolsets:
+  - files
+  - coding
+  - core
+workflow:
+  - id: inspect-reference
+    description: Load the spec reference.
+    toolsets:
+      - core
+  - id: inspect-template
+    description: Load the output template.
+    toolsets:
+      - core
+  - id: run-render-script
+    description: Run the skill-local renderer.
+    toolsets:
+      - coding
+permission_expectations:
+  - auto-read
+  - auto-run
+---
+Load the reference and template, then run the renderer script to produce composed-proof.md in the workspace.
+`, "utf8");
+await writeFile(
+  join(composedSkillRoot, "references", "spec.md"),
+  "Audience: research operators\nSentence: EstaCoda composes references, templates, and scripts through one provider-driven workflow.\n",
+  "utf8"
+);
+await writeFile(
+  join(composedSkillRoot, "templates", "card.md"),
+  "# Composed Proof\n\nAudience: {{audience}}\n\nSentence: {{sentence}}\n",
+  "utf8"
+);
+await writeFile(
+  join(composedSkillRoot, "scripts", "render.py"),
+  [
+    "import argparse",
+    "from pathlib import Path",
+    "",
+    "parser = argparse.ArgumentParser()",
+    "parser.add_argument('--reference', required=True)",
+    "parser.add_argument('--template', required=True)",
+    "parser.add_argument('--output', required=True)",
+    "args = parser.parse_args()",
+    "",
+    "reference = Path(args.reference).read_text(encoding='utf8').strip().splitlines()",
+    "template = Path(args.template).read_text(encoding='utf8')",
+    "pairs = {}",
+    "for line in reference:",
+    "    if ': ' in line:",
+    "        key, value = line.split(': ', 1)",
+    "        pairs[key.lower()] = value",
+    "rendered = template.replace('{{audience}}', pairs.get('audience', 'unknown')).replace('{{sentence}}', pairs.get('sentence', 'missing'))",
+    "Path(args.output).write_text(rendered, encoding='utf8')",
+    "print('rendered composed-proof.md')"
+  ].join("\n") + "\n",
+  "utf8"
+);
+const composedProviderRequests: ProviderRequest[] = [];
+const composedProviderRegistry = new ProviderRegistry();
+composedProviderRegistry.register({
+  id: "deepseek",
+  name: "Composed skill provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    composedProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (composedProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "composed-ref-view",
+        name: "skill_view",
+        argumentsText: JSON.stringify({
+          name: "provider-composed-proof",
+          path: "references/spec.md"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (composedProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "composed-template-view",
+        name: "skill_view",
+        argumentsText: JSON.stringify({
+          name: "provider-composed-proof",
+          path: "templates/card.md"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (composedProviderRequests.length === 3) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "composed-terminal-run",
+        name: "terminal_run",
+        argumentsText: JSON.stringify({
+          command: `python3 "${join(composedSkillRoot, "scripts", "render.py")}" --reference "${join(composedSkillRoot, "references", "spec.md")}" --template "${join(composedSkillRoot, "templates", "card.md")}" --output composed-proof.md`
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Composed skill loaded its reference and template, ran the local renderer, and produced composed-proof.md."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    composedProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Composed skill loaded its reference and template, ran the local renderer, and produced composed-proof.md.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const composedRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-composed-skill-smoke",
+  profileId: "smoke",
+  workspaceRoot: composedSkillWorkspace,
+  providerRegistry: composedProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const composedResponse = await composedRuntime.handle({
+  text: "/provider-composed-proof Build the proof artifact using the skill package.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+const composedPromptText = composedProviderRequests[0]?.messages.map((message) => message.content).join("\n\n") ?? "";
+assert(composedProviderRequests.length === 4, "expected composed skill smoke to use four provider iterations");
+assert(
+  composedPromptText.includes("skill_dir=" + composedSkillRoot),
+  "expected composed skill smoke to expose the selected skill directory"
+);
+assert(
+  composedPromptText.includes(`${composedCredentialRoot}/provider-composed.json`) &&
+    composedPromptText.includes("present at"),
+  "expected composed skill smoke to expose the resolved credential file path when present"
+);
+assert(
+  composedPromptText.includes("ESTACODA_COMPOSED_MODE: missing"),
+  "expected composed skill smoke to show missing env status without hiding the skill"
+);
+assert(
+  !composedPromptText.includes("Audience: research operators") &&
+    !composedPromptText.includes("{{audience}}") &&
+    !composedPromptText.includes("rendered composed-proof.md"),
+  "expected composed skill smoke to avoid eager loading of reference, template, and script contents"
+);
+assert(
+  composedProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("# provider-composed-proof / references/spec.md") &&
+    message.content.includes("Audience: research operators")
+  ),
+  "expected composed skill smoke to load the reference via skill.view"
+);
+assert(
+  composedProviderRequests[2]?.messages.some((message) =>
+    message.content.includes("# provider-composed-proof / templates/card.md") &&
+    message.content.includes("{{audience}}")
+  ),
+  "expected composed skill smoke to load the template via skill.view"
+);
+assert(
+  composedProviderRequests[3]?.messages.some((message) =>
+    message.content.includes("Tool: terminal.run") &&
+    message.content.includes("rendered composed-proof.md")
+  ),
+  "expected composed skill smoke continuation to include terminal.run results"
+);
+assert(
+  composedResponse.toolPlans.filter((plan) => plan.status === "executed").map((plan) => plan.tool).join(",") === "skill.view,skill.view,terminal.run",
+  "expected composed skill smoke to execute reference load, template load, then terminal.run"
+);
+assert(
+  composedResponse.skillOutcomes.some((outcome) => outcome.skill === "provider-composed-proof" && outcome.status === "succeeded"),
+  "expected composed skill smoke to record a successful skill outcome"
+);
+const composedOutput = await readFile(join(composedSkillWorkspace, "composed-proof.md"), "utf8");
+assert(
+  composedOutput.includes("Audience: research operators") &&
+    composedOutput.includes("EstaCoda composes references, templates, and scripts through one provider-driven workflow."),
+  "expected composed skill smoke to render the final output from reference + template + script"
+);
+assert(
+  composedResponse.text.includes("produced composed-proof.md"),
+  "expected composed skill smoke final response"
+);
+
+const packageRefreshWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-package-refresh-"));
+const packageRefreshSkillRoot = join(packageRefreshWorkspace, ".estacoda", "skills", "package-refresh-proof");
+await mkdir(join(packageRefreshSkillRoot, "templates"), { recursive: true });
+await writeFile(join(packageRefreshSkillRoot, "SKILL.md"), `---
+name: package-refresh-proof
+description: Prove session-stable skill package visibility.
+version: 0.1.0
+category: general
+required_toolsets:
+  - core
+permission_expectations:
+  - auto-read
+---
+Inspect available templates and report what is visible in this session.
+`, "utf8");
+await writeFile(join(packageRefreshSkillRoot, "templates", "first.md"), "first template\n", "utf8");
+const packageRefreshRequests: ProviderRequest[] = [];
+const packageRefreshRegistry = new ProviderRegistry();
+packageRefreshRegistry.register({
+  id: "deepseek",
+  name: "Package refresh provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  complete: async (request) => {
+    packageRefreshRequests.push(request);
+    return {
+      ok: true,
+      content: "Package refresh smoke response.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const packageRefreshRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-package-refresh-before",
+  profileId: "smoke",
+  workspaceRoot: packageRefreshWorkspace,
+  providerRegistry: packageRefreshRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+await writeFile(join(packageRefreshSkillRoot, "templates", "second.md"), "second template\n", "utf8");
+await packageRefreshRuntime.handle({
+  text: "/package-refresh-proof Tell me which templates are available.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+const packageRefreshRuntimeAfter = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-package-refresh-after",
+  profileId: "smoke",
+  workspaceRoot: packageRefreshWorkspace,
+  providerRegistry: packageRefreshRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+await packageRefreshRuntimeAfter.handle({
+  text: "/package-refresh-proof Tell me which templates are available now.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+assert(
+  packageRefreshRequests[0]?.messages.some((message) =>
+    message.content.includes("templates/first.md") &&
+    !message.content.includes("templates/second.md")
+  ),
+  "expected current session package resources to stay stable before refresh"
+);
+assert(
+  packageRefreshRequests[1]?.messages.some((message) =>
+    message.content.includes("templates/first.md") &&
+    message.content.includes("templates/second.md")
+  ),
+  "expected refreshed session package resources to include newly added files"
 );
 assert(
   !youtubeMatches.some((skill) => skill.name === "ascii-video"),

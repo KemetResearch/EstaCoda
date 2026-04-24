@@ -59,6 +59,7 @@ export type RuntimeOptions = {
   personalSkillsRoot?: string;
   projectSkillsRoot?: string;
   externalSkillRoots?: string[];
+  skillConfig?: Record<string, Record<string, unknown>>;
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
@@ -340,7 +341,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       user: frozenMemorySnapshot.files.get("USER.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
-    skillsIndex: sessionSkillCatalog
+    skillsIndex: sessionSkillCatalog,
+    skillConfig: options.skillConfig
   });
 
   return {

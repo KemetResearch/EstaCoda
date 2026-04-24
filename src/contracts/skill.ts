@@ -68,6 +68,13 @@ export type SkillResourceEntry = {
   declared?: boolean;
 };
 
+export type SkillConfigField = {
+  key: string;
+  description?: string;
+  required?: boolean;
+  defaultValue?: unknown;
+};
+
 export type SkillDefinition = {
   name: string;
   description: string;
@@ -78,6 +85,9 @@ export type SkillDefinition = {
   metadata?: Record<string, unknown>;
   whenToUse: string[];
   requiredToolsets: ToolsetName[];
+  requiredEnvironmentVariables?: string[];
+  requiredCredentialFiles?: string[];
+  configFields?: SkillConfigField[];
   visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;
   outputs?: Record<string, unknown>;

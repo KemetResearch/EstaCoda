@@ -53,6 +53,7 @@ async function buildRuntime(input: {
     sessionId: input.sessionId,
     sessionDb: input.sessionDb,
     externalSkillRoots: latestConfig.skills.externalDirs,
+    skillConfig: latestConfig.skills.config,
     providerRegistry: latestConfig.providerRegistry,
     credentialPools: latestConfig.credentialPools,
     auxiliaryProviders: latestConfig.auxiliaryProviders,
