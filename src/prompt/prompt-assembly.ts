@@ -1,4 +1,5 @@
 import type { ArtifactRecord } from "../contracts/artifact.js";
+import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProviderContext } from "../contracts/memory.js";
@@ -33,6 +34,7 @@ export type ProviderPromptInput = {
   routedText: string;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
   selectedSkillInstructions: string | undefined;
+  attachments?: ChannelAttachment[];
   selectedSkillSetup?: {
     skillDirectory?: string;
     requiredEnvironmentVariables: Array<{ name: string; present: boolean }>;
@@ -201,6 +203,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
     : input.providerTools
         .map((tool) => `${tool.function.name}: ${tool.function.description}`)
         .join("\n");
+  const attachmentManifest = renderChannelAttachments(input.attachments);
   const identity = input.soul?.trim().length
     ? input.soul.trim()
     : defaultIdentity();
@@ -242,6 +245,13 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
         "",
         `Expanded/routed message:\n${input.routedText}`
       ].join("\n")
+    }),
+    layer({
+      name: "channel-attachments",
+      cacheable: false,
+      protectedLayer: true,
+      priority: 1,
+      content: `Channel attachments:\n${attachmentManifest}`
     }),
     layer({
       name: "intent",
@@ -331,6 +341,46 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       content: `Deterministic fallback response if model cannot improve it:\n${input.fallbackText}`
     })
   ];
+}
+
+function renderChannelAttachments(attachments: ChannelAttachment[] | undefined): string {
+  if (attachments === undefined || attachments.length === 0) {
+    return "No channel attachments were supplied with this turn.";
+  }
+
+  return attachments.map((attachment) => {
+    const parts = [
+      `id=${attachment.id}`,
+      `kind=${attachment.kind}`,
+      attachment.originalName ?? attachment.name,
+      attachment.mimeType === undefined ? undefined : `mime=${attachment.mimeType}`,
+      attachment.bytes === undefined ? undefined : `bytes=${attachment.bytes}`,
+      attachment.localPath === undefined && attachment.path === undefined ? undefined : `local_ref=${attachment.localPath ?? attachment.path}`,
+      attachment.remoteUrl === undefined && attachment.url === undefined ? undefined : `remote_ref=${attachment.remoteUrl ?? attachment.url}`,
+      `suggested_tools=${suggestedToolsForAttachment(attachment).join(", ")}`
+    ].filter((value) => value !== undefined && value !== "");
+    return `- ${parts.join(" · ")}`;
+  }).join("\n");
+}
+
+function suggestedToolsForAttachment(attachment: ChannelAttachment): string[] {
+  if (attachment.kind === "image") {
+    return ["media.inspect"];
+  }
+
+  if (attachment.kind === "document") {
+    return ["document.probe"];
+  }
+
+  if (attachment.kind === "video") {
+    return ["media.inspect", "media.extract-frame"];
+  }
+
+  if (attachment.kind === "audio" || attachment.kind === "voice") {
+    return ["media.inspect"];
+  }
+
+  return ["document.probe"];
 }
 
 function renderSkillResources(resources: SkillResourceEntry[] | undefined): string {

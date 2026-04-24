@@ -5,6 +5,7 @@ export type PromptLayerName =
   | "project-context"
   | "session-history"
   | "user-message"
+  | "channel-attachments"
   | "intent"
   | "skill"
   | "skill-setup"

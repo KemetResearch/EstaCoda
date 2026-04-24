@@ -196,7 +196,8 @@ export class ChannelGateway {
       ? await this.#trustedWorkspace(message)
       : this.#trustedWorkspace;
     const response = await runtime.handle({
-        text: renderChannelInput(message),
+        text: message.text,
+        attachments: message.attachments,
         channel: message.channel,
         trustedWorkspace,
         signal: controller.signal,
@@ -634,24 +635,6 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
       : policy.deniedMessage ??
         "This EstaCoda gateway is not paired with this account yet. Pair this chat from a trusted local session first."
   };
-}
-
-function renderChannelInput(message: ChannelMessage): string {
-  const attachmentLines = (message.attachments ?? []).map((attachment) => {
-    const name = attachment.originalName ?? attachment.name ?? attachment.localPath ?? attachment.path ?? attachment.remoteUrl ?? attachment.url ?? attachment.id;
-    return `- ${attachment.kind}: ${name}`;
-  });
-
-  if (attachmentLines.length === 0) {
-    return message.text;
-  }
-
-  return [
-    message.text,
-    "",
-    "Channel attachments:",
-    ...attachmentLines
-  ].join("\n");
 }
 
 function stableSessionKey(sessionKey: ChannelSessionKey): string {

@@ -1354,6 +1354,8 @@ await writeFile(
   "export const answer = 42;\nexport const name = 'EstaCoda';\n",
   "utf8"
 );
+const workspaceDocumentPath = join(contextWorkspace, "notes.txt");
+await writeFile(workspaceDocumentPath, "Workspace-local document probe sample.", "utf8");
 await writeFile(join(contextWorkspace, ".env"), "SECRET_TOKEN=hidden", "utf8");
 const contextExpansion = await new ContextReferenceExpander({
   workspaceRoot: contextWorkspace
@@ -2104,14 +2106,14 @@ assert(pythonToolExecution?.result?.ok === true, "expected tool executor to run 
 const documentToolExecution = await toolExecutor.executeTool({
   tool: "document.probe",
   input: {
-    path: documentPath
+    path: "package.json"
   },
   trustedWorkspace: true,
   sessionId: directSession.id
 });
 assert(documentToolExecution?.result?.ok === true, "expected tool executor to run document.probe");
 assert(
-  documentToolExecution.result.content.includes("sample.txt"),
+  documentToolExecution.result.content.includes("Document: package.json"),
   "expected document.probe tool output"
 );
 const executeCodeToolExecution = await toolExecutor.executeTool({
@@ -5969,6 +5971,11 @@ const channelApprovalStore = new ChannelApprovalStore({
 const channelRuntimeRequests: Array<{
   sessionId: string;
   input: string;
+  attachments?: Array<{
+    kind: string;
+    originalName?: string;
+    localPath?: string;
+  }>;
   trustedWorkspace?: boolean;
 }> = [];
 const channelGateway = new ChannelGateway({
@@ -5988,6 +5995,11 @@ const channelGateway = new ChannelGateway({
       channelRuntimeRequests.push({
         sessionId,
         input: input.text,
+        attachments: input.attachments?.map((attachment) => ({
+          kind: attachment.kind,
+          originalName: attachment.originalName,
+          localPath: attachment.localPath
+        })),
         trustedWorkspace: input.trustedWorkspace
       });
       await input.onEvent?.({
@@ -6207,8 +6219,9 @@ assert(gatewayStopRequested, "expected channel /stop callback");
 assert(channelResult.replyText.includes("Channel reply for telegram"), "expected channel gateway reply text");
 assert(channelResult.artifactCount === 1, "expected channel gateway artifact count");
 assert(channelResult.progressCount === 2, "expected channel gateway progress count");
-assert(channelRuntimeRequests[0]?.input.includes("Channel attachments:"), "expected channel attachments to enter prompt");
-assert(channelRuntimeRequests[0]?.input.includes("sample.png"), "expected channel attachment name in prompt");
+assert(channelRuntimeRequests[0]?.input === "Analyze this image", "expected channel gateway to preserve raw user text");
+assert(channelRuntimeRequests[0]?.attachments?.[0]?.originalName === "sample.png", "expected channel attachment name to reach runtime");
+assert(channelRuntimeRequests[0]?.attachments?.[0]?.localPath === "media/sample.png", "expected channel attachment local path to reach runtime");
 assert(channelRuntimeRequests[0]?.trustedWorkspace === true, "expected channel gateway trusted workspace forwarding");
 assert(
   mockChannel.deliveries.some((delivery) => delivery.type === "text" && delivery.text?.includes("Channel reply")),
@@ -6730,6 +6743,378 @@ assert(
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");
 
+const telegramAttachmentSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:00:00.000Z")
+});
+const telegramAttachmentHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-home-"));
+const telegramAttachmentWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-workspace-"));
+const telegramAttachmentRequests: Array<{
+  url: string;
+  body: Record<string, unknown>;
+}> = [];
+const telegramAttachmentProviderRequests: ProviderRequest[] = [];
+const telegramAttachmentProviderRegistry = new ProviderRegistry();
+telegramAttachmentProviderRegistry.register({
+  id: "deepseek",
+  name: "Telegram attachment smoke provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    telegramAttachmentProviderRequests.push(request);
+    const promptText = request.messages.map((message) => message.content).join("\n\n");
+    const localRef = extractAttachmentLocalRef(promptText);
+
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (telegramAttachmentProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "telegram-image-inspect",
+        name: "media_inspect",
+        argumentsText: JSON.stringify({
+          path: localRef
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (telegramAttachmentProviderRequests.length === 2) {
+      yield {
+        kind: "token",
+        provider: "deepseek",
+        model: request.model,
+        text: "Image attachment inspected successfully through telegram-media-analysis."
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (telegramAttachmentProviderRequests.length === 3) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "telegram-document-probe",
+        name: "document_probe",
+        argumentsText: JSON.stringify({
+          path: localRef
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Document attachment inspected successfully through telegram-media-analysis."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    telegramAttachmentProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Telegram attachment inspection complete.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const telegramAttachmentAdapter = new TelegramAdapter({
+  botToken: "telegram-attachment-token",
+  mediaRoot: join(telegramAttachmentHome, ".estacoda", "channel-media"),
+  now: () => new Date("2026-04-16T00:00:00.000Z"),
+  fetch: async (url, init) => {
+    const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+    telegramAttachmentRequests.push({ url, body });
+
+    if (url.endsWith("/getUpdates")) {
+      const offset = Number(body.offset ?? 0);
+      if (offset === 0) {
+        return fakeTelegramResponse([{
+          update_id: 100,
+          message: {
+            message_id: 21,
+            date: 1_776_000_000,
+            text: "Analyze the image I sent",
+            chat: {
+              id: 1254738091,
+              type: "private",
+              username: "telegram-image-chat"
+            },
+            from: {
+              id: 1254738091,
+              first_name: "Image",
+              username: "telegram-image-user"
+            },
+            photo: [{
+              file_id: "tg-image-small",
+              file_size: 10,
+              width: 64,
+              height: 64
+            }, {
+              file_id: "tg-image-large",
+              file_unique_id: "tg-image-unique",
+              file_size: 100,
+              width: 512,
+              height: 512
+            }]
+          }
+        }]);
+      }
+
+      if (offset === 101) {
+        return fakeTelegramResponse([{
+          update_id: 101,
+          message: {
+            message_id: 22,
+            date: 1_776_000_010,
+            text: "Summarize the attached document",
+            chat: {
+              id: 1254738091,
+              type: "private",
+              username: "telegram-doc-chat"
+            },
+            from: {
+              id: 1254738091,
+              first_name: "Document",
+              username: "telegram-doc-user"
+            },
+            document: {
+              file_id: "tg-doc-file",
+              file_name: "brief.txt",
+              mime_type: "text/plain",
+              file_size: 48
+            }
+          }
+        }]);
+      }
+
+      return fakeTelegramResponse([]);
+    }
+
+    if (url.endsWith("/getFile") && body.file_id === "tg-image-large") {
+      return fakeTelegramResponse({
+        file_id: "tg-image-large",
+        file_unique_id: "tg-image-unique",
+        file_size: 100,
+        file_path: "photos/telegram-image.jpg"
+      });
+    }
+
+    if (url.endsWith("/getFile") && body.file_id === "tg-doc-file") {
+      return fakeTelegramResponse({
+        file_id: "tg-doc-file",
+        file_unique_id: "tg-doc-unique",
+        file_size: 48,
+        file_path: "docs/brief.txt"
+      });
+    }
+
+    if (url.includes("/file/bottelegram-attachment-token/photos/telegram-image.jpg")) {
+      return fakeTelegramFileResponse("pretend-image-bytes");
+    }
+
+    if (url.includes("/file/bottelegram-attachment-token/docs/brief.txt")) {
+      return fakeTelegramFileResponse("EstaCoda document attachment smoke content.");
+    }
+
+    return fakeTelegramResponse({ message_id: 99 });
+  }
+});
+const telegramAttachmentGateway = new ChannelGateway({
+  adapters: [telegramAttachmentAdapter],
+  approvalStore: new ChannelApprovalStore({
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-approvals-")), "approvals.json"),
+    idFactory: sequenceId()
+  }),
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["1254738091"],
+    allowedChatIds: ["1254738091"]
+  },
+  trustedWorkspace: true,
+  runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({
+    theme: kemetBlueTheme,
+    sessionDb: telegramAttachmentSessionDb,
+    sessionId,
+    profileId: "smoke",
+    workspaceRoot: telegramAttachmentWorkspace,
+    homeDir: telegramAttachmentHome,
+    providerRegistry: telegramAttachmentProviderRegistry,
+    securityPolicy,
+    telegramReady: true,
+    model: {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  })
+});
+await telegramAttachmentGateway.start();
+const telegramImagePollCount = await telegramAttachmentAdapter.pollOnce();
+const telegramDocumentPollCount = await telegramAttachmentAdapter.pollOnce();
+await telegramAttachmentGateway.stop();
+const telegramAttachmentSessionId = "channel-telegram-telegram-1254738091-main";
+const telegramAttachmentEvents = await telegramAttachmentSessionDb.listEvents(telegramAttachmentSessionId);
+const telegramAttachmentMessages = await telegramAttachmentSessionDb.listMessages(telegramAttachmentSessionId);
+const telegramAttachmentImagePath = join(
+  telegramAttachmentHome,
+  ".estacoda",
+  "channel-media",
+  "telegram",
+  "1254738091",
+  "1254738091-telegram-100-21-tg-image-large.jpg"
+);
+const telegramAttachmentDocumentPath = join(
+  telegramAttachmentHome,
+  ".estacoda",
+  "channel-media",
+  "telegram",
+  "1254738091",
+  "1254738091-telegram-101-22-tg-doc-file.txt"
+);
+assert(telegramImagePollCount === 1, "expected Telegram attachment image poll to process one update");
+assert(telegramDocumentPollCount === 1, "expected Telegram attachment document poll to process one update");
+assert(
+  telegramAttachmentRequests.some((request) => request.url.endsWith("/getFile") && request.body.file_id === "tg-image-large"),
+  "expected Telegram attachment image getFile request"
+);
+assert(
+  telegramAttachmentRequests.some((request) => request.url.endsWith("/getFile") && request.body.file_id === "tg-doc-file"),
+  "expected Telegram attachment document getFile request"
+);
+assert((await readFile(telegramAttachmentImagePath, "utf8")) === "pretend-image-bytes", "expected Telegram attachment image download");
+assert((await readFile(telegramAttachmentDocumentPath, "utf8")) === "EstaCoda document attachment smoke content.", "expected Telegram attachment document download");
+assert(telegramAttachmentProviderRequests.length === 4, "expected Telegram attachment E2E to use four provider iterations");
+assert(
+  telegramAttachmentProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Channel attachments:") &&
+    message.content.includes("kind=image") &&
+    message.content.includes("local_ref=") &&
+    message.content.includes("suggested_tools=media.inspect")
+  ),
+  "expected Telegram image prompt to expose attachment manifest and suggested media tools"
+);
+assert(
+  telegramAttachmentProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("telegram-media-analysis")
+  ),
+  "expected Telegram image prompt to select telegram-media-analysis"
+);
+assert(
+  telegramAttachmentProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("Tool: media.inspect") &&
+    message.content.includes("Media:") &&
+    message.content.includes("telegram-image.jpg")
+  ),
+  "expected Telegram image continuation to include media.inspect results"
+);
+assert(
+  telegramAttachmentProviderRequests[2]?.messages.some((message) =>
+    message.content.includes("Channel attachments:") &&
+    message.content.includes("kind=document") &&
+    message.content.includes("suggested_tools=document.probe")
+  ),
+  "expected Telegram document prompt to expose attachment manifest and suggested document tools"
+);
+assert(
+  telegramAttachmentMessages.some((message) =>
+    message.role === "user" &&
+      message.metadata?.attachments !== undefined &&
+      JSON.stringify(message.metadata.attachments).includes("tg-image-large")
+  ),
+  "expected Telegram attachment session metadata to record attachment summaries"
+);
+assert(
+  telegramAttachmentEvents.some((event) => event.kind === "skill-selected" && event.skill === "telegram-media-analysis"),
+  "expected Telegram attachment flow to select telegram-media-analysis"
+);
+assert(
+  telegramAttachmentEvents.some((event) => event.kind === "tool-plan" && event.plan.tool === "media.inspect" && event.plan.status === "executed"),
+  "expected Telegram image attachment flow to execute media.inspect"
+);
+assert(
+  telegramAttachmentEvents.some((event) => event.kind === "tool-plan" && event.plan.tool === "document.probe" && event.plan.status === "executed"),
+  "expected Telegram document attachment flow to execute document.probe"
+);
+assert(
+  telegramAttachmentRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("Image attachment inspected successfully through telegram-media-analysis.")
+  ),
+  "expected Telegram image attachment reply to be sent back to chat"
+);
+assert(
+  telegramAttachmentRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("Document attachment inspected successfully through telegram-media-analysis.")
+  ),
+  "expected Telegram document attachment reply to be sent back to chat"
+);
+
 console.log("v2 smoke passed");
 
 function assert(condition: boolean, message: string): asserts condition {
@@ -6890,4 +7275,13 @@ function fakeTelegramFileResponse(content: string) {
     }),
     text: async () => content
   };
+}
+
+function extractAttachmentLocalRef(promptText: string): string {
+  const match = promptText.match(/local_ref=([^\n·]+)/u);
+  if (match?.[1] === undefined) {
+    throw new Error("Expected attachment manifest to expose local_ref");
+  }
+
+  return match[1].trim();
 }

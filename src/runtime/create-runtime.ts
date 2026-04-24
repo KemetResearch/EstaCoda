@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { AuxiliaryProviderConfig, ModelProfile } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { MemoryProvider } from "../contracts/memory.js";
@@ -133,6 +134,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       preferFreeOrOpenWeights: true
     });
   const processManager = new ProcessManager({ workspaceRoot });
+  const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
   let activeTrustedWorkspace = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
@@ -186,7 +188,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     fetch: options.cdpFetch,
     webSocketFactory: options.cdpWebSocketFactory
   });
-  for (const tool of createPythonTools({ workspaceRoot })) {
+  for (const tool of createPythonTools({
+    workspaceRoot,
+    allowedRoots: [channelMediaRoot]
+  })) {
     toolRegistry.register(tool);
   }
   for (const tool of createWebTools({
@@ -200,7 +205,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createWorkspaceTools({ workspaceRoot })) {
     toolRegistry.register(tool);
   }
-  for (const tool of createMediaTools({ workspaceRoot, artifactStore })) {
+  for (const tool of createMediaTools({
+    workspaceRoot,
+    artifactStore,
+    allowedRoots: [channelMediaRoot]
+  })) {
     toolRegistry.register(tool);
   }
   for (const tool of createProcessTools({ processManager })) {

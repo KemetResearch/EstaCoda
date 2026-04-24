@@ -1,4 +1,5 @@
 import type { IntentLabel, IntentRoute } from "../contracts/intent.js";
+import type { ChannelAttachment } from "../contracts/channel.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
@@ -14,7 +15,7 @@ export class IntentRouter {
     this.#skillRegistry = options.skillRegistry;
   }
 
-  route(prompt: string): IntentRoute {
+  route(prompt: string, options: { attachments?: ChannelAttachment[] } = {}): IntentRoute {
     const slashInvocation = parseSlashInvocation(prompt, this.#skillRegistry);
 
     if (slashInvocation !== undefined) {
@@ -34,7 +35,7 @@ export class IntentRouter {
     }
 
     const normalized = normalize(prompt);
-    const labels = detectLabels(normalized);
+    const labels = detectLabels(normalized, options.attachments);
     const suggestedToolsets = toolsetsFor(labels);
     const promptMatchedSkills = labels.length === 0
       ? []
@@ -57,7 +58,7 @@ export class IntentRouter {
   }
 }
 
-function detectLabels(normalized: string): IntentLabel[] {
+function detectLabels(normalized: string, attachments: ChannelAttachment[] | undefined): IntentLabel[] {
   const labels: IntentLabel[] = [];
 
   if (hasAny(normalized, ["youtube.com", "youtu.be", "youtube", "transcript"])) {
@@ -72,7 +73,7 @@ function detectLabels(normalized: string): IntentLabel[] {
     labels.push("media-generation");
   }
 
-  if (isChannelMediaReference(normalized)) {
+  if (isChannelMediaReference(normalized, attachments)) {
     labels.push("telegram-media");
   }
 
@@ -195,9 +196,20 @@ function hasAny(value: string, needles: string[]): boolean {
   return needles.some((needle) => value.includes(needle));
 }
 
-function isChannelMediaReference(normalized: string): boolean {
+function isChannelMediaReference(normalized: string, attachments: ChannelAttachment[] | undefined): boolean {
   const channelSignals = ["telegram", "channel", "chat", "uploaded", "sent it", "sent the", "shared here"];
   const mediaSignals = ["image", "photo", "pdf", "document", "file", "audio", "video", "voice note", "attachment"];
+
+  if ((attachments ?? []).some((attachment) =>
+    attachment.kind === "image" ||
+    attachment.kind === "document" ||
+    attachment.kind === "file" ||
+    attachment.kind === "audio" ||
+    attachment.kind === "video" ||
+    attachment.kind === "voice"
+  )) {
+    return true;
+  }
 
   return hasAny(normalized, ["voice note"]) ||
     (hasAny(normalized, channelSignals) && hasAny(normalized, mediaSignals));

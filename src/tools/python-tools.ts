@@ -1,11 +1,17 @@
-import type { RegisteredTool } from "../contracts/tool.js";
+import { realpath } from "node:fs/promises";
+import { resolve } from "node:path";
+import { explainPathBlock } from "../context/context-security.js";
+import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { runPythonWorker } from "../workers/python-worker.js";
 
 export type PythonToolOptions = {
   workspaceRoot?: string;
+  allowedRoots?: string[];
 };
 
 export function createPythonTools(options: PythonToolOptions = {}): readonly RegisteredTool[] {
+  const allowedRoots = dedupeRoots([options.workspaceRoot, ...(options.allowedRoots ?? [])]);
+
   return [
   {
     name: "python.probe",
@@ -45,15 +51,88 @@ export function createPythonTools(options: PythonToolOptions = {}): readonly Reg
     progressLabel: "probing document",
     maxResultSizeChars: 4000,
     isAvailable: () => true,
-    run: async (input: Record<string, unknown>) =>
-      runPythonWorker({
+    run: async (input: Record<string, unknown>) => {
+      const resolvedPath = await resolveAllowedDocumentPath(allowedRoots, input.path);
+      if (!resolvedPath.ok) {
+        return resolvedPath;
+      }
+
+      return runPythonWorker({
         tool: "document.probe",
-        input
+        input: {
+          ...input,
+          path: resolvedPath.path
+        }
       }, {
         cwd: options.workspaceRoot
-      })
+      });
+    }
   }
   ];
 }
 
 export const pythonTools: readonly RegisteredTool[] = createPythonTools();
+
+function dedupeRoots(roots: Array<string | undefined>): string[] {
+  return [...new Set(
+    roots
+      .filter((root): root is string => typeof root === "string" && root.length > 0)
+      .map((root) => resolve(root))
+  )];
+}
+
+async function resolveAllowedDocumentPath(
+  roots: string[],
+  pathValue: unknown
+): Promise<ToolResult & { path?: string }> {
+  if (typeof pathValue !== "string" || pathValue.length === 0) {
+    return {
+      ok: false,
+      content: "path must be a non-empty string"
+    };
+  }
+
+  if (roots.length === 0) {
+    return {
+      ok: false,
+      content: "No allowed roots are configured for document inspection."
+    };
+  }
+
+  let lastError = "path is outside the trusted workspace";
+
+  for (const root of roots) {
+    const candidate = resolve(root, pathValue);
+    let canonicalRoot = root;
+    let canonicalTarget = candidate;
+
+    try {
+      canonicalRoot = await realpath(root);
+    } catch {
+      canonicalRoot = root;
+    }
+
+    try {
+      canonicalTarget = await realpath(candidate);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "path does not exist";
+      continue;
+    }
+
+    const blockedReason = explainPathBlock(canonicalRoot, canonicalTarget);
+    if (blockedReason === undefined) {
+      return {
+        ok: true,
+        content: "",
+        path: canonicalTarget
+      };
+    }
+
+    lastError = blockedReason;
+  }
+
+  return {
+    ok: false,
+    content: lastError
+  };
+}

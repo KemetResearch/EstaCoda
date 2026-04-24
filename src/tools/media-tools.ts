@@ -9,6 +9,7 @@ import { explainPathBlock } from "../context/context-security.js";
 export type MediaToolOptions = {
   workspaceRoot: string;
   artifactStore: ArtifactStore;
+  allowedRoots?: string[];
   commandTimeoutMs?: number;
 };
 
@@ -20,6 +21,7 @@ type ResolvedPath =
 
 export function createMediaTools(options: MediaToolOptions): readonly RegisteredTool[] {
   const root = resolve(options.workspaceRoot);
+  const allowedRoots = dedupeRoots([root, ...(options.allowedRoots ?? [])]);
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
   return [
@@ -72,14 +74,14 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
       maxResultSizeChars: 8000,
       isAvailable: () => true,
       run: async (input: { path?: string }) => {
-        const canonicalRoot = await realpath(root);
-        const path = await resolveWorkspacePath(canonicalRoot, input.path);
+        const path = await resolveAllowedPath(allowedRoots, input.path);
         if (!path.ok) {
           return path;
         }
 
         const fileStat = await stat(path.path);
-        const relPath = relative(canonicalRoot, path.path);
+        const displayRoot = path.root ?? root;
+        const relPath = relative(displayRoot, path.path);
         const ffprobe = await runCommand("ffprobe", [
           "-v",
           "error",
@@ -129,12 +131,12 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
       isAvailable: () => true,
       run: async (input: { path?: string; atSeconds?: number; outputPath?: string }) => {
         const canonicalRoot = await realpath(root);
-        const source = await resolveWorkspacePath(canonicalRoot, input.path);
+        const source = await resolveAllowedPath(allowedRoots, input.path);
         if (!source.ok) {
           return source;
         }
 
-        const output = await resolveWorkspacePath(canonicalRoot, input.outputPath ?? defaultFramePath(source.path), {
+        const output = await resolveAllowedPath([canonicalRoot], input.outputPath ?? defaultFramePath(source.path), {
           allowMissingLeaf: true
         });
         if (!output.ok) {
@@ -196,7 +198,7 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
       isAvailable: () => true,
       run: async (input: { path?: string; kind?: ArtifactKind; summary?: string }) => {
         const canonicalRoot = await realpath(root);
-        const path = await resolveWorkspacePath(canonicalRoot, input.path);
+        const path = await resolveAllowedPath([canonicalRoot], input.path);
         if (!path.ok) {
           return path;
         }
@@ -225,39 +227,62 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
   ];
 }
 
-async function resolveWorkspacePath(
-  root: string,
+async function resolveAllowedPath(
+  roots: string[],
   path: string | undefined,
   options: { allowMissingLeaf?: boolean } = {}
-): Promise<ResolvedPath> {
+): Promise<ResolvedPath & { root?: string }> {
   if (typeof path !== "string" || path.length === 0) {
     return errorResult("path must be a non-empty string");
   }
 
-  const candidate = resolve(root, path);
-  let canonical = candidate;
+  let lastError = "path is outside the trusted workspace";
 
-  try {
-    canonical = await realpath(candidate);
-  } catch (error) {
-    if (options.allowMissingLeaf !== true) {
-      return errorResult(error instanceof Error ? error.message : "path does not exist");
+  for (const root of roots) {
+    const candidate = resolve(root, path);
+    let canonicalRoot = root;
+    let canonical = candidate;
+
+    try {
+      canonicalRoot = await realpath(root);
+    } catch {
+      canonicalRoot = root;
     }
 
-    const parent = await realpath(dirname(candidate));
-    canonical = join(parent, basename(candidate));
+    try {
+      canonical = await realpath(candidate);
+    } catch (error) {
+      if (options.allowMissingLeaf !== true) {
+        lastError = error instanceof Error ? error.message : "path does not exist";
+        continue;
+      }
+
+      const parent = await realpath(dirname(candidate));
+      canonical = join(parent, basename(candidate));
+    }
+
+    const blockedReason = explainPathBlock(canonicalRoot, canonical);
+    if (blockedReason === undefined) {
+      return {
+        ok: true,
+        content: "",
+        path: canonical,
+        root: canonicalRoot
+      };
+    }
+
+    lastError = blockedReason;
   }
 
-  const blockedReason = explainPathBlock(root, canonical);
-  if (blockedReason !== undefined) {
-    return errorResult(blockedReason);
-  }
+  return errorResult(lastError);
+}
 
-  return {
-    ok: true,
-    content: "",
-    path: canonical
-  };
+function dedupeRoots(roots: string[]): string[] {
+  return [...new Set(
+    roots
+      .filter((root) => root.length > 0)
+      .map((root) => resolve(root))
+  )];
 }
 
 async function probeCommand(command: string, args: string[], timeoutMs: number): Promise<{

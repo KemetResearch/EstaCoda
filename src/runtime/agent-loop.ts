@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
-import type { ChannelKind } from "../contracts/channel.js";
+import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider, MemoryProviderContext, SkillOutcome } from "../contracts/memory.js";
@@ -41,6 +41,7 @@ import type { IntentRouter } from "./intent-router.js";
 export type AgentLoopInput = {
   text: string;
   channel: ChannelKind;
+  attachments?: ChannelAttachment[];
   trustedWorkspace?: boolean;
   workspaceRoot?: string;
   onEvent?: RuntimeEventSink;
@@ -216,6 +217,7 @@ export class AgentLoop {
       content: effectiveText,
       channel: input.channel,
       metadata: {
+        attachments: summarizeAttachments(input.attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
@@ -224,6 +226,7 @@ export class AgentLoop {
     this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
       channel: input.channel,
+      attachments: summarizeAttachments(input.attachments),
       contextReferences: context?.references.map((reference) => reference.raw) ?? []
     });
 
@@ -269,7 +272,9 @@ export class AgentLoop {
         resumeNote
       });
     }
-    const intent = this.#intentRouter.route(routedText);
+    const intent = this.#intentRouter.route(routedText, {
+      attachments: input.attachments
+    });
     await emit(input.onEvent, {
       kind: "intent",
       labels: intent.labels,
@@ -388,6 +393,7 @@ export class AgentLoop {
       toolExecutions,
       context,
       projectContext: this.#projectContext,
+      attachments: input.attachments,
       memoryContext: this.#memoryContext,
       providerTools,
       fallbackText: fallbackResponse.text,
@@ -997,6 +1003,7 @@ export class AgentLoop {
     toolExecutions: ToolExecutionRecord[];
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
+    attachments: ChannelAttachment[] | undefined;
     memoryContext: MemoryProviderContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     fallbackText: string;
@@ -1257,15 +1264,16 @@ export class AgentLoop {
   async #completeWithProvider(input: {
     userText: string;
     routedText: string;
-      selectedSkill: LoadedSkill | SkillDefinition | undefined;
-      selectedSkillInstructions: string | undefined;
-      selectedSkillResources: LoadedSkill["resources"] | undefined;
-      selectedSkillSetup: SkillSetupContext | undefined;
+    selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    selectedSkillInstructions: string | undefined;
+    selectedSkillResources: LoadedSkill["resources"] | undefined;
+    selectedSkillSetup: SkillSetupContext | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
+    attachments: ChannelAttachment[] | undefined;
     memoryContext: MemoryProviderContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     fallbackText: string;
@@ -1288,7 +1296,8 @@ export class AgentLoop {
       frozenMemory: this.#frozenMemory,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
-      selectedSkillSetup: input.selectedSkillSetup
+      selectedSkillSetup: input.selectedSkillSetup,
+      attachments: input.attachments
     });
     await this.#recordPromptAssembly(prompt.budget);
 
@@ -1358,6 +1367,7 @@ export class AgentLoop {
     toolExecutions: ToolExecutionRecord[];
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
+    attachments: ChannelAttachment[] | undefined;
     memoryContext: MemoryProviderContext | undefined;
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
@@ -1387,7 +1397,8 @@ export class AgentLoop {
       frozenMemory: this.#frozenMemory,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
-      selectedSkillSetup: input.selectedSkillSetup
+      selectedSkillSetup: input.selectedSkillSetup,
+      attachments: input.attachments
     });
     await this.#recordPromptAssembly(prompt.budget);
 
@@ -1713,6 +1724,18 @@ function buildResumeNote(input: {
   ].filter((line) => line !== undefined);
 
   return lines.join("\n");
+}
+
+function summarizeAttachments(attachments: ChannelAttachment[] | undefined): Array<Record<string, unknown>> {
+  return (attachments ?? []).map((attachment) => ({
+    id: attachment.id,
+    kind: attachment.kind,
+    name: attachment.originalName ?? attachment.name,
+    path: attachment.localPath ?? attachment.path,
+    remoteUrl: attachment.remoteUrl ?? attachment.url,
+    mimeType: attachment.mimeType,
+    bytes: attachment.bytes
+  }));
 }
 
 function truncate(value: string, maxChars: number): string {
