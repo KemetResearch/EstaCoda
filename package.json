@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "$npm_execpath src/index.ts",
-    "smoke": "$npm_execpath src/smoke.ts"
+    "smoke": "$npm_execpath src/smoke.ts",
+    "alpha:harness": "$npm_execpath scripts/internal-alpha.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
