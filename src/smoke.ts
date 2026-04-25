@@ -6723,6 +6723,23 @@ await telegramAdapter.delivery.sendProgress({
   tool: "web.extract",
   stepId: "telegram-smoke"
 });
+await telegramAdapter.delivery.sendProgress({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  kind: "tool-start",
+  tool: "web.extract",
+  stepId: "telegram-smoke"
+});
+await telegramAdapter.delivery.sendProgress({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  kind: "provider-attempt",
+  provider: "kimi",
+  model: "kimi-k2.5",
+  fallback: false
+});
 await telegramAdapter.delivery.sendArtifact({
   platform: "telegram",
   chatId: "1254738091"
@@ -6775,8 +6792,19 @@ assert(
   "expected Telegram typing action"
 );
 assert(
-  telegramRequests.some((request) => request.url.endsWith("/sendMessage") && String(request.body.text).includes("preparing web.extract")),
-  "expected Telegram progress message"
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("𓂀 EstaCoda is working...")
+  ),
+  "expected initial Telegram progress message"
+);
+assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/editMessageText") &&
+      String(request.body.text).includes("💠 preparing web.extract (telegram-smoke) (x2)") &&
+      String(request.body.text).includes("🧿 provider: kimi/kimi-k2.5")
+  ),
+  "expected Telegram progress updates to compact into a single edited message"
 );
 assert(
   telegramRequests.some((request) => request.url.endsWith("/setMyCommands")),

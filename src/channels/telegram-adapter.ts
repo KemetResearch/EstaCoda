@@ -109,6 +109,21 @@ type TelegramFile = {
   file_size?: number;
 };
 
+type TelegramSentMessage = {
+  message_id: number;
+};
+
+type ProgressEntry = {
+  text: string;
+  count: number;
+};
+
+type TelegramProgressState = {
+  messageId?: number;
+  entries: ProgressEntry[];
+  lastRendered?: string;
+};
+
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export class TelegramAdapter implements ChannelAdapter {
@@ -124,24 +139,26 @@ export class TelegramAdapter implements ChannelAdapter {
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #offset = 0;
   #running = false;
+  readonly #progressByChat = new Map<string, TelegramProgressState>();
 
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
+      this.#progressByChat.delete(sessionKey.chatId);
       await this.#sendMessage(sessionKey.chatId, text, options);
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       if (event.kind === "agent-start" || event.kind === "provider-attempt") {
         await this.#sendChatAction(sessionKey.chatId, "typing");
-        return;
       }
 
       const rendered = renderProgress(event);
 
       if (rendered.length > 0) {
-        await this.#sendMessage(sessionKey.chatId, rendered);
+        await this.#upsertProgressMessage(sessionKey.chatId, rendered);
       }
     },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
+      this.#progressByChat.delete(sessionKey.chatId);
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
     }
   };
@@ -206,8 +223,8 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.#running;
   }
 
-  async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<void> {
-    await this.#call("sendMessage", {
+  async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
+    return this.#call<TelegramSentMessage>("sendMessage", {
       chat_id: chatId,
       text,
       disable_web_page_preview: true,
@@ -245,6 +262,47 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.#call("answerCallbackQuery", {
       callback_query_id: callbackQueryId
     });
+  }
+
+  async #editMessageText(chatId: string, messageId: number, text: string): Promise<TelegramSentMessage> {
+    return this.#call<TelegramSentMessage>("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      disable_web_page_preview: true
+    });
+  }
+
+  async #upsertProgressMessage(chatId: string, line: string): Promise<void> {
+    const state = this.#progressByChat.get(chatId) ?? {
+      entries: []
+    };
+    appendProgressEntry(state.entries, line);
+    const rendered = renderProgressSummary(state.entries);
+
+    if (rendered.length === 0 || rendered === state.lastRendered) {
+      this.#progressByChat.set(chatId, state);
+      return;
+    }
+
+    if (state.messageId === undefined) {
+      const message = await this.#sendMessage(chatId, rendered);
+      state.messageId = message.message_id;
+      state.lastRendered = rendered;
+      this.#progressByChat.set(chatId, state);
+      return;
+    }
+
+    try {
+      await this.#editMessageText(chatId, state.messageId, rendered);
+      state.lastRendered = rendered;
+      this.#progressByChat.set(chatId, state);
+    } catch {
+      const message = await this.#sendMessage(chatId, rendered);
+      state.messageId = message.message_id;
+      state.lastRendered = rendered;
+      this.#progressByChat.set(chatId, state);
+    }
   }
 
   async #downloadAttachments(message: ChannelMessage): Promise<ChannelAttachment[]> {
@@ -545,6 +603,30 @@ function renderProgress(event: RuntimeEvent): string {
     default:
       return "";
   }
+}
+
+function appendProgressEntry(entries: ProgressEntry[], text: string): void {
+  const last = entries.at(-1);
+
+  if (last?.text === text) {
+    last.count += 1;
+    return;
+  }
+
+  entries.push({
+    text,
+    count: 1
+  });
+
+  if (entries.length > 12) {
+    entries.splice(0, entries.length - 12);
+  }
+}
+
+function renderProgressSummary(entries: ProgressEntry[]): string {
+  return entries
+    .map((entry) => entry.count > 1 ? `${entry.text} (x${entry.count})` : entry.text)
+    .join("\n");
 }
 
 function renderArtifactNotice(artifact: ArtifactRecord): string {
