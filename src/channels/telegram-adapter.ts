@@ -10,6 +10,7 @@ import type {
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 
 export type TelegramFetch = (url: string, init?: {
   method?: string;
@@ -30,6 +31,7 @@ export type TelegramAdapterOptions = {
   pollTimeoutSeconds?: number;
   maxAttachmentBytes?: number;
   mediaRoot?: string;
+  activityLabelsLocale?: ActivityLabelLocale;
   fetch?: TelegramFetch;
   now?: () => Date;
 };
@@ -134,6 +136,7 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly #pollTimeoutSeconds: number;
   readonly #maxAttachmentBytes: number;
   readonly #mediaRoot: string | undefined;
+  readonly #activityLabelsLocale: ActivityLabelLocale;
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
@@ -151,7 +154,7 @@ export class TelegramAdapter implements ChannelAdapter {
         await this.#sendChatAction(sessionKey.chatId, "typing");
       }
 
-      const rendered = renderProgress(event);
+      const rendered = renderChannelProgressLabel(event, this.#activityLabelsLocale);
 
       if (rendered.length > 0) {
         await this.#upsertProgressMessage(sessionKey.chatId, rendered);
@@ -169,6 +172,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#pollTimeoutSeconds = options.pollTimeoutSeconds ?? 25;
     this.#maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
     this.#mediaRoot = options.mediaRoot;
+    this.#activityLabelsLocale = options.activityLabelsLocale ?? "en";
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
   }
@@ -585,24 +589,6 @@ function appendFileAttachment(
       telegramUniqueId: file.file_unique_id
     }
   });
-}
-
-function renderProgress(event: RuntimeEvent): string {
-  switch (event.kind) {
-    case "agent-start":
-      return "𓂀 EstaCoda is working...";
-    case "skill":
-      return `☥ skill: ${event.name}`;
-    case "tool-start":
-      return `💠 preparing ${event.tool}${event.stepId === undefined ? "" : ` (${event.stepId})`}`;
-    case "provider-attempt":
-      return `🧿 provider: ${event.provider}/${event.model}`;
-    case "agent-final":
-    case "provider-token":
-      return "";
-    default:
-      return "";
-  }
 }
 
 function appendProgressEntry(entries: ProgressEntry[], text: string): void {

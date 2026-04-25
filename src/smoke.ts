@@ -6794,15 +6794,15 @@ assert(
 assert(
   telegramRequests.some((request) =>
     request.url.endsWith("/sendMessage") &&
-      String(request.body.text).includes("𓂀 EstaCoda is working...")
+      String(request.body.text).includes("🌀 Thinking")
   ),
   "expected initial Telegram progress message"
 );
 assert(
   telegramRequests.some((request) =>
     request.url.endsWith("/editMessageText") &&
-      String(request.body.text).includes("💠 preparing web.extract (telegram-smoke) (x2)") &&
-      String(request.body.text).includes("🧿 provider: kimi/kimi-k2.5")
+      String(request.body.text).includes("🌐 Web action (x2)") &&
+      String(request.body.text).includes("🧬 Routing task")
   ),
   "expected Telegram progress updates to compact into a single edited message"
 );
@@ -6816,6 +6816,48 @@ assert(
 );
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");
+const arabicTelegramRequests: Array<{
+  url: string;
+  body: Record<string, unknown>;
+}> = [];
+const arabicTelegramAdapter = new TelegramAdapter({
+  botToken: "telegram-token-ar",
+  activityLabelsLocale: "ar",
+  fetch: async (url, init) => {
+    const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+    arabicTelegramRequests.push({ url, body });
+    return fakeTelegramResponse({ message_id: 41 });
+  }
+});
+await arabicTelegramAdapter.delivery.sendProgress({
+  platform: "telegram",
+  chatId: "chat-ar"
+}, {
+  kind: "agent-start",
+  sessionId: "telegram-ar",
+  input: "hello"
+});
+await arabicTelegramAdapter.delivery.sendProgress({
+  platform: "telegram",
+  chatId: "chat-ar"
+}, {
+  kind: "tool-start",
+  tool: "file.read"
+});
+assert(
+  arabicTelegramRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("🌀 جارٍ التفكير")
+  ),
+  "expected Arabic Telegram progress to use localized thinking label"
+);
+assert(
+  arabicTelegramRequests.some((request) =>
+    request.url.endsWith("/editMessageText") &&
+      String(request.body.text).includes("🗂️ قراءة الملفات")
+  ),
+  "expected Arabic Telegram progress to use localized file-read label"
+);
 const telegramCallbackRequests: Array<{
   url: string;
   body: Record<string, unknown>;
