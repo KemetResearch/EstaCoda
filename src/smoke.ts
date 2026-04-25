@@ -573,6 +573,11 @@ const gatewayStatusLocked = await runCliCommand({
   homeDir: gatewayHome
 });
 process.env.ESTACODA_GATEWAY_TELEGRAM_TOKEN = "gateway-telegram-token";
+const gatewayStatusReady = await runCliCommand({
+  argv: ["gateway", "status"],
+  workspaceRoot: gatewayWorkspace,
+  homeDir: gatewayHome
+});
 const gatewayRequests: Array<{
   url: string;
   body: Record<string, unknown>;
@@ -1844,8 +1849,19 @@ assert(gatewayMediaSetup.output.includes("Telegram channel configured"), "expect
 assert(pairingSetup.output.includes("Telegram channel configured"), "expected pairing Telegram setup output");
 assert(pairingCode.output.includes("Code: 246810"), "expected Telegram pairing code output");
 assert(gatewayStatusLocked.exitCode === 1, "expected gateway status to fail without token");
+assert(gatewayStatusLocked.output.includes("Gateway process: foreground process"), "expected gateway process model in status");
+assert(gatewayStatusLocked.output.includes("Model route:"), "expected gateway model route in status");
+assert(gatewayStatusLocked.output.includes("Session DB:"), "expected gateway session DB path in status");
+assert(gatewayStatusLocked.output.includes("Approval store:"), "expected gateway approval store path in status");
 assert(gatewayStatusLocked.output.includes("Missing: ESTACODA_GATEWAY_TELEGRAM_TOKEN"), "expected gateway missing token output");
+assert(gatewayStatusReady.exitCode === 0, "expected gateway status to pass with token");
+assert(gatewayStatusReady.output.includes("Active adapters: telegram"), "expected active gateway adapter in ready status");
+assert(gatewayStatusReady.output.includes("Telegram token present: yes"), "expected gateway token presence in ready status");
 assert(gatewayStartOnce.exitCode === 0, "expected gateway start once to succeed");
+assert(gatewayStartOnce.output.includes("EstaCoda Telegram gateway"), "expected gateway start banner");
+assert(gatewayStartOnce.output.includes("Commands synced: yes"), "expected gateway command sync summary");
+assert(gatewayStartOnce.output.includes("Model route:"), "expected gateway model route in start output");
+assert(gatewayStartOnce.output.includes("Session DB:"), "expected gateway state paths in start output");
 assert(gatewayStartOnce.output.includes("Messages processed: 1"), "expected gateway start once message count");
 assert(
   gatewayRequests.some((request) => request.url.endsWith("/setMyCommands")),

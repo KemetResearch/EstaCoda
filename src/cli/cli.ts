@@ -22,7 +22,7 @@ import {
   renderProviderDiagnostic,
   renderProviderLiveDiagnostic
 } from "../config/provider-diagnostics.js";
-import { runTelegramGateway } from "../channels/gateway-runner.js";
+import { getTelegramGatewayDiagnostics, runTelegramGateway } from "../channels/gateway-runner.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 
@@ -524,18 +524,33 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   }
 
   if (subcommand === "status") {
-    const config = await loadRuntimeConfig(options);
-    const telegram = config.channels.telegram;
+    const diagnostics = await getTelegramGatewayDiagnostics(options);
 
     return {
       handled: true,
-      exitCode: telegram.ready ? 0 : 1,
+      exitCode: diagnostics.ready ? 0 : 1,
       output: [
         "EstaCoda gateway status",
-        `Telegram: ${telegram.ready ? "ready" : telegram.enabled ? "configured, missing credentials" : "disabled"}`,
-        `Telegram security: ${(telegram.allowedUserIds ?? []).length + (telegram.allowedChatIds ?? []).length > 0 ? "allowlist" : "locked until allowlist is configured"}`,
-        telegram.botTokenEnv === undefined ? undefined : `Telegram token env: ${telegram.botTokenEnv}`,
-        telegram.missing === undefined ? undefined : `Missing: ${telegram.missing.join(", ")}`
+        `Gateway process: ${diagnostics.processMode}`,
+        `Active adapters: ${diagnostics.enabled ? diagnostics.adapter : "none"}`,
+        `Telegram: ${diagnostics.statusLabel}`,
+        `Model route: ${diagnostics.modelRoute}`,
+        `Context window: ${diagnostics.contextWindowTokens} tokens`,
+        `Telegram security: ${diagnostics.securityLabel}`,
+        `Allowed users: ${diagnostics.allowedUserIds.join(", ") || "none"}`,
+        `Allowed chats: ${diagnostics.allowedChatIds.join(", ") || "none"}`,
+        diagnostics.botTokenEnv === undefined ? undefined : `Telegram token env: ${diagnostics.botTokenEnv}`,
+        `Telegram token present: ${diagnostics.botTokenPresent ? "yes" : "no"}`,
+        diagnostics.defaultChatId === undefined ? undefined : `Default chat: ${diagnostics.defaultChatId}`,
+        diagnostics.pollTimeoutSeconds === undefined ? undefined : `Poll timeout: ${diagnostics.pollTimeoutSeconds}s`,
+        diagnostics.maxAttachmentBytes === undefined ? undefined : `Max attachment size: ${diagnostics.maxAttachmentBytes} bytes`,
+        diagnostics.pairingExpiresAt === undefined ? undefined : `Pairing code active until: ${diagnostics.pairingExpiresAt}`,
+        `Session DB: ${diagnostics.sessionDbPath}`,
+        `Channel media: ${diagnostics.mediaRoot}`,
+        `Approval store: ${diagnostics.approvalStorePath}`,
+        `Logs: ${diagnostics.logsLocation}`,
+        `Config sources: ${diagnostics.configSources.join(", ") || "none"}`,
+        diagnostics.missing.length === 0 ? undefined : `Missing: ${diagnostics.missing.join(", ")}`
       ].filter((line) => line !== undefined).join("\n")
     };
   }
