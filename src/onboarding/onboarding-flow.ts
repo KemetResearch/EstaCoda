@@ -96,7 +96,7 @@ export function defaultOnboardingSteps(): OnboardingStep[] {
       options: [
         { provider: "deepseek", model: "deepseek-chat", label: "DeepSeek Chat" },
         { provider: "kimi", model: "kimi-k2.5", label: "Kimi K2.5" },
-        { provider: "openrouter", model: "openrouter/auto", label: "OpenRouter Auto" },
+        { provider: "openrouter", model: "qwen/qwen3.6-plus", label: "OpenRouter Qwen 3.6 Plus" },
         { provider: "local", model: "ollama/auto", label: "Local Ollama-compatible" }
       ]
     },

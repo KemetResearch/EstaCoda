@@ -61,6 +61,7 @@ Evidence:
 - Telegram approvals/progress/attachments/session behavior: `smoke-tested`
 - internal alpha harness and runbook: `live-proven`
 - vision-backed image support: Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
+- provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
 - evaluation substrate: `implemented but not live-proven`
 
 ## 3. Current Working Capabilities
@@ -100,7 +101,7 @@ Confirmed live by operator testing:
 Working but not yet fully proven live in operator testing:
 
 - Telegram image understanding on non-Kimi providers. `implemented but not live-proven`
-- Multi-provider live pass across Kimi/OpenRouter/Ollama/DeepSeek. `intended but not implemented` as a completed validation milestone
+- Multi-provider live pass across Kimi/OpenRouter/Ollama/DeepSeek. Hosted-provider matrix is now `live-proven`; local/Ollama remains unproven in this environment.
 - Memory promotion of repeated patterns into `USER.md` / `MEMORY.md`. `intended but not implemented`
 
 ## 4. Architecture Overview
@@ -506,7 +507,7 @@ Correct next milestone: **MVP hardening after strong internal alpha**.
 Best next development target:
 
 1. Broaden live Telegram image verification beyond Kimi. `implemented but not live-proven`
-2. Complete the broader live provider hardening pass across Kimi/OpenRouter/Ollama/DeepSeek. `intended but not implemented`
+2. Harden OpenRouter exactness/instruction fidelity after the live provider batch. OpenRouter runtime path is `live-proven`; exactness-sensitive tasks are still partial.
 3. Implement memory promotion: `intended but not implemented`
    - repeated user preferences -> `USER.md`
    - repeated workflows -> `MEMORY.md` or skill suggestions

@@ -4,9 +4,12 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## Runtime / provider
 
-- Live provider behavior has not yet been hardened in one batched sweep across Kimi/OpenRouter/Ollama/DeepSeek. `intended but not implemented`
+- The live provider hardening batch is now complete enough to establish a real acceptance matrix: Kimi, OpenAI, and DeepSeek passed; OpenRouter is operational but still weaker on exactness-sensitive tasks; local/Ollama is not validated in this environment. `live-proven`
 - `doctor --live` can succeed with `[empty]` response text for some providers. `live-proven`
 - Catalog-only providers are discovery adapters, not true inference adapters. `implemented`
+- `openrouter/auto` is not currently acceptance-grade for tool workflows; live batch showed empty-success/no-tool behavior on the file roundtrip task. `live-proven`
+- OpenRouter now works on the runtime/tool path with `qwen/qwen3.6-plus`, but it can still miss exact-content fidelity checks (for example, adding punctuation to “exact” file content). `live-proven`
+- Local/Ollama support is architecturally present, but the current environment has no working local model route, so local acceptance remains unproven here. `live-proven`
 
 ## Memory
 

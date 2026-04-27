@@ -15,6 +15,14 @@ It is already useful for:
 - Telegram image understanding with Kimi `live-proven`
 - repeatable internal alpha runs `live-proven`
 
+Current hosted-provider matrix:
+
+- Kimi: full pass `live-proven`
+- OpenAI: full pass `live-proven`
+- DeepSeek: full pass `live-proven`
+- OpenRouter: runtime path works, exactness still partial `live-proven`
+- local/Ollama: not accepted in this environment `live-proven`
+
 It is not yet “ship broadly without caveats.”
 
 ## Milestone Status
@@ -32,7 +40,7 @@ Done:
 
 Next:
 
-- broader live provider hardening
+- OpenRouter exactness/fidelity hardening after the hosted-provider batch
 - more realistic multi-tool live tasks
 
 ### 2. Executable skills
@@ -149,7 +157,7 @@ Next:
 The best next milestone is:
 
 1. **live Telegram image verification with a real vision-capable route**
-2. **live provider hardening batch**
+2. **OpenRouter exactness/fidelity hardening**
 3. **memory promotion implementation**
 4. **evaluation substrate expansion**
 5. **onboarding/distribution polish**

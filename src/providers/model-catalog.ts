@@ -9,6 +9,7 @@ export const knownModelProfiles: readonly ModelProfile[] = [
   model("openai", "gpt-4.1-mini", 1047576, { tools: true, vision: true, structured: true }),
   model("openai", "gpt-4o", 128000, { tools: true, vision: true, structured: true }),
   model("openrouter", "openrouter/auto", 128000, { tools: true, vision: true, structured: true }),
+  model("openrouter", "qwen/qwen3.6-plus", 256000, { tools: true, vision: true, structured: true, reasoning: true }),
   model("google", "gemini-2.5-pro", 1048576, { tools: true, vision: true, structured: true, reasoning: true }),
   model("google", "gemini-2.5-flash", 1048576, { tools: true, vision: true, structured: true, reasoning: true }),
   model("anthropic", "claude-sonnet-4.5", 200000, { tools: true, vision: true }),

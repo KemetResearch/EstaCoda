@@ -51,7 +51,7 @@ Next acceptance checks:
 - Done: terminal activity shows each tool step clearly.
 
 Remaining hardening:
-- Run live provider batches across Kimi/OpenRouter/Ollama/DeepSeek and resolve provider-specific quirks together.
+- Live provider batch now proves Kimi/OpenAI/DeepSeek as full passes. OpenRouter runtime path works but still needs exactness/fidelity hardening; local/Ollama is not validated in the current environment.
 - Expand normal-task live testing beyond smoke fixtures into more realistic multi-tool tasks.
 
 ### 2. Executable Skills
@@ -130,7 +130,7 @@ Remaining hardening:
 Move from strong internal alpha behavior to MVP launch hardening:
 
 1. Polish Telegram final reply formatting and complete a full live attachment/operator pass in the alpha harness.
-2. Harden live provider execution in a batched pass across Kimi/OpenRouter/Ollama/DeepSeek.
+2. Harden OpenRouter exactness/instruction fidelity after the provider batch established the current acceptance matrix.
 3. Promote repeated preferences into `USER.md` and repeated workflows into `MEMORY.md` or skill suggestions.
 4. Finish first-run install/onboarding polish and define the external distribution path.
 5. Expand from Telegram to the next launch channels only after the Telegram path feels stable.

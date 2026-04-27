@@ -34,6 +34,25 @@ cd /Users/ahnwy/estacoda-v2
   - `artifacts/`
   - `failures/`
 
+- A dedicated live provider batch can be run with:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run provider:hardening
+```
+
+That command rotates the project-level provider route across the current acceptance set, runs live diagnostics plus core prompt checks, captures results under `.estacoda/provider-hardening-runs/<timestamp>/`, and restores the original project config afterward.
+
+For OpenRouter, the batch intentionally targets a specific model rather than `openrouter/auto` by default. It currently prefers `qwen/qwen3.6-plus`. Override with `ESTACODA_OPENROUTER_MODEL` if you want to probe a different OpenRouter route.
+
+Current live outcome of that batch:
+
+- Kimi: full pass
+- OpenAI: full pass
+- DeepSeek: full pass
+- OpenRouter: runtime path works; exactness-sensitive checks still partial
+- local/Ollama: not accepted in the current environment
+
 ## What It Does Not Do Yet
 
 - It does not automatically execute all tasks.

@@ -1171,6 +1171,63 @@ const openAIStreamEvents = await collectAsync(streamingOpenAIProvider.stream?.({
   messages: [{ role: "user", content: "hello" }],
   stream: true
 }) ?? []);
+let emptyStreamFetchCalls = 0;
+const emptyStreamFallbackProvider = createOpenAICompatibleProvider({
+  id: "openrouter",
+  endpoint: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: {
+      kind: "none"
+    }
+  },
+  models: ["qwen/qwen3.6-plus"],
+  enableNetwork: true,
+  fetch: async (_url, init) => {
+    emptyStreamFetchCalls += 1;
+    const payload = JSON.parse(init.body) as { stream?: boolean };
+
+    if (payload.stream === true) {
+      const emptyStreamResponse = new Response([
+        "data: {\"choices\":[{\"delta\":{}}]}\n\n",
+        "data: [DONE]\n\n"
+      ].join(""), {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream"
+        }
+      });
+
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        body: emptyStreamResponse.body,
+        json: async () => ({}),
+        text: async () => ""
+      };
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      body: null,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: "fallback content"
+          }
+        }]
+      }),
+      text: async () => ""
+    };
+  }
+});
+const emptyStreamFallbackEvents = await collectAsync(emptyStreamFallbackProvider.stream?.({
+  model: "qwen/qwen3.6-plus",
+  messages: [{ role: "user", content: "hello" }],
+  stream: true
+}) ?? []);
 const noBodyToolCallProvider = createOpenAICompatibleProvider({
   id: "deepseek",
   endpoint: {
@@ -2032,6 +2089,11 @@ assert(
 assert(
   openAIStreamEvents.some((event) => event.kind === "done" && event.response.usage?.totalTokens === 6),
   "expected OpenAI-compatible stream usage"
+);
+assert(emptyStreamFetchCalls === 2, "expected empty OpenAI-compatible stream to retry as non-stream");
+assert(
+  emptyStreamFallbackEvents.some((event) => event.kind === "token" && event.text === "fallback content"),
+  "expected empty OpenAI-compatible stream to recover non-stream content"
 );
 assert(
   noBodyToolCallEvents.some((event) => event.kind === "tool-call" && event.name === "file_read"),

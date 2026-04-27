@@ -9,8 +9,8 @@
     "Relevant credentials exported"
   ],
   "steps": [
-    "For each provider, run `bun run dev -- doctor --live`.",
-    "For each provider, run a short one-shot prompt and one tool-using prompt.",
+    "Run `bun run provider:hardening` from a shell where the provider credentials are already exported.",
+    "Review `.estacoda/provider-hardening-runs/<timestamp>/summary.json` and per-provider logs.",
     "Record latency, correctness, and any tool-call quirks in the results file."
   ],
   "assertions": [
@@ -19,6 +19,7 @@
     "No provider-specific auth or malformed-tool regressions are introduced."
   ],
   "notes": [
-    "This is the key missing live-hardening milestone before claiming broader provider readiness."
+    "This batch is now live-proven enough to establish a real provider matrix.",
+    "Current result: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama not accepted in the current environment."
   ]
 }

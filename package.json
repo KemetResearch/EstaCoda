@@ -8,7 +8,8 @@
     "dev": "$npm_execpath src/index.ts",
     "smoke": "$npm_execpath src/smoke.ts",
     "alpha:harness": "$npm_execpath scripts/internal-alpha.ts",
-    "eval:substrate": "$npm_execpath scripts/eval-substrate.ts"
+    "eval:substrate": "$npm_execpath scripts/eval-substrate.ts",
+    "provider:hardening": "$npm_execpath scripts/provider-hardening.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

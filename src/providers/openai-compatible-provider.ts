@@ -356,10 +356,15 @@ export async function* streamOpenAICompatibleRequest(input: {
 
     let content = "";
     let usage: ProviderResponse["usage"] | undefined;
+    let sawToolCall = false;
 
     for await (const event of parseOpenAICompatibleStream(response.body, input.provider, input.model)) {
       if (event.kind === "token") {
         content += event.text;
+      }
+
+      if (event.kind === "tool-call") {
+        sawToolCall = true;
       }
 
       if (event.kind === "error") {
@@ -373,6 +378,63 @@ export async function* streamOpenAICompatibleRequest(input: {
       }
 
       yield event;
+    }
+
+    if (content.length === 0 && !sawToolCall) {
+      const fallback = await executeOpenAICompatibleRequest({
+        provider: input.provider,
+        model: input.model,
+        preparedRequest: {
+          ...input.preparedRequest,
+          body: {
+            ...input.preparedRequest.body,
+            stream: false
+          }
+        },
+        fetch: input.fetch,
+        timeoutMs: input.timeoutMs,
+        signal: input.signal
+      });
+
+      if (fallback.ok) {
+        for (const toolCall of extractOpenAICompatibleToolCalls(fallback.raw)) {
+          yield {
+            kind: "tool-call",
+            provider: input.provider,
+            model: input.model,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          };
+        }
+
+        if (fallback.content.length > 0) {
+          yield {
+            kind: "token",
+            provider: input.provider,
+            model: input.model,
+            text: fallback.content
+          };
+        }
+
+        yield {
+          kind: "done",
+          provider: input.provider,
+          model: input.model,
+          response: fallback
+        };
+        return;
+      }
+
+      yield {
+        kind: "error",
+        provider: input.provider,
+        model: input.model,
+        response: fallback
+      };
+      return;
     }
 
     yield {

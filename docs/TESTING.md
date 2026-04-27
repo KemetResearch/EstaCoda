@@ -75,6 +75,23 @@ Then use:
 - [docs/EVALUATION.md](/Users/ahnwy/estacoda-v2/docs/EVALUATION.md)
 - `evals/tasks/*.json`
 
+For the live provider acceptance sweep, run:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run provider:hardening
+```
+
+This must run from a shell where the provider credentials are already exported.
+
+Current live result from the batch:
+
+- Kimi: full pass `live-proven`
+- OpenAI: full pass `live-proven`
+- DeepSeek: full pass `live-proven`
+- OpenRouter: runtime/tool path passes, exactness-sensitive checks still partial `live-proven`
+- local/Ollama: not accepted in this environment `live-proven`
+
 Evidence level:
 
 - scaffold generation: `implemented but not live-proven`
@@ -151,7 +168,7 @@ At a high level:
 ## What Still Needs Live Validation
 
 - Telegram image understanding on non-Kimi vision-capable providers
-- multi-provider live route pass
+- OpenRouter exactness-sensitive task fidelity
 - live memory-promotion behavior once implemented
 - full operator pass after any major approval/channel changes
 
