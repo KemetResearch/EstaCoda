@@ -21,6 +21,7 @@ export type ChannelRuntimeFactory = (input: {
 export type ChannelSessionStore = {
   getOrCreateSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;
   resetSessionId?(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;
+  setSessionId?(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void>;
 };
 
 export type ChannelGatewayOptions = {
@@ -108,6 +109,15 @@ export class InMemoryChannelSessionStore implements ChannelSessionStore {
     });
 
     return sessionId;
+  }
+
+  async setSessionId(sessionKey: ChannelSessionKey, sessionId: string, _options?: { receivedAt?: string }): Promise<void> {
+    const key = stableSessionKey(sessionKey, this.#policy);
+    const receivedAt = _options?.receivedAt === undefined ? new Date() : new Date(_options.receivedAt);
+    this.#sessions.set(key, {
+      sessionId,
+      updatedAt: Number.isNaN(receivedAt.getTime()) ? new Date().toISOString() : receivedAt.toISOString()
+    });
   }
 
   #newSessionId(sessionKey: ChannelSessionKey): string {
@@ -301,6 +311,9 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
+        "/sessions - list recent sessions for this chat",
+        "/switch <session-id> - switch this chat to a specific session",
+        "/search <query> - search session history",
         "/new - start a fresh session",
         "/reset - alias for /new",
         "/commands - show the Telegram command menu",
@@ -329,6 +342,41 @@ export class ChannelGateway {
         `Chat: ${message.sessionKey.chatId}`,
         `Session: ${sessionId}`
       ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+
+      return {
+        sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/sessions") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
+      const sessions = (await runtime.sessionDb.listSessions("default"))
+        .filter((session) => session.id === sessionId || session.id.startsWith(prefix))
+        .slice(0, 10);
+      const text = sessions.length === 0
+        ? "No sessions found for this chat."
+        : [
+            "Recent sessions for this chat",
+            ...sessions.map((session, index) =>
+              `${index + 1}. ${session.id}${session.id === sessionId ? " (active)" : ""}${session.updatedAt ? ` — updated ${session.updatedAt}` : ""}`
+            )
+          ].join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
@@ -397,6 +445,105 @@ export class ChannelGateway {
 
       return {
         sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/switch") {
+      const targetSessionId = message.text.trim().split(/\s+/u)[1];
+      const currentSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      if (targetSessionId === undefined || targetSessionId.length === 0) {
+        const text = "Usage: /switch <session-id>";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: currentSessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId: currentSessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          currentSessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      const targetSession = await runtime.sessionDb.getSession(targetSessionId);
+      if (targetSession === undefined) {
+        const text = `Session not found: ${targetSessionId}`;
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: currentSessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
+      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+      this.#pendingApprovals.delete(key);
+      this.#approvalGrants.delete(key);
+      const text = [
+        "Switched this chat to an existing session.",
+        `Session: ${targetSessionId}`
+      ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+      return {
+        sessionId: targetSessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/search") {
+      const query = message.text.replace(/^\/search\s*/u, "").trim();
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      if (query.length === 0) {
+        const text = "Usage: /search <query>";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
+      const matches = (await runtime.sessionDb.search(query, { profileId: "default", limit: 20 }))
+        .filter((result) => result.session.id.startsWith(prefix))
+        .slice(0, 5);
+      const text = matches.length === 0
+        ? `No matching session history for "${query}".`
+        : [
+            `Search results for "${query}"`,
+            ...matches.map((result, index) =>
+              `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
+            )
+          ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+      return {
+        sessionId,
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -694,12 +841,15 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
     token === "/help" ||
     token === "/status" ||
+    token === "/sessions" ||
+    token === "/switch" ||
+    token === "/search" ||
     token === "/new" ||
     token === "/reset" ||
     token === "/resume" ||
@@ -786,6 +936,9 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
   return [
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
+    { command: "/sessions", description: "List recent chat sessions" },
+    { command: "/switch", description: "Switch to an existing session" },
+    { command: "/search", description: "Search session history" },
     { command: "/new", description: "Start a fresh session" },
     { command: "/reset", description: "Alias for /new" },
     { command: "/resume", description: "Show the latest interrupted turn" },
@@ -864,6 +1017,15 @@ function deriveApprovalReason(input: PendingApproval): string {
   }
 
   return formatRiskLabel(input.riskClass);
+}
+
+function truncateSingleLine(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/gu, " ").trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+
+  return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function formatApprovalToolLabel(toolName: string): string {

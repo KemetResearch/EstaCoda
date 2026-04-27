@@ -109,6 +109,17 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     return sessionId;
   }
 
+  async setSessionId(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void> {
+    await this.#ensureLoaded();
+    const key = stableSessionKey(sessionKey, this.#policy);
+    const receivedAt = parseTimestamp(options?.receivedAt) ?? new Date();
+    this.#entries.set(
+      key,
+      createEntry(key, normalizeSessionKey(sessionKey, this.#policy), sessionId, receivedAt)
+    );
+    await this.#flush();
+  }
+
   #newSessionId(sessionKey: ChannelSessionKey): string {
     this.#sequence += 1;
     return `${buildBaseSessionId(sessionKey, this.#policy)}-${this.#sequence}`;

@@ -335,8 +335,8 @@ For Telegram:
 - Memory promotion is not implemented in the real product sense yet. Skill outcomes persist, but repeated preferences/workflows are not automatically promoted intelligently.
 - Telegram final reply formatting is much better than before, but still not full Hermes parity.
 - Channel verbosity/profile controls are not implemented yet.
-- CLI still has no cross-launch session resume; default fresh launches still fall back to the scaffold session.
-- Session-admin UX is still thinner than Hermes: no first-class session search/switch surface yet.
+- CLI now resumes the active workspace session across launches through a persisted CLI session pointer. `smoke-tested`
+- Session-admin UX now has a first real surface (`/sessions`, `/search`, `/switch`) in both CLI and channel flows, but it is still thinner than Hermes overall. `smoke-tested`
 - Internal alpha harness is strong but still manual; it is not a full release gate yet.
 - `doctor --live` can return successful status with empty response text for some providers. This is noted but not fully improved.
 - CLI multiline paste ergonomics are still rough in interactive mode.
@@ -544,7 +544,6 @@ This is the shortest honest path from strong internal alpha to a private MVP can
 - Should the gateway become a true daemon/service with liveness tracking, or remain foreground-first?
 - What is the right packaging/distribution shape for MVP: Bun-based install, npm wrapper, packaged binary, Homebrew, or multiple?
 - Which non-Telegram channel is next at launch, and does it share the same approval UX model?
-- Should CLI adopt persisted cross-launch session resume, or remain explicitly fresh-by-default with opt-in resume?
 - Should the vision route be configured as an explicit separate user-facing setup surface during onboarding?
 - What should the Hermes/OpenClaw migration story be: documentation-only, import tooling, partial compatibility layer, or something deeper?
 - How should local/open-source model support be explained and constrained for users, especially around tool-calling and vision differences?

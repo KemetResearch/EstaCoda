@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
+import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
@@ -11,6 +12,7 @@ import { kemetBlueTheme } from "./theme/kemet-blue.js";
 
 const argv = process.argv.slice(2);
 const workspaceRoot = process.cwd();
+const cliSessionStore = new PersistentCliSessionStore();
 let config: LoadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot
 });
@@ -64,7 +66,10 @@ async function buildRuntime(input: {
   });
 }
 
-const runtime = await buildRuntime();
+const runtime = await buildRuntime({
+  sessionId: await cliSessionStore.getSessionId(workspaceRoot)
+});
+await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
 
 const command = await runCliCommand({
   argv,
@@ -81,10 +86,22 @@ if (command.handled) {
 if (argv.length === 0 && canRunInteractive()) {
   await runSessionLoop({
     runtime,
-    refreshRuntime: async () => buildRuntime({
-      sessionId: randomUUID(),
-      sessionDb: runtime.sessionDb
-    })
+    refreshRuntime: async () => {
+      const nextRuntime = await buildRuntime({
+        sessionId: randomUUID(),
+        sessionDb: runtime.sessionDb
+      });
+      await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+      return nextRuntime;
+    },
+    switchRuntime: async (sessionId) => {
+      const nextRuntime = await buildRuntime({
+        sessionId,
+        sessionDb: runtime.sessionDb
+      });
+      await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+      return nextRuntime;
+    }
   });
   process.exit(0);
 }

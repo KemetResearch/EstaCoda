@@ -8,6 +8,7 @@ import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 export type SessionLoopOptions = {
   runtime: Runtime;
   refreshRuntime?: () => Promise<Runtime>;
+  switchRuntime?: (sessionId: string) => Promise<Runtime>;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   prompt?: (question: string) => Promise<string>;
@@ -65,7 +66,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           text,
           runtime,
           output,
-          refreshRuntime: options.refreshRuntime
+          refreshRuntime: options.refreshRuntime,
+          switchRuntime: options.switchRuntime
         });
 
         if (typeof shouldExit !== "boolean") {
@@ -73,13 +75,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           activityRenderer = new ToolActivityRenderer({
             tools: runtime.tools()
           });
-          output.write([
-            `Started fresh session ${runtime.sessionId}.`,
-            "Skills and config were refreshed for this new session.",
-            "",
-            runtime.describe(),
-            ""
-          ].join("\n"));
+          output.write(`${shouldExit.notice(runtime)}\n\n`);
           continue;
         }
 
@@ -120,8 +116,9 @@ async function handleSlashCommand(input: {
   text: string;
   runtime: Runtime;
   refreshRuntime?: () => Promise<Runtime>;
+  switchRuntime?: (sessionId: string) => Promise<Runtime>;
   output: NodeJS.WritableStream;
-}): Promise<boolean | { runtime: Runtime }> {
+}): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
 
   switch (command) {
@@ -143,7 +140,13 @@ async function handleSlashCommand(input: {
       }
 
       return {
-        runtime: await input.refreshRuntime()
+        runtime: await input.refreshRuntime(),
+        notice: (runtime) => [
+          `Started fresh session ${runtime.sessionId}.`,
+          "Skills and config were refreshed for this new session.",
+          "",
+          runtime.describe()
+        ].join("\n")
       };
     case "tools":
       input.output.write(`${renderToolsMenu(input.runtime, args.join(" "))}\n\n`);
@@ -154,6 +157,37 @@ async function handleSlashCommand(input: {
     case "resume":
       input.output.write(`${await renderLatestResume(input.runtime)}\n\n`);
       return false;
+    case "sessions":
+      input.output.write(`${await renderSessionList(input.runtime)}\n\n`);
+      return false;
+    case "search":
+      input.output.write(`${await renderSessionSearch(input.runtime, args.join(" "))}\n\n`);
+      return false;
+    case "switch": {
+      const target = args[0];
+      if (target === undefined || target.length === 0) {
+        input.output.write("Usage: /switch <session-id>\n\n");
+        return false;
+      }
+      if (input.switchRuntime === undefined) {
+        input.output.write("This session cannot switch sessions here.\n\n");
+        return false;
+      }
+      const targetSession = await input.runtime.sessionDb.getSession(target);
+      if (targetSession === undefined) {
+        input.output.write(`Session not found: ${target}\n\n`);
+        return false;
+      }
+      return {
+        runtime: await input.switchRuntime(target),
+        notice: (runtime) => [
+          "Switched this session to an existing session.",
+          `Session: ${runtime.sessionId}`,
+          "",
+          runtime.describe()
+        ].join("\n")
+      };
+    }
     case "trust":
       await input.runtime.trustWorkspace();
       input.output.write("Workspace trusted. EstaCoda will proceed with normal local work here.\n\n");
@@ -217,6 +251,42 @@ async function renderLatestResume(runtime: Runtime): Promise<string> {
       ].join("\n");
 }
 
+async function renderSessionList(runtime: Runtime): Promise<string> {
+  const sessions = (await runtime.sessionDb.listSessions("default")).slice(0, 10);
+  if (sessions.length === 0) {
+    return "No sessions found.";
+  }
+
+  return [
+    "Recent sessions",
+    ...sessions.map((session, index) =>
+      `${index + 1}. ${session.id}${session.id === runtime.sessionId ? " (active)" : ""}${session.updatedAt ? ` — updated ${session.updatedAt}` : ""}`
+    )
+  ].join("\n");
+}
+
+async function renderSessionSearch(runtime: Runtime, query: string): Promise<string> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length === 0) {
+    return "Usage: /search <query>";
+  }
+
+  const matches = await runtime.sessionDb.search(normalizedQuery, {
+    profileId: "default",
+    limit: 5
+  });
+  if (matches.length === 0) {
+    return `No matching session history for "${normalizedQuery}".`;
+  }
+
+  return [
+    `Search results for "${normalizedQuery}"`,
+    ...matches.map((result, index) =>
+      `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
+    )
+  ].join("\n");
+}
+
 function renderRuntimeEvent(
   output: NodeJS.WritableStream,
   event: RuntimeEvent,
@@ -268,6 +338,15 @@ function renderRuntimeEvent(
     case "agent-final":
       return;
   }
+}
+
+function truncateSingleLine(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/gu, " ").trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+
+  return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function humanProviderIssue(errorClass: string | undefined): string {

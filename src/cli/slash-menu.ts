@@ -9,6 +9,9 @@ export type SlashMenuCommand = {
 export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "help", description: "Show command help" },
   { name: "status", description: "Show runtime, model, context, trust, memory, and skill status", aliases: ["model"] },
+  { name: "sessions", description: "List recent sessions" },
+  { name: "switch", description: "Switch to an existing session" },
+  { name: "search", description: "Search session history" },
   { name: "reset", description: "Start a fresh session and refresh the skill/config snapshot", aliases: ["new"] },
   { name: "tools", description: "Browse available tools grouped by capability" },
   { name: "skills", description: "Browse commands and available skills" },

@@ -97,6 +97,21 @@ Evidence level:
 - scaffold generation: `implemented but not live-proven`
 - automated scoring/evolution: `intended but not implemented`
 
+## CLI Session Checks
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run dev
+```
+
+Inside the interactive CLI:
+
+- `/sessions`
+- `/search <query>`
+- `/switch <session-id>`
+- `/reset`
+- exit and relaunch `bun run dev` to confirm the active workspace session resumes
+
 ## Telegram Checks
 
 ### Setup

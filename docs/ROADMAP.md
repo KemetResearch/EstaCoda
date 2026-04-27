@@ -83,8 +83,7 @@ Next:
 - repeated workflow promotion
 - better session-summary preservation
 - compression protection around recent tool pairs
-- CLI cross-launch session resume
-- session-admin UX: search / switch / richer resume controls
+- richer session-admin UX: lineage / history / resume controls beyond the current `/sessions`, `/search`, and `/switch`
 
 ### 4. Channels
 

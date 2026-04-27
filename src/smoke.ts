@@ -11,6 +11,7 @@ import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-ada
 import { formatTelegramReply } from "./channels/telegram-format.js";
 import { createConfigTools } from "./config/config-tools.js";
 import { runCliCommand } from "./cli/cli.js";
+import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
@@ -4196,8 +4197,34 @@ const oneShotPrompt = await runOneShotPrompt({
   runtime,
   argv: ["--trust", "Summarize", "this", "workspace", "briefly"]
 });
+await sessionDb.createSession({
+  id: "cli-switch-target",
+  profileId: "default",
+  title: "CLI switch target"
+});
+await sessionDb.appendMessage({
+  sessionId: "cli-switch-target",
+  role: "user",
+  content: "needle session content",
+  channel: "cli"
+});
 await runSessionLoop({
   runtime,
+  switchRuntime: async (sessionId) => createRuntime({
+    theme: kemetBlueTheme,
+    sessionDb,
+    sessionId,
+    profileId: "default",
+    workspaceRoot: process.cwd(),
+    model: {
+      id: "smoke-model",
+      provider: "unconfigured",
+      contextWindowTokens: 0,
+      supportsTools: false,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    }
+  }),
   output: {
     write(chunk: string | Uint8Array): boolean {
       sessionLoopOutput.push(String(chunk));
@@ -4213,9 +4240,13 @@ await runSessionLoop({
     "/doctor",
     "/trust",
     "/status",
+    "/sessions",
+    "/search needle",
     "/untrust",
     "/resume",
     "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
+    "/switch cli-switch-target",
+    "/status",
     "/exit"
   ][sessionLoopPromptIndex++] ?? "/exit",
   close: () => {
@@ -4288,6 +4319,20 @@ This skill exists to prove Hermes-style session refresh semantics.
   close: () => {}
 });
 const renderedResetSessionLoop = resetLoopOutput.join("");
+const cliSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-cli-sessions-")), "cli-sessions.json");
+const cliSessionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-workspace-"));
+const cliSessionStore = new PersistentCliSessionStore({
+  path: cliSessionStorePath
+});
+assert(await cliSessionStore.getSessionId(cliSessionWorkspace) === undefined, "expected empty CLI session store");
+await cliSessionStore.setSessionId(cliSessionWorkspace, "cli-persisted-session");
+const reopenedCliSessionStore = new PersistentCliSessionStore({
+  path: cliSessionStorePath
+});
+assert(
+  await reopenedCliSessionStore.getSessionId(cliSessionWorkspace) === "cli-persisted-session",
+  "expected CLI session store to persist active workspace session"
+);
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   browserBackend: createLocalCdpBrowserBackend({
@@ -4394,6 +4439,10 @@ assert(renderedSessionLoop.includes("/ascii-video"), "expected session slash men
 assert(renderedSessionLoop.includes("media tools"), "expected filtered tools menu to show media tools");
 assert(renderedSessionLoop.includes("EstaCoda session doctor"), "expected session /doctor output");
 assert(renderedSessionLoop.includes("Workspace trusted"), "expected session /trust output");
+assert(renderedSessionLoop.includes("Recent sessions"), "expected /sessions output");
+assert(renderedSessionLoop.includes("Search results for \"needle\""), "expected /search output");
+assert(renderedSessionLoop.includes("Switched this session to an existing session."), "expected /switch output");
+assert(renderedSessionLoop.includes("cli-switch-target"), "expected switched CLI session id to appear");
 assert(renderedSessionLoop.includes("Workspace trust revoked"), "expected session /untrust output");
 assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
@@ -6083,6 +6132,17 @@ const channelRuntimeRequests: Array<{
   }>;
   trustedWorkspace?: boolean;
 }> = [];
+const ensureSmokeSession = async (sessionId: string): Promise<void> => {
+  if (await sessionDb.getSession(sessionId)) {
+    return;
+  }
+
+  await sessionDb.createSession({
+    id: sessionId,
+    profileId: "default",
+    title: sessionId
+  });
+};
 const channelGateway = new ChannelGateway({
   adapters: [mockChannel],
   sessionStore: channelSessionStore,
@@ -6093,61 +6153,79 @@ const channelGateway = new ChannelGateway({
     allowedChatIds: ["chat-2"]
   },
   trustedWorkspace: true,
-  runtimeForSession: async ({ sessionId }) => fakeRuntime({
-    sessionId,
-    latestResumeNote: async () => "Resume note: channel interrupted task",
-    handle: async (input) => {
-      channelRuntimeRequests.push({
-        sessionId,
-        input: input.text,
-        attachments: input.attachments?.map((attachment) => ({
-          kind: attachment.kind,
-          originalName: attachment.originalName,
-          localPath: attachment.localPath
-        })),
-        trustedWorkspace: input.trustedWorkspace
-      });
-      await input.onEvent?.({
-        kind: "agent-start",
-        sessionId,
-        input: input.text
-      });
-      await input.onEvent?.({
-        kind: "tool-start",
-        tool: "web.extract",
-        stepId: "channel-smoke"
-      });
+  runtimeForSession: async ({ sessionId }) => {
+    await ensureSmokeSession(sessionId);
 
-      return {
-        label: "EstaCoda",
-        text: `Channel reply for ${input.channel}`,
-        matchedSkills: [],
-        intent: {
-          labels: ["general"],
-          confidence: 0.8,
-          suggestedToolsets: [],
-          suggestedSkills: [],
-          confirmationRequired: false,
-          rationale: "channel smoke"
-        },
-        securityDecision: "allow",
-        toolExecutions: [],
-        toolPlans: [],
-        skillOutcomes: [],
-        artifacts: [{
-          id: "artifact-channel-smoke",
-          path: "outputs/channel.png",
-          kind: "image",
-          bytes: 12,
-          createdAt: "2026-04-16T00:00:00.000Z",
-          summary: "Channel smoke image"
-        }],
-        context: undefined,
-        projectContext: undefined,
-        progress: []
-      };
-    }
-  })
+    return fakeRuntime({
+      sessionId,
+      latestResumeNote: async () => "Resume note: channel interrupted task",
+      handle: async (input) => {
+        channelRuntimeRequests.push({
+          sessionId,
+          input: input.text,
+          attachments: input.attachments?.map((attachment) => ({
+            kind: attachment.kind,
+            originalName: attachment.originalName,
+            localPath: attachment.localPath
+          })),
+          trustedWorkspace: input.trustedWorkspace
+        });
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "user",
+          content: input.text,
+          channel: input.channel
+        });
+        await input.onEvent?.({
+          kind: "agent-start",
+          sessionId,
+          input: input.text
+        });
+        await input.onEvent?.({
+          kind: "tool-start",
+          tool: "web.extract",
+          stepId: "channel-smoke"
+        });
+
+        const replyText = `Channel reply for ${input.channel}`;
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "agent",
+          content: replyText,
+          channel: input.channel
+        });
+
+        return {
+          label: "EstaCoda",
+          text: replyText,
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.8,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: false,
+            rationale: "channel smoke"
+          },
+          securityDecision: "allow",
+          toolExecutions: [],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [{
+            id: "artifact-channel-smoke",
+            path: "outputs/channel.png",
+            kind: "image",
+            bytes: 12,
+            createdAt: "2026-04-16T00:00:00.000Z",
+            summary: "Channel smoke image"
+          }],
+          context: undefined,
+          projectContext: undefined,
+          progress: []
+        };
+      }
+    });
+  }
 });
 await channelGateway.start();
 const channelMessage = {
@@ -6198,15 +6276,35 @@ const channelCommandsResult = await channelGateway.receive({
   id: "message-commands",
   text: "/commands"
 });
+const channelSessionsResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-sessions",
+  text: "/sessions"
+});
 const channelNewResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-new",
   text: "/new"
 });
+const channelSearchResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-search",
+  text: "/search Analyze"
+});
 const channelAfterNewResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-after-new",
   text: "Fresh session message"
+});
+const channelSwitchResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-switch",
+  text: `/switch ${channelResult.sessionId}`
+});
+const channelAfterSwitchResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-after-switch",
+  text: "Back on the old session"
 });
 let channelCancelSignal: AbortSignal | undefined;
 let releaseChannelTurn: (() => void) | undefined;
@@ -6314,7 +6412,11 @@ assert(channelStatusResult.replyText.includes(channelResult.sessionId), "expecte
 assert(channelResumeResult.replyText.includes("channel interrupted task"), "expected channel /resume to report latest resume note");
 assert(channelHelpResult.replyText.includes("/new"), "expected channel /help commands");
 assert(channelCommandsResult.replyText.includes("/approve"), "expected channel /commands to list approval command");
+assert(channelSessionsResult.replyText.includes("Recent sessions for this chat"), "expected channel /sessions output");
 assert(channelNewResult.sessionId !== channelResult.sessionId, "expected channel /new to rotate session");
+assert(channelSearchResult.replyText.includes(`Search results for "Analyze"`), "expected channel /search output");
+assert(channelSwitchResult.replyText.includes("Switched this chat to an existing session"), "expected channel /switch output");
+assert(channelAfterSwitchResult.sessionId === channelResult.sessionId, "expected channel /switch to restore the selected session");
 assert(channelAfterNewResult.sessionId === channelNewResult.sessionId, "expected messages after /new to use fresh session");
 assert(channelCancelSignal?.aborted === true, "expected channel /stop to abort active turn");
 assert(channelCancelResult.replyText.includes("Cancelled"), "expected channel /stop to cancel active turn first");
