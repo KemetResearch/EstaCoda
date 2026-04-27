@@ -1,0 +1,23 @@
+{
+  "id": "cli-file-roundtrip",
+  "title": "CLI file write/read/verify",
+  "channel": "cli",
+  "evidence": "live-proven",
+  "goal": "Verify that the provider-backed CLI loop can write a file, read it back, and confirm exact contents.",
+  "prompt": "Create a file called eval-proof.md with one sentence proving EstaCoda can edit files through tools, then read it back and confirm the exact contents.",
+  "prerequisites": [
+    "Workspace trust available or grantable",
+    "Provider credentials exported in the same shell"
+  ],
+  "steps": [
+    "Run `bun run dev` in the workspace.",
+    "Use `/trust` if needed.",
+    "Send the suggested prompt.",
+    "Confirm `file.write` and `file.read` were used and the response matches the file contents."
+  ],
+  "assertions": [
+    "File is created successfully.",
+    "File contents are read back correctly.",
+    "Final answer confirms exact contents."
+  ]
+}

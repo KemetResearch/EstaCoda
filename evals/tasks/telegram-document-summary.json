@@ -1,0 +1,22 @@
+{
+  "id": "telegram-document-summary",
+  "title": "Telegram document summary",
+  "channel": "telegram",
+  "evidence": "live-proven",
+  "goal": "Verify that Telegram document attachments are downloaded, inspected, and summarized end to end.",
+  "prompt": "Please inspect this document and summarize it.",
+  "prerequisites": [
+    "Telegram gateway running",
+    "A text-like document or PDF ready to send"
+  ],
+  "steps": [
+    "Send the document to the bot with the suggested prompt.",
+    "Observe progress and final reply.",
+    "Capture screenshots or logs if the bot falls back to a generic failure response."
+  ],
+  "assertions": [
+    "Document is summarized rather than only metadata-inspected.",
+    "No local path internals are leaked in the reply.",
+    "Gateway does not crash on attachment handling."
+  ]
+}

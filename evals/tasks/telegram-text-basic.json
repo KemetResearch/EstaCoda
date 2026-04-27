@@ -1,0 +1,22 @@
+{
+  "id": "telegram-text-basic",
+  "title": "Telegram text task",
+  "channel": "telegram",
+  "evidence": "live-proven",
+  "goal": "Verify that the Telegram gateway can receive a text prompt, show progress, and return a grounded response.",
+  "prompt": "Read the files in the current workspace and tell me what kind of project this is.",
+  "prerequisites": [
+    "Telegram bot token exported in the same shell as the gateway",
+    "Gateway started with `bun run dev -- gateway start --telegram`"
+  ],
+  "steps": [
+    "Send the suggested prompt to the Telegram bot.",
+    "Observe progress behavior in chat.",
+    "Capture the final reply and any gateway terminal output."
+  ],
+  "assertions": [
+    "One evolving progress message appears instead of message spam.",
+    "Final reply is grounded in the repo contents.",
+    "Gateway stays healthy throughout the turn."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "telegram-image-vision-kimi",
+  "title": "Telegram image vision with Kimi",
+  "channel": "telegram",
+  "evidence": "live-proven",
+  "goal": "Verify that a Kimi-backed Telegram session can inspect an image natively, including visible text when asked.",
+  "prompt": "Please inspect this image and include any visible text.",
+  "prerequisites": [
+    "KIMI_API_KEY exported in the same shell as the gateway",
+    "ESTACODA_TELEGRAM_BOT_TOKEN exported in the same shell as the gateway",
+    "Gateway restarted after the native-vision changes"
+  ],
+  "steps": [
+    "Send an image containing visible text with the suggested prompt.",
+    "Then send a mixed prompt like `Please extract any visible text and summarize what the image is showing.`",
+    "Observe whether the reply describes the image directly instead of falling back to metadata-only behavior."
+  ],
+  "assertions": [
+    "Bot gives semantic image understanding, not just file metadata.",
+    "Visible text is extracted meaningfully.",
+    "Simple image/OCR prompt does not needlessly over-select `telegram-media-analysis` on a vision-capable main route."
+  ],
+  "notes": [
+    "This is currently live-proven with Kimi specifically, not yet across all providers."
+  ]
+}

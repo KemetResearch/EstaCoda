@@ -51,6 +51,7 @@ What has been achieved:
 - Telegram approvals, progress updates, attachments, and session behavior are implemented.
 - Internal alpha testing now has a repeatable harness and runbook.
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
+- A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
 
 Evidence:
 
@@ -60,6 +61,7 @@ Evidence:
 - Telegram approvals/progress/attachments/session behavior: `smoke-tested`
 - internal alpha harness and runbook: `live-proven`
 - vision-backed image support: Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
+- evaluation substrate: `implemented but not live-proven`
 
 ## 3. Current Working Capabilities
 
@@ -84,6 +86,7 @@ Confirmed working in code and smoke:
 - Telegram attachment ingestion, download, failure handling, and document inspection. document path `live-proven`; broader path `smoke-tested`
 - Native main-route vision plus fallback vision-tool routing for image attachment analysis. Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
 - Internal alpha harness generation. `live-proven`
+- Evaluation task scaffold and run generation. `implemented but not live-proven`
 
 Confirmed live by operator testing:
 
@@ -238,6 +241,12 @@ Project-local overlays live under `<workspace>/.estacoda/` and can override or e
 
 - [NEXT_PHASE_ROADMAP.md](/Users/ahnwy/estacoda-v2/NEXT_PHASE_ROADMAP.md)
   Current tracked roadmap.
+
+- [docs/EVALUATION.md](/Users/ahnwy/estacoda-v2/docs/EVALUATION.md)
+  Phase 0 evaluation-substrate overview for future self-evolution work.
+
+- [scripts/eval-substrate.ts](/Users/ahnwy/estacoda-v2/scripts/eval-substrate.ts)
+  Generates a repeatable evaluation run folder and task manifest from `evals/tasks`.
 
 ## 6. Execution Flow
 
@@ -406,6 +415,13 @@ cd /Users/ahnwy/estacoda-v2
 /Users/ahnwy/.bun/bin/bun run alpha:harness
 ```
 
+Evaluation substrate:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run eval:substrate
+```
+
 ## 11. Environment Setup
 
 Install / bootstrap:
@@ -494,7 +510,8 @@ Best next development target:
 3. Implement memory promotion: `intended but not implemented`
    - repeated user preferences -> `USER.md`
    - repeated workflows -> `MEMORY.md` or skill suggestions
-4. Finish onboarding/distribution polish. `intended but not implemented`
+4. Expand the evaluation substrate into a scored skill-first benchmark layer. `implemented but not live-proven`
+5. Finish onboarding/distribution polish. `intended but not implemented`
 
 This is the shortest honest path from strong internal alpha to a private MVP candidate.
 

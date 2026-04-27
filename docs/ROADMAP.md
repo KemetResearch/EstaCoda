@@ -127,6 +127,23 @@ Next:
 - stronger pass/fail release gate behavior
 - more guided live checks
 
+### 7. Evaluation substrate
+
+State: first foundation now exists.
+
+Done:
+
+- task-based eval scaffold `implemented`
+- eval task catalog under `evals/tasks` `implemented`
+- repeatable eval-run folders under `.estacoda/eval-runs` `implemented`
+
+Next:
+
+- structured scoring beyond pass/fail
+- baseline vs candidate comparison
+- skill-first batch evaluation
+- eventual substrate for safe self-evolution loops
+
 ## Correct Next Milestone
 
 The best next milestone is:
@@ -134,7 +151,8 @@ The best next milestone is:
 1. **live Telegram image verification with a real vision-capable route**
 2. **live provider hardening batch**
 3. **memory promotion implementation**
-4. **onboarding/distribution polish**
+4. **evaluation substrate expansion**
+5. **onboarding/distribution polish**
 
 ## Product Gap Analysis
 

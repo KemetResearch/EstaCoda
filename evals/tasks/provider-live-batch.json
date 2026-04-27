@@ -1,0 +1,24 @@
+{
+  "id": "provider-live-batch",
+  "title": "Cross-provider live batch",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "goal": "Run the same core prompts across Kimi, OpenRouter, Ollama/local, and DeepSeek to identify provider-specific regressions.",
+  "prerequisites": [
+    "Each provider route configured in turn",
+    "Relevant credentials exported"
+  ],
+  "steps": [
+    "For each provider, run `bun run dev -- doctor --live`.",
+    "For each provider, run a short one-shot prompt and one tool-using prompt.",
+    "Record latency, correctness, and any tool-call quirks in the results file."
+  ],
+  "assertions": [
+    "Provider is reachable and healthy.",
+    "Tool-calling succeeds for the basic file workflow.",
+    "No provider-specific auth or malformed-tool regressions are introduced."
+  ],
+  "notes": [
+    "This is the key missing live-hardening milestone before claiming broader provider readiness."
+  ]
+}

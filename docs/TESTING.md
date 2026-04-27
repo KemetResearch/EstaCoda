@@ -61,6 +61,25 @@ Then follow:
 
 - [docs/INTERNAL_ALPHA_RUNBOOK.md](/Users/ahnwy/estacoda-v2/docs/INTERNAL_ALPHA_RUNBOOK.md)
 
+## Evaluation Substrate
+
+Generate an evaluation run folder:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run eval:substrate
+```
+
+Then use:
+
+- [docs/EVALUATION.md](/Users/ahnwy/estacoda-v2/docs/EVALUATION.md)
+- `evals/tasks/*.json`
+
+Evidence level:
+
+- scaffold generation: `implemented but not live-proven`
+- automated scoring/evolution: `intended but not implemented`
+
 ## Telegram Checks
 
 ### Setup

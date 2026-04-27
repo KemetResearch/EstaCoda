@@ -32,6 +32,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 - Smoke coverage is broad, but some live behaviors are only smoke-verified, not yet repeatedly operator-verified. `live-proven` as a process observation
 - Internal alpha harness is manual and not yet a strict release gate. `live-proven`
+- The evaluation substrate exists, but it is still a scaffold and not yet a scored automated benchmark system. `implemented but not live-proven`
 
 ## Architecture debt
 
