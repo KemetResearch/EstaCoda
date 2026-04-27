@@ -116,6 +116,21 @@ cd /Users/ahnwy/estacoda-v2
 
 Restart the gateway after channel-formatting, progress, approval, or attachment-path changes. The running foreground process will not hot-reload those edits.
 
+### Session lifecycle checks
+
+Check `gateway status` output for:
+
+- `Session context: ...`
+- `Group sessions per user: yes|no`
+- `Thread sessions per user: yes|no`
+- `Session reset policy: ...`
+
+Useful chat checks:
+
+- send a message, then `/new`, then another message
+- restart the gateway, then send another message in the same chat
+- confirm the chat stays on the fresh post-`/new` session rather than silently falling back
+
 ### Text checks
 
 Use Telegram bot messages like:
@@ -164,6 +179,9 @@ At a high level:
 - Telegram attachment flows
 - Telegram formatter behavior
 - vision-backed image path in smoke
+- persisted channel session context and restart continuity
+- Telegram DM/group/thread session-key policy
+- gateway auto-reset session lifecycle policy
 
 ## What Still Needs Live Validation
 

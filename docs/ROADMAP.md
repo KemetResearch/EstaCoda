@@ -70,6 +70,9 @@ Done:
 
 - bounded memory files `smoke-tested`
 - session DB `live-proven` on gateway path
+- persisted channel session context `smoke-tested`
+- Telegram session identity policy for DM/group/thread behavior `smoke-tested`
+- Telegram auto-reset session lifecycle on gateway path `smoke-tested`
 - history packing `smoke-tested`
 - prompt cache `smoke-tested`
 - skill outcome persistence `smoke-tested`
@@ -80,6 +83,8 @@ Next:
 - repeated workflow promotion
 - better session-summary preservation
 - compression protection around recent tool pairs
+- CLI cross-launch session resume
+- session-admin UX: search / switch / richer resume controls
 
 ### 4. Channels
 

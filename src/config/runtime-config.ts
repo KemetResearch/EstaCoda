@@ -58,6 +58,10 @@ export type TelegramChannelConfig = {
   defaultChatId?: string;
   allowedUserIds?: string[];
   allowedChatIds?: string[];
+  groupSessionsPerUser?: boolean;
+  threadSessionsPerUser?: boolean;
+  sessionResetPolicy?: "none" | "idle" | "daily" | "both";
+  sessionIdleResetMinutes?: number;
   pollTimeoutSeconds?: number;
   maxAttachmentBytes?: number;
   pairing?: {

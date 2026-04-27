@@ -25,6 +25,8 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Telegram final formatting is improved but still not full Hermes parity. formatting improvements `smoke-tested`; full parity `intended but not implemented`
 - Channel verbosity/profile control is not implemented yet. `intended but not implemented`
 - Gateway status reports readiness, not real background-process liveness. `live-proven`
+- Telegram gateway session context is now persisted and policy-driven, but session-admin UX is still thin compared with Hermes. persistence/policy `smoke-tested`; admin UX `intended but not implemented`
+- CLI still lacks cross-launch session resume. `live-proven`
 
 ## CLI / UX
 

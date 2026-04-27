@@ -65,6 +65,7 @@ Evidence note:
 ### Channels
 
 - [src/channels/channel-gateway.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-gateway.ts)
+- [src/channels/channel-session-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-session-store.ts)
 - [src/channels/telegram-adapter.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-adapter.ts)
 - [src/channels/channel-approval-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-approval-store.ts)
 - [src/channels/telegram-format.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-format.ts)
@@ -248,6 +249,8 @@ Responsibilities:
 
 - auth / allowlist / pairing
 - session mapping
+- normalized session-key policy
+- session auto-reset policy
 - runtime construction
 - progress delivery
 - approval prompt delivery
@@ -268,6 +271,8 @@ Important Telegram UX choices:
 - inline approval buttons map back into the same `/approve` and `/deny` command path
 - final replies are formatted in a Telegram-safe HTML layer
 - activity labels are localized through a shared label map, currently `en` and `ar`
+- group sessions are per-user by default; thread sessions are shared by default unless configured otherwise
+- active chat -> session mapping persists across gateway restarts
 
 ## Security Model
 
@@ -289,6 +294,8 @@ Important traits:
 - interactive/session state is written to session DB
 - SQLite is used for the gateway path
 - in-memory session DB is used in smoke/runtime scaffolding
+- channel session context is persisted separately from the session DB in `.estacoda/channel-sessions.json`
+- channel session identity now includes explicit chat/thread policy rather than relying on accidental raw keying
 
 ### Memory persistence
 

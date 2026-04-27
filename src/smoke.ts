@@ -5,6 +5,7 @@ import { ArtifactStore } from "./artifacts/artifact-store.js";
 import { createLocalCdpBrowserBackend, createMockBrowserBackend, type CdpWebSocketEvent, type CdpWebSocketLike } from "./browser/browser-backend.js";
 import { ChannelApprovalStore } from "./channels/channel-approval-store.js";
 import { ChannelGateway, InMemoryChannelSessionStore } from "./channels/channel-gateway.js";
+import { PersistentChannelSessionStore } from "./channels/channel-session-store.js";
 import { MockChannelAdapter } from "./channels/mock-channel-adapter.js";
 import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-adapter.js";
 import { formatTelegramReply } from "./channels/telegram-format.js";
@@ -6637,6 +6638,167 @@ assert(
 assert(similarDifferentTarget.replyText.includes("needs approval"), "expected different target key to require fresh approval");
 assert(differentChat.replyText.includes("needs approval"), "expected different chat to require fresh approval");
 
+const persistedSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-channel-sessions-")), "sessions.json");
+const persistedRuntimeRequests: string[] = [];
+const createPersistentSessionGateway = () => new ChannelGateway({
+  adapters: [new MockChannelAdapter({ kind: "telegram" })],
+  sessionStore: new PersistentChannelSessionStore({ path: persistedSessionStorePath }),
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["user-1"]
+  },
+  runtimeForSession: async ({ sessionId }) => fakeRuntime({
+    sessionId,
+    handle: async (input) => {
+      persistedRuntimeRequests.push(sessionId);
+      return {
+        label: "EstaCoda",
+        text: `Persistent session reply for ${input.text}`,
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.8,
+          suggestedSkills: [],
+          suggestedToolsets: [],
+          confirmationRequired: false,
+          rationale: "persistent session smoke"
+        },
+        securityDecision: "allow",
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      };
+    }
+  })
+});
+const persistentSessionGateway = createPersistentSessionGateway();
+const persistentSessionInitial = await persistentSessionGateway.receive({
+  ...channelMessage,
+  id: "message-persistent-session-initial",
+  text: "Hello persistent session"
+});
+const persistentSessionNew = await persistentSessionGateway.receive({
+  ...channelMessage,
+  id: "message-persistent-session-new",
+  text: "/new"
+});
+const restartedPersistentSessionGateway = createPersistentSessionGateway();
+const persistentSessionAfterRestart = await restartedPersistentSessionGateway.receive({
+  ...channelMessage,
+  id: "message-persistent-session-after-restart",
+  text: "Resume after restart"
+});
+
+assert(
+  persistentSessionInitial.sessionId !== persistentSessionNew.sessionId,
+  "expected persisted store /new to rotate the active session"
+);
+assert(
+  persistentSessionAfterRestart.sessionId === persistentSessionNew.sessionId,
+  "expected persisted channel session store to preserve the active session across restart"
+);
+assert(
+  persistedRuntimeRequests.at(-1) === persistentSessionNew.sessionId,
+  "expected post-restart message to use the persisted active session id"
+);
+
+const telegramDmKey = {
+  platform: "telegram" as const,
+  accountId: "telegram",
+  chatId: "dm-99",
+  chatType: "dm" as const,
+  userId: "alice"
+};
+const telegramGroupAliceKey = {
+  platform: "telegram" as const,
+  accountId: "telegram",
+  chatId: "group-123",
+  chatType: "group" as const,
+  userId: "alice"
+};
+const telegramGroupBobKey = {
+  ...telegramGroupAliceKey,
+  userId: "bob"
+};
+const telegramThreadAliceKey = {
+  platform: "telegram" as const,
+  accountId: "telegram",
+  chatId: "group-123",
+  chatType: "thread" as const,
+  threadId: "thread-7",
+  userId: "alice"
+};
+const telegramThreadBobKey = {
+  ...telegramThreadAliceKey,
+  userId: "bob"
+};
+const policyStore = new InMemoryChannelSessionStore({
+  policy: {
+    groupSessionsPerUser: true,
+    threadSessionsPerUser: false
+  }
+});
+const dmSessionId = await policyStore.getOrCreateSessionId(telegramDmKey);
+const dmSessionRepeatId = await policyStore.getOrCreateSessionId({
+  ...telegramDmKey,
+  userId: "someone-else"
+});
+const groupAliceSessionId = await policyStore.getOrCreateSessionId(telegramGroupAliceKey);
+const groupBobSessionId = await policyStore.getOrCreateSessionId(telegramGroupBobKey);
+const threadAliceSessionId = await policyStore.getOrCreateSessionId(telegramThreadAliceKey);
+const threadBobSessionId = await policyStore.getOrCreateSessionId(telegramThreadBobKey);
+const perUserThreadStore = new InMemoryChannelSessionStore({
+  policy: {
+    groupSessionsPerUser: true,
+    threadSessionsPerUser: true
+  }
+});
+const isolatedThreadAliceSessionId = await perUserThreadStore.getOrCreateSessionId(telegramThreadAliceKey);
+const isolatedThreadBobSessionId = await perUserThreadStore.getOrCreateSessionId(telegramThreadBobKey);
+const idleResetStore = new InMemoryChannelSessionStore({
+  policy: {
+    groupSessionsPerUser: true,
+    threadSessionsPerUser: false,
+    resetPolicy: "idle",
+    idleResetMinutes: 30
+  }
+});
+const idleSessionId = await idleResetStore.getOrCreateSessionId(telegramDmKey, {
+  receivedAt: "2026-04-27T10:00:00.000Z"
+});
+const idleSessionRepeatId = await idleResetStore.getOrCreateSessionId(telegramDmKey, {
+  receivedAt: "2026-04-27T10:20:00.000Z"
+});
+const idleSessionResetId = await idleResetStore.getOrCreateSessionId(telegramDmKey, {
+  receivedAt: "2026-04-27T10:51:01.000Z"
+});
+const dailyResetStore = new InMemoryChannelSessionStore({
+  policy: {
+    groupSessionsPerUser: true,
+    threadSessionsPerUser: false,
+    resetPolicy: "daily",
+    timeZone: "Asia/Dubai"
+  }
+});
+const dailySessionId = await dailyResetStore.getOrCreateSessionId(telegramDmKey, {
+  receivedAt: "2026-04-27T19:30:00.000Z"
+});
+const dailySessionResetId = await dailyResetStore.getOrCreateSessionId(telegramDmKey, {
+  receivedAt: "2026-04-27T20:05:00.000Z"
+});
+
+assert(dmSessionId === dmSessionRepeatId, "expected DM session ids to ignore sender identity");
+assert(groupAliceSessionId !== groupBobSessionId, "expected group sessions to isolate by user by default");
+assert(threadAliceSessionId === threadBobSessionId, "expected thread sessions to be shared by default");
+assert(isolatedThreadAliceSessionId !== isolatedThreadBobSessionId, "expected threadSessionsPerUser=true to isolate threads per user");
+assert(idleSessionId === idleSessionRepeatId, "expected idle reset policy to preserve session within the idle window");
+assert(idleSessionId !== idleSessionResetId, "expected idle reset policy to rotate the session after the idle window");
+assert(dailySessionId !== dailySessionResetId, "expected daily reset policy to rotate the session after crossing the local day boundary");
+
 const sessionApprovalMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const sessionApprovalStore = new ChannelApprovalStore({
   path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-session-approval-store-")), "approvals.json"),
@@ -7342,7 +7504,7 @@ await telegramAttachmentGateway.start();
 const telegramImagePollCount = await telegramAttachmentAdapter.pollOnce();
 const telegramDocumentPollCount = await telegramAttachmentAdapter.pollOnce();
 await telegramAttachmentGateway.stop();
-const telegramAttachmentSessionId = "channel-telegram-telegram-1254738091-main";
+const telegramAttachmentSessionId = "channel-telegram-telegram-dm-1254738091-main";
 const telegramAttachmentEvents = await telegramAttachmentSessionDb.listEvents(telegramAttachmentSessionId);
 const telegramAttachmentMessages = await telegramAttachmentSessionDb.listMessages(telegramAttachmentSessionId);
 const telegramAttachmentImagePath = join(
@@ -7653,7 +7815,7 @@ const missingAttachmentResponse = await telegramAttachmentFailureGateway.receive
   receivedAt: new Date("2026-04-25T00:00:00.000Z").toISOString()
 });
 await telegramAttachmentFailureGateway.stop();
-const telegramAttachmentFailureSessionId = "channel-telegram-telegram-1254738091-main";
+const telegramAttachmentFailureSessionId = "channel-telegram-telegram-dm-1254738091-main";
 const telegramAttachmentFailureMessages = await telegramAttachmentFailureSessionDb.listMessages(telegramAttachmentFailureSessionId);
 assert(telegramUnsupportedPollCount === 1, "expected unsupported Telegram attachment update to process");
 assert(telegramOversizedPollCount === 1, "expected oversized Telegram attachment update to process");

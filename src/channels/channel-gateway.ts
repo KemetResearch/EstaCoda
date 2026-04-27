@@ -9,6 +9,7 @@ import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy, ty
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
+import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -18,8 +19,8 @@ export type ChannelRuntimeFactory = (input: {
 }) => Promise<Runtime>;
 
 export type ChannelSessionStore = {
-  getOrCreateSessionId(sessionKey: ChannelSessionKey): Promise<string>;
-  resetSessionId?(sessionKey: ChannelSessionKey): Promise<string>;
+  getOrCreateSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;
+  resetSessionId?(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;
 };
 
 export type ChannelGatewayOptions = {
@@ -31,6 +32,7 @@ export type ChannelGatewayOptions = {
   onStopRequested?: (message: ChannelMessage) => void | Promise<void>;
   pair?: (message: ChannelMessage) => Promise<string | undefined>;
   approvalStore?: ChannelApprovalStore;
+  sessionPolicy?: ChannelSessionPolicy;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -54,30 +56,56 @@ type ApprovalGrant = {
 };
 
 export class InMemoryChannelSessionStore implements ChannelSessionStore {
-  readonly #sessions = new Map<string, string>();
+  readonly #sessions = new Map<string, { sessionId: string; updatedAt: string }>();
+  readonly #policy: ChannelSessionPolicy;
   #sequence = 0;
 
-  async getOrCreateSessionId(sessionKey: ChannelSessionKey): Promise<string> {
-    const key = stableSessionKey(sessionKey);
-    const existing = this.#sessions.get(key);
+  constructor(options: { policy?: ChannelSessionPolicy } = {}) {
+    this.#policy = options.policy ?? {};
+  }
 
-    if (existing !== undefined) {
-      return existing;
+  async getOrCreateSessionId(sessionKey: ChannelSessionKey, _options?: { receivedAt?: string }): Promise<string> {
+    const key = stableSessionKey(sessionKey, this.#policy);
+    const existing = this.#sessions.get(key);
+    const receivedAt = _options?.receivedAt === undefined ? new Date() : new Date(_options.receivedAt);
+
+    if (existing !== undefined && !Number.isNaN(receivedAt.getTime())) {
+      if (shouldAutoResetSession(existing.updatedAt, receivedAt, this.#policy)) {
+        const sessionId = this.#newSessionId(sessionKey);
+        this.#sessions.set(key, {
+          sessionId,
+          updatedAt: receivedAt.toISOString()
+        });
+        return sessionId;
+      }
+
+      existing.updatedAt = receivedAt.toISOString();
+      this.#sessions.set(key, existing);
+      return existing.sessionId;
     }
 
-    const sessionId = `channel-${sanitizeSessionPart(sessionKey.platform)}-${sanitizeSessionPart(
-      sessionKey.accountId ?? "default"
-    )}-${sanitizeSessionPart(sessionKey.chatId)}-${sanitizeSessionPart(sessionKey.threadId ?? "main")}`;
-    this.#sessions.set(key, sessionId);
+    if (existing !== undefined) {
+      return existing.sessionId;
+    }
+
+    const sessionId = buildBaseSessionId(sessionKey, this.#policy);
+    this.#sessions.set(key, {
+      sessionId,
+      updatedAt: Number.isNaN(receivedAt.getTime()) ? new Date().toISOString() : receivedAt.toISOString()
+    });
 
     return sessionId;
   }
 
-  async resetSessionId(sessionKey: ChannelSessionKey): Promise<string> {
-    const key = stableSessionKey(sessionKey);
+  async resetSessionId(sessionKey: ChannelSessionKey, _options?: { receivedAt?: string }): Promise<string> {
+    const key = stableSessionKey(sessionKey, this.#policy);
     const sessionId = this.#newSessionId(sessionKey);
 
-    this.#sessions.set(key, sessionId);
+    const receivedAt = _options?.receivedAt === undefined ? new Date() : new Date(_options.receivedAt);
+    this.#sessions.set(key, {
+      sessionId,
+      updatedAt: Number.isNaN(receivedAt.getTime()) ? new Date().toISOString() : receivedAt.toISOString()
+    });
 
     return sessionId;
   }
@@ -85,9 +113,7 @@ export class InMemoryChannelSessionStore implements ChannelSessionStore {
   #newSessionId(sessionKey: ChannelSessionKey): string {
     this.#sequence += 1;
 
-    return `channel-${sanitizeSessionPart(sessionKey.platform)}-${sanitizeSessionPart(
-      sessionKey.accountId ?? "default"
-    )}-${sanitizeSessionPart(sessionKey.chatId)}-${sanitizeSessionPart(sessionKey.threadId ?? "main")}-${this.#sequence}`;
+    return `${buildBaseSessionId(sessionKey, this.#policy)}-${this.#sequence}`;
   }
 }
 
@@ -100,6 +126,7 @@ export class ChannelGateway {
   readonly #onStopRequested: ChannelGatewayOptions["onStopRequested"];
   readonly #pair: ChannelGatewayOptions["pair"];
   readonly #approvalStore: ChannelApprovalStore;
+  readonly #sessionPolicy: ChannelSessionPolicy;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -112,6 +139,7 @@ export class ChannelGateway {
     this.#onStopRequested = options.onStopRequested;
     this.#pair = options.pair;
     this.#approvalStore = options.approvalStore ?? new ChannelApprovalStore();
+    this.#sessionPolicy = options.sessionPolicy ?? {};
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -176,20 +204,23 @@ export class ChannelGateway {
       return commandResult;
     }
 
-    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
+      receivedAt: message.receivedAt
+    });
+    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
     const securityPolicy = this.#securityPolicyFor(
-      message.sessionKey,
+      normalizedSessionKey,
       sessionId,
-      await this.#approvalStore.listForSession(message.sessionKey)
+      await this.#approvalStore.listForSession(normalizedSessionKey)
     );
     const runtime = await this.#runtimeForSession({
       sessionId,
-      sessionKey: message.sessionKey,
+      sessionKey: normalizedSessionKey,
       channel: message.channel,
       securityPolicy
     });
     let progressCount = 0;
-    const activeTurnKey = stableSessionKey(message.sessionKey);
+    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
     const controller = new AbortController();
     this.#activeTurns.set(activeTurnKey, controller);
     const trustedWorkspace = typeof this.#trustedWorkspace === "function"
@@ -203,7 +234,7 @@ export class ChannelGateway {
         signal: controller.signal,
         onEvent: async (event) => {
           progressCount += 1;
-          await adapter.delivery?.sendProgress?.(message.sessionKey, event);
+          await adapter.delivery?.sendProgress?.(normalizedSessionKey, event);
         }
       })
       .finally(() => {
@@ -219,22 +250,22 @@ export class ChannelGateway {
       this.#pendingApprovals.delete(activeTurnKey);
     }
 
-    await adapter.delivery?.sendText(message.sessionKey, response.text);
+    await adapter.delivery?.sendText(normalizedSessionKey, response.text);
     await adapter.send?.({
       conversationId: message.sessionKey.chatId,
-      sessionKey: message.sessionKey,
+      sessionKey: normalizedSessionKey,
       text: response.text,
       artifacts: response.artifacts
     });
 
     for (const artifact of response.artifacts) {
-      await adapter.delivery?.sendArtifact?.(message.sessionKey, artifact);
+      await adapter.delivery?.sendArtifact?.(normalizedSessionKey, artifact);
     }
 
     if (pendingApproval !== undefined) {
       const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
       await adapter.delivery?.sendText(
-        message.sessionKey,
+        normalizedSessionKey,
         approvalPrompt,
         adapter.kind === "telegram"
           ? {
@@ -245,7 +276,7 @@ export class ChannelGateway {
       );
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
-        sessionKey: message.sessionKey,
+        sessionKey: normalizedSessionKey,
         text: approvalPrompt
       });
     }
@@ -283,7 +314,7 @@ export class ChannelGateway {
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -291,7 +322,7 @@ export class ChannelGateway {
     }
 
     if (command === "/status") {
-      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const text = [
         "EstaCoda channel status",
         `Channel: ${message.channel}`,
@@ -309,15 +340,16 @@ export class ChannelGateway {
     }
 
     if (command === "/resume") {
-      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
       const runtime = await this.#runtimeForSession({
         sessionId,
-        sessionKey: message.sessionKey,
+        sessionKey: normalizedSessionKey,
         channel: message.channel,
         securityPolicy: this.#securityPolicyFor(
-          message.sessionKey,
+          normalizedSessionKey,
           sessionId,
-          await this.#approvalStore.listForSession(message.sessionKey)
+          await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
       const resumeNote = await runtime.latestResumeNote();
@@ -338,8 +370,8 @@ export class ChannelGateway {
     }
 
     if (command === "/new" || command === "/reset") {
-      const sessionId = await this.#resetSession(message.sessionKey);
-      const key = stableSessionKey(message.sessionKey);
+      const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
+      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
       const text = [
@@ -364,7 +396,7 @@ export class ChannelGateway {
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -380,7 +412,7 @@ export class ChannelGateway {
     }
 
     if (command === "/deny") {
-      const key = stableSessionKey(message.sessionKey);
+      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
       const pending = this.#pendingApprovals.get(key);
       const text = pending === undefined
         ? "There is no pending approval request for this chat."
@@ -393,7 +425,7 @@ export class ChannelGateway {
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
-        sessionId: pending?.sessionId ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+        sessionId: pending?.sessionId ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -405,8 +437,8 @@ export class ChannelGateway {
     }
 
     if (command === "/stop") {
-      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
-      const activeTurn = this.#activeTurns.get(stableSessionKey(message.sessionKey));
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const activeTurn = this.#activeTurns.get(stableSessionKey(message.sessionKey, this.#sessionPolicy));
       if (activeTurn !== undefined) {
         activeTurn.abort("channel-stop");
         const text = "Cancelled the active EstaCoda turn for this chat.";
@@ -436,7 +468,8 @@ export class ChannelGateway {
   }
 
   async #approvePending(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
-    const key = stableSessionKey(message.sessionKey);
+    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
     const pending = this.#pendingApprovals.get(key);
 
     if (pending === undefined) {
@@ -444,7 +477,7 @@ export class ChannelGateway {
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -468,7 +501,7 @@ export class ChannelGateway {
 
     if (scope === "always") {
       await this.#approvalStore.grant({
-        sessionKey: message.sessionKey,
+        sessionKey: normalizedSessionKey,
         toolName: pending.toolName,
         riskClass: pending.riskClass,
         targetKey: pending.targetKey,
@@ -509,8 +542,9 @@ export class ChannelGateway {
   }
 
   async #showApprovals(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
-    const key = stableSessionKey(message.sessionKey);
-    const persistent = await this.#approvalStore.listForSession(message.sessionKey);
+    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const persistent = await this.#approvalStore.listForSession(normalizedSessionKey);
     const sessionScoped = this.#approvalGrants.get(key) ?? [];
     const pending = this.#pendingApprovals.get(key);
     const text = [
@@ -534,7 +568,7 @@ export class ChannelGateway {
     await adapter.delivery?.sendText(message.sessionKey, text);
 
     return {
-      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
       replyText: text,
       artifactCount: 0,
       progressCount: 0
@@ -549,33 +583,33 @@ export class ChannelGateway {
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
         replyText: text,
         artifactCount: 0,
         progressCount: 0
       };
     }
 
-    const revoked = await this.#approvalStore.revoke(approvalId, message.sessionKey);
+    const revoked = await this.#approvalStore.revoke(approvalId, normalizeSessionKey(message.sessionKey, this.#sessionPolicy));
     const text = revoked
       ? `Revoked persistent approval ${approvalId}.`
       : `No persistent approval matched ${approvalId} for this chat.`;
     await adapter.delivery?.sendText(message.sessionKey, text);
 
     return {
-      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey),
+      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
       replyText: text,
       artifactCount: 0,
       progressCount: 0
     };
   }
 
-  async #resetSession(sessionKey: ChannelSessionKey): Promise<string> {
+  async #resetSession(sessionKey: ChannelSessionKey, receivedAt?: string): Promise<string> {
     if (this.#sessionStore.resetSessionId !== undefined) {
-      return this.#sessionStore.resetSessionId(sessionKey);
+      return this.#sessionStore.resetSessionId(sessionKey, { receivedAt });
     }
 
-    return this.#sessionStore.getOrCreateSessionId(sessionKey);
+    return this.#sessionStore.getOrCreateSessionId(sessionKey, { receivedAt });
   }
 
   #securityPolicyFor(
@@ -583,7 +617,7 @@ export class ChannelGateway {
     sessionId: string,
     persistentApprovals: PersistedApprovalGrant[]
   ): SecurityPolicy {
-    const key = stableSessionKey(sessionKey);
+    const key = stableSessionKey(sessionKey, this.#sessionPolicy);
 
     return {
       decide: (request: SecurityRequest): SecurityDecision => {
@@ -658,22 +692,6 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
       : policy.deniedMessage ??
         "This EstaCoda gateway is not paired with this account yet. Pair this chat from a trusted local session first."
   };
-}
-
-function stableSessionKey(sessionKey: ChannelSessionKey): string {
-  return [
-    sessionKey.platform,
-    sessionKey.accountId ?? "",
-    sessionKey.chatId,
-    sessionKey.threadId ?? "",
-    sessionKey.userId ?? ""
-  ].join(":");
-}
-
-function sanitizeSessionPart(value: string): string {
-  const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-
-  return sanitized.length > 0 ? sanitized.slice(0, 64) : "default";
 }
 
 function parseGatewayCommand(text: string): "/help" | "/status" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {

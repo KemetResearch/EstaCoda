@@ -6,7 +6,8 @@ import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { ChannelApprovalStore } from "./channel-approval-store.js";
-import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands } from "./channel-gateway.js";
+import { ChannelGateway, telegramGatewayCommands } from "./channel-gateway.js";
+import { PersistentChannelSessionStore } from "./channel-session-store.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
 
 export type GatewayRunOptions = {
@@ -35,6 +36,10 @@ export type TelegramGatewayDiagnostics = {
   securityLabel: string;
   allowedUserIds: string[];
   allowedChatIds: string[];
+  groupSessionsPerUser: boolean;
+  threadSessionsPerUser: boolean;
+  sessionResetPolicy: "none" | "idle" | "daily" | "both";
+  sessionIdleResetMinutes?: number;
   botTokenEnv?: string;
   botTokenPresent: boolean;
   defaultChatId?: string;
@@ -49,6 +54,7 @@ export type TelegramGatewayDiagnostics = {
   sessionDbPath: string;
   mediaRoot: string;
   approvalStorePath: string;
+  sessionContextPath: string;
   configSources: string[];
 };
 
@@ -59,6 +65,7 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
   const sessionDbPath = join(stateRoot, "sessions.sqlite");
   const mediaRoot = join(stateRoot, "channel-media");
   const approvalStorePath = join(stateRoot, "channel-approvals.json");
+  const sessionContextPath = join(stateRoot, "channel-sessions.json");
   const authPolicy = telegramAuthPolicy(telegram.allowedUserIds ?? [], telegram.allowedChatIds ?? []);
   const botTokenEnv = telegram.botTokenEnv;
   const botTokenPresent = botTokenEnv !== undefined && process.env[botTokenEnv] !== undefined;
@@ -77,6 +84,10 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
         : "locked until allowlist or pairing is configured",
     allowedUserIds: telegram.allowedUserIds ?? [],
     allowedChatIds: telegram.allowedChatIds ?? [],
+    groupSessionsPerUser: telegram.groupSessionsPerUser ?? true,
+    threadSessionsPerUser: telegram.threadSessionsPerUser ?? false,
+    sessionResetPolicy: telegram.sessionResetPolicy ?? "none",
+    sessionIdleResetMinutes: telegram.sessionIdleResetMinutes,
     botTokenEnv,
     botTokenPresent,
     defaultChatId: telegram.defaultChatId,
@@ -91,6 +102,7 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
     sessionDbPath,
     mediaRoot,
     approvalStorePath,
+    sessionContextPath,
     configSources: config.sources
   };
 }
@@ -137,6 +149,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         `Session DB: ${diagnostics.sessionDbPath}`,
         `Channel media: ${diagnostics.mediaRoot}`,
         `Approval store: ${diagnostics.approvalStorePath}`,
+        `Session context: ${diagnostics.sessionContextPath}`,
         `Logs: ${diagnostics.logsLocation}`,
         "",
         "Startup blocked",
@@ -153,9 +166,17 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const sessionDbPath = diagnostics.sessionDbPath;
   const mediaRoot = diagnostics.mediaRoot;
   const approvalStorePath = diagnostics.approvalStorePath;
+  const sessionContextPath = diagnostics.sessionContextPath;
   await mkdir(dirname(sessionDbPath), { recursive: true });
   const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
   const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
+  const sessionPolicy = {
+    groupSessionsPerUser: telegram.groupSessionsPerUser ?? true,
+    threadSessionsPerUser: telegram.threadSessionsPerUser ?? false,
+    resetPolicy: telegram.sessionResetPolicy ?? "none",
+    idleResetMinutes: telegram.sessionIdleResetMinutes,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  };
   const adapter = new TelegramAdapter({
     botToken,
     defaultChatId: telegram.defaultChatId,
@@ -166,10 +187,11 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   });
   const gateway = new ChannelGateway({
     adapters: [adapter],
-    sessionStore: new InMemoryChannelSessionStore(),
+    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy }),
     approvalStore,
     authPolicy,
     trustedWorkspace: true,
+    sessionPolicy,
     pair: async (message) => {
       const result = await consumeTelegramPairingCode({
         workspaceRoot: options.workspaceRoot,
@@ -251,6 +273,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         `Session DB: ${diagnostics.sessionDbPath}`,
         `Channel media: ${diagnostics.mediaRoot}`,
         `Approval store: ${diagnostics.approvalStorePath}`,
+        `Session context: ${diagnostics.sessionContextPath}`,
         `Logs: ${diagnostics.logsLocation}`,
         "",
         `Failure: ${message}`
@@ -272,6 +295,10 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
       `Security: ${diagnostics.securityLabel}`,
       `Allowed users: ${renderIdList(diagnostics.allowedUserIds)}`,
       `Allowed chats: ${renderIdList(diagnostics.allowedChatIds)}`,
+      `Group sessions per user: ${diagnostics.groupSessionsPerUser ? "yes" : "no"}`,
+      `Thread sessions per user: ${diagnostics.threadSessionsPerUser ? "yes" : "no"}`,
+      `Session reset policy: ${diagnostics.sessionResetPolicy}`,
+      diagnostics.sessionIdleResetMinutes === undefined ? undefined : `Session idle reset: ${diagnostics.sessionIdleResetMinutes} min`,
       `Bot token env: ${diagnostics.botTokenEnv ?? "unset"}`,
       `Bot token present: ${diagnostics.botTokenPresent ? "yes" : "no"}`,
       diagnostics.defaultChatId === undefined ? undefined : `Default chat: ${diagnostics.defaultChatId}`,
@@ -285,6 +312,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
       `Session DB: ${diagnostics.sessionDbPath}`,
       `Channel media: ${diagnostics.mediaRoot}`,
       `Approval store: ${diagnostics.approvalStorePath}`,
+      `Session context: ${diagnostics.sessionContextPath}`,
       `Config sources: ${diagnostics.configSources.join(", ") || "none"}`,
       "",
       `Polls: ${polls}`,

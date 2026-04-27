@@ -88,13 +88,14 @@ Next acceptance checks:
 
 ### 4. Channels
 
-Status: generic channel contracts, Telegram adapter, pairing, allowlists, media download, real provider-backed Telegram text flow, attachment execution E2E, approval persistence/revocation, inline Telegram approval UX, gateway diagnostics, and compact bilingual progress updates all exist.
+Status: generic channel contracts, Telegram adapter, pairing, allowlists, media download, real provider-backed Telegram text flow, attachment execution E2E, approval persistence/revocation, inline Telegram approval UX, gateway diagnostics, compact bilingual progress updates, persisted channel session context, and policy-driven Telegram session lifecycle all exist.
 
 Next acceptance checks:
 - Done: Telegram runs against the v2 provider/tool loop in a real session.
 - Done: Telegram media triggers attachment-aware skills through attachment manifests and normal inspection tools.
 - Done: gateway status and startup UX are clear enough for operator testing.
 - Done: channel approval/denial flows work for gated actions, including persistent approvals and revocation.
+- Done: gateway sessions survive restart with persisted active-session mapping, explicit DM/group/thread policy, and configurable auto-reset lifecycle.
 
 Remaining hardening:
 - Polish Telegram final reply formatting so answers feel chat-native rather than terminal-native.

@@ -49,6 +49,7 @@ What has been achieved:
 - Skills are no longer decorative metadata; they execute through the normal provider/tool loop.
 - Telegram is a real runtime surface, not scaffolding.
 - Telegram approvals, progress updates, attachments, and session behavior are implemented.
+- Telegram session behavior now includes persisted active-session mapping, explicit group/thread session policy, and configurable auto-reset on the gateway path.
 - Internal alpha testing now has a repeatable harness and runbook.
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
@@ -59,6 +60,7 @@ Evidence:
 - skill execution through the normal loop: `smoke-tested`
 - Telegram runtime surface: `live-proven`
 - Telegram approvals/progress/attachments/session behavior: `smoke-tested`
+- Telegram persisted session context + lifecycle policy: `smoke-tested`
 - internal alpha harness and runbook: `live-proven`
 - vision-backed image support: Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
 - provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
@@ -84,6 +86,7 @@ Confirmed working in code and smoke:
 - Telegram approvals with persistent approval storage, `/approvals`, `/revoke`, inline buttons, and target-key matching. `smoke-tested`
 - Telegram progress compaction into one evolving status message. `smoke-tested`
 - Telegram bilingual activity labels (`en` and `ar`). `smoke-tested`
+- Telegram persisted session context, policy-driven group/thread identity, and auto-reset lifecycle. `smoke-tested`
 - Telegram attachment ingestion, download, failure handling, and document inspection. document path `live-proven`; broader path `smoke-tested`
 - Native main-route vision plus fallback vision-tool routing for image attachment analysis. Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
 - Internal alpha harness generation. `live-proven`
@@ -200,6 +203,9 @@ Project-local overlays live under `<workspace>/.estacoda/` and can override or e
 
 - [src/channels/channel-gateway.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-gateway.ts)
   Channel session handling, approvals, commands, and runtime bridging.
+
+- [src/channels/channel-session-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-session-store.ts)
+  Persisted channel-session mapping, normalized session-key policy, and auto-reset lifecycle logic.
 
 - [src/channels/gateway-runner.ts](/Users/ahnwy/estacoda-v2/src/channels/gateway-runner.ts)
   Telegram gateway startup path and diagnostics.
@@ -318,7 +324,7 @@ For Telegram:
 1. `gateway-runner.ts` constructs gateway + adapter.
 2. `TelegramAdapter.pollOnce()` pulls updates.
 3. Attachments are downloaded into `~/.estacoda/channel-media/...`.
-4. `ChannelGateway.receive()` handles auth, commands, runtime invocation, approvals, and delivery.
+4. `ChannelGateway.receive()` normalizes session identity, applies session lifecycle policy, then handles auth, commands, runtime invocation, approvals, and delivery.
 5. Progress is sent as one evolving edited Telegram message.
 6. Final text is formatted by `telegram-format.ts`.
 
@@ -329,6 +335,8 @@ For Telegram:
 - Memory promotion is not implemented in the real product sense yet. Skill outcomes persist, but repeated preferences/workflows are not automatically promoted intelligently.
 - Telegram final reply formatting is much better than before, but still not full Hermes parity.
 - Channel verbosity/profile controls are not implemented yet.
+- CLI still has no cross-launch session resume; default fresh launches still fall back to the scaffold session.
+- Session-admin UX is still thinner than Hermes: no first-class session search/switch surface yet.
 - Internal alpha harness is strong but still manual; it is not a full release gate yet.
 - `doctor --live` can return successful status with empty response text for some providers. This is noted but not fully improved.
 - CLI multiline paste ergonomics are still rough in interactive mode.
@@ -527,6 +535,7 @@ This is the shortest honest path from strong internal alpha to a private MVP can
 - Secrets must never be injected into provider prompts.
 - Trusted workspace behavior should remain proactive while still gating genuinely risky actions.
 - Channel gateway should remain adapter-based, not Telegram-special-cased in architecture.
+- Session identity, approval scope, and active-turn keys must stay aligned under shared-thread/group policies.
 
 ## 14. Open Questions
 
@@ -535,6 +544,7 @@ This is the shortest honest path from strong internal alpha to a private MVP can
 - Should the gateway become a true daemon/service with liveness tracking, or remain foreground-first?
 - What is the right packaging/distribution shape for MVP: Bun-based install, npm wrapper, packaged binary, Homebrew, or multiple?
 - Which non-Telegram channel is next at launch, and does it share the same approval UX model?
+- Should CLI adopt persisted cross-launch session resume, or remain explicitly fresh-by-default with opt-in resume?
 - Should the vision route be configured as an explicit separate user-facing setup surface during onboarding?
 - What should the Hermes/OpenClaw migration story be: documentation-only, import tooling, partial compatibility layer, or something deeper?
 - How should local/open-source model support be explained and constrained for users, especially around tool-calling and vision differences?

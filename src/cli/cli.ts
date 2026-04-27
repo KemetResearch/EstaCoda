@@ -539,6 +539,10 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
         `Telegram security: ${diagnostics.securityLabel}`,
         `Allowed users: ${diagnostics.allowedUserIds.join(", ") || "none"}`,
         `Allowed chats: ${diagnostics.allowedChatIds.join(", ") || "none"}`,
+        `Group sessions per user: ${diagnostics.groupSessionsPerUser ? "yes" : "no"}`,
+        `Thread sessions per user: ${diagnostics.threadSessionsPerUser ? "yes" : "no"}`,
+        `Session reset policy: ${diagnostics.sessionResetPolicy}`,
+        diagnostics.sessionIdleResetMinutes === undefined ? undefined : `Session idle reset: ${diagnostics.sessionIdleResetMinutes} min`,
         diagnostics.botTokenEnv === undefined ? undefined : `Telegram token env: ${diagnostics.botTokenEnv}`,
         `Telegram token present: ${diagnostics.botTokenPresent ? "yes" : "no"}`,
         diagnostics.defaultChatId === undefined ? undefined : `Default chat: ${diagnostics.defaultChatId}`,
@@ -548,6 +552,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
         `Session DB: ${diagnostics.sessionDbPath}`,
         `Channel media: ${diagnostics.mediaRoot}`,
         `Approval store: ${diagnostics.approvalStorePath}`,
+        `Session context: ${diagnostics.sessionContextPath}`,
         `Logs: ${diagnostics.logsLocation}`,
         `Config sources: ${diagnostics.configSources.join(", ") || "none"}`,
         diagnostics.missing.length === 0 ? undefined : `Missing: ${diagnostics.missing.join(", ")}`

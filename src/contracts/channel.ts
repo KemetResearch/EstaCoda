@@ -53,6 +53,7 @@ export type ChannelSessionKey = {
   platform: ChannelKind;
   chatId: string;
   accountId?: string;
+  chatType?: "dm" | "group" | "channel" | "thread";
   threadId?: string;
   userId?: string;
 };

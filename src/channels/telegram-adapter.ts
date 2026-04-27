@@ -77,6 +77,7 @@ type TelegramCallbackQuery = {
 type TelegramMessage = {
   message_id: number;
   date?: number;
+  message_thread_id?: number;
   text?: string;
   caption?: string;
   chat: {
@@ -488,6 +489,8 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
       platform: "telegram",
       accountId: "telegram",
       chatId,
+      chatType: telegramChatType(message.chat.type, message.message_thread_id),
+      threadId: message.message_thread_id === undefined ? undefined : String(message.message_thread_id),
       userId: senderId
     },
     text: message.text ?? message.caption ?? "",
@@ -527,6 +530,8 @@ function callbackQueryToChannelMessage(update: TelegramUpdate, now: () => Date):
       platform: "telegram",
       accountId: "telegram",
       chatId,
+      chatType: telegramChatType(message.chat.type, message.message_thread_id),
+      threadId: message.message_thread_id === undefined ? undefined : String(message.message_thread_id),
       userId: senderId
     },
     text: callback.data,
@@ -546,6 +551,22 @@ function callbackQueryToChannelMessage(update: TelegramUpdate, now: () => Date):
       }
     }
   };
+}
+
+function telegramChatType(chatType?: string, threadId?: number): "dm" | "group" | "channel" | "thread" {
+  if (threadId !== undefined) {
+    return "thread";
+  }
+
+  if (chatType === "private") {
+    return "dm";
+  }
+
+  if (chatType === "channel") {
+    return "channel";
+  }
+
+  return "group";
 }
 
 function telegramAttachments(message: TelegramMessage): ChannelAttachment[] {
