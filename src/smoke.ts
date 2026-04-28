@@ -18,7 +18,7 @@ import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
 import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
-import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig } from "./config/runtime-config.js";
+import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig, setupSecurityConfig } from "./config/runtime-config.js";
 import { ContextReferenceExpander } from "./context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
 import { DelegationManager } from "./delegation/delegation-manager.js";
@@ -52,6 +52,7 @@ import { buildFallbackChain, routeProvider } from "./providers/provider-router.j
 import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
 import { IntentRouter } from "./runtime/intent-router.js";
+import { createSecurityPolicyForMode } from "./security/security-policy-factory.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
@@ -572,6 +573,37 @@ const cliReadyProviderLiveToolDoctor = await runCliCommand({
     }
   }
 });
+const securityConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-security-config-workspace-"));
+const securitySetup = await setupSecurityConfig({
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome,
+  input: {
+    mode: "adaptive",
+    scope: "project"
+  }
+});
+const cliSecurityStatusBefore = await runCliCommand({
+  argv: ["security", "status"],
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome
+});
+const cliSecuritySetup = await runCliCommand({
+  argv: ["security", "setup", "--mode", "open", "--project"],
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome
+});
+const cliSecurityStatusAfter = await runCliCommand({
+  argv: ["security", "status"],
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome
+});
+const loadedSecurityConfig = await loadRuntimeConfig({
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome
+});
+const strictPolicy = createSecurityPolicyForMode("strict");
+const adaptivePolicy = createSecurityPolicyForMode("adaptive");
+const openPolicy = createSecurityPolicyForMode("open");
 const cliLiveToolProbeRemoved = await stat(
   join(cliReadyProviderWorkspace, ".estacoda", "doctor", "live-tool-smoke.ts")
 ).then(() => false, () => true);
@@ -3051,6 +3083,71 @@ assert(cliInteractivePrompts.length === 5, "expected interactive setup prompts")
 assert(cliInteractiveConfig.model.provider === "kimi", "expected interactive setup to save provider");
 assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected CLI setup output");
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
+assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
+assert(cliSecurityStatusBefore.output.includes("Approval mode: adaptive"), "expected CLI security status to report adaptive mode");
+assert(cliSecuritySetup.output.includes("Approval mode: open."), "expected CLI security setup output");
+assert(cliSecurityStatusAfter.output.includes("Approval mode: open"), "expected CLI security status to report updated open mode");
+assert(loadedSecurityConfig.security.approvalMode === "open", "expected runtime config to load updated approval mode");
+assert(
+  strictPolicy.decide({
+    riskClass: "destructive-local",
+    description: "remove source tree",
+    command: "rm -rf src",
+    targetSummary: "rm -rf src",
+    context: { trustedWorkspace: true }
+  }) === "ask",
+  "expected strict policy to ask for destructive commands"
+);
+assert(
+  adaptivePolicy.decide({
+    riskClass: "destructive-local",
+    description: "run python inline snippet",
+    command: "python -c \"print('hello')\"",
+    targetSummary: "python -c print",
+    context: { trustedWorkspace: true }
+  }) === "allow",
+  "expected adaptive policy to auto-allow benign destructive false positives"
+);
+assert(
+  adaptivePolicy.decide({
+    riskClass: "destructive-local",
+    description: "remove source tree",
+    command: "rm -rf src",
+    targetSummary: "rm -rf src",
+    context: { trustedWorkspace: true }
+  }) === "ask",
+  "expected adaptive policy to keep ambiguous destructive commands gated"
+);
+assert(
+  adaptivePolicy.decide({
+    riskClass: "credential-access",
+    description: "read api key from environment",
+    command: "printenv OPENAI_API_KEY",
+    targetSummary: "printenv OPENAI_API_KEY",
+    context: { trustedWorkspace: true }
+  }) === "deny",
+  "expected adaptive policy to deny credential-access commands"
+);
+assert(
+  openPolicy.decide({
+    riskClass: "destructive-local",
+    description: "touch a temporary file",
+    command: "touch tmp.txt",
+    targetSummary: "touch tmp.txt",
+    context: { trustedWorkspace: true }
+  }) === "allow",
+  "expected open mode to allow non-floor dangerous commands"
+);
+assert(
+  openPolicy.decide({
+    riskClass: "destructive-local",
+    description: "remove filesystem root",
+    command: "rm -rf /",
+    targetSummary: "rm -rf /",
+    context: { trustedWorkspace: true }
+  }) === "deny",
+  "expected open mode to preserve the unconditional dangerous-command floor"
+);
 assert(cliMissingProviderSetup.output.includes("Missing API key environment variable ESTACODA_SMOKE_MISSING_KEY"), "expected missing key setup warning");
 assert(cliMissingProviderDoctor.exitCode === 1, "expected missing key doctor to fail");
 assert(cliMissingProviderDoctor.output.includes("Missing API key environment variable ESTACODA_SMOKE_MISSING_KEY"), "expected missing key doctor warning");

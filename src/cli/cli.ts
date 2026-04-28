@@ -6,11 +6,13 @@ import {
   setupMcpConfig,
   setupBrowserConfig,
   setupProviderConfig,
+  setupSecurityConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
   type MCPSetupInput,
   type ProviderSetupInput,
+  type SecuritySetupInput,
   type TelegramSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
@@ -58,6 +60,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return web(options, args);
     case "browser":
       return browser(options, args);
+    case "security":
+      return security(options, args);
     case "mcp":
       return mcp(options, args);
     case "acp":
@@ -428,6 +432,52 @@ async function web(options: CliOptions, args: string[]): Promise<CliCommandResul
       `Config: ${result.path}`,
       result.config.web?.maxContentChars === undefined ? undefined : `Max content chars: ${result.config.web.maxContentChars}`
     ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
+async function security(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand !== "status" && subcommand !== "setup") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda security",
+        "  estacoda security status",
+        "  estacoda security setup --mode strict",
+        "  estacoda security setup --mode adaptive",
+        "  estacoda security setup --mode open"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "status") {
+    const config = await loadRuntimeConfig(options);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda security",
+        `Approval mode: ${config.security.approvalMode}`,
+        `Config sources: ${config.sources.join(", ") || "none"}`
+      ].join("\n")
+    };
+  }
+
+  const parsed = parseSecuritySetupArgs(rest);
+  const result = await setupSecurityConfig({
+    ...options,
+    input: parsed
+  });
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
+      `Config: ${result.path}`
+    ].join("\n")
   };
 }
 
@@ -971,6 +1021,38 @@ function hasFlag(args: string[], ...flags: string[]): boolean {
   return args.some((arg) => flags.includes(arg));
 }
 
+function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
+  const parsed: SecuritySetupInput = {};
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--mode") {
+      parsed.mode = next as SecuritySetupInput["mode"] | undefined;
+      index += 1;
+    } else if (arg === "--project") {
+      parsed.scope = "project";
+    } else if (arg === "--user") {
+      parsed.scope = "user";
+    }
+  }
+
+  if (
+    parsed.mode !== undefined &&
+    parsed.mode !== "strict" &&
+    parsed.mode !== "adaptive" &&
+    parsed.mode !== "open" &&
+    parsed.mode !== "manual" &&
+    parsed.mode !== "smart" &&
+    parsed.mode !== "off"
+  ) {
+    throw new Error("Expected --mode strict, adaptive, or open");
+  }
+
+  return parsed;
+}
+
 function help(): string {
   return [
     "EstaCoda commands",
@@ -978,6 +1060,7 @@ function help(): string {
     "  estacoda setup --interactive",
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
+    "  estacoda security View or configure approval mode",
     "  estacoda mcp     Configure MCP servers",
     "  estacoda acp     Start the ACP stdio server",
     "  estacoda telegram Configure Telegram channel",

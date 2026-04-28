@@ -35,6 +35,7 @@ import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
+import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
@@ -94,6 +95,7 @@ export type RuntimeOptions = {
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
   securityPolicy?: SecurityPolicy;
+  securityMode?: import("../contracts/security.js").SecurityApprovalMode;
   workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
@@ -341,7 +343,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
-  const securityPolicy = options.securityPolicy ?? capabilityFirstDefaults;
+  const securityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive");
   const toolExecutor = new ToolExecutor({
     registry: toolRegistry,
     securityPolicy,

@@ -236,6 +236,7 @@ State: partially built.
 
 - allowlist and pairing concepts exist `smoke-tested`
 - gateway security flow exists `smoke-tested`
+- security approval modes now exist across CLI/runtime/channel/ACP: `strict`, `adaptive`, `open` `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

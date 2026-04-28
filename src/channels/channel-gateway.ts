@@ -5,11 +5,12 @@ import type {
   ChannelMessage,
   ChannelSessionKey
 } from "../contracts/channel.js";
-import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
+import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -34,6 +35,7 @@ export type ChannelGatewayOptions = {
   pair?: (message: ChannelMessage) => Promise<string | undefined>;
   approvalStore?: ChannelApprovalStore;
   sessionPolicy?: ChannelSessionPolicy;
+  securityMode?: SecurityApprovalMode;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -137,6 +139,7 @@ export class ChannelGateway {
   readonly #pair: ChannelGatewayOptions["pair"];
   readonly #approvalStore: ChannelApprovalStore;
   readonly #sessionPolicy: ChannelSessionPolicy;
+  readonly #securityMode: SecurityApprovalMode;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -150,6 +153,7 @@ export class ChannelGateway {
     this.#pair = options.pair;
     this.#approvalStore = options.approvalStore ?? new ChannelApprovalStore();
     this.#sessionPolicy = options.sessionPolicy ?? {};
+    this.#securityMode = options.securityMode ?? "adaptive";
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -945,6 +949,7 @@ export class ChannelGateway {
 
     return {
       decide: (request: SecurityRequest): SecurityDecision => {
+        const basePolicy = createSecurityPolicyForMode(this.#securityMode);
         const grants = this.#approvalGrants.get(key) ?? [];
         const grantIndex = grants.findIndex((grant) =>
           grant.toolName === request.toolName &&
@@ -972,7 +977,7 @@ export class ChannelGateway {
           return "allow";
         }
 
-        return capabilityFirstDefaults.decide(request);
+        return basePolicy.decide(request);
       }
     };
   }

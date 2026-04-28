@@ -16,6 +16,8 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import { normalizeSecurityApprovalMode } from "../security/security-policy-factory.js";
+import type { SecurityApprovalMode } from "../contracts/security.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 
@@ -86,6 +88,12 @@ export type EstaCodaConfig = {
     autonomy?: SkillAutonomy;
     config?: Record<string, Record<string, unknown>>;
   };
+  security?: {
+    approvalMode?: SecurityApprovalMode | "manual" | "smart" | "off";
+    approvals?: {
+      mode?: SecurityApprovalMode | "manual" | "smart" | "off";
+    };
+  };
   channels?: {
     telegram?: TelegramChannelConfig;
   };
@@ -134,6 +142,9 @@ export type LoadedRuntimeConfig = {
     externalDirs: string[];
     autonomy: SkillAutonomy;
     config: Record<string, Record<string, unknown>>;
+  };
+  security: {
+    approvalMode: SecurityApprovalMode;
   };
   channels: {
     telegram: TelegramChannelConfig & {
@@ -210,6 +221,11 @@ export type TelegramPairingInput = {
   scope?: "user" | "project";
 };
 
+export type SecuritySetupInput = {
+  mode?: SecurityApprovalMode | "manual" | "smart" | "off";
+  scope?: "user" | "project";
+};
+
 export async function loadRuntimeConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -262,6 +278,9 @@ export async function loadRuntimeConfig(options: {
       autonomy: config.skills?.autonomy ?? "suggest",
       config: normalizeSkillConfig(config.skills?.config)
     },
+    security: {
+      approvalMode: normalizeSecurityApprovalMode(config.security?.approvalMode ?? config.security?.approvals?.mode)
+    },
     channels: {
       telegram: {
         ...telegram,
@@ -311,6 +330,14 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       config: {
         ...(merged.skills?.config ?? {}),
         ...(config.skills?.config ?? {})
+      }
+    },
+    security: {
+      ...(merged.security ?? {}),
+      approvalMode: config.security?.approvalMode ?? merged.security?.approvalMode,
+      approvals: {
+        ...(merged.security?.approvals ?? {}),
+        ...(config.security?.approvals ?? {})
       }
     },
     channels: {
@@ -624,6 +651,33 @@ export async function setupMcpConfig(options: {
     mcpServers: servers
   });
   delete config.mcp_servers;
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupSecurityConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: SecuritySetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const config = mergeConfig(existing.config, {
+    security: {
+      approvalMode: normalizeSecurityApprovalMode(options.input.mode)
+    }
+  });
 
   await saveRuntimeConfig(targetPath, config);
   return {

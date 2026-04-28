@@ -345,6 +345,9 @@ The security boundary is capability-first.
 
 Important traits:
 
+- approval modes are `strict`, `adaptive`, and `open`
+- `adaptive` is the default and currently uses deterministic triage, not a model-backed assessor
+- `open` still preserves a hard dangerous-command floor
 - tool risk classes drive gating
 - structured `targetKey` values are the approval boundary
 - display summaries are not the authorization boundary

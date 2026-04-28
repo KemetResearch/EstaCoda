@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { SessionMessage } from "../contracts/session.js";
 import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
@@ -13,6 +13,7 @@ import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 
 type JsonRpcId = string | number | null;
 
@@ -772,7 +773,8 @@ export class AcpServer {
       enableWebNetwork: config.web.enableNetwork,
       webMaxContentChars: config.web.maxContentChars,
       securityPolicy: createAcpSecurityPolicy(options.grants, {
-        allowEditorRead: this.#clientFsReadText
+        allowEditorRead: this.#clientFsReadText,
+        mode: config.security.approvalMode
       }),
       workspaceFsAdapter: this.#clientFsReadText === true
         ? createAcpWorkspaceFsAdapter({
@@ -1473,8 +1475,10 @@ function createAcpSecurityPolicy(
   grants: SessionGrants,
   options: {
     allowEditorRead: boolean;
+    mode?: SecurityApprovalMode;
   }
 ): SecurityPolicy {
+  const basePolicy = createSecurityPolicyForMode(options.mode ?? "adaptive");
   return {
     decide(request: SecurityRequest): SecurityDecision {
       const targetKey = request.targetKey;
@@ -1496,7 +1500,7 @@ function createAcpSecurityPolicy(
           return "allow";
         }
       }
-      return capabilityFirstDefaults.decide(request);
+      return basePolicy.decide(request);
     }
   };
 }

@@ -88,6 +88,7 @@ export class ToolExecutor {
       toolName: tool.name,
       targetKey,
       targetSummary,
+      command: typeof request.input.command === "string" ? request.input.command : undefined,
       description: `run tool ${tool.name}`,
       context: {
         trustedWorkspace: request.trustedWorkspace,

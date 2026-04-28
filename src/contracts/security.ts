@@ -10,12 +10,15 @@ export type SecurityContext = {
   targetConversationIsActive?: boolean;
 };
 
+export type SecurityApprovalMode = "strict" | "adaptive" | "open";
+
 export type SecurityRequest = {
   riskClass: ToolRiskClass;
   description: string;
   toolName?: string;
   targetKey?: string;
   targetSummary?: string;
+  command?: string;
   context: SecurityContext;
 };
 

@@ -4,11 +4,13 @@ import {
   setupMcpConfig,
   setupBrowserConfig,
   setupProviderConfig,
+  setupSecurityConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
   type MCPSetupInput,
   type ProviderSetupInput,
+  type SecuritySetupInput,
   type TelegramSetupInput,
   type WebSetupInput
 } from "./runtime-config.js";
@@ -57,6 +59,68 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             browser: loaded.browser,
             credentialPools: loaded.credentialPools.snapshots(),
             providerDiagnostic: diagnostic
+          }
+        };
+      }
+    },
+    {
+      name: "config.security.status",
+      description: "Show configured EstaCoda approval mode and security config sources.",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core"],
+      progressLabel: "checking security config",
+      maxResultSizeChars: 3000,
+      isAvailable: () => true,
+      run: async () => {
+        const loaded = await loadRuntimeConfig(options);
+        return {
+          ok: true,
+          content: [
+            "EstaCoda security",
+            `Approval mode: ${loaded.security.approvalMode}`,
+            `Config sources: ${loaded.sources.join(", ") || "none"}`
+          ].join("\n"),
+          metadata: {
+            sources: loaded.sources,
+            security: loaded.security
+          }
+        };
+      }
+    },
+    {
+      name: "config.security.setup",
+      description: "Configure EstaCoda approval mode.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["strict", "adaptive", "open", "manual", "smart", "off"] },
+          scope: { type: "string", enum: ["user", "project"] }
+        }
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core"],
+      progressLabel: "configuring security mode",
+      maxResultSizeChars: 3000,
+      isAvailable: () => true,
+      run: async (input: SecuritySetupInput) => {
+        const result = await setupSecurityConfig({
+          ...options,
+          input
+        });
+
+        return {
+          ok: true,
+          content: [
+            `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
+            `Wrote ${result.path}.`
+          ].join("\n"),
+          metadata: {
+            path: result.path,
+            security: result.config.security
           }
         };
       }

@@ -187,6 +187,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   });
   const gateway = new ChannelGateway({
     adapters: [adapter],
+    securityMode: config.security.approvalMode,
     sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy }),
     approvalStore,
     authPolicy,
