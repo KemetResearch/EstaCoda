@@ -10,8 +10,8 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - `openrouter/auto` is not currently acceptance-grade for tool workflows; live batch showed empty-success/no-tool behavior on the file roundtrip task. `live-proven`
 - OpenRouter now works on the runtime/tool path with `qwen/qwen3.6-plus`, but it can still miss exact-content fidelity checks (for example, adding punctuation to “exact” file content). `live-proven`
 - Local/Ollama support is architecturally present, but the current environment has no working local model route, so local acceptance remains unproven here. `live-proven`
-- MCP client support is currently stdio-only; HTTP transport is not implemented yet. `smoke-tested`
-- Default MCP tool risk classification is conservative (`external-side-effect`) because arbitrary third-party MCP tools are not yet trusted as local-read-only by default. `implemented`
+- MCP client support now covers stdio + HTTP, but only smoke proof exists so far; we still need real operator validation against third-party MCP servers. `smoke-tested`
+- Default MCP trust is intentionally conservative; arbitrary third-party MCP tools still start as `external-side-effect` unless a server trust level is configured. `implemented`
 
 ## Memory
 
@@ -48,7 +48,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Provider message content support was widened to support vision, but the rest of the provider stack still assumes string content in many places conceptually. `implemented`
 - There is still product logic mixed with formatting/delivery concerns in some channel paths. `implemented`
 - Live provider capability detection still deserves a more explicit “this route can truly do vision” operator signal. `intended but not implemented`
-- MCP server trust/visibility policy is still coarse-grained; we do not yet have per-server risk metadata or HTTP transport parity. `implemented but not live-proven`
+- MCP server trust/visibility policy is still coarse-grained even though per-server trust metadata now exists; we do not yet have finer-grained per-tool trust metadata or live proof across real remote MCP servers. `implemented but not live-proven`
 
 ## Product open edges
 

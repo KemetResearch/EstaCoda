@@ -15,6 +15,17 @@ import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } f
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
+import type { ToolRiskClass } from "../contracts/tool.js";
+
+export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
+
+export type MCPServerToolsConfig = {
+  include?: string[];
+  exclude?: string[];
+  resources?: boolean;
+  prompts?: boolean;
+  prefix?: string | boolean;
+};
 
 export type MCPServerConfig = {
   enabled?: boolean;
@@ -25,12 +36,18 @@ export type MCPServerConfig = {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  tools?: MCPServerToolsConfig;
   includeTools?: string[];
   excludeTools?: string[];
   exposeResources?: boolean;
   exposePrompts?: boolean;
   toolPrefix?: string | boolean;
   timeoutMs?: number;
+  connectTimeoutMs?: number;
+  trust?: MCPServerTrust;
+  toolRiskClass?: ToolRiskClass;
+  resourceReadRiskClass?: ToolRiskClass;
+  promptGetRiskClass?: ToolRiskClass;
 };
 
 export type EstaCodaConfig = {
@@ -161,12 +178,18 @@ export type MCPSetupInput = {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  tools?: MCPServerToolsConfig;
   includeTools?: string[];
   excludeTools?: string[];
   exposeResources?: boolean;
   exposePrompts?: boolean;
   toolPrefix?: string | boolean;
   timeoutMs?: number;
+  connectTimeoutMs?: number;
+  trust?: MCPServerTrust;
+  toolRiskClass?: ToolRiskClass;
+  resourceReadRiskClass?: ToolRiskClass;
+  promptGetRiskClass?: ToolRiskClass;
   scope?: "user" | "project";
 };
 
@@ -330,6 +353,9 @@ function normalizeMcpServers(
     }
 
     const record = entry as Record<string, unknown>;
+    const toolConfig = typeof record.tools === "object" && record.tools !== null && !Array.isArray(record.tools)
+      ? record.tools as Record<string, unknown>
+      : undefined;
     normalized[name] = {
       enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
       transport: record.transport === "http" || record.transport === "stdio" ? record.transport : undefined,
@@ -343,12 +369,40 @@ function normalizeMcpServers(
       headers: typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
         ? Object.fromEntries(Object.entries(record.headers).filter(([, headerValue]) => typeof headerValue === "string") as Array<[string, string]>)
         : undefined,
-      includeTools: Array.isArray(record.includeTools) ? record.includeTools.filter((item): item is string => typeof item === "string") : undefined,
-      excludeTools: Array.isArray(record.excludeTools) ? record.excludeTools.filter((item): item is string => typeof item === "string") : undefined,
-      exposeResources: typeof record.exposeResources === "boolean" ? record.exposeResources : undefined,
-      exposePrompts: typeof record.exposePrompts === "boolean" ? record.exposePrompts : undefined,
-      toolPrefix: typeof record.toolPrefix === "string" || typeof record.toolPrefix === "boolean" ? record.toolPrefix : undefined,
-      timeoutMs: typeof record.timeoutMs === "number" ? record.timeoutMs : undefined
+      tools: toolConfig === undefined ? undefined : {
+        include: Array.isArray(toolConfig.include) ? toolConfig.include.filter((item): item is string => typeof item === "string") : undefined,
+        exclude: Array.isArray(toolConfig.exclude) ? toolConfig.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        resources: typeof toolConfig.resources === "boolean" ? toolConfig.resources : undefined,
+        prompts: typeof toolConfig.prompts === "boolean" ? toolConfig.prompts : undefined,
+        prefix: typeof toolConfig.prefix === "string" || typeof toolConfig.prefix === "boolean" ? toolConfig.prefix : undefined
+      },
+      includeTools: Array.isArray(record.includeTools)
+        ? record.includeTools.filter((item): item is string => typeof item === "string")
+        : (toolConfig !== undefined && Array.isArray(toolConfig.include)
+            ? toolConfig.include.filter((item): item is string => typeof item === "string")
+            : undefined),
+      excludeTools: Array.isArray(record.excludeTools)
+        ? record.excludeTools.filter((item): item is string => typeof item === "string")
+        : (toolConfig !== undefined && Array.isArray(toolConfig.exclude)
+            ? toolConfig.exclude.filter((item): item is string => typeof item === "string")
+            : undefined),
+      exposeResources: typeof record.exposeResources === "boolean"
+        ? record.exposeResources
+        : (toolConfig !== undefined && typeof toolConfig.resources === "boolean" ? toolConfig.resources : undefined),
+      exposePrompts: typeof record.exposePrompts === "boolean"
+        ? record.exposePrompts
+        : (toolConfig !== undefined && typeof toolConfig.prompts === "boolean" ? toolConfig.prompts : undefined),
+      toolPrefix: typeof record.toolPrefix === "string" || typeof record.toolPrefix === "boolean"
+        ? record.toolPrefix
+        : (toolConfig !== undefined && (typeof toolConfig.prefix === "string" || typeof toolConfig.prefix === "boolean") ? toolConfig.prefix : undefined),
+      timeoutMs: typeof record.timeoutMs === "number" ? record.timeoutMs : undefined,
+      connectTimeoutMs: typeof record.connectTimeoutMs === "number" ? record.connectTimeoutMs : undefined,
+      trust: record.trust === "conservative" || record.trust === "read-only-network" || record.trust === "read-only-local"
+        ? record.trust
+        : undefined,
+      toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
+      resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
+      promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
     };
   }
   return normalized;
@@ -547,12 +601,24 @@ export async function setupMcpConfig(options: {
     env: options.input.env,
     url: options.input.url,
     headers: options.input.headers,
+    tools: {
+      include: options.input.includeTools ?? options.input.tools?.include,
+      exclude: options.input.excludeTools ?? options.input.tools?.exclude,
+      resources: options.input.exposeResources ?? options.input.tools?.resources,
+      prompts: options.input.exposePrompts ?? options.input.tools?.prompts,
+      prefix: options.input.toolPrefix ?? options.input.tools?.prefix
+    },
     includeTools: options.input.includeTools,
     excludeTools: options.input.excludeTools,
     exposeResources: options.input.exposeResources,
     exposePrompts: options.input.exposePrompts,
     toolPrefix: options.input.toolPrefix,
-    timeoutMs: options.input.timeoutMs
+    timeoutMs: options.input.timeoutMs,
+    connectTimeoutMs: options.input.connectTimeoutMs,
+    trust: options.input.trust,
+    toolRiskClass: options.input.toolRiskClass,
+    resourceReadRiskClass: options.input.resourceReadRiskClass,
+    promptGetRiskClass: options.input.promptGetRiskClass
   };
   const config = mergeConfig(existing.config, {
     mcpServers: servers
@@ -564,6 +630,18 @@ export async function setupMcpConfig(options: {
     path: targetPath,
     config
   };
+}
+
+function isToolRiskClass(value: unknown): value is ToolRiskClass {
+  return value === "read-only-local" ||
+    value === "read-only-network" ||
+    value === "workspace-write" ||
+    value === "external-side-effect" ||
+    value === "credential-access" ||
+    value === "destructive-local" ||
+    value === "shared-state-mutation" ||
+    value === "spend-money" ||
+    value === "sandbox-escape";
 }
 
 export async function setupTelegramConfig(options: {

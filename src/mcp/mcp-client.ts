@@ -2,6 +2,19 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 export type MCPServerTransport = "stdio" | "http";
 
+export type MCPFetchLike = (input: string, init?: {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+}>;
+
 type JSONRPCRequest = {
   jsonrpc: "2.0";
   id: number;
@@ -53,11 +66,16 @@ export type MCPServerCapabilities = {
 
 export class MCPClient {
   readonly #name: string;
-  readonly #command: string;
+  readonly #transport: MCPServerTransport;
+  readonly #command: string | undefined;
   readonly #args: string[];
   readonly #cwd: string | undefined;
   readonly #env: Record<string, string> | undefined;
+  readonly #url: string | undefined;
+  readonly #headers: Record<string, string>;
   readonly #timeoutMs: number;
+  readonly #connectTimeoutMs: number;
+  readonly #fetch: MCPFetchLike;
   #child: ChildProcessWithoutNullStreams | undefined;
   #buffer = "";
   #nextId = 1;
@@ -72,18 +90,28 @@ export class MCPClient {
 
   constructor(options: {
     name: string;
-    command: string;
+    transport?: MCPServerTransport;
+    command?: string;
     args?: string[];
     cwd?: string;
     env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
     timeoutMs?: number;
+    connectTimeoutMs?: number;
+    fetch?: MCPFetchLike;
   }) {
     this.#name = options.name;
+    this.#transport = options.transport ?? "stdio";
     this.#command = options.command;
     this.#args = options.args ?? [];
     this.#cwd = options.cwd;
     this.#env = options.env;
+    this.#url = options.url;
+    this.#headers = options.headers ?? {};
     this.#timeoutMs = options.timeoutMs ?? 10_000;
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? this.#timeoutMs;
+    this.#fetch = options.fetch ?? defaultFetch;
   }
 
   async start(): Promise<void> {
@@ -91,32 +119,16 @@ export class MCPClient {
       return;
     }
 
-    this.#child = spawn(this.#command, this.#args, {
-      cwd: this.#cwd,
-      env: this.#env === undefined
-        ? process.env
-        : {
-            ...process.env,
-            ...this.#env
-          },
-      stdio: "pipe"
-    });
-    this.#child.stdout.setEncoding("utf8");
-    this.#child.stderr.setEncoding("utf8");
-    this.#child.stdout.on("data", (chunk: string) => {
-      this.#buffer += chunk;
-      this.#pump();
-    });
-    this.#child.stderr.on("data", (chunk: string) => {
-      this.#stderr += chunk;
-    });
-    this.#child.on("exit", (code, signal) => {
-      const error = new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`);
-      for (const pending of this.#pending.values()) {
-        pending.reject(error);
+    if (this.#transport === "stdio") {
+      if (typeof this.#command !== "string" || this.#command.trim().length === 0) {
+        throw new Error(`MCP stdio server ${this.#name} requires a command`);
       }
-      this.#pending.clear();
-    });
+      this.#startStdio();
+    } else {
+      if (typeof this.#url !== "string" || this.#url.trim().length === 0) {
+        throw new Error(`MCP HTTP server ${this.#name} requires a url`);
+      }
+    }
 
     const initialize = await this.#request("initialize", {
       protocolVersion: "2024-11-05",
@@ -125,7 +137,7 @@ export class MCPClient {
         name: "EstaCoda",
         version: "0.0.0"
       }
-    }) as {
+    }, this.#connectTimeoutMs) as {
       capabilities?: MCPServerCapabilities;
     };
     this.capabilities = initialize.capabilities ?? {};
@@ -180,7 +192,44 @@ export class MCPClient {
     });
   }
 
+  get transport(): MCPServerTransport {
+    return this.#transport;
+  }
+
+  #startStdio(): void {
+    this.#child = spawn(this.#command!, this.#args, {
+      cwd: this.#cwd,
+      env: buildStdioEnv(this.#env),
+      stdio: "pipe"
+    });
+    this.#child.stdout.setEncoding("utf8");
+    this.#child.stderr.setEncoding("utf8");
+    this.#child.stdout.on("data", (chunk: string) => {
+      this.#buffer += chunk;
+      this.#pump();
+    });
+    this.#child.stderr.on("data", (chunk: string) => {
+      this.#stderr += chunk;
+    });
+    this.#child.on("exit", (code, signal) => {
+      const error = new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`);
+      for (const pending of this.#pending.values()) {
+        pending.reject(error);
+      }
+      this.#pending.clear();
+    });
+  }
+
   async #notify(method: string, params?: unknown): Promise<void> {
+    if (this.#transport === "http") {
+      await this.#sendHttp({
+        jsonrpc: "2.0",
+        method,
+        params
+      });
+      return;
+    }
+
     const child = this.#child;
     if (child === undefined) {
       throw new Error(`MCP server ${this.#name} is not running`);
@@ -193,12 +242,7 @@ export class MCPClient {
     child.stdin.write(frameMessage(payload), "utf8");
   }
 
-  async #request(method: string, params?: unknown): Promise<unknown> {
-    const child = this.#child;
-    if (child === undefined) {
-      throw new Error(`MCP server ${this.#name} is not running`);
-    }
-
+  async #request(method: string, params?: unknown, timeoutMs = this.#timeoutMs): Promise<unknown> {
     const id = this.#nextId++;
     const payload: JSONRPCRequest = {
       jsonrpc: "2.0",
@@ -207,11 +251,21 @@ export class MCPClient {
       params
     };
 
+    if (this.#transport === "http") {
+      const response = await this.#sendHttp(payload, timeoutMs);
+      return this.#unwrapResponse(response, method);
+    }
+
+    const child = this.#child;
+    if (child === undefined) {
+      throw new Error(`MCP server ${this.#name} is not running`);
+    }
+
     const response = await new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(id);
         reject(new Error(`MCP request timed out: ${this.#name} ${method}`));
-      }, this.#timeoutMs);
+      }, timeoutMs);
       this.#pending.set(id, {
         resolve: (value) => {
           clearTimeout(timeout);
@@ -226,6 +280,50 @@ export class MCPClient {
     });
 
     return response;
+  }
+
+  async #sendHttp(payload: Record<string, unknown>, timeoutMs = this.#timeoutMs): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await this.#fetch(this.#url!, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          ...this.#headers
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`MCP HTTP request failed: ${this.#name} ${response.status} ${response.statusText}${body.length === 0 ? "" : ` - ${body}`}`);
+      }
+      if ("id" in payload === false) {
+        return {};
+      }
+      return await response.json();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`MCP request timed out: ${this.#name}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  #unwrapResponse(response: unknown, method: string): unknown {
+    if (typeof response !== "object" || response === null) {
+      throw new Error(`Invalid MCP HTTP response for ${this.#name} ${method}`);
+    }
+    const message = response as JSONRPCResponse;
+    if (message.error !== undefined) {
+      throw new Error(`MCP ${this.#name} ${method} failed (${message.error.code}): ${message.error.message}`);
+    }
+    return message.result;
   }
 
   #pump(): void {
@@ -261,7 +359,7 @@ export class MCPClient {
     }
     this.#pending.delete(message.id);
     if (message.error !== undefined) {
-      pending.reject(new Error(`MCP error from ${this.#name}: ${message.error.message}${this.#stderr.length === 0 ? "" : `\n${this.#stderr.trim()}`}`));
+      pending.reject(new Error(`MCP ${this.#name} failed (${message.error.code}): ${message.error.message}`));
       return;
     }
     pending.resolve(message.result);
@@ -271,3 +369,47 @@ export class MCPClient {
 function frameMessage(body: string): string {
   return `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`;
 }
+
+function buildStdioEnv(customEnv: Record<string, string> | undefined): Record<string, string> {
+  const allowed = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "SHELL",
+    "TERM",
+    "LANG",
+    "LC_ALL",
+    "SYSTEMROOT",
+    "WINDIR",
+    "ComSpec",
+    "PATHEXT"
+  ];
+  const base = Object.fromEntries(
+    allowed.flatMap((key) => {
+      const value = process.env[key];
+      return typeof value === "string" ? [[key, value]] : [];
+    })
+  );
+
+  return customEnv === undefined
+    ? base
+    : {
+        ...base,
+        ...customEnv
+      };
+}
+
+const defaultFetch: MCPFetchLike = async (input, init) => {
+  const response = await fetch(input, init);
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    json: async () => await response.json(),
+    text: async () => await response.text()
+  };
+};

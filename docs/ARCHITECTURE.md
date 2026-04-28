@@ -59,7 +59,9 @@ Evidence note:
 ### MCP
 
 - [src/mcp/mcp-client.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-client.ts)
+  MCP client transport for stdio and HTTP. `smoke-tested`
 - [src/mcp/mcp-tools.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-tools.ts)
+  Discovery/registration layer plus server-level trust-to-risk mapping. `smoke-tested`
 
 ### Skills
 
@@ -272,7 +274,7 @@ Current implementation:
 
 1. config loads `mcpServers` / `mcp_servers`
 2. runtime creation calls `loadMcpServers(...)`
-3. stdio MCP servers are initialized over framed JSON-RPC
+3. stdio MCP servers are initialized over framed JSON-RPC, and HTTP servers are called over JSON-RPC POST
 4. discovered tools are registered into the normal tool registry
 5. optional wrappers are added for:
    - `resource.list`
@@ -280,6 +282,7 @@ Current implementation:
    - `prompt.list`
    - `prompt.get`
 6. runtime disposal stops MCP subprocesses
+7. server-level trust metadata maps MCP tools into EstaCoda risk classes
 
 Current operator semantics:
 

@@ -88,7 +88,7 @@ Next acceptance checks:
 - Long sessions preserve recent tool-call/result pairs during compression.
 
 Follow-on protocol work after this milestone:
-- MCP client stdio foundation is now in place with config-driven discovery, tool/resource/prompt registration, and reload semantics.
+- MCP client stdio + HTTP foundation is now in place with config-driven discovery, trust metadata, tool/resource/prompt registration, and reload semantics.
 - ACP should still wait until after MCP HTTP support and stronger memory/session maturity, because ACP is primarily an editor-surface/runtime product rather than a capability substrate.
 - MCP server bridging should still come later than MCP client and likely later than ACP.
 
@@ -137,7 +137,7 @@ Remaining hardening:
 Move from strong internal alpha behavior to MVP launch hardening:
 
 1. Refine workflow-learning heuristics and skill patching behavior now that project-fact promotion and `skills.autonomy` exist.
-2. Expand MCP beyond the current stdio foundation with HTTP transport and per-server trust/visibility controls.
+2. Refine MCP trust/visibility controls and real-server validation.
 3. Finish first-run install/onboarding polish and define the external distribution path.
 4. Expand the evaluation substrate into stronger scored comparisons.
 5. Revisit ACP/editor embedding only after the MCP client and memory/session work are in better shape.

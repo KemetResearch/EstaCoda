@@ -2119,11 +2119,140 @@ const directEchoResult = await directEchoTool?.run({ text: "hello" });
 const directResourceResult = await directResourceReadTool?.run({ uri: "memo://hello" });
 const directPromptResult = await directPromptGetTool?.run({ name: "draft" });
 await Promise.all(directMcpServers.map((server) => server.stop()));
+const httpMcpSetupResult = await setupMcpConfig({
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome,
+  input: {
+    name: "remote",
+    transport: "http",
+    url: "https://mcp.example.test/http",
+    trust: "read-only-network",
+    includeTools: ["echo"],
+    exposeResources: true,
+    exposePrompts: true
+  }
+});
+const reloadedMcpConfig = await loadRuntimeConfig({
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome
+});
+const httpMcpRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+const httpMcpServers = await loadMcpServers({
+  servers: {
+    remote: {
+      transport: "http",
+      url: "https://mcp.example.test/http",
+      trust: "read-only-network",
+      tools: {
+        include: ["echo"],
+        resources: true,
+        prompts: true,
+        prefix: "remote"
+      }
+    }
+  },
+  fetch: async (url, init) => {
+    const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+    httpMcpRequests.push({ url, body });
+    const method = body.method;
+
+    if (method === "initialize") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          capabilities: { tools: {}, resources: {}, prompts: {} }
+        }
+      });
+    }
+    if (method === "notifications/initialized") {
+      return fakeFetchResponse(200, {});
+    }
+    if (method === "tools/list") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          tools: [
+            {
+              name: "echo",
+              description: "Echo text over HTTP",
+              inputSchema: {
+                type: "object",
+                properties: { text: { type: "string" } },
+                required: ["text"]
+              }
+            }
+          ]
+        }
+      });
+    }
+    if (method === "tools/call") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          content: [{ type: "text", text: `HTTP Echo: ${String((body.params as { arguments?: { text?: string } })?.arguments?.text ?? "")}` }]
+        }
+      });
+    }
+    if (method === "resources/list") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          resources: [{ uri: "memo://http", name: "http", mimeType: "text/plain" }]
+        }
+      });
+    }
+    if (method === "resources/read") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          content: [{ type: "text", text: "HTTP resource" }]
+        }
+      });
+    }
+    if (method === "prompts/list") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          prompts: [{ name: "http-draft", description: "HTTP draft" }]
+        }
+      });
+    }
+    if (method === "prompts/get") {
+      return fakeFetchResponse(200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          content: [{ type: "text", text: "HTTP prompt" }]
+        }
+      });
+    }
+
+    return fakeFetchResponse(200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {}
+    });
+  }
+});
+const httpEchoTool = httpMcpServers[0]?.tools.find((tool) => tool.name === "remote.echo");
+const httpResourceReadTool = httpMcpServers[0]?.tools.find((tool) => tool.name === "remote.resource.read");
+const httpPromptGetTool = httpMcpServers[0]?.tools.find((tool) => tool.name === "remote.prompt.get");
+const httpEchoResult = await httpEchoTool?.run({ text: "hello-http" });
+const httpResourceResult = await httpResourceReadTool?.run({ uri: "memo://http" });
+const httpPromptResult = await httpPromptGetTool?.run({ name: "http-draft" });
+await Promise.all(httpMcpServers.map((server) => server.stop()));
 const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
 const mcpDirectExitMarkerContent = await readFile(mcpDirectExitMarker, "utf8");
 assert(mcpSetupResult.config.mcpServers?.docs?.command === "/Users/ahnwy/.bun/bin/bun", "expected MCP setup to persist the stdio command");
 assert(mcpSetupResult.config.mcpServers?.docs?.args?.[0] === mcpServerScript, "expected MCP setup to persist command args");
 assert(loadedMcpConfig.mcp.servers.docs?.includeTools?.[0] === "echo", "expected MCP config to persist includeTools");
+assert(loadedMcpConfig.mcp.servers.docs?.tools?.include?.[0] === "echo", "expected MCP config to persist Hermes-style nested tool include");
 assert(mcpRuntimeTools.includes("mcp.docs.echo"), "expected MCP runtime to register filtered tool");
 assert(mcpRuntimeTools.includes("mcp.docs.resource.list"), "expected MCP runtime to register resource.list wrapper");
 assert(mcpRuntimeTools.includes("mcp.docs.resource.read"), "expected MCP runtime to register resource.read wrapper");
@@ -2145,6 +2274,21 @@ assert(directResourceResult?.ok === true, "expected direct MCP resource.read too
 assert(directResourceResult?.content.includes("Hello resource") === true, "expected direct MCP resource content");
 assert(directPromptResult?.ok === true, "expected direct MCP prompt.get tool to succeed");
 assert(directPromptResult?.content.includes("Prompt result") === true, "expected direct MCP prompt content");
+assert(httpMcpSetupResult.config.mcpServers?.remote?.transport === "http", "expected HTTP MCP setup to persist transport");
+assert(reloadedMcpConfig.mcp.servers.remote?.url === "https://mcp.example.test/http", "expected HTTP MCP config to persist url");
+assert(reloadedMcpConfig.mcp.servers.remote?.trust === "read-only-network", "expected HTTP MCP config to persist trust");
+assert(reloadedMcpConfig.mcp.servers.remote?.tools?.resources === true, "expected HTTP MCP config to persist nested resource visibility");
+assert(httpEchoTool?.riskClass === "read-only-network", "expected HTTP MCP tool trust to map to read-only-network");
+assert(httpResourceReadTool?.riskClass === "read-only-network", "expected HTTP MCP resource.read trust to map to read-only-network");
+assert(httpPromptGetTool?.riskClass === "read-only-network", "expected HTTP MCP prompt.get trust to map to read-only-network");
+assert(httpEchoResult?.ok === true, "expected HTTP MCP echo tool to succeed");
+assert(httpEchoResult?.content.includes("HTTP Echo: hello-http") === true, "expected HTTP MCP echo content");
+assert(httpResourceResult?.ok === true, "expected HTTP MCP resource.read tool to succeed");
+assert(httpResourceResult?.content.includes("HTTP resource") === true, "expected HTTP MCP resource content");
+assert(httpPromptResult?.ok === true, "expected HTTP MCP prompt.get tool to succeed");
+assert(httpPromptResult?.content.includes("HTTP prompt") === true, "expected HTTP MCP prompt content");
+assert(httpMcpRequests.some((request) => request.body.method === "initialize"), "expected HTTP MCP initialize request");
+assert(httpMcpRequests.some((request) => request.body.method === "tools/list"), "expected HTTP MCP tools/list request");
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");

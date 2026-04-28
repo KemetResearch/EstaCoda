@@ -50,8 +50,8 @@ Inside the session:
 Evidence level:
 
 - stdio MCP discovery/registration: `smoke-tested`
+- HTTP MCP discovery/registration: `smoke-tested`
 - MCP reload semantics: `smoke-tested`
-- HTTP MCP transport: `intended but not implemented`
 
 ## CLI Sanity Checks
 
@@ -233,7 +233,7 @@ At a high level:
 - Telegram image understanding on non-Kimi vision-capable providers
 - OpenRouter exactness-sensitive task fidelity
 - live memory-promotion behavior once implemented
-- live MCP server use against real third-party servers
+- live MCP server use against real third-party servers, especially remote HTTP servers
 - full operator pass after any major approval/channel changes
 
 ## Vision Route Sanity Check

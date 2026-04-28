@@ -157,19 +157,20 @@ Next:
 
 ### 8. MCP and ACP
 
-State: MCP client foundation exists; ACP is still not implemented.
+State: MCP client foundation now includes stdio + HTTP; ACP is still not implemented.
 
 Done:
 
 - stdio MCP client transport `smoke-tested`
+- HTTP MCP client transport `smoke-tested`
 - config-driven MCP server registration/discovery `smoke-tested`
 - MCP tool/resource/prompt discovery and registration into the normal runtime loop `smoke-tested`
 - reload semantics via `estacoda mcp reload` and `/reload-mcp` `smoke-tested`
+- per-server trust metadata now maps MCP tools into runtime risk classes `smoke-tested`
 - auxiliary provider routing still reserves an `mcp` task label `implemented`
 
 Next:
 
-- add MCP HTTP transport
 - add richer per-server trust/visibility controls
 - refine resource/prompt ergonomics
 - defer ACP until after MCP client and memory/session maturity
@@ -180,7 +181,7 @@ Next:
 The best next milestone is:
 
 1. **workflow-learning refinement**
-2. **MCP HTTP + trust/visibility expansion**
+2. **MCP trust/visibility refinement**
 3. **evaluation substrate expansion**
 4. **onboarding/distribution polish**
 5. **ACP/editor embedding only after MCP client and memory/session maturity**
@@ -314,23 +315,24 @@ What remains:
 
 ### 10. MCP / ACP
 
-State: MCP client foundation now exists; ACP does not.
+State: MCP client foundation now exists across stdio + HTTP; ACP does not.
 
 - stdio MCP client transport exists `smoke-tested`
+- HTTP MCP client transport exists `smoke-tested`
 - MCP config surface exists `smoke-tested`
 - MCP tool/resource/prompt discovery exists `smoke-tested`
 - reload semantics now exist:
   - `estacoda mcp reload`
   - `/reload-mcp`
   `smoke-tested`
+- per-server trust metadata exists and currently maps server trust to runtime risk classes `smoke-tested`
 - ACP adapter/server is still not implemented
-- MCP HTTP transport is still not implemented
 - current `mcp` auxiliary route remains a routing preference construct, not the protocol client itself
 
 What remains:
 
 - Phase 1: MCP client for stdio servers `done / smoke-tested`
-- Phase 2: MCP HTTP, trust/visibility controls, and richer resource/prompt ergonomics
+- Phase 2: trust/visibility refinement and richer resource/prompt ergonomics
 - Phase 3: ACP adapter/editor embedding after the runtime/tool/session surface is more mature
 - Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
 

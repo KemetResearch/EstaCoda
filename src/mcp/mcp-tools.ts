@@ -1,6 +1,6 @@
 import type { MCPServerConfig } from "../config/runtime-config.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import { MCPClient, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
+import type { RegisteredTool, ToolResult, ToolRiskClass } from "../contracts/tool.js";
+import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
 
 export type MCPServerSnapshot = {
   name: string;
@@ -23,6 +23,7 @@ export type LoadedMCPServer = {
 
 export async function loadMcpServers(input: {
   servers: Record<string, MCPServerConfig>;
+  fetch?: MCPFetchLike;
 }): Promise<LoadedMCPServer[]> {
   const loaded: LoadedMCPServer[] = [];
 
@@ -30,32 +31,38 @@ export async function loadMcpServers(input: {
     if (config.enabled === false) {
       continue;
     }
-    if ((config.transport ?? "stdio") !== "stdio") {
-      loaded.push(unavailableServer(name, config, "Only stdio MCP transport is implemented in this slice."));
+    const transport = config.transport ?? "stdio";
+    if (transport === "stdio" && (typeof config.command !== "string" || config.command.trim().length === 0)) {
+      loaded.push(unavailableServer(name, config, "MCP stdio server requires a command."));
       continue;
     }
-    if (typeof config.command !== "string" || config.command.trim().length === 0) {
-      loaded.push(unavailableServer(name, config, "MCP stdio server requires a command."));
+    if (transport === "http" && (typeof config.url !== "string" || config.url.trim().length === 0)) {
+      loaded.push(unavailableServer(name, config, "MCP HTTP server requires a url."));
       continue;
     }
 
     const client = new MCPClient({
       name,
+      transport,
       command: config.command,
       args: config.args,
       cwd: config.cwd,
       env: config.env,
-      timeoutMs: config.timeoutMs
+      url: config.url,
+      headers: config.headers,
+      timeoutMs: config.timeoutMs,
+      connectTimeoutMs: config.connectTimeoutMs,
+      fetch: input.fetch
     });
 
     try {
       await client.start();
       const allTools = await client.listTools();
       const filteredTools = filterTools(allTools, config);
-      const resources = config.exposeResources === true && client.capabilities.resources !== undefined
+      const resources = resourcesEnabled(config) && client.capabilities.resources !== undefined
         ? await client.listResources().catch(() => [])
         : [];
-      const prompts = config.exposePrompts === true && client.capabilities.prompts !== undefined
+      const prompts = promptsEnabled(config) && client.capabilities.prompts !== undefined
         ? await client.listPrompts().catch(() => [])
         : [];
       const tools = [
@@ -70,7 +77,7 @@ export async function loadMcpServers(input: {
         tools,
         snapshot: {
           name,
-          transport: config.transport ?? "stdio",
+          transport,
           toolCount: filteredTools.length,
           resourceCount: resources.length,
           promptCount: prompts.length,
@@ -123,7 +130,7 @@ function createMcpTool(
       type: "object",
       additionalProperties: true
     },
-    riskClass: "external-side-effect",
+    riskClass: config.toolRiskClass ?? defaultMcpRisk(config, client.transport, "tool"),
     toolsets: ["mcp"],
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
@@ -149,7 +156,7 @@ function createResourceTools(
         type: "object",
         properties: {}
       },
-      riskClass: "read-only-local",
+      riskClass: listWrapperRisk(client.transport),
       toolsets: ["mcp"],
       progressLabel: `listing MCP resources`,
       maxResultSizeChars: 12_000,
@@ -174,7 +181,7 @@ function createResourceTools(
         },
         required: ["uri"]
       },
-      riskClass: "external-side-effect",
+      riskClass: config.resourceReadRiskClass ?? defaultMcpRisk(config, client.transport, "resource"),
       toolsets: ["mcp"],
       progressLabel: `reading MCP resource`,
       maxResultSizeChars: 12_000,
@@ -207,7 +214,7 @@ function createPromptTools(
         type: "object",
         properties: {}
       },
-      riskClass: "read-only-local",
+      riskClass: listWrapperRisk(client.transport),
       toolsets: ["mcp"],
       progressLabel: `listing MCP prompts`,
       maxResultSizeChars: 12_000,
@@ -236,7 +243,7 @@ function createPromptTools(
         },
         required: ["name"]
       },
-      riskClass: "external-side-effect",
+      riskClass: config.promptGetRiskClass ?? defaultMcpRisk(config, client.transport, "prompt"),
       toolsets: ["mcp"],
       progressLabel: `getting MCP prompt`,
       maxResultSizeChars: 12_000,
@@ -255,19 +262,46 @@ function createPromptTools(
   ];
 }
 
+function defaultMcpRisk(
+  config: MCPServerConfig,
+  transport: "stdio" | "http",
+  target: "tool" | "resource" | "prompt"
+): ToolRiskClass {
+  const trust = config.trust ?? "conservative";
+
+  if (trust === "read-only-local") {
+    return "read-only-local";
+  }
+
+  if (trust === "read-only-network") {
+    return "read-only-network";
+  }
+
+  if (target === "resource" && transport === "http") {
+    return "read-only-network";
+  }
+
+  return "external-side-effect";
+}
+
+function listWrapperRisk(transport: "stdio" | "http"): ToolRiskClass {
+  return transport === "http" ? "read-only-network" : "read-only-local";
+}
+
 function prefixTool(serverName: string, config: MCPServerConfig, toolName: string): string {
-  if (config.toolPrefix === false) {
+  const toolPrefix = config.toolPrefix ?? config.tools?.prefix;
+  if (toolPrefix === false) {
     return toolName;
   }
-  if (typeof config.toolPrefix === "string" && config.toolPrefix.trim().length > 0) {
-    return `${config.toolPrefix.trim()}.${toolName}`;
+  if (typeof toolPrefix === "string" && toolPrefix.trim().length > 0) {
+    return `${toolPrefix.trim()}.${toolName}`;
   }
   return `mcp.${serverName}.${toolName}`;
 }
 
 function filterTools(tools: MCPToolDescriptor[], config: MCPServerConfig): MCPToolDescriptor[] {
-  const include = new Set(config.includeTools ?? []);
-  const exclude = new Set(config.excludeTools ?? []);
+  const include = new Set(config.includeTools ?? config.tools?.include ?? []);
+  const exclude = new Set(config.excludeTools ?? config.tools?.exclude ?? []);
   return tools.filter((tool) => {
     if (include.size > 0 && !include.has(tool.name)) {
       return false;
@@ -277,6 +311,14 @@ function filterTools(tools: MCPToolDescriptor[], config: MCPServerConfig): MCPTo
     }
     return true;
   });
+}
+
+function resourcesEnabled(config: MCPServerConfig): boolean {
+  return config.exposeResources ?? config.tools?.resources ?? false;
+}
+
+function promptsEnabled(config: MCPServerConfig): boolean {
+  return config.exposePrompts ?? config.tools?.prompts ?? false;
 }
 
 function normalizeMcpResult(result: unknown): ToolResult {

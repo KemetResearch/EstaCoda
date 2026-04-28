@@ -523,7 +523,8 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp status",
         "  estacoda mcp reload",
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
-        "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch"
+        "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
+        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --trust read-only-network"
       ].join("\n")
     };
   }
@@ -554,7 +555,9 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
                 `${name}`,
                 `  status: ${status}`,
                 `  transport: ${server.transport ?? "stdio"}`,
+                `  trust: ${server.trust ?? "conservative"}`,
                 server.command === undefined ? undefined : `  command: ${server.command}`,
+                server.url === undefined ? undefined : `  url: ${server.url}`,
                 server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
                 server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
                 snapshot === undefined ? undefined : `  discovered tools: ${snapshot.toolCount}, resources: ${snapshot.resourceCount}, prompts: ${snapshot.promptCount}`,
@@ -607,7 +610,9 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
       `Configured MCP server ${parsed.name}.`,
       `Config: ${result.path}`,
       `Transport: ${parsed.transport ?? "stdio"}`,
+      `Trust: ${parsed.trust ?? "conservative"}`,
       parsed.command === undefined ? undefined : `Command: ${parsed.command}`,
+      parsed.url === undefined ? undefined : `URL: ${parsed.url}`,
       parsed.args === undefined ? undefined : `Args: ${parsed.args.join(" ") || "(none)"}`,
       parsed.cwd === undefined ? undefined : `CWD: ${parsed.cwd}`,
       "Next: run estacoda mcp status, estacoda mcp reload, or /reload-mcp in an interactive session."
@@ -884,6 +889,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--url") {
       parsed.url = next;
       index += 1;
+    } else if (arg === "--trust") {
+      parsed.trust = next as MCPSetupInput["trust"];
+      index += 1;
     } else if (arg === "--include-tools") {
       parsed.includeTools = (next ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0);
       index += 1;
@@ -904,6 +912,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--timeout-ms") {
       parsed.timeoutMs = Number.parseInt(next ?? "", 10);
       index += 1;
+    } else if (arg === "--connect-timeout-ms") {
+      parsed.connectTimeoutMs = Number.parseInt(next ?? "", 10);
+      index += 1;
     } else if (arg === "--project") {
       parsed.scope = "project";
     } else if (arg === "--user") {
@@ -913,6 +924,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
 
   if (Number.isNaN(parsed.timeoutMs)) {
     parsed.timeoutMs = undefined;
+  }
+  if (Number.isNaN(parsed.connectTimeoutMs)) {
+    parsed.connectTimeoutMs = undefined;
   }
 
   return parsed;

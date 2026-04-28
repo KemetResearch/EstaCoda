@@ -169,7 +169,9 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                     `${name}`,
                     `  enabled: ${server.enabled === false ? "no" : "yes"}`,
                     `  transport: ${server.transport ?? "stdio"}`,
+                    `  trust: ${server.trust ?? "conservative"}`,
                     server.command === undefined ? undefined : `  command: ${server.command}`,
+                    server.url === undefined ? undefined : `  url: ${server.url}`,
                     server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
                     server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`
                   ].filter((line) => line !== undefined).join("\n")
@@ -194,12 +196,15 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           command: { type: "string" },
           args: { type: "array", items: { type: "string" } },
           cwd: { type: "string" },
+          url: { type: "string" },
           includeTools: { type: "array", items: { type: "string" } },
           excludeTools: { type: "array", items: { type: "string" } },
           exposeResources: { type: "boolean" },
           exposePrompts: { type: "boolean" },
           toolPrefix: { anyOf: [{ type: "string" }, { type: "boolean" }] },
           timeoutMs: { type: "number" },
+          connectTimeoutMs: { type: "number" },
+          trust: { type: "string", enum: ["conservative", "read-only-network", "read-only-local"] },
           enabled: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] }
         },
@@ -221,7 +226,9 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Configured MCP server ${input.name}.`,
             `Wrote ${result.path}.`,
             `Transport: ${input.transport ?? "stdio"}`,
+            `Trust: ${input.trust ?? "conservative"}`,
             input.command === undefined ? undefined : `Command: ${input.command}`,
+            input.url === undefined ? undefined : `URL: ${input.url}`,
             input.args === undefined ? undefined : `Args: ${input.args.join(" ") || "(none)"}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
