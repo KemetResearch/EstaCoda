@@ -60,6 +60,7 @@ async function buildRuntime(input: {
     providerRegistry: latestConfig.providerRegistry,
     credentialPools: latestConfig.credentialPools,
     auxiliaryProviders: latestConfig.auxiliaryProviders,
+    mcpServers: latestConfig.mcp.servers,
     browser: latestConfig.browser,
     telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
@@ -81,15 +82,16 @@ const command = await runCliCommand({
 
 if (command.handled) {
   console.log(command.output);
+  await runtime.dispose();
   process.exit(command.exitCode);
 }
 
 if (argv.length === 0 && canRunInteractive()) {
   await runSessionLoop({
     runtime,
-    refreshRuntime: async () => {
+    refreshRuntime: async (options) => {
       const nextRuntime = await buildRuntime({
-        sessionId: randomUUID(),
+        sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),
         sessionDb: runtime.sessionDb
       });
       await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
@@ -104,6 +106,7 @@ if (argv.length === 0 && canRunInteractive()) {
       return nextRuntime;
     }
   });
+  await runtime.dispose();
   process.exit(0);
 }
 
@@ -114,8 +117,10 @@ const oneShot = await runOneShotPrompt({
 
 if (oneShot.handled) {
   console.log(oneShot.output);
+  await runtime.dispose();
   process.exit(oneShot.exitCode);
 }
 
 console.log(runtime.describe());
 console.log(`config sources: ${config.sources.join(", ") || "none"}`);
+await runtime.dispose();

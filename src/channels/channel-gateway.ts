@@ -237,21 +237,20 @@ export class ChannelGateway {
       ? await this.#trustedWorkspace(message)
       : this.#trustedWorkspace;
     const response = await runtime.handle({
-        text: message.text,
-        attachments: message.attachments,
-        channel: message.channel,
-        trustedWorkspace,
-        signal: controller.signal,
-        onEvent: async (event) => {
-          progressCount += 1;
-          await adapter.delivery?.sendProgress?.(normalizedSessionKey, event);
-        }
-      })
-      .finally(() => {
-        if (this.#activeTurns.get(activeTurnKey) === controller) {
-          this.#activeTurns.delete(activeTurnKey);
-        }
-      });
+      text: message.text,
+      attachments: message.attachments,
+      channel: message.channel,
+      trustedWorkspace,
+      signal: controller.signal,
+      onEvent: async (event) => {
+        progressCount += 1;
+        await adapter.delivery?.sendProgress?.(normalizedSessionKey, event);
+      }
+    }).finally(() => {
+      if (this.#activeTurns.get(activeTurnKey) === controller) {
+        this.#activeTurns.delete(activeTurnKey);
+      }
+    });
 
     const pendingApproval = firstPendingApproval(response.toolExecutions, message, sessionId);
     if (pendingApproval !== undefined) {
@@ -260,43 +259,47 @@ export class ChannelGateway {
       this.#pendingApprovals.delete(activeTurnKey);
     }
 
-    await adapter.delivery?.sendText(normalizedSessionKey, response.text);
-    await adapter.send?.({
-      conversationId: message.sessionKey.chatId,
-      sessionKey: normalizedSessionKey,
-      text: response.text,
-      artifacts: response.artifacts
-    });
-
-    for (const artifact of response.artifacts) {
-      await adapter.delivery?.sendArtifact?.(normalizedSessionKey, artifact);
-    }
-
-    if (pendingApproval !== undefined) {
-      const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
-      await adapter.delivery?.sendText(
-        normalizedSessionKey,
-        approvalPrompt,
-        adapter.kind === "telegram"
-          ? {
-              format: "html",
-              actions: approvalActions()
-            }
-          : undefined
-      );
+    try {
+      await adapter.delivery?.sendText(normalizedSessionKey, response.text);
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
-        text: approvalPrompt
+        text: response.text,
+        artifacts: response.artifacts
       });
-    }
 
-    return {
-      sessionId,
-      replyText: response.text,
-      artifactCount: response.artifacts.length,
-      progressCount
-    };
+      for (const artifact of response.artifacts) {
+        await adapter.delivery?.sendArtifact?.(normalizedSessionKey, artifact);
+      }
+
+      if (pendingApproval !== undefined) {
+        const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
+        await adapter.delivery?.sendText(
+          normalizedSessionKey,
+          approvalPrompt,
+          adapter.kind === "telegram"
+            ? {
+                format: "html",
+                actions: approvalActions()
+              }
+            : undefined
+        );
+        await adapter.send?.({
+          conversationId: message.sessionKey.chatId,
+          sessionKey: normalizedSessionKey,
+          text: approvalPrompt
+        });
+      }
+
+      return {
+        sessionId,
+        replyText: response.text,
+        artifactCount: response.artifacts.length,
+        progressCount
+      };
+    } finally {
+      await runtime.dispose();
+    }
   }
 
   async #handleCommand(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
@@ -317,6 +320,7 @@ export class ChannelGateway {
         "/search <query> - search session history",
         "/new - start a fresh session",
         "/reset - alias for /new",
+        "/reload-mcp - reload MCP config for future turns in this chat",
         "/commands - show the Telegram command menu",
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
@@ -366,24 +370,28 @@ export class ChannelGateway {
           await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
-      const promotions = await runtime.inspectMemoryPromotions();
-      const text = promotions.length === 0
-        ? "No promoted memory conclusions found."
-        : [
-            "Promoted memory conclusions",
-            ...promotions.map((record, index) => {
-              const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
-              const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
-              return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
-            })
-          ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
-      return {
-        sessionId,
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+      try {
+        const promotions = await runtime.inspectMemoryPromotions();
+        const text = promotions.length === 0
+          ? "No promoted memory conclusions found."
+          : [
+              "Promoted memory conclusions",
+              ...promotions.map((record, index) => {
+                const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
+                const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
+                return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
+              })
+            ].join("\n");
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/sessions") {
@@ -399,26 +407,30 @@ export class ChannelGateway {
           await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
-      const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
-      const sessions = (await runtime.sessionDb.listSessions("default"))
-        .filter((session) => session.id === sessionId || session.id.startsWith(prefix))
-        .slice(0, 10);
-      const text = sessions.length === 0
-        ? "No sessions found for this chat."
-        : [
-            "Recent sessions for this chat",
-            ...sessions.map((session, index) =>
-              `${index + 1}. ${session.id}${session.id === sessionId ? " (active)" : ""}${session.updatedAt ? ` — updated ${session.updatedAt}` : ""}`
-            )
-          ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      try {
+        const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
+        const sessions = (await runtime.sessionDb.listSessions("default"))
+          .filter((session) => session.id === sessionId || session.id.startsWith(prefix))
+          .slice(0, 10);
+        const text = sessions.length === 0
+          ? "No sessions found for this chat."
+          : [
+              "Recent sessions for this chat",
+              ...sessions.map((session, index) =>
+                `${index + 1}. ${session.id}${session.id === sessionId ? " (active)" : ""}${session.updatedAt ? ` — updated ${session.updatedAt}` : ""}`
+              )
+            ].join("\n");
+        await adapter.delivery?.sendText(message.sessionKey, text);
 
-      return {
-        sessionId,
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/resume") {
@@ -434,21 +446,25 @@ export class ChannelGateway {
           await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
-      const resumeNote = await runtime.latestResumeNote();
-      const text = resumeNote === undefined
-        ? "No interrupted turn is available to resume for this chat."
-        : [
-            "Latest interrupted turn",
-            resumeNote
-          ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      try {
+        const resumeNote = await runtime.latestResumeNote();
+        const text = resumeNote === undefined
+          ? "No interrupted turn is available to resume for this chat."
+          : [
+              "Latest interrupted turn",
+              resumeNote
+            ].join("\n");
+        await adapter.delivery?.sendText(message.sessionKey, text);
 
-      return {
-        sessionId,
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/new" || command === "/reset") {
@@ -468,6 +484,38 @@ export class ChannelGateway {
         artifactCount: 0,
         progressCount: 0
       };
+    }
+
+    if (command === "/reload-mcp") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      try {
+        const snapshots = runtime.inspectMcpServers();
+        const ready = snapshots.filter((snapshot) => snapshot.available).length;
+        const text = snapshots.length === 0
+          ? "Reloaded MCP configuration. No MCP servers are configured for this runtime."
+          : `Reloaded MCP configuration. MCP servers ready: ${ready}/${snapshots.length}.`;
+        await adapter.delivery?.sendText(message.sessionKey, text);
+
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/commands") {
@@ -510,33 +558,37 @@ export class ChannelGateway {
           await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
-      const targetSession = await runtime.sessionDb.getSession(targetSessionId);
-      if (targetSession === undefined) {
-        const text = `Session not found: ${targetSessionId}`;
+      try {
+        const targetSession = await runtime.sessionDb.getSession(targetSessionId);
+        if (targetSession === undefined) {
+          const text = `Session not found: ${targetSessionId}`;
+          await adapter.delivery?.sendText(message.sessionKey, text);
+          return {
+            sessionId: currentSessionId,
+            replyText: text,
+            artifactCount: 0,
+            progressCount: 0
+          };
+        }
+
+        await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
+        const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+        this.#pendingApprovals.delete(key);
+        this.#approvalGrants.delete(key);
+        const text = [
+          "Switched this chat to an existing session.",
+          `Session: ${targetSessionId}`
+        ].join("\n");
         await adapter.delivery?.sendText(message.sessionKey, text);
         return {
-          sessionId: currentSessionId,
+          sessionId: targetSessionId,
           replyText: text,
           artifactCount: 0,
           progressCount: 0
         };
+      } finally {
+        await runtime.dispose();
       }
-
-      await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
-      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-      this.#pendingApprovals.delete(key);
-      this.#approvalGrants.delete(key);
-      const text = [
-        "Switched this chat to an existing session.",
-        `Session: ${targetSessionId}`
-      ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
-      return {
-        sessionId: targetSessionId,
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
     }
 
     if (command === "/search") {
@@ -563,25 +615,29 @@ export class ChannelGateway {
           await this.#approvalStore.listForSession(normalizedSessionKey)
         )
       });
-      const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
-      const matches = (await runtime.sessionDb.search(query, { profileId: "default", limit: 20 }))
-        .filter((result) => result.session.id.startsWith(prefix))
-        .slice(0, 5);
-      const text = matches.length === 0
-        ? `No matching session history for "${query}".`
-        : [
-            `Search results for "${query}"`,
-            ...matches.map((result, index) =>
-              `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
-            )
-          ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
-      return {
-        sessionId,
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+      try {
+        const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
+        const matches = (await runtime.sessionDb.search(query, { profileId: "default", limit: 20 }))
+          .filter((result) => result.session.id.startsWith(prefix))
+          .slice(0, 5);
+        const text = matches.length === 0
+          ? `No matching session history for "${query}".`
+          : [
+              `Search results for "${query}"`,
+              ...matches.map((result, index) =>
+                `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
+              )
+            ].join("\n");
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/approve") {
@@ -875,7 +931,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -887,6 +943,7 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/search" ||
     token === "/new" ||
     token === "/reset" ||
+    token === "/reload-mcp" ||
     token === "/resume" ||
     token === "/stop" ||
     token === "/approve" ||

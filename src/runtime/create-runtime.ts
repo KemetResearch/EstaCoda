@@ -16,6 +16,8 @@ import { createMemoryTool } from "../memory/memory-tool.js";
 import { renderMemorySnapshot } from "../memory/memory-renderer.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
+import type { MCPServerConfig } from "../config/runtime-config.js";
+import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
@@ -63,6 +65,7 @@ export type RuntimeOptions = {
   personalSkillsRoot?: string;
   projectSkillsRoot?: string;
   externalSkillRoots?: string[];
+  mcpServers?: Record<string, MCPServerConfig>;
   skillAutonomy?: SkillAutonomy;
   skillConfig?: Record<string, Record<string, unknown>>;
   trustStore?: WorkspaceTrustStore;
@@ -99,10 +102,12 @@ export type Runtime = {
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
+  inspectMcpServers(): MCPServerSnapshot[];
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
+  dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
 };
@@ -159,6 +164,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const loadedOfficialSkills = await loadSkillsFromDirectory(new URL("../../skills/official", import.meta.url).pathname, {
     sourceKind: "official"
   });
+  const loadedMcpServers = await loadMcpServers({
+    servers: options.mcpServers ?? {}
+  });
 
   if (loadedOfficialSkills.errors.length > 0) {
     throw new Error(
@@ -170,6 +178,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   for (const skill of loadedOfficialSkills.skills) {
     skillRegistry.register(skill);
+  }
+  for (const server of loadedMcpServers) {
+    for (const tool of server.tools) {
+      toolRegistry.register(tool);
+    }
   }
   for (const root of [personalSkillsRoot, projectSkillsRoot, ...(options.externalSkillRoots ?? [])]) {
     const loaded = await loadSkillsFromDirectory(root, {
@@ -405,6 +418,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];
     },
+    inspectMcpServers() {
+      return loadedMcpServers.map((server) => structuredClone(server.snapshot));
+    },
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot, { profileId });
       activeTrustedWorkspace = trustedWorkspace;
@@ -426,6 +442,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     revokeWorkspaceTrust() {
       return trustStore.revoke(workspaceRoot, { profileId });
     },
+    async dispose() {
+      await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
+    },
     describe() {
       const memorySnapshot = memoryStore.snapshot();
       const renderedMemory = renderMemorySnapshot(memorySnapshot);
@@ -439,6 +458,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `provider fallbacks: ${providerRoute === undefined ? 0 : providerRoute.fallbacks.length}`,
         `auxiliary routes: ${auxiliaryRoutes.length === 0 ? "unavailable" : summarizeAuxiliaryRoutes(auxiliaryRoutes)}`,
         `tools: ${toolRegistry.list().length}`,
+        `mcp servers: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         `skills: ${sessionSkillCatalog.length}`,
         `skill autonomy: ${options.skillAutonomy ?? "suggest"}`,
         `project context files: ${projectContext.files.length}`,

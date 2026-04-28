@@ -157,19 +157,21 @@ Next:
 
 ### 8. MCP and ACP
 
-State: not implemented yet beyond a reserved routing slot.
+State: MCP client foundation exists; ACP is still not implemented.
 
 Done:
 
-- auxiliary provider routing already reserves an `mcp` task label `implemented but not protocol-backed`
+- stdio MCP client transport `smoke-tested`
+- config-driven MCP server registration/discovery `smoke-tested`
+- MCP tool/resource/prompt discovery and registration into the normal runtime loop `smoke-tested`
+- reload semantics via `estacoda mcp reload` and `/reload-mcp` `smoke-tested`
+- auxiliary provider routing still reserves an `mcp` task label `implemented`
 
 Next:
 
-- finish memory promotion before protocol expansion
-- build an MCP client first, starting with stdio servers
-- add config-driven MCP server registration/discovery
-- expose discovered MCP tools into the normal tool/runtime loop
-- later add MCP HTTP transport, filtering, and resource/prompt support
+- add MCP HTTP transport
+- add richer per-server trust/visibility controls
+- refine resource/prompt ergonomics
 - defer ACP until after MCP client and memory/session maturity
 - treat MCP server bridging as later than MCP client and ACP
 
@@ -178,7 +180,7 @@ Next:
 The best next milestone is:
 
 1. **workflow-learning refinement**
-2. **MCP client foundation (stdio first)**
+2. **MCP HTTP + trust/visibility expansion**
 3. **evaluation substrate expansion**
 4. **onboarding/distribution polish**
 5. **ACP/editor embedding only after MCP client and memory/session maturity**
@@ -312,18 +314,23 @@ What remains:
 
 ### 10. MCP / ACP
 
-State: not meaningfully built.
+State: MCP client foundation now exists; ACP does not.
 
-- no MCP client transport
-- no MCP config surface
-- no MCP tool/resource discovery
-- no ACP adapter/server
-- current `mcp` auxiliary route is only a reserved routing label, not protocol support
+- stdio MCP client transport exists `smoke-tested`
+- MCP config surface exists `smoke-tested`
+- MCP tool/resource/prompt discovery exists `smoke-tested`
+- reload semantics now exist:
+  - `estacoda mcp reload`
+  - `/reload-mcp`
+  `smoke-tested`
+- ACP adapter/server is still not implemented
+- MCP HTTP transport is still not implemented
+- current `mcp` auxiliary route remains a routing preference construct, not the protocol client itself
 
 What remains:
 
-- Phase 1: MCP client for stdio servers
-- Phase 2: MCP HTTP, filtering, prompts/resources, and richer registration
+- Phase 1: MCP client for stdio servers `done / smoke-tested`
+- Phase 2: MCP HTTP, trust/visibility controls, and richer resource/prompt ergonomics
 - Phase 3: ACP adapter/editor embedding after the runtime/tool/session surface is more mature
 - Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
 

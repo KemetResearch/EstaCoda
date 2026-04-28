@@ -26,6 +26,33 @@ Evidence level:
 - `typecheck`: compile guard only
 - `smoke`: `smoke-tested`
 
+## MCP Checks
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run dev -- mcp status
+/Users/ahnwy/.bun/bin/bun run dev -- mcp reload
+```
+
+Interactive CLI:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run dev
+```
+
+Inside the session:
+
+- `/reload-mcp`
+- `/tools`
+- `/skills`
+
+Evidence level:
+
+- stdio MCP discovery/registration: `smoke-tested`
+- MCP reload semantics: `smoke-tested`
+- HTTP MCP transport: `intended but not implemented`
+
 ## CLI Sanity Checks
 
 ```bash
@@ -110,6 +137,7 @@ Inside the interactive CLI:
 - `/search <query>`
 - `/switch <session-id>`
 - `/reset`
+- `/reload-mcp`
 - exit and relaunch `bun run dev` to confirm the active workspace session resumes
 
 ## Telegram Checks
@@ -145,6 +173,7 @@ Useful chat checks:
 - send a message, then `/new`, then another message
 - restart the gateway, then send another message in the same chat
 - confirm the chat stays on the fresh post-`/new` session rather than silently falling back
+- change MCP config, then send `/reload-mcp` to confirm the new runtime snapshot sees the latest server state
 
 ### Text checks
 
@@ -197,12 +226,14 @@ At a high level:
 - persisted channel session context and restart continuity
 - Telegram DM/group/thread session-key policy
 - gateway auto-reset session lifecycle policy
+- stdio MCP discovery, registration, and reload semantics
 
 ## What Still Needs Live Validation
 
 - Telegram image understanding on non-Kimi vision-capable providers
 - OpenRouter exactness-sensitive task fidelity
 - live memory-promotion behavior once implemented
+- live MCP server use against real third-party servers
 - full operator pass after any major approval/channel changes
 
 ## Vision Route Sanity Check

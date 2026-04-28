@@ -1,11 +1,13 @@
 import type { RegisteredTool } from "../contracts/tool.js";
 import {
   loadRuntimeConfig,
+  setupMcpConfig,
   setupBrowserConfig,
   setupProviderConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
+  type MCPSetupInput,
   type ProviderSetupInput,
   type TelegramSetupInput,
   type WebSetupInput
@@ -133,6 +135,98 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           metadata: {
             path: result.path,
             browser: result.config.browser
+          }
+        };
+      }
+    },
+    {
+      name: "config.mcp.status",
+      description: "Show configured MCP servers and config sources.",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "mcp"],
+      progressLabel: "checking MCP config",
+      maxResultSizeChars: 5000,
+      isAvailable: () => true,
+      run: async () => {
+        const loaded = await loadRuntimeConfig(options);
+        const servers = Object.entries(loaded.mcp.servers);
+        return {
+          ok: true,
+          content: servers.length === 0
+            ? [
+                "MCP servers",
+                "No MCP servers configured.",
+                `Config sources: ${loaded.sources.join(", ") || "none"}`
+              ].join("\n")
+            : [
+                "MCP servers",
+                ...servers.map(([name, server]) =>
+                  [
+                    `${name}`,
+                    `  enabled: ${server.enabled === false ? "no" : "yes"}`,
+                    `  transport: ${server.transport ?? "stdio"}`,
+                    server.command === undefined ? undefined : `  command: ${server.command}`,
+                    server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
+                    server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`
+                  ].filter((line) => line !== undefined).join("\n")
+                ),
+                `Config sources: ${loaded.sources.join(", ") || "none"}`
+              ].join("\n"),
+          metadata: {
+            servers: loaded.mcp.servers,
+            sources: loaded.sources
+          }
+        };
+      }
+    },
+    {
+      name: "config.mcp.setup",
+      description: "Configure an MCP server entry for EstaCoda runtime discovery.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          transport: { type: "string", enum: ["stdio", "http"] },
+          command: { type: "string" },
+          args: { type: "array", items: { type: "string" } },
+          cwd: { type: "string" },
+          includeTools: { type: "array", items: { type: "string" } },
+          excludeTools: { type: "array", items: { type: "string" } },
+          exposeResources: { type: "boolean" },
+          exposePrompts: { type: "boolean" },
+          toolPrefix: { anyOf: [{ type: "string" }, { type: "boolean" }] },
+          timeoutMs: { type: "number" },
+          enabled: { type: "boolean" },
+          scope: { type: "string", enum: ["user", "project"] }
+        },
+        required: ["name"]
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core", "mcp"],
+      progressLabel: "configuring MCP",
+      maxResultSizeChars: 5000,
+      isAvailable: () => true,
+      run: async (input: MCPSetupInput) => {
+        const result = await setupMcpConfig({
+          ...options,
+          input
+        });
+        return {
+          ok: true,
+          content: [
+            `Configured MCP server ${input.name}.`,
+            `Wrote ${result.path}.`,
+            `Transport: ${input.transport ?? "stdio"}`,
+            input.command === undefined ? undefined : `Command: ${input.command}`,
+            input.args === undefined ? undefined : `Args: ${input.args.join(" ") || "(none)"}`
+          ].filter((line) => line !== undefined).join("\n"),
+          metadata: {
+            path: result.path,
+            servers: result.config.mcpServers
           }
         };
       }

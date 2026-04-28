@@ -212,28 +212,32 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     onStopRequested: async () => {
       await adapter.stop();
     },
-    runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({
-      theme: kemetBlueTheme,
-      model: config.model,
-      workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      userConfigPath: options.userConfigPath,
-      projectConfigPath: options.projectConfigPath,
-      sessionId,
-      profileId: "default",
-      sessionDb,
-      externalSkillRoots: config.skills.externalDirs,
-      skillAutonomy: config.skills.autonomy,
-      skillConfig: config.skills.config,
-      providerRegistry: config.providerRegistry,
-      credentialPools: config.credentialPools,
-      auxiliaryProviders: config.auxiliaryProviders,
-      securityPolicy,
-      browser: config.browser,
-      telegramReady: config.channels.telegram.ready,
-      enableWebNetwork: config.web.enableNetwork,
-      webMaxContentChars: config.web.maxContentChars
-    })
+    runtimeForSession: async ({ sessionId, securityPolicy }) => {
+      const latestConfig = await loadRuntimeConfig(options);
+      return createRuntime({
+        theme: kemetBlueTheme,
+        model: latestConfig.model,
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        sessionId,
+        profileId: "default",
+        sessionDb,
+        externalSkillRoots: latestConfig.skills.externalDirs,
+        skillAutonomy: latestConfig.skills.autonomy,
+        skillConfig: latestConfig.skills.config,
+        providerRegistry: latestConfig.providerRegistry,
+        credentialPools: latestConfig.credentialPools,
+        auxiliaryProviders: latestConfig.auxiliaryProviders,
+        mcpServers: latestConfig.mcp.servers,
+        securityPolicy,
+        browser: latestConfig.browser,
+        telegramReady: latestConfig.channels.telegram.ready,
+        enableWebNetwork: latestConfig.web.enableNetwork,
+        webMaxContentChars: latestConfig.web.maxContentChars
+      });
+    }
   });
   let polls = 0;
   let processed = 0;

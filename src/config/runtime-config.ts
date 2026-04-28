@@ -13,7 +13,25 @@ import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-
 import { inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
+
+export type MCPServerConfig = {
+  enabled?: boolean;
+  transport?: MCPServerTransport;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  includeTools?: string[];
+  excludeTools?: string[];
+  exposeResources?: boolean;
+  exposePrompts?: boolean;
+  toolPrefix?: string | boolean;
+  timeoutMs?: number;
+};
 
 export type EstaCodaConfig = {
   model?: {
@@ -44,6 +62,8 @@ export type EstaCodaConfig = {
     launchCommand?: string;
     autoLaunch?: boolean;
   };
+  mcpServers?: Record<string, MCPServerConfig>;
+  mcp_servers?: Record<string, MCPServerConfig>;
   skills?: {
     externalDirs?: string[];
     autonomy?: SkillAutonomy;
@@ -90,6 +110,9 @@ export type LoadedRuntimeConfig = {
     launchCommand?: string;
     autoLaunch: boolean;
   };
+  mcp: {
+    servers: Record<string, MCPServerConfig>;
+  };
   skills: {
     externalDirs: string[];
     autonomy: SkillAutonomy;
@@ -125,6 +148,25 @@ export type BrowserSetupInput = {
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
+  scope?: "user" | "project";
+};
+
+export type MCPSetupInput = {
+  name: string;
+  enabled?: boolean;
+  transport?: MCPServerTransport;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  includeTools?: string[];
+  excludeTools?: string[];
+  exposeResources?: boolean;
+  exposePrompts?: boolean;
+  toolPrefix?: string | boolean;
+  timeoutMs?: number;
   scope?: "user" | "project";
 };
 
@@ -189,6 +231,9 @@ export async function loadRuntimeConfig(options: {
       launchCommand: config.browser?.launchCommand,
       autoLaunch: config.browser?.autoLaunch ?? false
     },
+    mcp: {
+      servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, options.homeDir)
+    },
     skills: {
       externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir),
       autonomy: config.skills?.autonomy ?? "suggest",
@@ -230,6 +275,12 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(merged.browser ?? {}),
       ...(config.browser ?? {})
     },
+    mcpServers: {
+      ...(merged.mcpServers ?? {}),
+      ...(merged.mcp_servers ?? {}),
+      ...(config.mcpServers ?? {}),
+      ...(config.mcp_servers ?? {})
+    },
     skills: {
       ...(merged.skills ?? {}),
       externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs,
@@ -260,6 +311,45 @@ function normalizeSkillConfig(value: unknown): Record<string, Record<string, unk
     if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
       normalized[skillName] = { ...entry };
     }
+  }
+  return normalized;
+}
+
+function normalizeMcpServers(
+  value: unknown,
+  homeDir?: string
+): Record<string, MCPServerConfig> {
+  if (value === undefined || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, MCPServerConfig> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+
+    const record = entry as Record<string, unknown>;
+    normalized[name] = {
+      enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+      transport: record.transport === "http" || record.transport === "stdio" ? record.transport : undefined,
+      command: typeof record.command === "string" ? record.command : undefined,
+      args: Array.isArray(record.args) ? record.args.filter((arg): arg is string => typeof arg === "string") : undefined,
+      cwd: typeof record.cwd === "string" ? expandConfiguredPath(record.cwd, homeDir) : undefined,
+      env: typeof record.env === "object" && record.env !== null && !Array.isArray(record.env)
+        ? Object.fromEntries(Object.entries(record.env).filter(([, envValue]) => typeof envValue === "string") as Array<[string, string]>)
+        : undefined,
+      url: typeof record.url === "string" ? record.url : undefined,
+      headers: typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
+        ? Object.fromEntries(Object.entries(record.headers).filter(([, headerValue]) => typeof headerValue === "string") as Array<[string, string]>)
+        : undefined,
+      includeTools: Array.isArray(record.includeTools) ? record.includeTools.filter((item): item is string => typeof item === "string") : undefined,
+      excludeTools: Array.isArray(record.excludeTools) ? record.excludeTools.filter((item): item is string => typeof item === "string") : undefined,
+      exposeResources: typeof record.exposeResources === "boolean" ? record.exposeResources : undefined,
+      exposePrompts: typeof record.exposePrompts === "boolean" ? record.exposePrompts : undefined,
+      toolPrefix: typeof record.toolPrefix === "string" || typeof record.toolPrefix === "boolean" ? record.toolPrefix : undefined,
+      timeoutMs: typeof record.timeoutMs === "number" ? record.timeoutMs : undefined
+    };
   }
   return normalized;
 }
@@ -426,6 +516,50 @@ export async function setupBrowserConfig(options: {
 
   await saveRuntimeConfig(targetPath, config);
 
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupMcpConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: MCPSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const serverName = options.input.name.trim();
+  const servers = normalizeMcpServers(existing.config.mcpServers ?? existing.config.mcp_servers, options.homeDir);
+  servers[serverName] = {
+    enabled: options.input.enabled ?? true,
+    transport: options.input.transport ?? "stdio",
+    command: options.input.command,
+    args: options.input.args,
+    cwd: options.input.cwd === undefined ? undefined : expandConfiguredPath(options.input.cwd, options.homeDir),
+    env: options.input.env,
+    url: options.input.url,
+    headers: options.input.headers,
+    includeTools: options.input.includeTools,
+    excludeTools: options.input.excludeTools,
+    exposeResources: options.input.exposeResources,
+    exposePrompts: options.input.exposePrompts,
+    toolPrefix: options.input.toolPrefix,
+    timeoutMs: options.input.timeoutMs
+  };
+  const config = mergeConfig(existing.config, {
+    mcpServers: servers
+  });
+  delete config.mcp_servers;
+
+  await saveRuntimeConfig(targetPath, config);
   return {
     path: targetPath,
     config

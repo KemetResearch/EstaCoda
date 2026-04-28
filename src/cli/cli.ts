@@ -3,11 +3,13 @@ import { join } from "node:path";
 import {
   createTelegramPairingCode,
   loadRuntimeConfig,
+  setupMcpConfig,
   setupBrowserConfig,
   setupProviderConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
+  type MCPSetupInput,
   type ProviderSetupInput,
   type TelegramSetupInput,
   type WebSetupInput
@@ -55,6 +57,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return web(options, args);
     case "browser":
       return browser(options, args);
+    case "mcp":
+      return mcp(options, args);
     case "telegram":
       return telegram(options, args);
     case "gateway":
@@ -507,6 +511,110 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
   };
 }
 
+async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+
+  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "reload") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda MCP",
+        "  estacoda mcp status",
+        "  estacoda mcp reload",
+        "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
+        "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "status") {
+    const config = await loadRuntimeConfig(options);
+    const snapshots = options.runtime?.inspectMcpServers() ?? [];
+    const lines = Object.entries(config.mcp.servers);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: lines.length === 0
+        ? [
+            "EstaCoda MCP",
+            "No MCP servers configured.",
+            `Config sources: ${config.sources.join(", ") || "none"}`
+          ].join("\n")
+        : [
+            "EstaCoda MCP",
+            ...lines.map(([name, server]) => {
+              const snapshot = snapshots.find((entry) => entry.name === name);
+              const status = snapshot === undefined
+                ? (server.enabled === false ? "disabled" : "configured")
+                : snapshot.available
+                  ? "ready"
+                  : `unavailable (${snapshot.error})`;
+              return [
+                `${name}`,
+                `  status: ${status}`,
+                `  transport: ${server.transport ?? "stdio"}`,
+                server.command === undefined ? undefined : `  command: ${server.command}`,
+                server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
+                server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
+                snapshot === undefined ? undefined : `  discovered tools: ${snapshot.toolCount}, resources: ${snapshot.resourceCount}, prompts: ${snapshot.promptCount}`,
+                snapshot === undefined || snapshot.tools.length === 0 ? undefined : `  registered: ${snapshot.tools.join(", ")}`
+              ].filter((line) => line !== undefined).join("\n");
+            }),
+            `Config sources: ${config.sources.join(", ") || "none"}`
+          ].join("\n")
+    };
+  }
+
+  if (subcommand === "reload") {
+    const config = await loadRuntimeConfig(options);
+    const servers = Object.keys(config.mcp.servers);
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: servers.length === 0
+        ? [
+            "EstaCoda MCP",
+            "Reloaded MCP configuration.",
+            "No MCP servers are configured."
+          ].join("\n")
+        : [
+            "EstaCoda MCP",
+            "Reloaded MCP configuration.",
+            `Configured servers: ${servers.join(", ")}`,
+            "Interactive sessions should use /reload-mcp to refresh their live MCP tool snapshot."
+          ].join("\n")
+    };
+  }
+
+  const parsed = parseMcpArgs(args.slice(1));
+  if (parsed.name === undefined || parsed.name.length === 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c]"
+    };
+  }
+  const result = await setupMcpConfig({
+    ...options,
+    input: parsed as MCPSetupInput
+  });
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      `Configured MCP server ${parsed.name}.`,
+      `Config: ${result.path}`,
+      `Transport: ${parsed.transport ?? "stdio"}`,
+      parsed.command === undefined ? undefined : `Command: ${parsed.command}`,
+      parsed.args === undefined ? undefined : `Args: ${parsed.args.join(" ") || "(none)"}`,
+      parsed.cwd === undefined ? undefined : `CWD: ${parsed.cwd}`,
+      "Next: run estacoda mcp status, estacoda mcp reload, or /reload-mcp in an interactive session."
+    ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
 async function gateway(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
 
@@ -748,6 +856,68 @@ function parseTelegramPairArgs(args: string[]): {
   return parsed;
 }
 
+function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
+  const parsed: Partial<MCPSetupInput> = {
+    enabled: true,
+    transport: "stdio"
+  };
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--name") {
+      parsed.name = next;
+      index += 1;
+    } else if (arg === "--command") {
+      parsed.command = next;
+      index += 1;
+    } else if (arg === "--args") {
+      parsed.args = (next ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0);
+      index += 1;
+    } else if (arg === "--cwd") {
+      parsed.cwd = next;
+      index += 1;
+    } else if (arg === "--transport") {
+      parsed.transport = next as MCPSetupInput["transport"];
+      index += 1;
+    } else if (arg === "--url") {
+      parsed.url = next;
+      index += 1;
+    } else if (arg === "--include-tools") {
+      parsed.includeTools = (next ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0);
+      index += 1;
+    } else if (arg === "--exclude-tools") {
+      parsed.excludeTools = (next ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0);
+      index += 1;
+    } else if (arg === "--tool-prefix") {
+      parsed.toolPrefix = next ?? true;
+      index += 1;
+    } else if (arg === "--no-prefix") {
+      parsed.toolPrefix = false;
+    } else if (arg === "--resources") {
+      parsed.exposeResources = true;
+    } else if (arg === "--prompts") {
+      parsed.exposePrompts = true;
+    } else if (arg === "--disabled") {
+      parsed.enabled = false;
+    } else if (arg === "--timeout-ms") {
+      parsed.timeoutMs = Number.parseInt(next ?? "", 10);
+      index += 1;
+    } else if (arg === "--project") {
+      parsed.scope = "project";
+    } else if (arg === "--user") {
+      parsed.scope = "user";
+    }
+  }
+
+  if (Number.isNaN(parsed.timeoutMs)) {
+    parsed.timeoutMs = undefined;
+  }
+
+  return parsed;
+}
+
 function hasFlag(args: string[], ...flags: string[]): boolean {
   return args.some((arg) => flags.includes(arg));
 }
@@ -759,6 +929,7 @@ function help(): string {
     "  estacoda setup --interactive",
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
+    "  estacoda mcp     Configure MCP servers",
     "  estacoda telegram Configure Telegram channel",
     "  estacoda telegram pair Pair a Telegram chat",
     "  estacoda gateway Start channel gateway",

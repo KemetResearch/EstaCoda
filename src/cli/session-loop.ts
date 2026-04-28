@@ -7,7 +7,7 @@ import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
-  refreshRuntime?: () => Promise<Runtime>;
+  refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
@@ -71,6 +71,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         });
 
         if (typeof shouldExit !== "boolean") {
+          await runtime.dispose();
           runtime = shouldExit.runtime;
           activityRenderer = new ToolActivityRenderer({
             tools: runtime.tools()
@@ -108,6 +109,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
+    await runtime.dispose();
     close();
   }
 }
@@ -115,7 +117,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 async function handleSlashCommand(input: {
   text: string;
   runtime: Runtime;
-  refreshRuntime?: () => Promise<Runtime>;
+  refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   output: NodeJS.WritableStream;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
@@ -140,7 +142,7 @@ async function handleSlashCommand(input: {
       }
 
       return {
-        runtime: await input.refreshRuntime(),
+        runtime: await input.refreshRuntime({ preserveSession: false }),
         notice: (runtime) => [
           `Started fresh session ${runtime.sessionId}.`,
           "Skills and config were refreshed for this new session.",
@@ -157,6 +159,28 @@ async function handleSlashCommand(input: {
     case "skills":
       input.output.write(`${renderSlashMenu(input.runtime, args.join(" "))}\n\n`);
       return false;
+    case "reload-mcp":
+      if (input.refreshRuntime === undefined) {
+        input.output.write("This session cannot reload MCP configuration here.\n\n");
+        return false;
+      }
+
+      return {
+        runtime: await input.refreshRuntime({ preserveSession: true }),
+        notice: (runtime) => {
+          const snapshots = runtime.inspectMcpServers();
+          const configured = snapshots.length;
+          const ready = snapshots.filter((snapshot) => snapshot.available).length;
+          return [
+            "Reloaded MCP configuration for this session.",
+            configured === 0
+              ? "No MCP servers are configured."
+              : `MCP servers ready: ${ready}/${configured}.`,
+            "",
+            runtime.describe()
+          ].join("\n");
+        }
+      };
     case "resume":
       input.output.write(`${await renderLatestResume(input.runtime)}\n\n`);
       return false;

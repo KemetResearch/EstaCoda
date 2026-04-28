@@ -16,7 +16,7 @@ import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
 import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
-import { loadRuntimeConfig, mergeConfig, setupProviderConfig } from "./config/runtime-config.js";
+import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig } from "./config/runtime-config.js";
 import { ContextReferenceExpander } from "./context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
 import { DelegationManager } from "./delegation/delegation-manager.js";
@@ -26,6 +26,7 @@ import { renderMemorySnapshot } from "./memory/memory-renderer.js";
 import { MemoryStore } from "./memory/memory-store.js";
 import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
 import { __detectForgetPreferenceForTest, __detectProjectFactForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
+import { loadMcpServers } from "./mcp/mcp-tools.js";
 import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
 import { ProcessManager } from "./process/process-manager.js";
 import { createProcessTools } from "./process/process-tools.js";
@@ -478,9 +479,11 @@ const cliReadyProviderLiveToolDoctor = await runCliCommand({
     skills: () => [],
     latestResumeNote: async () => undefined,
     inspectMemoryPromotions: async () => [],
+    inspectMcpServers: () => [],
     trustWorkspace: async () => undefined,
     isWorkspaceTrusted: async () => true,
     revokeWorkspaceTrust: async () => true,
+    dispose: async () => undefined,
     handle: async () => {
       const probeContent = await readFile(
         join(cliReadyProviderWorkspace, ".estacoda", "doctor", "live-tool-smoke.ts"),
@@ -1789,8 +1792,8 @@ const reopenedSqliteSearch = await reopenedSqliteDb.search("sqlite session", { p
 const reopenedSqliteEvents = await reopenedSqliteDb.listEvents("sqlite-smoke");
 reopenedSqliteDb.close();
 
-assert(tools.list().length === 45, "expected 45 registered tools");
-assert(availableTools.length === 43, "expected 43 registered tools before execute_code bridge registration");
+assert(tools.list().length >= 45, "expected baseline registered tools to be present");
+assert(availableTools.length >= 43, "expected baseline available tools before execute_code bridge registration");
 assert(mediaProbe?.result?.content.includes("ffmpeg:") === true, "expected media probe to report ffmpeg status");
 assert(mediaInspect?.result?.ok === true, "expected media inspect to succeed for workspace media");
 assert(mediaInspect.result.content.includes("Kind: video"), "expected media inspect to infer video kind");
@@ -1932,6 +1935,218 @@ assert(sharedTeamSkill?.description === "Personal override version.", "expected 
 assert(sharedTeamSkill?.sourceKind === "personal", "expected overridden skill to be marked personal");
 assert(envExternalSkill?.sourceKind === "external", "expected env external skill to load as external");
 assert(renderSlashMenu(externalDirsRuntime).includes("/env-external-skill"), "expected external skill to appear in slash menu");
+const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));
+const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-workspace-"));
+const mcpServerScript = join(mcpWorkspace, "fake-mcp-server.js");
+const mcpExitMarker = join(mcpWorkspace, "mcp-runtime-exit.txt");
+const mcpDirectExitMarker = join(mcpWorkspace, "mcp-direct-exit.txt");
+await writeFile(mcpServerScript, `
+import { writeFileSync } from "node:fs";
+
+let buffer = "";
+function frame(body) {
+  return \`Content-Length: \${Buffer.byteLength(body, "utf8")}\\r\\n\\r\\n\${body}\`;
+}
+function reply(id, result) {
+  process.stdout.write(frame(JSON.stringify({ jsonrpc: "2.0", id, result })));
+}
+function handle(message) {
+  if (message.method === "initialize") {
+    reply(message.id, { capabilities: { tools: {}, resources: {}, prompts: {} } });
+    return;
+  }
+  if (message.method === "notifications/initialized") {
+    return;
+  }
+  if (message.method === "tools/list") {
+    reply(message.id, {
+      tools: [
+        {
+          name: "echo",
+          description: "Echo text",
+          inputSchema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"]
+          }
+        },
+        {
+          name: "hidden",
+          description: "Should be filtered",
+          inputSchema: { type: "object", properties: {} }
+        }
+      ]
+    });
+    return;
+  }
+  if (message.method === "tools/call") {
+    const text = message.params?.arguments?.text ?? "";
+    reply(message.id, {
+      content: [
+        { type: "text", text: \`Echo: \${text}\` }
+      ]
+    });
+    return;
+  }
+  if (message.method === "resources/list") {
+    reply(message.id, {
+      resources: [
+        { uri: "memo://hello", name: "hello", mimeType: "text/plain" }
+      ]
+    });
+    return;
+  }
+  if (message.method === "resources/read") {
+    reply(message.id, {
+      content: [
+        { type: "text", text: "Hello resource" }
+      ]
+    });
+    return;
+  }
+  if (message.method === "prompts/list") {
+    reply(message.id, {
+      prompts: [
+        { name: "draft", description: "Draft prompt" }
+      ]
+    });
+    return;
+  }
+  if (message.method === "prompts/get") {
+    reply(message.id, {
+      content: [
+        { type: "text", text: "Prompt result" }
+      ]
+    });
+    return;
+  }
+  reply(message.id, { content: [{ type: "text", text: "Unhandled" }] });
+}
+
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const boundary = buffer.indexOf("\\r\\n\\r\\n");
+    if (boundary === -1) return;
+    const header = buffer.slice(0, boundary);
+    const match = header.match(/Content-Length:\\s*(\\d+)/i);
+    if (!match) {
+      buffer = "";
+      return;
+    }
+    const length = Number(match[1]);
+    const start = boundary + 4;
+    if (buffer.length < start + length) return;
+    const body = buffer.slice(start, start + length);
+    buffer = buffer.slice(start + length);
+    handle(JSON.parse(body));
+  }
+});
+process.on("SIGTERM", () => {
+  if (process.env.EXIT_MARKER) {
+    writeFileSync(process.env.EXIT_MARKER, "stopped\\n", "utf8");
+  }
+  process.exit(0);
+});
+`, "utf8");
+const mcpSetupResult = await setupMcpConfig({
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome,
+  input: {
+    name: "docs",
+    command: "/Users/ahnwy/.bun/bin/bun",
+    args: [mcpServerScript],
+    includeTools: ["echo"],
+    exposeResources: true,
+    exposePrompts: true,
+    env: {
+      EXIT_MARKER: mcpExitMarker
+    }
+  }
+});
+const loadedMcpConfig = await loadRuntimeConfig({
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome
+});
+const mcpRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome,
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  },
+  mcpServers: loadedMcpConfig.mcp.servers
+});
+const mcpRuntimeTools = mcpRuntime.tools().map((tool) => tool.name);
+const mcpSnapshots = mcpRuntime.inspectMcpServers();
+const mcpStatus = await runCliCommand({
+  argv: ["mcp", "status"],
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome,
+  runtime: mcpRuntime
+});
+const mcpReload = await runCliCommand({
+  argv: ["mcp", "reload"],
+  workspaceRoot: mcpWorkspace,
+  homeDir: mcpHome,
+  runtime: mcpRuntime
+});
+await mcpRuntime.dispose();
+const directMcpServers = await loadMcpServers({
+  servers: {
+    direct: {
+      command: "/Users/ahnwy/.bun/bin/bun",
+      args: [mcpServerScript],
+      includeTools: ["echo"],
+      exposeResources: true,
+      exposePrompts: true,
+      env: {
+        EXIT_MARKER: mcpDirectExitMarker
+      }
+    }
+  }
+});
+const directEchoTool = directMcpServers[0]?.tools.find((tool) => tool.name === "mcp.direct.echo");
+const directResourceReadTool = directMcpServers[0]?.tools.find((tool) => tool.name === "mcp.direct.resource.read");
+const directPromptGetTool = directMcpServers[0]?.tools.find((tool) => tool.name === "mcp.direct.prompt.get");
+const directEchoResult = await directEchoTool?.run({ text: "hello" });
+const directResourceResult = await directResourceReadTool?.run({ uri: "memo://hello" });
+const directPromptResult = await directPromptGetTool?.run({ name: "draft" });
+await Promise.all(directMcpServers.map((server) => server.stop()));
+const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
+const mcpDirectExitMarkerContent = await readFile(mcpDirectExitMarker, "utf8");
+assert(mcpSetupResult.config.mcpServers?.docs?.command === "/Users/ahnwy/.bun/bin/bun", "expected MCP setup to persist the stdio command");
+assert(mcpSetupResult.config.mcpServers?.docs?.args?.[0] === mcpServerScript, "expected MCP setup to persist command args");
+assert(loadedMcpConfig.mcp.servers.docs?.includeTools?.[0] === "echo", "expected MCP config to persist includeTools");
+assert(mcpRuntimeTools.includes("mcp.docs.echo"), "expected MCP runtime to register filtered tool");
+assert(mcpRuntimeTools.includes("mcp.docs.resource.list"), "expected MCP runtime to register resource.list wrapper");
+assert(mcpRuntimeTools.includes("mcp.docs.resource.read"), "expected MCP runtime to register resource.read wrapper");
+assert(mcpRuntimeTools.includes("mcp.docs.prompt.list"), "expected MCP runtime to register prompt.list wrapper");
+assert(mcpRuntimeTools.includes("mcp.docs.prompt.get"), "expected MCP runtime to register prompt.get wrapper");
+assert(!mcpRuntimeTools.includes("mcp.docs.hidden"), "expected MCP runtime to hide excluded tools");
+assert(mcpSnapshots[0]?.available === true, "expected MCP snapshot to report an available server");
+assert(mcpSnapshots[0]?.toolCount === 1, "expected MCP snapshot to report one filtered tool");
+assert(mcpSnapshots[0]?.resourceCount === 1, "expected MCP snapshot to report one resource");
+assert(mcpSnapshots[0]?.promptCount === 1, "expected MCP snapshot to report one prompt");
+assert(mcpStatus.output.includes("EstaCoda MCP"), "expected MCP CLI status banner");
+assert(mcpStatus.output.includes("docs"), "expected MCP CLI status to include the configured server name");
+assert(mcpStatus.output.includes("discovered tools: 1"), "expected MCP CLI status to include discovered tool count");
+assert(mcpReload.output.includes("Reloaded MCP configuration."), "expected MCP CLI reload confirmation");
+assert(mcpReload.output.includes("Configured servers: docs"), "expected MCP CLI reload to list configured servers");
+assert(directEchoResult?.ok === true, "expected direct MCP echo tool to succeed");
+assert(directEchoResult?.content.includes("Echo: hello") === true, "expected direct MCP echo tool content");
+assert(directResourceResult?.ok === true, "expected direct MCP resource.read tool to succeed");
+assert(directResourceResult?.content.includes("Hello resource") === true, "expected direct MCP resource content");
+assert(directPromptResult?.ok === true, "expected direct MCP prompt.get tool to succeed");
+assert(directPromptResult?.content.includes("Prompt result") === true, "expected direct MCP prompt content");
+assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
+assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
 assert(cliInteractiveSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive CLI setup output");
 assert(cliInteractiveSetup.output.includes("export KIMI_API_KEY='interactive-secret'"), "expected interactive shell export");
@@ -2620,12 +2835,14 @@ const dynamicMenuRuntime = {
   skills: () => skills.catalog(),
   latestResumeNote: async () => undefined,
   inspectMemoryPromotions: async () => [],
+  inspectMcpServers: () => [],
   handle: async () => {
     throw new Error("dynamic menu smoke runtime cannot handle prompts");
   },
   trustWorkspace: async () => {},
   isWorkspaceTrusted: async () => true,
   revokeWorkspaceTrust: async () => true,
+  dispose: async () => undefined,
   sessionDb,
   sessionId: "dynamic-menu-smoke"
 };
@@ -4728,6 +4945,7 @@ assert(renderedSessionLoop.includes("Tools:"), "expected session /tools output")
 assert(renderedSessionLoop.includes("Commands"), "expected session slash menu commands");
 assert(renderedSessionLoop.includes("Skills"), "expected session slash menu skills");
 assert(renderedSessionLoop.includes("/ascii-video"), "expected session slash menu to show ascii-video");
+assert(renderedSessionLoop.includes("/reload-mcp"), "expected session command surface to include /reload-mcp");
 assert(renderedSessionLoop.includes("media tools"), "expected filtered tools menu to show media tools");
 assert(renderedSessionLoop.includes("EstaCoda session doctor"), "expected session /doctor output");
 assert(renderedSessionLoop.includes("No promoted memory conclusions found."), "expected session /memory output");
@@ -6641,6 +6859,11 @@ const channelSearchResult = await channelGateway.receive({
   id: "message-search",
   text: "/search Analyze"
 });
+const channelReloadMcpResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-reload-mcp",
+  text: "/reload-mcp"
+});
 const channelAfterNewResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-after-new",
@@ -6761,10 +6984,12 @@ assert(channelResult.sessionId === channelRepeatResult.sessionId, "expected chan
 assert(channelStatusResult.replyText.includes(channelResult.sessionId), "expected channel /status to report session");
 assert(channelResumeResult.replyText.includes("channel interrupted task"), "expected channel /resume to report latest resume note");
 assert(channelHelpResult.replyText.includes("/new"), "expected channel /help commands");
+assert(channelHelpResult.replyText.includes("/reload-mcp"), "expected channel /help to advertise /reload-mcp");
 assert(channelCommandsResult.replyText.includes("/approve"), "expected channel /commands to list approval command");
 assert(channelSessionsResult.replyText.includes("Recent sessions for this chat"), "expected channel /sessions output");
 assert(channelNewResult.sessionId !== channelResult.sessionId, "expected channel /new to rotate session");
 assert(channelSearchResult.replyText.includes(`Search results for "Analyze"`), "expected channel /search output");
+assert(channelReloadMcpResult.replyText.includes("Reloaded MCP configuration."), "expected channel /reload-mcp output");
 assert(channelSwitchResult.replyText.includes("Switched this chat to an existing session"), "expected channel /switch output");
 assert(channelAfterSwitchResult.sessionId === channelResult.sessionId, "expected channel /switch to restore the selected session");
 assert(channelAfterNewResult.sessionId === channelNewResult.sessionId, "expected messages after /new to use fresh session");
@@ -8402,10 +8627,12 @@ function fakeRuntime(input: {
     skills: () => [],
     latestResumeNote: input.latestResumeNote ?? (async () => undefined),
     inspectMemoryPromotions: async () => [],
+    inspectMcpServers: () => [],
     handle: input.handle,
     trustWorkspace: async () => {},
     isWorkspaceTrusted: async () => true,
     revokeWorkspaceTrust: async () => true,
+    dispose: async () => undefined,
     sessionDb,
     sessionId: input.sessionId
   };

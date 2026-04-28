@@ -56,6 +56,11 @@ Evidence note:
 - [src/tools/web-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/web-tools.ts)
 - [src/tools/execute-code-tool.ts](/Users/ahnwy/estacoda-v2/src/tools/execute-code-tool.ts)
 
+### MCP
+
+- [src/mcp/mcp-client.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-client.ts)
+- [src/mcp/mcp-tools.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-tools.ts)
+
 ### Skills
 
 - [src/skills/skill-loader.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-loader.ts)
@@ -101,6 +106,7 @@ Important composition details:
 - Visible skill catalog is filtered per session using runtime conditions.
 - `vision.analyze` is registered as a real tool and uses the auxiliary `vision` provider route preferences.
 - Channel media directory is treated as an additional allowed root for relevant tools.
+- Configured MCP servers are loaded during runtime creation and stopped during runtime disposal.
 
 Key runtime products created here:
 
@@ -258,6 +264,29 @@ Responsibilities:
 - progress delivery
 - approval prompt delivery
 - command handling
+- fresh runtime creation from the latest config snapshot on the gateway path
+
+## MCP Architecture
+
+Current implementation:
+
+1. config loads `mcpServers` / `mcp_servers`
+2. runtime creation calls `loadMcpServers(...)`
+3. stdio MCP servers are initialized over framed JSON-RPC
+4. discovered tools are registered into the normal tool registry
+5. optional wrappers are added for:
+   - `resource.list`
+   - `resource.read`
+   - `prompt.list`
+   - `prompt.get`
+6. runtime disposal stops MCP subprocesses
+
+Current operator semantics:
+
+- one-shot CLI commands see current MCP config automatically
+- interactive CLI sessions need `/reload-mcp` to refresh their live MCP snapshot
+- `estacoda mcp reload` confirms config-level reload
+- channel turns rebuild from fresh config snapshots, so later turns can see MCP config changes without a full gateway restart
 - approval persistence/revocation
 
 Telegram-specific concerns live in `TelegramAdapter`:

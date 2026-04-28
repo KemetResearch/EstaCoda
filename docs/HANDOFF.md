@@ -8,15 +8,20 @@ This document is for a coding agent taking over the EstaCoda v2 codebase. It is 
 - Current git status:
 
 ```text
+ M src/channels/channel-gateway.ts
+ M src/channels/gateway-runner.ts
+ M src/cli/cli.ts
+ M src/cli/session-loop.ts
+ M src/cli/slash-menu.ts
+ M src/config/config-tools.ts
+ M src/config/runtime-config.ts
+ M src/index.ts
+ M src/runtime/create-runtime.ts
+ M src/smoke.ts
 ?? agent-proof-live.md
 ?? alpha-proof.md
-?? docs/ARCHITECTURE.md
-?? docs/ENVIRONMENT.md
-?? docs/HANDOFF.md
-?? docs/KNOWN_ISSUES.md
-?? docs/ROADMAP.md
-?? docs/TESTING.md
 ?? live-tool-smoke.ts
+?? src/mcp/
 ```
 
 Evidence labels used in this document:
@@ -53,6 +58,7 @@ What has been achieved:
 - Internal alpha testing now has a repeatable harness and runbook.
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
+- A Hermes-shaped MCP client foundation now exists for stdio servers, with config-driven discovery and reload semantics.
 
 Evidence:
 
@@ -65,6 +71,7 @@ Evidence:
 - vision-backed image support: Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
 - provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
 - evaluation substrate: `implemented but not live-proven`
+- MCP client foundation: `smoke-tested`
 
 ## 3. Current Working Capabilities
 
@@ -108,6 +115,14 @@ Working but not yet fully proven live in operator testing:
 - Repeated user-preference promotion into `USER.md`, including contradiction handling, strengthening, forgetting, and inspection. `smoke-tested`
 - Repeated project-fact/convention promotion into `MEMORY.md`. `smoke-tested`
 - Workflow learning with `skills.autonomy` (`none | suggest | proactive | autonomous`) now exists for bounded local workflows and creates project skills rather than writing procedures into `MEMORY.md`. `smoke-tested`
+- MCP client foundation now exists:
+  - stdio transport
+  - config-driven server registration
+  - tool/resource/prompt discovery
+  - `estacoda mcp status`
+  - `estacoda mcp reload`
+  - `/reload-mcp`
+  `smoke-tested`
 
 ## 4. Architecture Overview
 
