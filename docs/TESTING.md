@@ -57,6 +57,19 @@ Evidence level:
 - MCP reload semantics: `live-proven`
 - trusted stdio filesystem MCP execution: `live-proven`
 
+## ACP Checks
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run dev -- acp manifest
+```
+
+Current evidence level:
+
+- ACP stdio server foundation: `smoke-tested`
+- ACP initialize/session/new/session/prompt/session/load/session/cancel flow: `smoke-tested`
+- real editor/operator ACP integration: `implemented but not live-proven`
+
 ## CLI Sanity Checks
 
 ```bash

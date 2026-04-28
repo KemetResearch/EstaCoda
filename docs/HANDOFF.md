@@ -59,6 +59,7 @@ What has been achieved:
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
 - A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
+- An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, and a registry manifest.
 
 Evidence:
 
@@ -72,6 +73,7 @@ Evidence:
 - provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
 - evaluation substrate: `implemented but not live-proven`
 - MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
+- ACP foundation: `smoke-tested`
 
 ## 3. Current Working Capabilities
 
@@ -125,6 +127,13 @@ Working but not yet fully proven live in operator testing:
   - `estacoda mcp reload`
   - `/reload-mcp`
   - real stdio third-party server execution is now `live-proven` for the filesystem server after workspace trust is granted
+- ACP foundation now exists:
+  - stdio JSON-RPC server
+  - cwd-bound ACP sessions mapped onto EstaCoda runtimes
+  - core methods: `initialize`, `authenticate`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`
+  - `session/update` streaming
+  - `acp_registry/agent.json`
+  `smoke-tested`
 
 ## 4. Architecture Overview
 

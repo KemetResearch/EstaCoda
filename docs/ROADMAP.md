@@ -157,7 +157,7 @@ Next:
 
 ### 8. MCP and ACP
 
-State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP is still not implemented.
+State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP foundation now exists as a smoke-tested stdio JSON-RPC server, but full editor parity is still not implemented.
 
 Done:
 
@@ -168,12 +168,19 @@ Done:
 - reload semantics via `estacoda mcp reload` and `/reload-mcp` `live-proven`
 - per-server trust metadata now maps MCP tools into runtime risk classes; trusted stdio filesystem execution is `live-proven`
 - auxiliary provider routing still reserves an `mcp` task label `implemented`
+- ACP foundation now exists with:
+  - `estacoda acp serve`
+  - `estacoda acp manifest`
+  - `acp_registry/agent.json`
+  - core methods: `initialize`, `authenticate`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`
+  - streaming `session/update` notifications for session info, thought chunks, tool calls, agent message chunks, and usage
+  `smoke-tested`
 
 Next:
 
 - add richer per-server trust/visibility controls
 - refine resource/prompt ergonomics
-- defer ACP until after MCP client and memory/session maturity
+- deepen ACP toward Hermes parity after MCP client and memory/session maturity
 - treat MCP server bridging as later than MCP client and ACP
 
 ## Correct Next Milestone
@@ -315,25 +322,25 @@ What remains:
 
 ### 10. MCP / ACP
 
-State: MCP client foundation now exists across stdio + HTTP; ACP does not.
+State: MCP client foundation now exists across stdio + HTTP; ACP foundation now exists, but only the first stdio/session slice is implemented.
 
-- stdio MCP client transport exists `smoke-tested`
+- stdio MCP client transport exists `live-proven`
 - HTTP MCP client transport exists `smoke-tested`
-- MCP config surface exists `smoke-tested`
-- MCP tool/resource/prompt discovery exists `smoke-tested`
+- MCP config surface exists `live-proven` on stdio usage, `smoke-tested` more broadly
+- MCP tool/resource/prompt discovery exists `live-proven` on stdio usage, `smoke-tested` more broadly
 - reload semantics now exist:
   - `estacoda mcp reload`
   - `/reload-mcp`
   `smoke-tested`
 - per-server trust metadata exists and currently maps server trust to runtime risk classes `smoke-tested`
-- ACP adapter/server is still not implemented
+- ACP adapter/server foundation now exists `smoke-tested`
 - current `mcp` auxiliary route remains a routing preference construct, not the protocol client itself
 
 What remains:
 
 - Phase 1: MCP client for stdio servers `done / smoke-tested`
 - Phase 2: trust/visibility refinement and richer resource/prompt ergonomics
-- Phase 3: ACP adapter/editor embedding after the runtime/tool/session surface is more mature
+- Phase 3: ACP foundation `done / smoke-tested`; next is richer editor, approval, and tool parity
 - Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
 
 ## Launch Readiness Read

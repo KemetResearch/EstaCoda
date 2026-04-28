@@ -89,7 +89,7 @@ Next acceptance checks:
 
 Follow-on protocol work after this milestone:
 - MCP client stdio + HTTP foundation is now in place with config-driven discovery, trust metadata, tool/resource/prompt registration, and reload semantics; the stdio path is now live-proven against a real filesystem MCP server.
-- ACP should still wait until after MCP HTTP support and stronger memory/session maturity, because ACP is primarily an editor-surface/runtime product rather than a capability substrate.
+- ACP foundation is now in place as a smoke-tested stdio JSON-RPC server with session lifecycle methods and streaming updates; deeper editor parity should still wait until after stronger memory/session maturity.
 - MCP server bridging should still come later than MCP client and likely later than ACP.
 
 ### 4. Channels

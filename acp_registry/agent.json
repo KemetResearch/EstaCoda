@@ -1,0 +1,16 @@
+{
+  "name": "estacoda",
+  "displayName": "EstaCoda",
+  "description": "EstaCoda ACP agent server",
+  "transport": {
+    "type": "stdio",
+    "command": "bun",
+    "args": [
+      "run",
+      "dev",
+      "--",
+      "acp",
+      "serve"
+    ]
+  }
+}

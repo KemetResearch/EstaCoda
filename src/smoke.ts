@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
+import { AcpServer } from "./acp/server.js";
 import { ArtifactStore } from "./artifacts/artifact-store.js";
 import { createLocalCdpBrowserBackend, createMockBrowserBackend, type CdpWebSocketEvent, type CdpWebSocketLike } from "./browser/browser-backend.js";
 import { ChannelApprovalStore } from "./channels/channel-approval-store.js";
@@ -2277,6 +2279,116 @@ if (previousSmokeHome === undefined) {
 } else {
   process.env.HOME = previousSmokeHome;
 }
+const acpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-workspace-"));
+const acpInput = new PassThrough();
+const acpOutput = new PassThrough();
+acpOutput.setEncoding("utf8");
+const acpSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:00:00.000Z")
+});
+const acpServer = new AcpServer({
+  workspaceRoot: acpWorkspace,
+  input: acpInput,
+  output: acpOutput,
+  sessionDb: acpSessionDb,
+  runtimeFactory: async ({ workspaceRoot, sessionId, sessionDb }) => {
+    if (await sessionDb.getSession(sessionId) === undefined) {
+      await sessionDb.createSession({
+        id: sessionId,
+        profileId: "default",
+        title: "ACP smoke session",
+        metadata: { workspaceRoot }
+      });
+    }
+
+    return {
+      describe: () => "fake acp runtime",
+      tools: () => [],
+      skills: () => [],
+      latestResumeNote: async () => undefined,
+      inspectMemoryPromotions: async () => [],
+      inspectMcpServers: () => [],
+      trustWorkspace: async () => {},
+      isWorkspaceTrusted: async () => true,
+      revokeWorkspaceTrust: async () => true,
+      dispose: async () => undefined,
+      sessionDb,
+      sessionId,
+      handle: async ({ text, onEvent }) => {
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "user",
+          content: text,
+          channel: "web"
+        });
+        await onEvent?.({ kind: "agent-start", sessionId, input: text });
+        await onEvent?.({ kind: "tool-start", tool: "mcp.filesystem.read_file", stepId: "acp-tool-1" });
+        await onEvent?.({ kind: "tool-result", tool: "mcp.filesystem.read_file", ok: true, chars: 12, sentChars: 12 });
+        await onEvent?.({ kind: "provider-token", provider: "fake", model: "fake-model", text: "ACP says hello." });
+        await onEvent?.({ kind: "agent-final", text: "ACP says hello." });
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "agent",
+          content: "ACP says hello.",
+          channel: "web",
+          metadata: { workspaceRoot }
+        });
+        return {
+          label: "EstaCoda",
+          text: "ACP says hello.",
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.5,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: false,
+            rationale: "ACP smoke runtime"
+          },
+          securityDecision: "allow",
+          toolExecutions: [],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          providerExecution: {
+            ok: true,
+            response: {
+              ok: true,
+              model: "fake-model",
+              provider: "kimi",
+              content: "ACP says hello.",
+              usage: {
+                inputTokens: 11,
+                outputTokens: 7,
+                totalTokens: 18
+              }
+            },
+            fallbackUsed: false,
+            attempts: [],
+            toolCalls: [],
+          },
+          progress: []
+        };
+      }
+    };
+  }
+});
+const acpRunPromise = acpServer.run();
+const acpRpc = createJsonRpcHarness(acpInput, acpOutput);
+const acpInitialize = await acpRpc.request("initialize", { protocolVersion: "0.1", clientCapabilities: {} });
+const acpNewSession = await acpRpc.request("session/new", { cwd: acpWorkspace });
+const acpPrompt = await acpRpc.request("session/prompt", {
+  sessionId: acpNewSession.sessionId,
+  prompt: "Say hello over ACP."
+});
+const acpNotifications = await acpRpc.collectFor(50);
+const acpLoad = await acpRpc.request("session/load", { sessionId: acpNewSession.sessionId });
+await acpRpc.notify("session/cancel", { sessionId: acpNewSession.sessionId });
+acpInput.end();
+await acpRunPromise;
 const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
 const mcpDirectExitMarkerContent = await readFile(mcpDirectExitMarker, "utf8");
 assert(mcpSetupResult.config.mcpServers?.docs?.command === "/Users/ahnwy/.bun/bin/bun", "expected MCP setup to persist the stdio command");
@@ -2320,6 +2432,22 @@ assert(httpPromptResult?.content.includes("HTTP prompt") === true, "expected HTT
 assert(httpMcpRequests.some((request) => request.body.method === "initialize"), "expected HTTP MCP initialize request");
 assert(httpMcpRequests.some((request) => request.body.method === "tools/list"), "expected HTTP MCP tools/list request");
 assert(resolvedFakeNpxBinary === join(fakeNpxCacheRoot, ".bin", "demo-server"), "expected MCP client to resolve cached npx binaries");
+assert(acpInitialize.protocolVersion === "0.1", "expected ACP initialize protocol version");
+assert(typeof acpNewSession.sessionId === "string" && acpNewSession.sessionId.length > 0, "expected ACP session/new to return a session id");
+assert(acpPrompt.stopReason === "end_turn", "expected ACP prompt to finish its turn");
+assert(acpLoad.sessionId === acpNewSession.sessionId, "expected ACP load to return the same session id");
+assert(
+  acpNotifications.some((message) => message.method === "session/update" && message.params?.update?.sessionUpdate === "tool_call_update"),
+  "expected ACP prompt flow to emit tool_call_update notifications"
+);
+assert(
+  acpNotifications.some((message) => message.method === "session/update" && message.params?.update?.sessionUpdate === "agent_message_chunk"),
+  "expected ACP prompt flow to emit agent_message_chunk notifications"
+);
+assert(
+  acpNotifications.some((message) => message.method === "session/update" && message.params?.update?.sessionUpdate === "usage_update"),
+  "expected ACP prompt flow to emit usage_update notifications"
+);
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
@@ -8916,4 +9044,68 @@ function extractAttachmentLocalRef(promptText: string): string {
   }
 
   return match[1].trim();
+}
+
+function createJsonRpcHarness(input: PassThrough, output: PassThrough) {
+  let nextId = 1;
+  let buffer = "";
+  const responses = new Map<number, unknown>();
+  const notifications: Array<Record<string, any>> = [];
+  const waiters = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (error: unknown) => void;
+  }>();
+
+  output.on("data", (chunk: string | Buffer) => {
+    buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    while (true) {
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) {
+        return;
+      }
+      const line = buffer.slice(0, newline).replace(/\r$/u, "").trim();
+      buffer = buffer.slice(newline + 1);
+      if (line.length === 0) {
+        continue;
+      }
+      const message = JSON.parse(line) as Record<string, any>;
+      if (typeof message.id === "number") {
+        const waiter = waiters.get(message.id);
+        if (waiter !== undefined) {
+          waiters.delete(message.id);
+          if (message.error !== undefined) {
+            waiter.reject(new Error(String(message.error.message ?? "JSON-RPC error")));
+          } else {
+            waiter.resolve(message.result);
+          }
+        } else {
+          responses.set(message.id, message.result);
+        }
+        continue;
+      }
+      notifications.push(message);
+    }
+  });
+
+  return {
+    request(method: string, params?: unknown): Promise<any> {
+      const id = nextId++;
+      input.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, "utf8");
+      const existing = responses.get(id);
+      if (existing !== undefined) {
+        responses.delete(id);
+        return Promise.resolve(existing);
+      }
+      return new Promise((resolve, reject) => {
+        waiters.set(id, { resolve, reject });
+      });
+    },
+    async notify(method: string, params?: unknown): Promise<void> {
+      input.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`, "utf8");
+    },
+    async collectFor(delayMs: number): Promise<Array<Record<string, any>>> {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return [...notifications];
+    }
+  };
 }

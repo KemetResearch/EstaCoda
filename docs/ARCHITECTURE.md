@@ -63,6 +63,11 @@ Evidence note:
 - [src/mcp/mcp-tools.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-tools.ts)
   Discovery/registration layer plus server-level trust-to-risk mapping. `smoke-tested`
 
+### ACP
+
+- [src/acp/server.ts](/Users/ahnwy/estacoda-v2/src/acp/server.ts)
+  ACP stdio JSON-RPC server, in-process ACP session manager, cwd-bound runtime creation, and `session/update` streaming. `smoke-tested`
+
 ### Skills
 
 - [src/skills/skill-loader.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-loader.ts)

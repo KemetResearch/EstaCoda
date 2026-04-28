@@ -27,6 +27,7 @@ import {
 import { getTelegramGatewayDiagnostics, runTelegramGateway } from "../channels/gateway-runner.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import { runAcpServer } from "../acp/server.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -59,6 +60,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return browser(options, args);
     case "mcp":
       return mcp(options, args);
+    case "acp":
+      return acp(options, args);
     case "telegram":
       return telegram(options, args);
     case "gateway":
@@ -694,6 +697,38 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   };
 }
 
+async function acp(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+
+  if (subcommand === undefined || subcommand === "serve") {
+    await runAcpServer({
+      workspaceRoot: options.workspaceRoot,
+      homeDir: options.homeDir,
+      userConfigPath: options.userConfigPath,
+      projectConfigPath: options.projectConfigPath
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: ""
+    };
+  }
+
+  if (subcommand === "manifest") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: join(options.workspaceRoot, "acp_registry", "agent.json")
+    };
+  }
+
+  return {
+    handled: true,
+    exitCode: 1,
+    output: "Usage: estacoda acp [serve|manifest]"
+  };
+}
+
 function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {
   const parsed: Partial<ProviderSetupInput> = {};
 
@@ -944,6 +979,7 @@ function help(): string {
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
     "  estacoda mcp     Configure MCP servers",
+    "  estacoda acp     Start the ACP stdio server",
     "  estacoda telegram Configure Telegram channel",
     "  estacoda telegram pair Pair a Telegram chat",
     "  estacoda gateway Start channel gateway",

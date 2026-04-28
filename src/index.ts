@@ -68,6 +68,20 @@ async function buildRuntime(input: {
   });
 }
 
+if (argv[0] === "acp") {
+  const acpCommand = await runCliCommand({
+    argv,
+    workspaceRoot
+  });
+
+  if (acpCommand.handled) {
+    if (acpCommand.output.length > 0) {
+      console.log(acpCommand.output);
+    }
+    process.exit(acpCommand.exitCode);
+  }
+}
+
 const runtime = await buildRuntime({
   sessionId: await cliSessionStore.getSessionId(workspaceRoot)
 });
