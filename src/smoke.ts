@@ -2378,7 +2378,7 @@ const acpServer = new AcpServer({
 });
 const acpRunPromise = acpServer.run();
 const acpRpc = createJsonRpcHarness(acpInput, acpOutput);
-const acpInitialize = await acpRpc.request("initialize", { protocolVersion: "0.1", clientCapabilities: {} });
+const acpInitialize = await acpRpc.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
 const acpNewSession = await acpRpc.request("session/new", { cwd: acpWorkspace });
 const acpPrompt = await acpRpc.request("session/prompt", {
   sessionId: acpNewSession.sessionId,
@@ -2387,6 +2387,461 @@ const acpPrompt = await acpRpc.request("session/prompt", {
 const acpNotifications = await acpRpc.collectFor(50);
 const acpLoad = await acpRpc.request("session/load", { sessionId: acpNewSession.sessionId });
 await acpRpc.notify("session/cancel", { sessionId: acpNewSession.sessionId });
+
+let acpEditorReadPromptText = "";
+const acpEditorReadWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-editor-read-"));
+const acpEditorReadInput = new PassThrough();
+const acpEditorReadOutput = new PassThrough();
+acpEditorReadOutput.setEncoding("utf8");
+const acpEditorReadSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:30:00.000Z")
+});
+const acpEditorReadServer = new AcpServer({
+  workspaceRoot: acpEditorReadWorkspace,
+  input: acpEditorReadInput,
+  output: acpEditorReadOutput,
+  sessionDb: acpEditorReadSessionDb,
+  runtimeFactory: async ({ workspaceRoot, sessionId, sessionDb }) => {
+    if (await sessionDb.getSession(sessionId) === undefined) {
+      await sessionDb.createSession({
+        id: sessionId,
+        profileId: "default",
+        title: "ACP editor read session",
+        metadata: { workspaceRoot }
+      });
+    }
+
+    return {
+      describe: () => "fake acp editor-read runtime",
+      tools: () => [],
+      skills: () => [],
+      latestResumeNote: async () => undefined,
+      inspectMemoryPromotions: async () => [],
+      inspectMcpServers: () => [],
+      trustWorkspace: async () => {},
+      isWorkspaceTrusted: async () => true,
+      revokeWorkspaceTrust: async () => true,
+      dispose: async () => undefined,
+      sessionDb,
+      sessionId,
+      handle: async ({ text, onEvent }) => {
+        acpEditorReadPromptText = text;
+        await onEvent?.({ kind: "agent-start", sessionId, input: text });
+        await onEvent?.({ kind: "agent-final", text: "Read through ACP editor fs." });
+        return {
+          label: "EstaCoda",
+          text: "Read through ACP editor fs.",
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.5,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: false,
+            rationale: "ACP editor file bridge smoke"
+          },
+          securityDecision: "allow",
+          toolExecutions: [],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          providerExecution: undefined,
+          progress: []
+        };
+      }
+    };
+  }
+});
+const acpEditorReadRunPromise = acpEditorReadServer.run();
+const acpEditorReadRpc = createJsonRpcHarness(acpEditorReadInput, acpEditorReadOutput);
+await acpEditorReadRpc.request("initialize", {
+  protocolVersion: 1,
+  clientCapabilities: {
+    fs: {
+      readTextFile: true
+    }
+  }
+});
+const acpEditorReadSession = await acpEditorReadRpc.request("session/new", { cwd: acpEditorReadWorkspace });
+const acpEditorReadPromptPromise = acpEditorReadRpc.request("session/prompt", {
+  sessionId: acpEditorReadSession.sessionId,
+  prompt: "Read package.json and summarize the scripts in this project."
+});
+const acpEditorReadFsRequest = await acpEditorReadRpc.nextServerRequest("fs/read_text_file");
+await acpEditorReadRpc.respond(acpEditorReadFsRequest.id, {
+  content: JSON.stringify({
+    scripts: {
+      dev: "bun run dev",
+      smoke: "bun run smoke"
+    }
+  }, null, 2)
+});
+const acpEditorReadPrompt = await acpEditorReadPromptPromise;
+acpEditorReadInput.end();
+await acpEditorReadRunPromise;
+
+const acpPermissionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-permission-"));
+const acpPermissionTargetKey = "terminal.run:cmd=rm -rf /tmp/demo";
+const acpPermissionTool = {
+  name: "terminal.run",
+  description: "Run a shell command.",
+  inputSchema: { type: "object" },
+  riskClass: "destructive-local" as const,
+  toolsets: ["shell-write"],
+  progressLabel: "run shell",
+  maxResultSizeChars: 8_000
+};
+let acpAllowHandleCalls = 0;
+const acpAllowInput = new PassThrough();
+const acpAllowOutput = new PassThrough();
+acpAllowOutput.setEncoding("utf8");
+const acpAllowSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T01:00:00.000Z")
+});
+const acpAllowServer = new AcpServer({
+  workspaceRoot: acpPermissionWorkspace,
+  input: acpAllowInput,
+  output: acpAllowOutput,
+  sessionDb: acpAllowSessionDb,
+  runtimeFactory: async ({ workspaceRoot, sessionId, sessionDb, securityPolicy }) => {
+    if (await sessionDb.getSession(sessionId) === undefined) {
+      await sessionDb.createSession({
+        id: sessionId,
+        profileId: "default",
+        title: "ACP permission allow",
+        metadata: { workspaceRoot }
+      });
+    }
+    return {
+      describe: () => "fake acp permission runtime",
+      tools: () => [],
+      skills: () => [],
+      latestResumeNote: async () => undefined,
+      inspectMemoryPromotions: async () => [],
+      inspectMcpServers: () => [],
+      trustWorkspace: async () => {},
+      isWorkspaceTrusted: async () => false,
+      revokeWorkspaceTrust: async () => false,
+      dispose: async () => undefined,
+      sessionDb,
+      sessionId,
+      handle: async ({ text, onEvent }) => {
+        acpAllowHandleCalls += 1;
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "user",
+          content: text,
+          channel: "web"
+        });
+        await onEvent?.({ kind: "agent-start", sessionId, input: text });
+        const decision = securityPolicy.decide({
+          riskClass: "destructive-local",
+          description: "run tool terminal.run",
+          toolName: "terminal.run",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: "rm -rf /tmp/demo",
+          context: {
+            trustedWorkspace: false,
+            targetConversationIsActive: true
+          }
+        });
+        if (decision !== "allow") {
+          return {
+            label: "EstaCoda",
+            text: "Permission required.",
+            matchedSkills: [],
+            intent: {
+              labels: ["general"],
+              confidence: 0.5,
+              suggestedToolsets: [],
+              suggestedSkills: [],
+              confirmationRequired: true,
+              rationale: "ACP permission test"
+            },
+            securityDecision: decision,
+            toolExecutions: [{
+              tool: acpPermissionTool,
+              decision,
+              riskClass: "destructive-local",
+              targetKey: acpPermissionTargetKey,
+              targetSummary: "rm -rf /tmp/demo"
+            }],
+            toolPlans: [],
+            skillOutcomes: [],
+            artifacts: [],
+            context: undefined,
+            projectContext: undefined,
+            providerExecution: undefined,
+            progress: []
+          };
+        }
+        await onEvent?.({ kind: "tool-start", tool: "terminal.run", stepId: "acp-allow-terminal" });
+        await onEvent?.({ kind: "tool-result", tool: "terminal.run", ok: true, riskClass: "destructive-local", chars: 2, sentChars: 2 });
+        await onEvent?.({ kind: "agent-final", text: "Allowed after permission." });
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "agent",
+          content: "Allowed after permission.",
+          channel: "web",
+          metadata: { workspaceRoot }
+        });
+        return {
+          label: "EstaCoda",
+          text: "Allowed after permission.",
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.5,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: false,
+            rationale: "ACP permission test"
+          },
+          securityDecision: "allow",
+          toolExecutions: [],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          providerExecution: {
+            ok: true,
+            response: {
+              ok: true,
+              model: "fake-model",
+              provider: "kimi",
+              content: "Allowed after permission.",
+              usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 }
+            },
+            fallbackUsed: false,
+            attempts: [],
+            toolCalls: []
+          },
+          progress: []
+        };
+      }
+    };
+  }
+});
+const acpAllowRunPromise = acpAllowServer.run();
+const acpAllowRpc = createJsonRpcHarness(acpAllowInput, acpAllowOutput);
+await acpAllowRpc.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+const acpAllowSession = await acpAllowRpc.request("session/new", { cwd: acpPermissionWorkspace });
+const acpAllowPromptPromise = acpAllowRpc.request("session/prompt", {
+  sessionId: acpAllowSession.sessionId,
+  prompt: "Try the risky command."
+});
+const acpAllowPermissionRequest = await acpAllowRpc.nextServerRequest("session/request_permission");
+await acpAllowRpc.respond(acpAllowPermissionRequest.id, {
+  outcome: "selected",
+  optionId: "allow-once",
+  source: "client"
+});
+const acpAllowPrompt = await acpAllowPromptPromise;
+const acpAllowNotifications = await acpAllowRpc.collectFor(50);
+acpAllowInput.end();
+await acpAllowRunPromise;
+
+let acpDenyHandleCalls = 0;
+const acpDenyInput = new PassThrough();
+const acpDenyOutput = new PassThrough();
+acpDenyOutput.setEncoding("utf8");
+const acpDenySessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T02:00:00.000Z")
+});
+const acpDenyServer = new AcpServer({
+  workspaceRoot: acpPermissionWorkspace,
+  input: acpDenyInput,
+  output: acpDenyOutput,
+  sessionDb: acpDenySessionDb,
+  runtimeFactory: async ({ workspaceRoot, sessionId, sessionDb, securityPolicy }) => {
+    if (await sessionDb.getSession(sessionId) === undefined) {
+      await sessionDb.createSession({
+        id: sessionId,
+        profileId: "default",
+        title: "ACP permission deny",
+        metadata: { workspaceRoot }
+      });
+    }
+    return {
+      describe: () => "fake acp deny runtime",
+      tools: () => [],
+      skills: () => [],
+      latestResumeNote: async () => undefined,
+      inspectMemoryPromotions: async () => [],
+      inspectMcpServers: () => [],
+      trustWorkspace: async () => {},
+      isWorkspaceTrusted: async () => false,
+      revokeWorkspaceTrust: async () => false,
+      dispose: async () => undefined,
+      sessionDb,
+      sessionId,
+      handle: async ({ text, onEvent }) => {
+        acpDenyHandleCalls += 1;
+        await onEvent?.({ kind: "agent-start", sessionId, input: text });
+        const decision = securityPolicy.decide({
+          riskClass: "destructive-local",
+          description: "run tool terminal.run",
+          toolName: "terminal.run",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: "rm -rf /tmp/demo",
+          context: {
+            trustedWorkspace: false,
+            targetConversationIsActive: true
+          }
+        });
+        return {
+          label: "EstaCoda",
+          text: "Permission required.",
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.5,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: true,
+            rationale: "ACP permission deny"
+          },
+          securityDecision: decision,
+          toolExecutions: [{
+            tool: acpPermissionTool,
+            decision,
+            riskClass: "destructive-local",
+            targetKey: acpPermissionTargetKey,
+            targetSummary: "rm -rf /tmp/demo"
+          }],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          providerExecution: undefined,
+          progress: []
+        };
+      }
+    };
+  }
+});
+const acpDenyRunPromise = acpDenyServer.run();
+const acpDenyRpc = createJsonRpcHarness(acpDenyInput, acpDenyOutput);
+await acpDenyRpc.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+const acpDenySession = await acpDenyRpc.request("session/new", { cwd: acpPermissionWorkspace });
+const acpDenyPromptPromise = acpDenyRpc.request("session/prompt", {
+  sessionId: acpDenySession.sessionId,
+  prompt: "Try the risky command."
+});
+const acpDenyPermissionRequest = await acpDenyRpc.nextServerRequest("session/request_permission");
+await acpDenyRpc.respond(acpDenyPermissionRequest.id, {
+  outcome: "selected",
+  optionId: "reject-once",
+  source: "client"
+});
+const acpDenyPrompt = await acpDenyPromptPromise;
+const acpDenyNotifications = await acpDenyRpc.collectFor(50);
+acpDenyInput.end();
+await acpDenyRunPromise;
+
+let acpTimeoutHandleCalls = 0;
+const acpTimeoutInput = new PassThrough();
+const acpTimeoutOutput = new PassThrough();
+acpTimeoutOutput.setEncoding("utf8");
+const acpTimeoutSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T03:00:00.000Z")
+});
+const acpTimeoutServer = new AcpServer({
+  workspaceRoot: acpPermissionWorkspace,
+  input: acpTimeoutInput,
+  output: acpTimeoutOutput,
+  sessionDb: acpTimeoutSessionDb,
+  permissionTimeoutMs: 25,
+  runtimeFactory: async ({ workspaceRoot, sessionId, sessionDb, securityPolicy }) => {
+    if (await sessionDb.getSession(sessionId) === undefined) {
+      await sessionDb.createSession({
+        id: sessionId,
+        profileId: "default",
+        title: "ACP permission timeout",
+        metadata: { workspaceRoot }
+      });
+    }
+    return {
+      describe: () => "fake acp timeout runtime",
+      tools: () => [],
+      skills: () => [],
+      latestResumeNote: async () => undefined,
+      inspectMemoryPromotions: async () => [],
+      inspectMcpServers: () => [],
+      trustWorkspace: async () => {},
+      isWorkspaceTrusted: async () => false,
+      revokeWorkspaceTrust: async () => false,
+      dispose: async () => undefined,
+      sessionDb,
+      sessionId,
+      handle: async ({ text, onEvent }) => {
+        acpTimeoutHandleCalls += 1;
+        await onEvent?.({ kind: "agent-start", sessionId, input: text });
+        const decision = securityPolicy.decide({
+          riskClass: "destructive-local",
+          description: "run tool terminal.run",
+          toolName: "terminal.run",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: "rm -rf /tmp/demo",
+          context: {
+            trustedWorkspace: false,
+            targetConversationIsActive: true
+          }
+        });
+        return {
+          label: "EstaCoda",
+          text: "Permission required.",
+          matchedSkills: [],
+          intent: {
+            labels: ["general"],
+            confidence: 0.5,
+            suggestedToolsets: [],
+            suggestedSkills: [],
+            confirmationRequired: true,
+            rationale: "ACP permission timeout"
+          },
+          securityDecision: decision,
+          toolExecutions: [{
+            tool: acpPermissionTool,
+            decision,
+            riskClass: "destructive-local",
+            targetKey: acpPermissionTargetKey,
+            targetSummary: "rm -rf /tmp/demo"
+          }],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          providerExecution: undefined,
+          progress: []
+        };
+      }
+    };
+  }
+});
+const acpTimeoutRunPromise = acpTimeoutServer.run();
+const acpTimeoutRpc = createJsonRpcHarness(acpTimeoutInput, acpTimeoutOutput);
+await acpTimeoutRpc.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+const acpTimeoutSession = await acpTimeoutRpc.request("session/new", { cwd: acpPermissionWorkspace });
+const acpTimeoutPromptPromise = acpTimeoutRpc.request("session/prompt", {
+  sessionId: acpTimeoutSession.sessionId,
+  prompt: "Try the risky command."
+});
+const acpTimeoutPermissionRequest = await acpTimeoutRpc.nextServerRequest("session/request_permission");
+const acpTimeoutPrompt = await acpTimeoutPromptPromise;
+const acpTimeoutNotifications = await acpTimeoutRpc.collectFor(50);
+acpTimeoutInput.end();
+await acpTimeoutRunPromise;
+
 acpInput.end();
 await acpRunPromise;
 const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
@@ -2432,7 +2887,7 @@ assert(httpPromptResult?.content.includes("HTTP prompt") === true, "expected HTT
 assert(httpMcpRequests.some((request) => request.body.method === "initialize"), "expected HTTP MCP initialize request");
 assert(httpMcpRequests.some((request) => request.body.method === "tools/list"), "expected HTTP MCP tools/list request");
 assert(resolvedFakeNpxBinary === join(fakeNpxCacheRoot, ".bin", "demo-server"), "expected MCP client to resolve cached npx binaries");
-assert(acpInitialize.protocolVersion === "0.1", "expected ACP initialize protocol version");
+assert(acpInitialize.protocolVersion === 1, "expected ACP initialize protocol version");
 assert(typeof acpNewSession.sessionId === "string" && acpNewSession.sessionId.length > 0, "expected ACP session/new to return a session id");
 assert(acpPrompt.stopReason === "end_turn", "expected ACP prompt to finish its turn");
 assert(acpLoad.sessionId === acpNewSession.sessionId, "expected ACP load to return the same session id");
@@ -2447,6 +2902,61 @@ assert(
 assert(
   acpNotifications.some((message) => message.method === "session/update" && message.params?.update?.sessionUpdate === "usage_update"),
   "expected ACP prompt flow to emit usage_update notifications"
+);
+assert(acpEditorReadPrompt.stopReason === "end_turn", "expected ACP editor fs prompt to finish its turn");
+assert(acpEditorReadFsRequest.method === "fs/read_text_file", "expected ACP editor fs bridge to request file contents from the client");
+assert(acpEditorReadFsRequest.params?.sessionId === acpEditorReadSession.sessionId, "expected ACP editor fs bridge to include the ACP sessionId");
+assert(String(acpEditorReadFsRequest.params?.path ?? "").endsWith("/package.json"), "expected ACP editor fs bridge to request package.json");
+assert(acpEditorReadPromptText.includes("[ACP Editor File Context]"), "expected ACP runtime prompt to include editor file context");
+assert(acpEditorReadPromptText.includes("Path: package.json"), "expected ACP runtime prompt to name the editor-backed file");
+assert(acpEditorReadPromptText.includes("\"dev\": \"bun run dev\""), "expected ACP runtime prompt to include editor-backed package.json content");
+assert(acpAllowPermissionRequest.method === "session/request_permission", "expected ACP to issue a permission request");
+assert(acpAllowPrompt.stopReason === "end_turn", "expected ACP allow-once prompt to resume and finish");
+assert(acpAllowHandleCalls === 2, "expected ACP allow-once flow to rerun the blocked action once");
+assert(
+  acpAllowNotifications.some((message) =>
+    message.method === "session/update" &&
+    message.params?.update?.sessionUpdate === "tool_call_update" &&
+    message.params?.update?.status === "blocked"
+  ),
+  "expected ACP allow-once flow to emit a blocked tool update"
+);
+assert(
+  acpAllowNotifications.some((message) =>
+    message.method === "session/update" &&
+    message.params?.update?.sessionUpdate === "tool_call_update" &&
+    message.params?.update?.status === "in_progress"
+  ),
+  "expected ACP allow-once flow to emit an in-progress tool update after approval"
+);
+assert(
+  acpAllowNotifications.some((message) =>
+    message.method === "session/update" &&
+    message.params?.update?.sessionUpdate === "tool_call_update" &&
+    message.params?.update?.status === "completed"
+  ),
+  "expected ACP allow-once flow to emit a completed tool update"
+);
+assert(acpDenyPrompt.stopReason === "cancelled", "expected ACP deny flow to cancel cleanly");
+assert(acpDenyHandleCalls === 1, "expected ACP deny flow to avoid rerunning the blocked action");
+assert(
+  acpDenyNotifications.some((message) =>
+    message.method === "session/update" &&
+    message.params?.update?.sessionUpdate === "thought_message_chunk" &&
+    String(message.params?.update?.content?.text ?? "").includes("Permission denied.")
+  ),
+  "expected ACP deny flow to emit a denial message"
+);
+assert(acpTimeoutPermissionRequest.method === "session/request_permission", "expected ACP timeout flow to request permission");
+assert(acpTimeoutPrompt.stopReason === "end_turn", "expected ACP timeout flow to deny by default and end the turn");
+assert(acpTimeoutHandleCalls === 1, "expected ACP timeout flow to avoid rerunning the blocked action");
+assert(
+  acpTimeoutNotifications.some((message) =>
+    message.method === "session/update" &&
+    message.params?.update?.sessionUpdate === "thought_message_chunk" &&
+    String(message.params?.update?.content?.text ?? "").includes("Denied by default")
+  ),
+  "expected ACP timeout flow to explain default denial"
 );
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
@@ -9051,10 +9561,15 @@ function createJsonRpcHarness(input: PassThrough, output: PassThrough) {
   let buffer = "";
   const responses = new Map<number, unknown>();
   const notifications: Array<Record<string, any>> = [];
+  const serverRequests: Array<Record<string, any>> = [];
   const waiters = new Map<number, {
     resolve: (value: unknown) => void;
     reject: (error: unknown) => void;
   }>();
+  const serverRequestWaiters = new Map<string, Array<{
+    resolve: (value: Record<string, any>) => void;
+    reject: (error: unknown) => void;
+  }>>();
 
   output.on("data", (chunk: string | Buffer) => {
     buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -9069,6 +9584,15 @@ function createJsonRpcHarness(input: PassThrough, output: PassThrough) {
         continue;
       }
       const message = JSON.parse(line) as Record<string, any>;
+      if (typeof message.method === "string" && typeof message.id === "number") {
+        serverRequests.push(message);
+        const waitersForMethod = serverRequestWaiters.get(message.method);
+        const waiter = waitersForMethod?.shift();
+        if (waiter !== undefined) {
+          waiter.resolve(message);
+        }
+        continue;
+      }
       if (typeof message.id === "number") {
         const waiter = waiters.get(message.id);
         if (waiter !== undefined) {
@@ -9102,6 +9626,43 @@ function createJsonRpcHarness(input: PassThrough, output: PassThrough) {
     },
     async notify(method: string, params?: unknown): Promise<void> {
       input.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`, "utf8");
+    },
+    async nextServerRequest(method: string, timeoutMs = 1_000): Promise<Record<string, any>> {
+      const existingIndex = serverRequests.findIndex((message) => message.method === method);
+      if (existingIndex !== -1) {
+        return serverRequests.splice(existingIndex, 1)[0];
+      }
+      return await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          const queue = serverRequestWaiters.get(method);
+          if (queue !== undefined) {
+            const index = queue.findIndex((entry) => entry.resolve === resolve);
+            if (index !== -1) {
+              queue.splice(index, 1);
+            }
+            if (queue.length === 0) {
+              serverRequestWaiters.delete(method);
+            }
+          }
+          reject(new Error(`Timed out waiting for server request ${method}`));
+        }, timeoutMs);
+        const entry = {
+          resolve: (value: Record<string, any>) => {
+            clearTimeout(timeout);
+            resolve(value);
+          },
+          reject: (error: unknown) => {
+            clearTimeout(timeout);
+            reject(error);
+          }
+        };
+        const queue = serverRequestWaiters.get(method) ?? [];
+        queue.push(entry);
+        serverRequestWaiters.set(method, queue);
+      });
+    },
+    async respond(id: number, result: unknown): Promise<void> {
+      input.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`, "utf8");
     },
     async collectFor(delayMs: number): Promise<Array<Record<string, any>>> {
       await new Promise((resolve) => setTimeout(resolve, delayMs));

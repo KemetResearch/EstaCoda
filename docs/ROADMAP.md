@@ -157,7 +157,7 @@ Next:
 
 ### 8. MCP and ACP
 
-State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP foundation now exists as a smoke-tested stdio JSON-RPC server, but full editor parity is still not implemented.
+State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP foundation now exists as a stdio JSON-RPC server, and the basic JetBrains editor flow is now live-proven for chat plus editor-backed file reads, but full editor parity is still not implemented.
 
 Done:
 
@@ -174,13 +174,15 @@ Done:
   - `acp_registry/agent.json`
   - core methods: `initialize`, `authenticate`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`
   - streaming `session/update` notifications for session info, thought chunks, tool calls, agent message chunks, and usage
-  `smoke-tested`
+  - editor-backed file reads in JetBrains
+  `basic editor flow live-proven`
 
 Next:
 
 - add richer per-server trust/visibility controls
 - refine resource/prompt ergonomics
 - deepen ACP toward Hermes parity after MCP client and memory/session maturity
+  The next explicit live proof should be the approval handshake in a real editor client.
 - treat MCP server bridging as later than MCP client and ACP
 
 ## Correct Next Milestone
@@ -322,7 +324,7 @@ What remains:
 
 ### 10. MCP / ACP
 
-State: MCP client foundation now exists across stdio + HTTP; ACP foundation now exists, but only the first stdio/session slice is implemented.
+State: MCP client foundation now exists across stdio + HTTP; ACP foundation now exists, and basic editor chat plus editor-backed file reads are now live-proven, but only the first editor slice is implemented.
 
 - stdio MCP client transport exists `live-proven`
 - HTTP MCP client transport exists `smoke-tested`
@@ -333,14 +335,14 @@ State: MCP client foundation now exists across stdio + HTTP; ACP foundation now 
   - `/reload-mcp`
   `smoke-tested`
 - per-server trust metadata exists and currently maps server trust to runtime risk classes `smoke-tested`
-- ACP adapter/server foundation now exists `smoke-tested`
+- ACP adapter/server foundation now exists; base editor flow is `live-proven`
 - current `mcp` auxiliary route remains a routing preference construct, not the protocol client itself
 
 What remains:
 
 - Phase 1: MCP client for stdio servers `done / smoke-tested`
 - Phase 2: trust/visibility refinement and richer resource/prompt ergonomics
-- Phase 3: ACP foundation `done / smoke-tested`; next is richer editor, approval, and tool parity
+- Phase 3: ACP foundation `done`; base editor flow is `live-proven`, and next is live approval proof plus richer editor/tool parity
 - Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
 
 ## Launch Readiness Read

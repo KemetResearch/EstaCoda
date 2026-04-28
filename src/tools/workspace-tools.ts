@@ -9,6 +9,12 @@ export type WorkspaceToolOptions = {
   maxReadBytes?: number;
   maxSearchResults?: number;
   commandTimeoutMs?: number;
+  fsAdapter?: WorkspaceFsAdapter;
+};
+
+export type WorkspaceFsAdapter = {
+  readTextFile(input: { path: string; lineStart?: number; lineEnd?: number }): Promise<string>;
+  writeTextFile?(input: { path: string; content: string }): Promise<void>;
 };
 
 const DEFAULT_MAX_READ_BYTES = 48_000;
@@ -25,6 +31,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxSearchResults = options.maxSearchResults ?? DEFAULT_MAX_SEARCH_RESULTS;
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+  const fsAdapter = options.fsAdapter;
 
   return [
     {
@@ -49,6 +56,19 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         const path = await resolveWorkspacePath(canonicalRoot, input.path);
         if (!path.ok) {
           return path;
+        }
+
+        if (fsAdapter !== undefined) {
+          const content = await fsAdapter.readTextFile({
+            path: path.path,
+            lineStart: input.lineStart,
+            lineEnd: input.lineEnd
+          });
+          return renderWorkspaceFile(canonicalRoot, path.path, content, {
+            maxReadBytes,
+            lineStart: input.lineStart,
+            lineEnd: input.lineEnd
+          });
         }
 
         return readWorkspaceFile(canonicalRoot, path.path, {
@@ -85,8 +105,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return path;
         }
 
-        await mkdir(dirname(path.path), { recursive: true });
-        await writeFile(path.path, input.content, "utf8");
+        if (fsAdapter?.writeTextFile !== undefined) {
+          await fsAdapter.writeTextFile({
+            path: path.path,
+            content: input.content
+          });
+        } else {
+          await mkdir(dirname(path.path), { recursive: true });
+          await writeFile(path.path, input.content, "utf8");
+        }
 
         return {
           ok: true,
@@ -126,7 +153,9 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return path;
         }
 
-        const existing = await readFile(path.path, "utf8");
+        const existing = fsAdapter !== undefined
+          ? await fsAdapter.readTextFile({ path: path.path })
+          : await readFile(path.path, "utf8");
         const index = existing.indexOf(input.oldText);
 
         if (index === -1) {
@@ -138,7 +167,14 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const next = existing.slice(0, index) + input.newText + existing.slice(index + input.oldText.length);
-        await writeFile(path.path, next, "utf8");
+        if (fsAdapter?.writeTextFile !== undefined) {
+          await fsAdapter.writeTextFile({
+            path: path.path,
+            content: next
+          });
+        } else {
+          await writeFile(path.path, next, "utf8");
+        }
 
         return {
           ok: true,
@@ -294,6 +330,32 @@ async function readWorkspaceFile(
   const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
   const ranged = applyLineRange(content, options.lineStart, options.lineEnd);
 
+  return renderWorkspaceFile(root, path, ranged, {
+    maxReadBytes: options.maxReadBytes,
+    originalBytes: bytes.length,
+    alreadyRanged: true
+  });
+}
+
+function renderWorkspaceFile(
+  root: string,
+  path: string,
+  content: string,
+  options: {
+    maxReadBytes: number;
+    lineStart?: number;
+    lineEnd?: number;
+    originalBytes?: number;
+    alreadyRanged?: boolean;
+  }
+): ToolResult {
+  const byteLength = options.originalBytes ?? Buffer.byteLength(content);
+  const truncated = byteLength > options.maxReadBytes;
+  const trimmed = truncated ? content.slice(0, options.maxReadBytes) : content;
+  const ranged = options.alreadyRanged === true
+    ? trimmed
+    : applyLineRange(trimmed, options.lineStart, options.lineEnd);
+
   return {
     ok: true,
     content: [
@@ -302,7 +364,7 @@ async function readWorkspaceFile(
     ].join("\n"),
     metadata: {
       path: relative(root, path),
-      bytes: bytes.length,
+      bytes: byteLength,
       truncated
     }
   };

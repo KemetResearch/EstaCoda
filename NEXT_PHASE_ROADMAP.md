@@ -89,7 +89,7 @@ Next acceptance checks:
 
 Follow-on protocol work after this milestone:
 - MCP client stdio + HTTP foundation is now in place with config-driven discovery, trust metadata, tool/resource/prompt registration, and reload semantics; the stdio path is now live-proven against a real filesystem MCP server.
-- ACP foundation is now in place as a smoke-tested stdio JSON-RPC server with session lifecycle methods and streaming updates; deeper editor parity should still wait until after stronger memory/session maturity.
+- ACP foundation is now in place as a stdio JSON-RPC server with session lifecycle methods and streaming updates, and the basic JetBrains editor flow is now live-proven for chat plus editor-backed file reads; deeper editor parity should still wait until after stronger memory/session maturity.
 - MCP server bridging should still come later than MCP client and likely later than ACP.
 
 ### 4. Channels

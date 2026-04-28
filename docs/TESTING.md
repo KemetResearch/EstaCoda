@@ -66,9 +66,10 @@ cd /Users/ahnwy/estacoda-v2
 
 Current evidence level:
 
-- ACP stdio server foundation: `smoke-tested`
-- ACP initialize/session/new/session/prompt/session/load/session/cancel flow: `smoke-tested`
-- real editor/operator ACP integration: `implemented but not live-proven`
+- ACP stdio server foundation: `live-proven`
+- ACP initialize/session/new/session/prompt/session/load/session/cancel flow: `live-proven`
+- real editor/operator ACP integration: basic chat + editor-backed file reads are `live-proven`
+- ACP permission handshake: `implemented and smoke-tested`, but still not live-proven in an editor client
 
 ## CLI Sanity Checks
 

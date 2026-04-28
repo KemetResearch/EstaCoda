@@ -48,7 +48,7 @@ import { createVisionTools } from "../tools/vision-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { createWebTools, type FetchLike as WebFetchLike } from "../tools/web-tools.js";
-import { createWorkspaceTools } from "../tools/workspace-tools.js";
+import { createWorkspaceTools, type WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -94,6 +94,7 @@ export type RuntimeOptions = {
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
   securityPolicy?: SecurityPolicy;
+  workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
 export type Runtime = {
@@ -219,7 +220,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   })) {
     toolRegistry.register(tool);
   }
-  for (const tool of createWorkspaceTools({ workspaceRoot })) {
+  for (const tool of createWorkspaceTools({
+    workspaceRoot,
+    fsAdapter: options.workspaceFsAdapter
+  })) {
     toolRegistry.register(tool);
   }
   for (const tool of createMediaTools({
