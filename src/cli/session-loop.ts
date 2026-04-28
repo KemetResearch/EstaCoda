@@ -2,6 +2,7 @@ import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
@@ -87,25 +88,45 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         continue;
       }
 
-      output.write("\n");
-      activeTurn = new AbortController();
-      const response = await runtime.handle({
-          text,
-          channel: "cli",
-          signal: activeTurn.signal,
-          onEvent: (event) => renderRuntimeEvent(output, event, activityRenderer)
-        })
-        .finally(() => {
-          activeTurn = undefined;
+      let retryText: string | undefined = text;
+      while (retryText !== undefined) {
+        output.write("\n");
+        activeTurn = new AbortController();
+        const response = await runtime.handle({
+            text: retryText,
+            channel: "cli",
+            signal: activeTurn.signal,
+            onEvent: (event) => renderRuntimeEvent(output, event, activityRenderer)
+          })
+          .finally(() => {
+            activeTurn = undefined;
+          });
+
+        output.write(`\n${response.label}: ${response.text}\n`);
+
+        if (response.progress.length > 0) {
+          output.write(`progress: ${response.progress.join(" -> ")}\n`);
+        }
+
+        const approvalResolution = await maybeHandleApprovalGate({
+          runtime,
+          prompt,
+          output,
+          execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
-      output.write(`\n${response.label}: ${response.text}\n`);
+        if (approvalResolution.retry === false) {
+          if (approvalResolution.message !== undefined) {
+            output.write(`${approvalResolution.message}\n`);
+          }
+          output.write("\n");
+          retryText = undefined;
+          continue;
+        }
 
-      if (response.progress.length > 0) {
-        output.write(`progress: ${response.progress.join(" -> ")}\n`);
+        output.write(`${approvalResolution.message}\n\n`);
+        retryText = text;
       }
-
-      output.write("\n");
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
@@ -184,6 +205,23 @@ async function handleSlashCommand(input: {
     case "resume":
       input.output.write(`${await renderLatestResume(input.runtime)}\n\n`);
       return false;
+    case "approvals":
+      input.output.write(`${await renderApprovalStatus(input.runtime)}\n\n`);
+      return false;
+    case "revoke": {
+      const approvalId = args[0];
+      if (approvalId === undefined || approvalId.length === 0) {
+        input.output.write("Usage: /revoke <approval-id>\n\n");
+        return false;
+      }
+      if (input.runtime.revokeApproval === undefined) {
+        input.output.write("This session does not support persistent approval revocation here.\n\n");
+        return false;
+      }
+      const revoked = await input.runtime.revokeApproval(approvalId);
+      input.output.write(`${revoked ? `Revoked persistent approval ${approvalId}.` : `No persistent approval matched ${approvalId}.`}\n\n`);
+      return false;
+    }
     case "sessions":
       input.output.write(`${await renderSessionList(input.runtime)}\n\n`);
       return false;
@@ -255,6 +293,102 @@ function renderSessionHelp(): string {
   return [
     "EstaCoda session commands",
     ...SESSION_COMMANDS.map((command) => `/${command.name.padEnd(8)}${command.description}`)
+  ].join("\n");
+}
+
+async function maybeHandleApprovalGate(input: {
+  runtime: Runtime;
+  prompt: (question: string) => Promise<string>;
+  output: NodeJS.WritableStream;
+  execution: ToolExecutionRecord | undefined;
+}): Promise<{
+  retry: boolean;
+  message?: string;
+}> {
+  const execution = input.execution;
+  if (execution === undefined || input.runtime.grantApproval === undefined) {
+    return {
+      retry: false
+    };
+  }
+
+  while (true) {
+    const answer = (await input.prompt(renderApprovalPrompt(execution))).trim().toLowerCase();
+    if (answer === "deny" || answer === "reject" || answer === "no" || answer === "n") {
+      return {
+        retry: false,
+        message: "Permission denied."
+      };
+    }
+
+    const scope = normalizeApprovalScope(answer);
+    if (scope === undefined) {
+      input.output.write("Enter one of: once, session, always, deny.\n\n");
+      continue;
+    }
+
+    await input.runtime.grantApproval({
+      toolName: execution.tool.name,
+      riskClass: execution.riskClass,
+      targetKey: execution.targetKey,
+      targetSummary: execution.targetSummary,
+      scope
+    });
+
+    return {
+      retry: true,
+      message: scope === "always"
+        ? "Approval granted (persistent for this workspace). Retrying now."
+        : `Approval granted (${scope}). Retrying now.`
+    };
+  }
+}
+
+function renderApprovalPrompt(execution: ToolExecutionRecord): string {
+  const details = [
+    "",
+    "Approval required",
+    `Tool: ${execution.tool.name}`,
+    `Risk: ${execution.riskClass}`,
+    execution.targetSummary === undefined ? undefined : `Target: ${execution.targetSummary}`,
+    "Choose once, session, always, or deny",
+    "approval > "
+  ].filter((line): line is string => typeof line === "string");
+
+  return details.join("\n");
+}
+
+function normalizeApprovalScope(value: string): "once" | "session" | "always" | undefined {
+  if (value === "once" || value === "1") return "once";
+  if (value === "session" || value === "2") return "session";
+  if (value === "always" || value === "persist" || value === "3") return "always";
+  return undefined;
+}
+
+async function renderApprovalStatus(runtime: Runtime): Promise<string> {
+  const approvals = await runtime.inspectApprovals?.();
+  if (approvals === undefined) {
+    return "This session does not expose approval state here.";
+  }
+
+  return [
+    "Approval status",
+    "",
+    "Session approvals:",
+    ...(approvals.session.length === 0
+      ? ["none"]
+      : approvals.session.map((grant, index) =>
+          `${index + 1}. scope=${grant.scope} tool=${grant.toolName} risk=${grant.riskClass}${grant.targetSummary === undefined ? "" : ` target=${grant.targetSummary}`}`
+        )),
+    "",
+    "Persistent approvals:",
+    ...(approvals.persistent.length === 0
+      ? ["none"]
+      : approvals.persistent.map((grant, index) =>
+          `${index + 1}. [${grant.id}] tool=${grant.toolName} risk=${grant.riskClass}${grant.targetSummary === undefined ? "" : ` target=${grant.targetSummary}`}`
+        )),
+    "",
+    "Use /revoke <approval-id> to remove a persistent approval."
   ].join("\n");
 }
 

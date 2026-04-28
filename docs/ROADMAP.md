@@ -238,6 +238,7 @@ State: partially built.
 - gateway security flow exists `smoke-tested`
 - security approval modes now exist across CLI/runtime/channel/ACP: `strict`, `adaptive`, `open` `smoke-tested`
 - adaptive assessor path now exists with structured fallback-to-ask behavior `smoke-tested`
+- CLI approval scopes and persistent workspace approval revocation now exist `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

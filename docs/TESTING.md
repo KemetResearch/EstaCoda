@@ -238,6 +238,7 @@ At a high level:
 - skill execution and package behavior
 - session-stable skill visibility
 - approvals and strict target-key matching
+- CLI approval scopes plus persistent workspace approval storage/revocation
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - Telegram progress compaction

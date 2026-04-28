@@ -28,7 +28,7 @@ import { createOpenAICompatibleProvider } from "../providers/openai-compatible-p
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { routeProvider } from "../providers/provider-router.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
-import type { SecurityPolicy } from "../contracts/security.js";
+import type { SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { CredentialPoolRegistry } from "../providers/credential-pool.js";
@@ -36,6 +36,7 @@ import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
@@ -97,6 +98,7 @@ export type RuntimeOptions = {
   securityPolicy?: SecurityPolicy;
   securityMode?: import("../contracts/security.js").SecurityApprovalMode;
   securityAssessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
+  approvalController?: WorkspaceApprovalController;
   workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
@@ -113,6 +115,24 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  grantApproval?(input: {
+    toolName: string;
+    riskClass: import("../contracts/tool.js").ToolRiskClass;
+    targetKey?: string;
+    targetSummary?: string;
+    scope: ApprovalScope;
+  }): Promise<void>;
+  inspectApprovals?(): Promise<{
+    session: Array<{
+      toolName: string;
+      riskClass: import("../contracts/tool.js").ToolRiskClass;
+      targetKey?: string;
+      targetSummary?: string;
+      scope: "once" | "session";
+    }>;
+    persistent: PersistedWorkspaceApprovalGrant[];
+  }>;
+  revokeApproval?(id: string): Promise<boolean>;
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
@@ -344,7 +364,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
-  const securityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive", {
+  const baseSecurityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive", {
     assessor: options.securityAssessor === undefined
       ? undefined
       : {
@@ -353,6 +373,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionId
       }
   });
+  const securityPolicy = options.approvalController === undefined
+    ? baseSecurityPolicy
+    : {
+      decide(request: SecurityRequest) {
+        return baseSecurityPolicy.decide(request);
+      },
+      async assess(request: SecurityRequest) {
+        return await options.approvalController!.assess(baseSecurityPolicy, request, {
+          workspaceRoot,
+          profileId,
+          sessionId,
+          mode: options.securityMode ?? "adaptive"
+        });
+      }
+    };
   const toolExecutor = new ToolExecutor({
     registry: toolRegistry,
     securityPolicy,
@@ -460,6 +495,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionId,
         signal: input.signal
       });
+    },
+    async grantApproval(input) {
+      await options.approvalController?.grant({
+        workspaceRoot,
+        profileId,
+        sessionId,
+        toolName: input.toolName,
+        riskClass: input.riskClass,
+        targetKey: input.targetKey,
+        targetSummary: input.targetSummary,
+        scope: input.scope
+      });
+    },
+    async inspectApprovals() {
+      return await options.approvalController?.inspect({
+        workspaceRoot,
+        profileId,
+        sessionId
+      }) ?? {
+        session: [],
+        persistent: []
+      };
+    },
+    async revokeApproval(id) {
+      return await options.approvalController?.revokePersistent({
+        id,
+        workspaceRoot,
+        profileId
+      }) ?? false;
     },
     async trustWorkspace() {
       await trustStore.grant(workspaceRoot, {

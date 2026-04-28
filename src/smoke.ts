@@ -53,6 +53,7 @@ import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
 import { IntentRouter } from "./runtime/intent-router.js";
 import { createSecurityPolicyForMode } from "./security/security-policy-factory.js";
+import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./security/workspace-approval-controller.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
@@ -5573,25 +5574,31 @@ await runSessionLoop({
       return true;
     }
   } as NodeJS.WritableStream,
-  prompt: async () => [
-    "/",
-    "/help",
-    "/skills ascii",
-    "/tools",
-    "/tools media",
-    "/doctor",
-    "/memory",
-    "/trust",
-    "/status",
-    "/sessions",
-    "/search needle",
-    "/untrust",
-    "/resume",
-    "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
-    "/switch cli-switch-target",
-    "/status",
-    "/exit"
-  ][sessionLoopPromptIndex++] ?? "/exit",
+  prompt: async (question) => {
+    if (question.includes("approval >")) {
+      return "deny";
+    }
+
+    return [
+      "/",
+      "/help",
+      "/skills ascii",
+      "/tools",
+      "/tools media",
+      "/doctor",
+      "/memory",
+      "/trust",
+      "/status",
+      "/sessions",
+      "/search needle",
+      "/untrust",
+      "/resume",
+      "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
+      "/switch cli-switch-target",
+      "/status",
+      "/exit"
+    ][sessionLoopPromptIndex++] ?? "/exit";
+  },
   close: () => {
     sessionLoopClosed = true;
   }
@@ -5630,7 +5637,11 @@ await runSessionLoop({
       return true;
     }
   } as NodeJS.WritableStream,
-  prompt: async () => {
+  prompt: async (question) => {
+    if (question.includes("approval >")) {
+      return "deny";
+    }
+
     const value = [
       "/skills reset-proof-skill",
       "__install_reset_skill__",
@@ -7764,6 +7775,61 @@ assert(
   trustStatusAfterRevoke.result.content.includes("not trusted"),
   "expected trust status to reflect revoke"
 );
+const workspaceApprovalStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-approvals-")), "approvals.json");
+const workspaceApprovalController = new WorkspaceApprovalController({
+  store: new WorkspaceApprovalStore({
+    path: workspaceApprovalStorePath,
+    idFactory: sequenceId()
+  })
+});
+const approvalRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "workspace-approval-smoke",
+  profileId: "smoke",
+  workspaceRoot: trustWorkspaceDir,
+  trustStore,
+  approvalController: workspaceApprovalController,
+  securityMode: "strict",
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  }
+});
+const blockedTerminalRun = await approvalRuntime.executeTool?.({
+  tool: "terminal.run",
+  toolInput: {
+    command: "touch approved-by-scope.txt"
+  }
+});
+assert(blockedTerminalRun?.decision === "ask", "expected strict mode to gate untrusted terminal write before approval");
+await approvalRuntime.grantApproval?.({
+  toolName: blockedTerminalRun!.tool.name,
+  riskClass: blockedTerminalRun!.riskClass,
+  targetKey: blockedTerminalRun!.targetKey,
+  targetSummary: blockedTerminalRun!.targetSummary,
+  scope: "always"
+});
+const approvalsAfterGrant = await approvalRuntime.inspectApprovals?.();
+const allowedTerminalRun = await approvalRuntime.executeTool?.({
+  tool: "terminal.run",
+  toolInput: {
+    command: "touch approved-by-scope.txt"
+  }
+});
+assert(approvalsAfterGrant?.persistent.length === 1, "expected persistent workspace approval to be stored");
+assert(allowedTerminalRun?.decision === "allow", "expected persistent workspace approval to allow rerun");
+assert(allowedTerminalRun?.result?.ok === true, "expected approved terminal command to execute");
+assert(
+  await approvalRuntime.revokeApproval?.(approvalsAfterGrant?.persistent[0]?.id ?? "") === true,
+  "expected persistent workspace approval to revoke"
+);
+const approvalsAfterRevoke = await approvalRuntime.inspectApprovals?.();
+assert(approvalsAfterRevoke?.persistent.length === 0, "expected revoked workspace approval to disappear");
 
 const mockChannel = new MockChannelAdapter({ kind: "telegram" });
 const channelSessionStore = new InMemoryChannelSessionStore();

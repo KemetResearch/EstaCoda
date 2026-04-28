@@ -355,6 +355,8 @@ Important traits:
 - workspace trust allows normal local work to proceed proactively
 - obvious risk classes still trigger approval logic
 - persistent approvals match on normalized `targetKey` values, including operation type and normalized targets where supported
+- channel approvals use `once`, `session`, and `always`
+- CLI approvals now use the same `once`, `session`, and `always` scope model through runtime-backed grants and a workspace approval store
 
 ## Persistence Model
 

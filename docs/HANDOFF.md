@@ -386,6 +386,7 @@ For Telegram:
   Trust and approval behavior are tied to tool/risk/target rather than raw text.
   Public approval modes are now `strict`, `adaptive`, and `open`, with `adaptive` as the default.
   `adaptive` now supports an optional auxiliary assessor after deterministic triage, while the dangerous-command floor remains non-overridable.
+  Channel and CLI approval scopes now both support `once`, `session`, and `always`, while ACP remains narrower because of editor permission-card constraints.
 
 - **Local-first skill mutation**
   External skill roots are read-only. Agent-authored or edited skills write into the local personal skill home.

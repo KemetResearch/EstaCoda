@@ -1,0 +1,350 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import type { ToolRiskClass } from "../contracts/tool.js";
+
+export type ApprovalScope = "once" | "session" | "always";
+
+export type EphemeralApprovalGrant = {
+  toolName: string;
+  riskClass: ToolRiskClass;
+  targetKey?: string;
+  targetSummary?: string;
+  scope: "once" | "session";
+};
+
+export type PersistedWorkspaceApprovalGrant = {
+  id: string;
+  workspaceRoot: string;
+  profileId?: string;
+  toolName: string;
+  riskClass: ToolRiskClass;
+  targetKey?: string;
+  targetSummary?: string;
+  grantedAt: string;
+};
+
+type ApprovalFile = {
+  version: 1;
+  grants: PersistedWorkspaceApprovalGrant[];
+};
+
+type MatchingGrant = {
+  scope: ApprovalScope;
+  grant: EphemeralApprovalGrant | PersistedWorkspaceApprovalGrant;
+  index?: number;
+};
+
+export class WorkspaceApprovalStore {
+  readonly #path: string;
+  readonly #now: () => Date;
+  readonly #idFactory: () => string;
+
+  constructor(options: {
+    path?: string;
+    now?: () => Date;
+    idFactory?: () => string;
+  } = {}) {
+    this.#path = options.path ?? join(homedir(), ".estacoda", "workspace-approvals.json");
+    this.#now = options.now ?? (() => new Date());
+    this.#idFactory = options.idFactory ?? (() => `approval-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+  }
+
+  get path(): string {
+    return this.#path;
+  }
+
+  async listForWorkspace(workspaceRoot: string, profileId?: string): Promise<PersistedWorkspaceApprovalGrant[]> {
+    const normalizedWorkspaceRoot = resolve(workspaceRoot);
+    const file = await this.#read();
+    return file.grants.filter((grant) =>
+      grant.workspaceRoot === normalizedWorkspaceRoot &&
+      grant.profileId === profileId
+    );
+  }
+
+  async grant(input: {
+    workspaceRoot: string;
+    profileId?: string;
+    toolName: string;
+    riskClass: ToolRiskClass;
+    targetKey?: string;
+    targetSummary?: string;
+  }): Promise<PersistedWorkspaceApprovalGrant> {
+    const normalizedWorkspaceRoot = resolve(input.workspaceRoot);
+    const file = await this.#read();
+    const existing = file.grants.find((grant) =>
+      grant.workspaceRoot === normalizedWorkspaceRoot &&
+      grant.profileId === input.profileId &&
+      grant.toolName === input.toolName &&
+      grant.riskClass === input.riskClass &&
+      grant.targetKey === input.targetKey &&
+      grant.targetSummary === input.targetSummary
+    );
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const grant: PersistedWorkspaceApprovalGrant = {
+      id: this.#idFactory(),
+      workspaceRoot: normalizedWorkspaceRoot,
+      profileId: input.profileId,
+      toolName: input.toolName,
+      riskClass: input.riskClass,
+      targetKey: input.targetKey,
+      targetSummary: input.targetSummary,
+      grantedAt: this.#now().toISOString()
+    };
+
+    file.grants.push(grant);
+    file.grants.sort((left, right) => left.grantedAt.localeCompare(right.grantedAt) || left.id.localeCompare(right.id));
+    await this.#write(file);
+
+    return grant;
+  }
+
+  async revoke(id: string, workspaceRoot: string, profileId?: string): Promise<boolean> {
+    const normalizedWorkspaceRoot = resolve(workspaceRoot);
+    const file = await this.#read();
+    const before = file.grants.length;
+    file.grants = file.grants.filter((grant) =>
+      !(grant.id === id && grant.workspaceRoot === normalizedWorkspaceRoot && grant.profileId === profileId)
+    );
+
+    if (file.grants.length === before) {
+      return false;
+    }
+
+    await this.#write(file);
+    return true;
+  }
+
+  async #read(): Promise<ApprovalFile> {
+    try {
+      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<ApprovalFile>;
+      return {
+        version: 1,
+        grants: Array.isArray(parsed.grants) ? parsed.grants.filter(isPersistedGrant) : []
+      };
+    } catch {
+      return {
+        version: 1,
+        grants: []
+      };
+    }
+  }
+
+  async #write(file: ApprovalFile): Promise<void> {
+    await mkdir(dirname(this.#path), { recursive: true });
+    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  }
+}
+
+export class WorkspaceApprovalController {
+  readonly #store: WorkspaceApprovalStore;
+  readonly #sessionGrants = new Map<string, EphemeralApprovalGrant[]>();
+
+  constructor(options: {
+    store?: WorkspaceApprovalStore;
+  } = {}) {
+    this.#store = options.store ?? new WorkspaceApprovalStore();
+  }
+
+  get storePath(): string {
+    return this.#store.path;
+  }
+
+  async assess(
+    basePolicy: SecurityPolicy,
+    request: SecurityRequest,
+    options: {
+      workspaceRoot: string;
+      profileId?: string;
+      sessionId: string;
+      mode: SecurityApprovalMode;
+    }
+  ): Promise<SecurityAssessment> {
+    const matched = await this.#findMatchingGrant(request, options);
+    if (matched !== undefined) {
+      if (matched.scope === "once") {
+        const sessionGrants = this.#sessionGrants.get(options.sessionId) ?? [];
+        if (matched.index !== undefined) {
+          sessionGrants.splice(matched.index, 1);
+        }
+        if (sessionGrants.length === 0) {
+          this.#sessionGrants.delete(options.sessionId);
+        } else {
+          this.#sessionGrants.set(options.sessionId, sessionGrants);
+        }
+      }
+
+      return {
+        decision: "allow",
+        mode: options.mode,
+        reason: matched.scope === "always"
+          ? "Allowed by a persistent workspace approval grant."
+          : matched.scope === "session"
+            ? "Allowed by a session approval grant."
+            : "Allowed by a one-time approval grant.",
+        risk: inferRiskLevel(request.riskClass),
+        deterministicRule: matched.scope === "always"
+          ? "persistent-workspace-approval"
+          : matched.scope === "session"
+            ? "session-approval"
+            : "one-time-approval",
+        assessor: {
+          used: false,
+          status: "disabled"
+        }
+      };
+    }
+
+    return await assessSecurityPolicy(basePolicy, request, options.mode);
+  }
+
+  async grant(input: {
+    workspaceRoot: string;
+    profileId?: string;
+    sessionId: string;
+    toolName: string;
+    riskClass: ToolRiskClass;
+    targetKey?: string;
+    targetSummary?: string;
+    scope: ApprovalScope;
+  }): Promise<void> {
+    if (input.scope === "always") {
+      await this.#store.grant({
+        workspaceRoot: input.workspaceRoot,
+        profileId: input.profileId,
+        toolName: input.toolName,
+        riskClass: input.riskClass,
+        targetKey: input.targetKey,
+        targetSummary: input.targetSummary
+      });
+      return;
+    }
+
+    const scopedGrant: EphemeralApprovalGrant = {
+      toolName: input.toolName,
+      riskClass: input.riskClass,
+      targetKey: input.targetKey,
+      targetSummary: input.targetSummary,
+      scope: input.scope
+    };
+    const grants = this.#sessionGrants.get(input.sessionId) ?? [];
+    if (!grants.some((grant) => sameGrant(grant, scopedGrant))) {
+      grants.push(scopedGrant);
+      this.#sessionGrants.set(input.sessionId, grants);
+    }
+  }
+
+  async inspect(input: {
+    workspaceRoot: string;
+    profileId?: string;
+    sessionId: string;
+  }): Promise<{
+    session: EphemeralApprovalGrant[];
+    persistent: PersistedWorkspaceApprovalGrant[];
+  }> {
+    return {
+      session: [...(this.#sessionGrants.get(input.sessionId) ?? [])],
+      persistent: await this.#store.listForWorkspace(input.workspaceRoot, input.profileId)
+    };
+  }
+
+  async revokePersistent(input: {
+    id: string;
+    workspaceRoot: string;
+    profileId?: string;
+  }): Promise<boolean> {
+    return await this.#store.revoke(input.id, input.workspaceRoot, input.profileId);
+  }
+
+  async #findMatchingGrant(
+    request: SecurityRequest,
+    options: {
+      workspaceRoot: string;
+      profileId?: string;
+      sessionId: string;
+    }
+  ): Promise<MatchingGrant | undefined> {
+    const sessionGrants = this.#sessionGrants.get(options.sessionId) ?? [];
+    const sessionIndex = sessionGrants.findIndex((grant) => matchesRequest(grant, request));
+    if (sessionIndex >= 0) {
+      const grant = sessionGrants[sessionIndex];
+      if (grant !== undefined) {
+        return {
+          scope: grant.scope,
+          grant,
+          index: sessionIndex
+        };
+      }
+    }
+
+    const persistent = await this.#store.listForWorkspace(options.workspaceRoot, options.profileId);
+    const persistentGrant = persistent.find((grant) => matchesRequest(grant, request));
+    if (persistentGrant !== undefined) {
+      return {
+        scope: "always",
+        grant: persistentGrant
+      };
+    }
+
+    return undefined;
+  }
+}
+
+function matchesRequest(
+  grant: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey">,
+  request: SecurityRequest
+): boolean {
+  return grant.toolName === request.toolName &&
+    grant.riskClass === request.riskClass &&
+    grant.targetKey === request.targetKey;
+}
+
+function sameGrant(
+  left: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope">,
+  right: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope">
+): boolean {
+  return left.toolName === right.toolName &&
+    left.riskClass === right.riskClass &&
+    left.targetKey === right.targetKey &&
+    left.scope === right.scope;
+}
+
+function inferRiskLevel(riskClass: ToolRiskClass): "low" | "medium" | "high" {
+  if (
+    riskClass === "destructive-local" ||
+    riskClass === "credential-access" ||
+    riskClass === "sandbox-escape" ||
+    riskClass === "spend-money"
+  ) {
+    return "high";
+  }
+
+  if (
+    riskClass === "workspace-write" ||
+    riskClass === "external-side-effect" ||
+    riskClass === "shared-state-mutation"
+  ) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function isPersistedGrant(value: unknown): value is PersistedWorkspaceApprovalGrant {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<PersistedWorkspaceApprovalGrant>;
+  return typeof candidate.id === "string" &&
+    typeof candidate.workspaceRoot === "string" &&
+    typeof candidate.toolName === "string" &&
+    typeof candidate.riskClass === "string" &&
+    typeof candidate.grantedAt === "string";
+}

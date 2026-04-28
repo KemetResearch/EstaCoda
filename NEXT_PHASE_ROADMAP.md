@@ -25,6 +25,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - Gateway startup/status diagnostics now expose adapter readiness, security mode, token/env presence, model route, state paths, and command-sync status.
 - Security approval modes now use EstaCoda naming: `strict`, `adaptive`, `open`, while preserving backward compatibility for old config values.
 - Adaptive security can now call an auxiliary assessor for ambiguous actions, while malformed/timeout cases fall back to approval-required and hard floors still deny.
+- CLI approvals now support `once`, `session`, and `always`, with persistent workspace approval revocation and the same target-key matching model used by channel approvals.
 - An internal alpha harness and runbook now exist for repeatable operator testing across CLI, Telegram, providers, approvals, and reset/rollback flow.
 
 ## Phase Goals

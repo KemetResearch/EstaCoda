@@ -8,11 +8,13 @@ import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
+import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 
 const argv = process.argv.slice(2);
 const workspaceRoot = process.cwd();
 const cliSessionStore = new PersistentCliSessionStore();
+const cliApprovalController = new WorkspaceApprovalController();
 let config: LoadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot
 });
@@ -66,7 +68,8 @@ async function buildRuntime(input: {
     enableWebNetwork: latestConfig.web.enableNetwork,
     webMaxContentChars: latestConfig.web.maxContentChars,
     securityMode: latestConfig.security.approvalMode,
-    securityAssessor: latestConfig.security.assessor
+    securityAssessor: latestConfig.security.assessor,
+    approvalController: cliApprovalController
   });
 }
 
