@@ -13,6 +13,7 @@ export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "switch", description: "Switch to an existing session" },
   { name: "search", description: "Search session history" },
   { name: "reset", description: "Start a fresh session and refresh the skill/config snapshot", aliases: ["new"] },
+  { name: "memory", description: "Inspect promoted memory conclusions" },
   { name: "tools", description: "Browse available tools grouped by capability" },
   { name: "skills", description: "Browse commands and available skills" },
   { name: "resume", description: "Show the latest interrupted-turn resume note" },

@@ -151,6 +151,9 @@ async function handleSlashCommand(input: {
     case "tools":
       input.output.write(`${renderToolsMenu(input.runtime, args.join(" "))}\n\n`);
       return false;
+    case "memory":
+      input.output.write(`${await renderMemoryPromotions(input.runtime)}\n\n`);
+      return false;
     case "skills":
       input.output.write(`${renderSlashMenu(input.runtime, args.join(" "))}\n\n`);
       return false;
@@ -284,6 +287,22 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
     ...matches.map((result, index) =>
       `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
     )
+  ].join("\n");
+}
+
+async function renderMemoryPromotions(runtime: Runtime): Promise<string> {
+  const promotions = await runtime.inspectMemoryPromotions();
+  if (promotions.length === 0) {
+    return "No promoted memory conclusions found.";
+  }
+
+  return [
+    "Promoted memory conclusions",
+    ...promotions.map((record, index) => {
+      const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
+      const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
+      return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
+    })
   ].join("\n");
 }
 

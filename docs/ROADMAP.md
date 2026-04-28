@@ -79,7 +79,6 @@ Done:
 
 Next:
 
-- repeated preference promotion
 - repeated workflow promotion
 - better session-summary preservation
 - compression protection around recent tool pairs
@@ -156,15 +155,33 @@ Next:
 - skill-first batch evaluation
 - eventual substrate for safe self-evolution loops
 
+### 8. MCP and ACP
+
+State: not implemented yet beyond a reserved routing slot.
+
+Done:
+
+- auxiliary provider routing already reserves an `mcp` task label `implemented but not protocol-backed`
+
+Next:
+
+- finish memory promotion before protocol expansion
+- build an MCP client first, starting with stdio servers
+- add config-driven MCP server registration/discovery
+- expose discovered MCP tools into the normal tool/runtime loop
+- later add MCP HTTP transport, filtering, and resource/prompt support
+- defer ACP until after MCP client and memory/session maturity
+- treat MCP server bridging as later than MCP client and ACP
+
 ## Correct Next Milestone
 
 The best next milestone is:
 
-1. **live Telegram image verification with a real vision-capable route**
-2. **OpenRouter exactness/fidelity hardening**
-3. **memory promotion implementation**
-4. **evaluation substrate expansion**
-5. **onboarding/distribution polish**
+1. **workflow/project-memory promotion**
+2. **MCP client foundation (stdio first)**
+3. **evaluation substrate expansion**
+4. **onboarding/distribution polish**
+5. **ACP/editor embedding only after MCP client and memory/session maturity**
 
 ## Product Gap Analysis
 
@@ -293,6 +310,23 @@ What remains:
 - version/update command or package-manager path
 - migration behavior across releases
 
+### 10. MCP / ACP
+
+State: not meaningfully built.
+
+- no MCP client transport
+- no MCP config surface
+- no MCP tool/resource discovery
+- no ACP adapter/server
+- current `mcp` auxiliary route is only a reserved routing label, not protocol support
+
+What remains:
+
+- Phase 1: MCP client for stdio servers
+- Phase 2: MCP HTTP, filtering, prompts/resources, and richer registration
+- Phase 3: ACP adapter/editor embedding after the runtime/tool/session surface is more mature
+- Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
+
 ## Launch Readiness Read
 
 Closest honest label:
@@ -303,7 +337,7 @@ Closest honest label:
 
 Main blockers to MVP:
 
-- memory promotion is still missing
+- workflow/project-memory promotion is still missing even though repeated user-preference promotion now exists
 - provider-route hardening is incomplete
 - Telegram image path is live-proven with Kimi, but not yet broadly proven across providers
 - install/distribution polish is not done

@@ -311,6 +311,7 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
+        "/memory - inspect promoted memory conclusions",
         "/sessions - list recent sessions for this chat",
         "/switch <session-id> - switch this chat to a specific session",
         "/search <query> - search session history",
@@ -344,6 +345,39 @@ export class ChannelGateway {
       ].join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
 
+      return {
+        sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/memory") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      const promotions = await runtime.inspectMemoryPromotions();
+      const text = promotions.length === 0
+        ? "No promoted memory conclusions found."
+        : [
+            "Promoted memory conclusions",
+            ...promotions.map((record, index) => {
+              const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
+              const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
+              return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
+            })
+          ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
       return {
         sessionId,
         replyText: text,
@@ -841,12 +875,13 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
     token === "/help" ||
     token === "/status" ||
+    token === "/memory" ||
     token === "/sessions" ||
     token === "/switch" ||
     token === "/search" ||
@@ -936,6 +971,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
   return [
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
+    { command: "/memory", description: "Inspect promoted memory conclusions" },
     { command: "/sessions", description: "List recent chat sessions" },
     { command: "/switch", description: "Switch to an existing session" },
     { command: "/search", description: "Search session history" },

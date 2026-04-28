@@ -13,11 +13,13 @@ Evidence note:
 ### Entrypoints
 
 - [src/index.ts](/Users/ahnwy/estacoda-v2/src/index.ts)
-  Main boot flow.
+  Main boot flow. Also restores the active CLI workspace session from the persisted CLI session store before interactive launch. `implemented but not live-proven`
 - [src/cli/cli.ts](/Users/ahnwy/estacoda-v2/src/cli/cli.ts)
   CLI command surface.
 - [src/cli/session-loop.ts](/Users/ahnwy/estacoda-v2/src/cli/session-loop.ts)
-  Interactive terminal loop.
+  Interactive terminal loop. Handles in-session admin commands like `/sessions`, `/search`, `/switch`, and `/reset`. `smoke-tested`
+- [src/cli/cli-session-store.ts](/Users/ahnwy/estacoda-v2/src/cli/cli-session-store.ts)
+  Persisted active CLI session pointer keyed by workspace root. `smoke-tested`
 - [src/channels/gateway-runner.ts](/Users/ahnwy/estacoda-v2/src/channels/gateway-runner.ts)
   Telegram gateway runtime wrapper.
 
@@ -251,6 +253,7 @@ Responsibilities:
 - session mapping
 - normalized session-key policy
 - session auto-reset policy
+- session-admin commands
 - runtime construction
 - progress delivery
 - approval prompt delivery
@@ -273,6 +276,29 @@ Important Telegram UX choices:
 - activity labels are localized through a shared label map, currently `en` and `ar`
 - group sessions are per-user by default; thread sessions are shared by default unless configured otherwise
 - active chat -> session mapping persists across gateway restarts
+- channel session-admin surface now includes `/sessions`, `/search <query>`, and `/switch <session-id>` for the current normalized chat context. `smoke-tested`
+
+## CLI Session Architecture
+
+Interactive CLI session behavior is now split into two layers:
+
+1. **runtime session**
+   - the actual `sessionId` used by `createRuntime()` and the session DB
+2. **workspace session pointer**
+   - a persisted mapping from workspace root to the active CLI session id
+
+The CLI startup path in [src/index.ts](/Users/ahnwy/estacoda-v2/src/index.ts) now:
+
+1. loads the persisted workspace session id from [src/cli/cli-session-store.ts](/Users/ahnwy/estacoda-v2/src/cli/cli-session-store.ts)
+2. builds the runtime with that session when present
+3. persists the resulting active session id back to the same store
+
+The interactive loop in [src/cli/session-loop.ts](/Users/ahnwy/estacoda-v2/src/cli/session-loop.ts) then updates that pointer when:
+
+- `/reset` or `/new` creates a fresh session
+- `/switch <session-id>` adopts an existing session
+
+This means fresh CLI launches are no longer forced back onto the default `scaffold` session when a persisted workspace session already exists. CLI resume persistence is `smoke-tested`.
 
 ## Security Model
 
@@ -294,8 +320,12 @@ Important traits:
 - interactive/session state is written to session DB
 - SQLite is used for the gateway path
 - in-memory session DB is used in smoke/runtime scaffolding
+- CLI session context is persisted separately from the session DB in `.estacoda/cli-sessions.json`
 - channel session context is persisted separately from the session DB in `.estacoda/channel-sessions.json`
 - channel session identity now includes explicit chat/thread policy rather than relying on accidental raw keying
+- CLI and channel session pointers are separate stores because they solve different routing problems:
+  - CLI maps workspace root -> active session
+  - channels map normalized conversation identity -> active session
 
 ### Memory persistence
 
@@ -303,8 +333,10 @@ Important traits:
 - bounded budgets enforced by `MemoryStore`
 - `LocalMemoryProvider` currently persists:
   - manual conclusions
+  - promoted user preferences
   - skill outcomes
-- true repeated-pattern promotion is still an open product gap
+- contradiction/forget/inspection for promoted user preferences now exists through the local promotion store
+- true repeated workflow/project-memory promotion is still an open product gap
 
 ### Trajectory persistence
 
@@ -331,7 +363,7 @@ The most important end-to-end path today is:
 
 ## Current Architectural Weak Spots
 
-- memory promotion is not yet a sophisticated subsystem
+- memory promotion now exists for repeated user preferences, but it is not yet a sophisticated full-memory subsystem
 - provider message content types were only recently widened enough to support vision
 - Telegram is the only real launch channel today
 - gateway liveness is readiness-focused, not daemon/service-tracking

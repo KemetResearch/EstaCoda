@@ -29,6 +29,7 @@ import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import { resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import {
   assembleProviderContinuationPrompt,
@@ -72,6 +73,7 @@ export type AgentLoopOptions = {
   trajectoryRecorder: TrajectoryRecorder;
   sessionDb: SessionDB;
   sessionId: string;
+  profileId: string;
   toolExecutor: ToolExecutor;
   toolCallPlanner?: ToolCallPlanner;
   providerExecutor?: ProviderExecutor;
@@ -128,6 +130,7 @@ export class AgentLoop {
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
+  readonly #profileId: string;
   readonly #toolExecutor: ToolExecutor;
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
   readonly #providerExecutor: ProviderExecutor | undefined;
@@ -152,6 +155,7 @@ export class AgentLoop {
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
+    this.#profileId = options.profileId;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#providerExecutor = options.providerExecutor;
@@ -224,6 +228,7 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
+    await this.#promoteRepeatedPreferences(effectiveText);
 
     this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
@@ -1050,6 +1055,34 @@ export class AgentLoop {
     });
 
     return [outcome];
+  }
+
+  async #promoteRepeatedPreferences(userText: string): Promise<void> {
+    if (this.#memoryProvider === undefined) {
+      return;
+    }
+
+    const result = await resolveUserPreferencePromotion({
+      profileId: this.#profileId,
+      currentUserText: userText,
+      sessionDb: this.#sessionDb,
+      memoryProvider: this.#memoryProvider
+    });
+
+    if (result === undefined || result.kind !== "conclusion") {
+      return;
+    }
+    const { conclusion } = result;
+
+    this.#trajectoryRecorder.record("memory-conclusion", {
+      provider: this.#memoryProvider.id,
+      conclusion
+    });
+    await this.#sessionDb.appendEvent(this.#sessionId, {
+      kind: "memory-conclusion",
+      provider: this.#memoryProvider.id,
+      conclusion
+    });
   }
 
   async #recordToolPlan(plan: ToolCallPlan): Promise<void> {

@@ -105,7 +105,8 @@ Working but not yet fully proven live in operator testing:
 
 - Telegram image understanding on non-Kimi providers. `implemented but not live-proven`
 - Multi-provider live pass across Kimi/OpenRouter/Ollama/DeepSeek. Hosted-provider matrix is now `live-proven`; local/Ollama remains unproven in this environment.
-- Memory promotion of repeated patterns into `USER.md` / `MEMORY.md`. `intended but not implemented`
+- Repeated user-preference promotion into `USER.md`, including contradiction handling, strengthening, forgetting, and inspection. `smoke-tested`
+- Repeated workflow/project-memory promotion into `MEMORY.md` or skills. `intended but not implemented`
 
 ## 4. Architecture Overview
 
@@ -516,9 +517,8 @@ Best next development target:
 
 1. Broaden live Telegram image verification beyond Kimi. `implemented but not live-proven`
 2. Harden OpenRouter exactness/instruction fidelity after the live provider batch. OpenRouter runtime path is `live-proven`; exactness-sensitive tasks are still partial.
-3. Implement memory promotion: `intended but not implemented`
-   - repeated user preferences -> `USER.md`
-   - repeated workflows -> `MEMORY.md` or skill suggestions
+3. Extend memory promotion beyond user preferences
+   - repeated workflows -> `MEMORY.md` or skill suggestions `intended but not implemented`
 4. Expand the evaluation substrate into a scored skill-first benchmark layer. `implemented but not live-proven`
 5. Finish onboarding/distribution polish. `intended but not implemented`
 

@@ -13,9 +13,9 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## Memory
 
-- Repeated preferences are not yet promoted automatically into `USER.md`. `intended but not implemented`
+- Repeated user preferences are now promoted into `USER.md` with contradiction handling, strengthening, forgetting, and inspection. `smoke-tested`
 - Repeated workflows are not yet promoted automatically into `MEMORY.md` or skills. `intended but not implemented`
-- Memory persistence exists, but “learning” is still shallow. skill outcomes `smoke-tested`; broader learning `intended but not implemented`
+- Memory persistence exists, and user-preference learning is now real, but broader workflow/project-memory learning is still shallow. preference promotion `smoke-tested`; broader learning `intended but not implemented`
 
 ## Telegram / channels
 

@@ -4,7 +4,7 @@ import type { IntentRoute } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
 import type { PromptBudgetReport } from "./prompt.js";
 import type { ArtifactRecord } from "./artifact.js";
-import type { SkillOutcome } from "./memory.js";
+import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
@@ -197,6 +197,11 @@ export type SessionEvent =
       kind: "memory-write";
       provider: string;
       outcome: SkillOutcome;
+    }
+  | {
+      kind: "memory-conclusion";
+      provider: string;
+      conclusion: MemoryConclusion;
     };
 
 export type SessionSearchResult = {

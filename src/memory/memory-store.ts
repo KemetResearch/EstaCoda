@@ -45,10 +45,14 @@ export class MemoryStore {
 
   async saveToDirectory(root: string): Promise<void> {
     for (const [kind, content] of this.#files.entries()) {
-      const path = join(root, kind);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, content, "utf8");
+      await this.saveFileToDirectory(root, kind);
     }
+  }
+
+  async saveFileToDirectory(root: string, kind: MemoryFileKind): Promise<void> {
+    const path = join(root, kind);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, this.read(kind), "utf8");
   }
 
   apply(operation: MemoryOperation): void {

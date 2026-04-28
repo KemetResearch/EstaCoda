@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { AuxiliaryProviderConfig, ModelProfile } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
-import type { MemoryProvider } from "../contracts/memory.js";
+import type { MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -96,6 +96,7 @@ export type Runtime = {
   tools(): import("../contracts/tool.js").ToolDefinition[];
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
+  inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
@@ -277,7 +278,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   await memoryStore.loadFromDirectory(projectMemoryRoot);
   const memoryProvider = options.memoryProvider ?? new LocalMemoryProvider({
     store: memoryStore,
-    saveRoot: projectMemoryRoot
+    saveRoots: {
+      "USER.md": userMemoryRoot,
+      "MEMORY.md": projectMemoryRoot,
+      "SOUL.md": projectMemoryRoot,
+      "AGENTS.md": projectMemoryRoot
+    },
+    promotionStorePath: join(userMemoryRoot, "promotions.json")
   });
   const frozenMemorySnapshot = memoryStore.snapshot();
   const memoryContext = await memoryProvider.context();
@@ -346,6 +353,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryRecorder,
     sessionDb,
     sessionId,
+    profileId,
     toolExecutor,
     toolCallPlanner,
     providerExecutor,
@@ -382,6 +390,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
 
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
+    },
+    async inspectMemoryPromotions() {
+      return await memoryProvider.inspectPromotions?.() ?? [];
     },
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot, { profileId });

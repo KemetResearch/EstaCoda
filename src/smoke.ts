@@ -25,6 +25,7 @@ import { createMemoryTool } from "./memory/memory-tool.js";
 import { renderMemorySnapshot } from "./memory/memory-renderer.js";
 import { MemoryStore } from "./memory/memory-store.js";
 import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
+import { __detectForgetPreferenceForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
 import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
 import { ProcessManager } from "./process/process-manager.js";
 import { createProcessTools } from "./process/process-tools.js";
@@ -298,6 +299,12 @@ const renderedMemory = renderMemorySnapshot(memory.snapshot());
 const localMemoryProvider = new LocalMemoryProvider({ store: memory });
 const localMemoryContext = await localMemoryProvider.context();
 const localMemorySearch = await localMemoryProvider.search("reusable workflows", { limit: 3 });
+await localMemoryProvider.conclude({
+  id: "smoke-pref",
+  kind: "user-preference",
+  content: "Prefer concise replies.",
+  confidence: 0.8
+});
 await localMemoryProvider.recordSkillOutcome({
   skill: "smoke-skill",
   stepId: "smoke-step",
@@ -305,6 +312,31 @@ await localMemoryProvider.recordSkillOutcome({
   status: "succeeded",
   tools: ["workflow.plan"]
 });
+const splitMemoryStore = new MemoryStore();
+const splitUserRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-user-"));
+const splitProjectRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-project-"));
+const splitMemoryProvider = new LocalMemoryProvider({
+  store: splitMemoryStore,
+  saveRoots: {
+    "USER.md": splitUserRoot,
+    "MEMORY.md": splitProjectRoot
+  },
+  promotionStorePath: join(splitUserRoot, "promotions.json")
+});
+await splitMemoryProvider.conclude({
+  id: "split-pref",
+  kind: "user-preference",
+  content: "Prefer concise Telegram replies.",
+  confidence: 0.9
+});
+await splitMemoryProvider.recordSkillOutcome({
+  skill: "split-memory-skill",
+  summary: "Recorded to project memory.",
+  status: "succeeded",
+  tools: ["workflow.plan"]
+});
+const splitUserMemory = await readFile(join(splitUserRoot, "USER.md"), "utf8");
+const splitProjectMemory = await readFile(join(splitProjectRoot, "MEMORY.md"), "utf8");
 const configWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-workspace-"));
 await mkdir(join(configWorkspace, ".estacoda"));
 const configHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-home-"));
@@ -444,6 +476,7 @@ const cliReadyProviderLiveToolDoctor = await runCliCommand({
     tools: () => [],
     skills: () => [],
     latestResumeNote: async () => undefined,
+    inspectMemoryPromotions: async () => [],
     trustWorkspace: async () => undefined,
     isWorkspaceTrusted: async () => true,
     revokeWorkspaceTrust: async () => true,
@@ -2585,6 +2618,7 @@ const dynamicMenuRuntime = {
   tools: () => tools.list(),
   skills: () => skills.catalog(),
   latestResumeNote: async () => undefined,
+  inspectMemoryPromotions: async () => [],
   handle: async () => {
     throw new Error("dynamic menu smoke runtime cannot handle prompts");
   },
@@ -3785,7 +3819,14 @@ assert(savedMemory.includes("promote repeated patterns into skills"), "expected 
 assert(renderedMemory.text.includes("§ ESTACODA FROZEN MEMORY SNAPSHOT"), "expected rendered memory header");
 assert(localMemoryContext.text.includes("§ ESTACODA FROZEN MEMORY SNAPSHOT"), "expected local memory provider context");
 assert(localMemorySearch.some((result) => result.content.includes("reusable workflows")), "expected local memory provider search");
+assert(memory.read("USER.md").includes("Prefer concise replies."), "expected local memory provider user-preference persistence");
 assert(memory.read("MEMORY.md").includes("skill:smoke-skill"), "expected local memory provider skill outcome persistence");
+assert(splitUserMemory.includes("Prefer concise Telegram replies."), "expected USER.md to save to the user memory root");
+assert(splitProjectMemory.includes("skill:split-memory-skill"), "expected MEMORY.md to save to the project memory root");
+assert(__detectUserPreferenceForTest("I prefer concise Telegram replies") === "Prefer concise replies.", "expected preference detector to canonicalize direct preference wording");
+assert(__detectUserPreferenceForTest("Please use Kimi by default") === "Use Kimi by default.", "expected preference detector to canonicalize default-use wording");
+assert(__detectUserPreferenceForTest("Actually give me detailed replies") === "Prefer detailed replies.", "expected preference detector to canonicalize contradiction wording");
+assert(__detectForgetPreferenceForTest("forget that I prefer detailed replies") === "Prefer detailed replies.", "expected forget detector to canonicalize removal wording");
 assert(
   renderedMemory.usage.some((entry) => entry.kind === "MEMORY.md" && entry.maxChars === 2200),
   "expected memory usage with Hermes-aligned budget"
@@ -4238,6 +4279,7 @@ await runSessionLoop({
     "/tools",
     "/tools media",
     "/doctor",
+    "/memory",
     "/trust",
     "/status",
     "/sessions",
@@ -4333,6 +4375,59 @@ assert(
   await reopenedCliSessionStore.getSessionId(cliSessionWorkspace) === "cli-persisted-session",
   "expected CLI session store to persist active workspace session"
 );
+const promotionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-promotion-"));
+const promotionUserMemoryRoot = join(await mkdtemp(join(tmpdir(), "estacoda-v2-memory-promotion-user-")), "memory");
+const promotionProjectMemoryRoot = join(promotionWorkspace, ".estacoda", "memory");
+const preferenceRuntimeFactory = async (sessionId: string) => createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId,
+  profileId: "memory-promotion",
+  workspaceRoot: promotionWorkspace,
+  userMemoryRoot: promotionUserMemoryRoot,
+  projectMemoryRoot: promotionProjectMemoryRoot,
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  }
+});
+const preferenceRuntimeOne = await preferenceRuntimeFactory("memory-preference-1");
+await preferenceRuntimeOne.handle({
+  text: "I prefer concise Telegram replies",
+  channel: "cli"
+});
+const userMemoryAfterFirstPreference = await readFile(join(promotionUserMemoryRoot, "USER.md"), "utf8").catch(() => "");
+const preferenceRuntimeTwo = await preferenceRuntimeFactory("memory-preference-2");
+await preferenceRuntimeTwo.handle({
+  text: "I prefer concise Telegram replies",
+  channel: "cli"
+});
+const userMemoryAfterSecondPreference = await readFile(join(promotionUserMemoryRoot, "USER.md"), "utf8");
+const preferenceEvents = await sessionDb.listEvents("memory-preference-2");
+const preferencePromotionsAfterConcise = await preferenceRuntimeTwo.inspectMemoryPromotions();
+const preferenceRuntimeThree = await preferenceRuntimeFactory("memory-preference-3");
+await preferenceRuntimeThree.handle({
+  text: "Actually give me detailed replies",
+  channel: "cli"
+});
+const preferenceRuntimeFour = await preferenceRuntimeFactory("memory-preference-4");
+await preferenceRuntimeFour.handle({
+  text: "Actually give me detailed replies",
+  channel: "cli"
+});
+const userMemoryAfterContradiction = await readFile(join(promotionUserMemoryRoot, "USER.md"), "utf8");
+const preferencePromotionsAfterContradiction = await preferenceRuntimeFour.inspectMemoryPromotions();
+const preferenceRuntimeFive = await preferenceRuntimeFactory("memory-preference-5");
+await preferenceRuntimeFive.handle({
+  text: "forget that I prefer detailed replies",
+  channel: "cli"
+});
+const userMemoryAfterForget = await readFile(join(promotionUserMemoryRoot, "USER.md"), "utf8");
+const preferencePromotionsAfterForget = await preferenceRuntimeFive.inspectMemoryPromotions();
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   browserBackend: createLocalCdpBrowserBackend({
@@ -4438,6 +4533,7 @@ assert(renderedSessionLoop.includes("Skills"), "expected session slash menu skil
 assert(renderedSessionLoop.includes("/ascii-video"), "expected session slash menu to show ascii-video");
 assert(renderedSessionLoop.includes("media tools"), "expected filtered tools menu to show media tools");
 assert(renderedSessionLoop.includes("EstaCoda session doctor"), "expected session /doctor output");
+assert(renderedSessionLoop.includes("No promoted memory conclusions found."), "expected session /memory output");
 assert(renderedSessionLoop.includes("Workspace trusted"), "expected session /trust output");
 assert(renderedSessionLoop.includes("Recent sessions"), "expected /sessions output");
 assert(renderedSessionLoop.includes("Search results for \"needle\""), "expected /search output");
@@ -4488,6 +4584,31 @@ assert(
 assert(
   runtimeEvents.some((event) => event.kind === "skill-workflow-step" && event.stepId === "browser-route" && event.status === "tool-executed" && event.tool === "browser.navigate"),
   "expected runtime to execute browser fallback"
+);
+assert(userMemoryAfterFirstPreference.trim().length === 0, "expected a single preference mention not to promote immediately");
+assert(userMemoryAfterSecondPreference.includes("Prefer concise replies."), "expected repeated user preference promotion into USER.md");
+assert(
+  preferenceEvents.some((event) => event.kind === "memory-conclusion" && event.conclusion.kind === "user-preference" && event.conclusion.content === "Prefer concise replies." && event.conclusion.occurrences === 2),
+  "expected repeated preference promotion to emit a memory-conclusion event with provenance"
+);
+assert(
+  preferencePromotionsAfterConcise.some((record) => record.active && record.content === "Prefer concise replies."),
+  "expected inspection to show active concise preference"
+);
+assert(userMemoryAfterContradiction.includes("Prefer detailed replies."), "expected contradiction to promote the newer preference");
+assert(!userMemoryAfterContradiction.includes("Prefer concise replies."), "expected contradiction handling to retire the superseded preference");
+assert(
+  preferencePromotionsAfterContradiction.some((record) => record.active && record.content === "Prefer detailed replies."),
+  "expected inspection to show the newer active preference"
+);
+assert(
+  preferencePromotionsAfterContradiction.some((record) => !record.active && record.content === "Prefer concise replies." && record.supersededBy !== undefined),
+  "expected inspection to show the superseded concise preference"
+);
+assert(!userMemoryAfterForget.includes("Prefer detailed replies."), "expected forget behavior to remove the active preference from USER.md");
+assert(
+  preferencePromotionsAfterForget.some((record) => record.content === "Prefer detailed replies." && !record.active && record.forgottenAt !== undefined),
+  "expected inspection to show forgotten preference state"
 );
 assert(
   runtimeEvents.some((event) => event.kind === "skill-workflow-step" && event.stepId === "structure-knowledge" && event.status === "tool-executed"),
@@ -8051,6 +8172,7 @@ function fakeRuntime(input: {
     tools: () => [],
     skills: () => [],
     latestResumeNote: input.latestResumeNote ?? (async () => undefined),
+    inspectMemoryPromotions: async () => [],
     handle: input.handle,
     trustWorkspace: async () => {},
     isWorkspaceTrusted: async () => true,

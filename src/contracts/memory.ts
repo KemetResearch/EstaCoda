@@ -57,6 +57,23 @@ export type MemoryConclusion = {
   content: string;
   confidence: number;
   source?: string;
+  occurrences?: number;
+  sourceSessionIds?: string[];
+};
+
+export type MemoryPromotionRecord = {
+  id: string;
+  kind: "user-preference";
+  content: string;
+  active: boolean;
+  confidence: number;
+  occurrences: number;
+  source: string;
+  sourceSessionIds: string[];
+  supersededBy?: string;
+  forgottenAt?: string;
+  forgottenReason?: string;
+  updatedAt: string;
 };
 
 export type SkillOutcome = {
@@ -75,4 +92,6 @@ export type MemoryProvider = {
   search(query: string, options?: { limit?: number }): Promise<MemorySearchResult[]> | MemorySearchResult[];
   conclude(conclusion: MemoryConclusion): Promise<void> | void;
   recordSkillOutcome(outcome: SkillOutcome): Promise<void> | void;
+  inspectPromotions?(): Promise<MemoryPromotionRecord[]> | MemoryPromotionRecord[];
+  forgetPromotion?(content: string): Promise<MemoryPromotionRecord | undefined> | MemoryPromotionRecord | undefined;
 };

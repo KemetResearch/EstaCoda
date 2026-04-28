@@ -1,25 +1,44 @@
 import type {
   MemoryConclusion,
   MemoryFileKind,
+  MemoryPromotionRecord,
   MemoryProvider,
   MemoryProviderContext,
   MemorySearchResult,
   SkillOutcome
 } from "../contracts/memory.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
+import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import type { MemoryStore } from "./memory-store.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
   readonly #store: MemoryStore;
-  readonly #saveRoot: string | undefined;
+  readonly #saveRoots: Partial<Record<MemoryFileKind, string>>;
+  readonly #promotionStore: MemoryPromotionStore | undefined;
 
   constructor(options: {
     store: MemoryStore;
     saveRoot?: string;
+    saveRoots?: Partial<Record<MemoryFileKind, string>>;
+    promotionStorePath?: string;
   }) {
     this.#store = options.store;
-    this.#saveRoot = options.saveRoot;
+    this.#saveRoots = options.saveRoots ?? (
+      options.saveRoot === undefined
+        ? {}
+        : {
+            "MEMORY.md": options.saveRoot,
+            "USER.md": options.saveRoot,
+            "SOUL.md": options.saveRoot,
+            "AGENTS.md": options.saveRoot
+          }
+    );
+    this.#promotionStore = options.promotionStorePath === undefined
+      ? undefined
+      : new MemoryPromotionStore({
+          path: options.promotionStorePath
+        });
   }
 
   context(): MemoryProviderContext {
@@ -59,6 +78,25 @@ export class LocalMemoryProvider implements MemoryProvider {
 
   async conclude(conclusion: MemoryConclusion): Promise<void> {
     const target = conclusion.kind === "user-preference" ? "USER.md" : "MEMORY.md";
+    if (conclusion.kind === "user-preference" && this.#promotionStore !== undefined) {
+      const applied = await this.#promotionStore.applyUserPreference({
+        id: conclusion.id,
+        content: conclusion.content,
+        confidence: conclusion.confidence,
+        occurrences: conclusion.occurrences ?? 1,
+        source: conclusion.source ?? "unknown",
+        sourceSessionIds: conclusion.sourceSessionIds ?? []
+      });
+
+      if (applied.superseded !== undefined) {
+        this.#removeExactLine("USER.md", `- ${applied.superseded.content}`);
+      }
+      if (applied.action === "created" || applied.action === "replaced") {
+        this.#appendDedupe(target, `- ${conclusion.content}`);
+      }
+      await this.#save();
+      return;
+    }
 
     this.#appendDedupe(target, `- ${conclusion.content}`);
     await this.#save();
@@ -81,6 +119,19 @@ export class LocalMemoryProvider implements MemoryProvider {
     await this.#save();
   }
 
+  async inspectPromotions(): Promise<MemoryPromotionRecord[]> {
+    return await this.#promotionStore?.list() ?? [];
+  }
+
+  async forgetPromotion(content: string): Promise<MemoryPromotionRecord | undefined> {
+    const forgotten = await this.#promotionStore?.forgetUserPreference(content);
+    if (forgotten !== undefined) {
+      this.#removeExactLine("USER.md", `- ${forgotten.content}`);
+      await this.#save();
+    }
+    return forgotten;
+  }
+
   #appendDedupe(file: MemoryFileKind, content: string): void {
     const current = this.#store.read(file);
 
@@ -95,9 +146,20 @@ export class LocalMemoryProvider implements MemoryProvider {
     });
   }
 
+  #removeExactLine(file: MemoryFileKind, content: string): void {
+    const current = this.#store.read(file);
+    const lines = current
+      .split("\n")
+      .filter((line) => line.trim() !== content.trim());
+    this.#store.write(file, lines.filter((line, index, array) => !(index === array.length - 1 && line.length === 0)).join("\n"));
+  }
+
   async #save(): Promise<void> {
-    if (this.#saveRoot !== undefined) {
-      await this.#store.saveToDirectory(this.#saveRoot);
+    for (const file of ["MEMORY.md", "USER.md", "SOUL.md", "AGENTS.md"] as const) {
+      const root = this.#saveRoots[file];
+      if (root !== undefined) {
+        await this.#store.saveFileToDirectory(root, file);
+      }
     }
   }
 }

@@ -78,13 +78,18 @@ Remaining hardening:
 
 ### 3. Memory And Sessions
 
-Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, prompt cache, and skill outcome persistence exist.
+Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, prompt cache, skill outcome persistence, and repeated user-preference promotion exist.
 
 Next acceptance checks:
-- Repeated user preferences are promoted into `USER.md`.
+- Done: repeated user preferences are promoted into `USER.md` with contradiction handling, strengthening, forgetting, and inspection.
 - Repeated workflows are promoted into `MEMORY.md` or skills.
 - Session summaries preserve active task state.
 - Long sessions preserve recent tool-call/result pairs during compression.
+
+Follow-on protocol work after this milestone:
+- MCP client should be the next external-capability expansion after memory promotion, starting with stdio servers and config-driven discovery.
+- ACP should wait until after MCP client and stronger memory/session maturity, because ACP is primarily an editor-surface/runtime product rather than a capability substrate.
+- MCP server bridging should come later than MCP client and likely later than ACP.
 
 ### 4. Channels
 
@@ -130,11 +135,11 @@ Remaining hardening:
 
 Move from strong internal alpha behavior to MVP launch hardening:
 
-1. Polish Telegram final reply formatting and complete a full live attachment/operator pass in the alpha harness.
-2. Harden OpenRouter exactness/instruction fidelity after the provider batch established the current acceptance matrix.
-3. Promote repeated preferences into `USER.md` and repeated workflows into `MEMORY.md` or skill suggestions.
-4. Finish first-run install/onboarding polish and define the external distribution path.
-5. Expand from Telegram to the next launch channels only after the Telegram path feels stable.
+1. Promote repeated workflows into `MEMORY.md` or skill suggestions.
+2. Build the MCP client foundation with stdio server support and config-driven discovery.
+3. Finish first-run install/onboarding polish and define the external distribution path.
+4. Expand the evaluation substrate into stronger scored comparisons.
+5. Revisit ACP/editor embedding only after the MCP client and memory/session work are in better shape.
 
 Keep Hermes alignment as the default rule:
 - session-stable snapshots over silent mutation
