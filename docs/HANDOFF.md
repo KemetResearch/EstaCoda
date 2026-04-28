@@ -58,7 +58,7 @@ What has been achieved:
 - Internal alpha testing now has a repeatable harness and runbook.
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
-- A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, and reload semantics.
+- A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
 
 Evidence:
 
@@ -71,7 +71,7 @@ Evidence:
 - vision-backed image support: Kimi path `live-proven`; broader provider coverage `implemented but not live-proven`
 - provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
 - evaluation substrate: `implemented but not live-proven`
-- MCP client foundation across stdio + HTTP: `smoke-tested`
+- MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
 
 ## 3. Current Working Capabilities
 
@@ -124,7 +124,7 @@ Working but not yet fully proven live in operator testing:
   - `estacoda mcp status`
   - `estacoda mcp reload`
   - `/reload-mcp`
-  `smoke-tested`
+  - real stdio third-party server execution is now `live-proven` for the filesystem server after workspace trust is granted
 
 ## 4. Architecture Overview
 

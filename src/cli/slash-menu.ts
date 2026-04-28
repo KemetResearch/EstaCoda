@@ -18,8 +18,9 @@ export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "skills", description: "Browse commands and available skills" },
   { name: "reload-mcp", description: "Reload MCP config and refresh MCP tools for this session" },
   { name: "resume", description: "Show the latest interrupted-turn resume note" },
-  { name: "trust", description: "Trust this workspace for proactive local work" },
-  { name: "untrust", description: "Revoke workspace trust" },
+  { name: "trust", description: "Trust this workspace for proactive local work", aliases: ["workspace.trust.grant"] },
+  { name: "untrust", description: "Revoke workspace trust", aliases: ["workspace.trust.revoke"] },
+  { name: "workspace.trust.status", description: "Show whether the current workspace is trusted" },
   { name: "doctor", description: "Run a quick in-session health check" },
   { name: "clear", description: "Clear the terminal" },
   { name: "exit", description: "End the session", aliases: ["quit"] }

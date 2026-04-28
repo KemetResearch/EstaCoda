@@ -321,6 +321,9 @@ export class ChannelGateway {
         "/new - start a fresh session",
         "/reset - alias for /new",
         "/reload-mcp - reload MCP config for future turns in this chat",
+        "/trust - trust this workspace for local read/write work",
+        "/untrust - revoke workspace trust for this chat session",
+        "/workspace.trust.status - show current workspace trust state",
         "/commands - show the Telegram command menu",
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
@@ -355,6 +358,90 @@ export class ChannelGateway {
         artifactCount: 0,
         progressCount: 0
       };
+    }
+
+    if (command === "/trust" || command === "/workspace.trust.grant") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      try {
+        await runtime.trustWorkspace();
+        const text = "Workspace trusted. EstaCoda will proceed with normal local work here.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
+    }
+
+    if (command === "/untrust" || command === "/workspace.trust.revoke") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      try {
+        await runtime.revokeWorkspaceTrust();
+        const text = "Workspace trust revoked. EstaCoda will ask before workspace writes here.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
+    }
+
+    if (command === "/workspace.trust.status") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      try {
+        const trusted = await runtime.isWorkspaceTrusted();
+        const text = `Workspace trust: ${trusted ? "trusted" : "not trusted"}`;
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
     }
 
     if (command === "/memory") {
@@ -931,7 +1018,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -944,6 +1031,11 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/new" ||
     token === "/reset" ||
     token === "/reload-mcp" ||
+    token === "/trust" ||
+    token === "/untrust" ||
+    token === "/workspace.trust.grant" ||
+    token === "/workspace.trust.revoke" ||
+    token === "/workspace.trust.status" ||
     token === "/resume" ||
     token === "/stop" ||
     token === "/approve" ||
@@ -1034,6 +1126,9 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/search", description: "Search session history" },
     { command: "/new", description: "Start a fresh session" },
     { command: "/reset", description: "Alias for /new" },
+    { command: "/trust", description: "Trust this workspace" },
+    { command: "/untrust", description: "Revoke workspace trust" },
+    { command: "/workspace.trust.status", description: "Show workspace trust state" },
     { command: "/resume", description: "Show the latest interrupted turn" },
     { command: "/approve", description: "Approve the pending gated action" },
     { command: "/deny", description: "Deny the pending gated action" },

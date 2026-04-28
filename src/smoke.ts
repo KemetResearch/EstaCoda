@@ -26,6 +26,7 @@ import { renderMemorySnapshot } from "./memory/memory-renderer.js";
 import { MemoryStore } from "./memory/memory-store.js";
 import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
 import { __detectForgetPreferenceForTest, __detectProjectFactForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
+import { __resolveNpxCachedBinaryForTest } from "./mcp/mcp-client.js";
 import { loadMcpServers } from "./mcp/mcp-tools.js";
 import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
 import { ProcessManager } from "./process/process-manager.js";
@@ -2027,6 +2028,15 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
   while (true) {
+    const newline = buffer.indexOf("\\n");
+    if (newline !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      if (line.startsWith("{")) {
+        buffer = buffer.slice(newline + 1);
+        handle(JSON.parse(line));
+        continue;
+      }
+    }
     const boundary = buffer.indexOf("\\r\\n\\r\\n");
     if (boundary === -1) return;
     const header = buffer.slice(0, boundary);
@@ -2247,6 +2257,26 @@ const httpEchoResult = await httpEchoTool?.run({ text: "hello-http" });
 const httpResourceResult = await httpResourceReadTool?.run({ uri: "memo://http" });
 const httpPromptResult = await httpPromptGetTool?.run({ name: "http-draft" });
 await Promise.all(httpMcpServers.map((server) => server.stop()));
+const fakeNpxHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-npx-home-"));
+const fakeNpxCacheRoot = join(fakeNpxHome, ".npm", "_npx", "cache-1", "node_modules");
+const fakeScopedPackageRoot = join(fakeNpxCacheRoot, "@scope", "demo-server");
+await mkdir(join(fakeNpxCacheRoot, ".bin"), { recursive: true });
+await mkdir(fakeScopedPackageRoot, { recursive: true });
+await writeFile(join(fakeScopedPackageRoot, "package.json"), JSON.stringify({
+  name: "@scope/demo-server",
+  bin: {
+    "demo-server": "dist/index.js"
+  }
+}), "utf8");
+await writeFile(join(fakeNpxCacheRoot, ".bin", "demo-server"), "#!/bin/sh\nexit 0\n", "utf8");
+const previousSmokeHome = process.env.HOME;
+process.env.HOME = fakeNpxHome;
+const resolvedFakeNpxBinary = await __resolveNpxCachedBinaryForTest("@scope/demo-server");
+if (previousSmokeHome === undefined) {
+  delete process.env.HOME;
+} else {
+  process.env.HOME = previousSmokeHome;
+}
 const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
 const mcpDirectExitMarkerContent = await readFile(mcpDirectExitMarker, "utf8");
 assert(mcpSetupResult.config.mcpServers?.docs?.command === "/Users/ahnwy/.bun/bin/bun", "expected MCP setup to persist the stdio command");
@@ -2289,6 +2319,7 @@ assert(httpPromptResult?.ok === true, "expected HTTP MCP prompt.get tool to succ
 assert(httpPromptResult?.content.includes("HTTP prompt") === true, "expected HTTP MCP prompt content");
 assert(httpMcpRequests.some((request) => request.body.method === "initialize"), "expected HTTP MCP initialize request");
 assert(httpMcpRequests.some((request) => request.body.method === "tools/list"), "expected HTTP MCP tools/list request");
+assert(resolvedFakeNpxBinary === join(fakeNpxCacheRoot, ".bin", "demo-server"), "expected MCP client to resolve cached npx binaries");
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");

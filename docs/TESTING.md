@@ -44,14 +44,18 @@ cd /Users/ahnwy/estacoda-v2
 Inside the session:
 
 - `/reload-mcp`
+- `/workspace.trust.status`
+- `/workspace.trust.grant`
 - `/tools`
 - `/skills`
+- `Use the MCP filesystem tools to list the root of the current project and then read package.json.`
 
 Evidence level:
 
-- stdio MCP discovery/registration: `smoke-tested`
+- stdio MCP discovery/registration: `live-proven`
 - HTTP MCP discovery/registration: `smoke-tested`
-- MCP reload semantics: `smoke-tested`
+- MCP reload semantics: `live-proven`
+- trusted stdio filesystem MCP execution: `live-proven`
 
 ## CLI Sanity Checks
 

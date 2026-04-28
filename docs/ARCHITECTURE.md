@@ -59,7 +59,7 @@ Evidence note:
 ### MCP
 
 - [src/mcp/mcp-client.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-client.ts)
-  MCP client transport for stdio and HTTP. `smoke-tested`
+  MCP client transport for stdio and HTTP. stdio path `live-proven`; HTTP path `smoke-tested`
 - [src/mcp/mcp-tools.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-tools.ts)
   Discovery/registration layer plus server-level trust-to-risk mapping. `smoke-tested`
 
@@ -274,7 +274,7 @@ Current implementation:
 
 1. config loads `mcpServers` / `mcp_servers`
 2. runtime creation calls `loadMcpServers(...)`
-3. stdio MCP servers are initialized over framed JSON-RPC, and HTTP servers are called over JSON-RPC POST
+3. stdio MCP servers are initialized over newline-delimited JSON-RPC, and HTTP servers are called over JSON-RPC POST
 4. discovered tools are registered into the normal tool registry
 5. optional wrappers are added for:
    - `resource.list`
@@ -283,12 +283,14 @@ Current implementation:
    - `prompt.get`
 6. runtime disposal stops MCP subprocesses
 7. server-level trust metadata maps MCP tools into EstaCoda risk classes
+8. `npx`-configured stdio servers are resolved to cached installed binaries before launch so MCP stdio handshakes do not depend on the `npx` wrapper behaving like a transparent transport
 
 Current operator semantics:
 
 - one-shot CLI commands see current MCP config automatically
 - interactive CLI sessions need `/reload-mcp` to refresh their live MCP snapshot
 - `estacoda mcp reload` confirms config-level reload
+- trusted workspaces can execute `read-only-local` MCP tools after explicit workspace trust is granted
 - channel turns rebuild from fresh config snapshots, so later turns can see MCP config changes without a full gateway restart
 - approval persistence/revocation
 

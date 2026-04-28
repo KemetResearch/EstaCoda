@@ -1,3 +1,6 @@
+import { access, readFile, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 export type MCPServerTransport = "stdio" | "http";
@@ -64,6 +67,8 @@ export type MCPServerCapabilities = {
   prompts?: { listChanged?: boolean };
 };
 
+const MCP_LATEST_PROTOCOL_VERSION = "2025-11-25";
+
 export class MCPClient {
   readonly #name: string;
   readonly #transport: MCPServerTransport;
@@ -123,7 +128,7 @@ export class MCPClient {
       if (typeof this.#command !== "string" || this.#command.trim().length === 0) {
         throw new Error(`MCP stdio server ${this.#name} requires a command`);
       }
-      this.#startStdio();
+      await this.#startStdio();
     } else {
       if (typeof this.#url !== "string" || this.#url.trim().length === 0) {
         throw new Error(`MCP HTTP server ${this.#name} requires a url`);
@@ -131,7 +136,7 @@ export class MCPClient {
     }
 
     const initialize = await this.#request("initialize", {
-      protocolVersion: "2024-11-05",
+      protocolVersion: MCP_LATEST_PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: {
         name: "EstaCoda",
@@ -196,8 +201,9 @@ export class MCPClient {
     return this.#transport;
   }
 
-  #startStdio(): void {
-    this.#child = spawn(this.#command!, this.#args, {
+  async #startStdio(): Promise<void> {
+    const resolved = await resolveStdioCommand(this.#command!, this.#args);
+    this.#child = spawn(resolved.command, resolved.args, {
       cwd: this.#cwd,
       env: buildStdioEnv(this.#env),
       stdio: "pipe"
@@ -239,7 +245,7 @@ export class MCPClient {
       method,
       params
     });
-    child.stdin.write(frameMessage(payload), "utf8");
+    child.stdin.write(`${payload}\n`, "utf8");
   }
 
   async #request(method: string, params?: unknown, timeoutMs = this.#timeoutMs): Promise<unknown> {
@@ -276,7 +282,7 @@ export class MCPClient {
           reject(error);
         }
       });
-      child.stdin.write(frameMessage(JSON.stringify(payload)), "utf8");
+      child.stdin.write(`${JSON.stringify(payload)}\n`, "utf8");
     });
 
     return response;
@@ -328,6 +334,37 @@ export class MCPClient {
 
   #pump(): void {
     while (true) {
+      const trimmedStart = this.#buffer.trimStart();
+      if (trimmedStart.startsWith("{")) {
+        const newline = this.#buffer.indexOf("\n");
+        if (newline === -1) {
+          return;
+        }
+        const line = this.#buffer.slice(0, newline).trim();
+        this.#buffer = this.#buffer.slice(newline + 1);
+        if (line.length === 0) {
+          continue;
+        }
+        try {
+          this.#handleMessage(JSON.parse(line) as JSONRPCResponse);
+        } catch {
+          continue;
+        }
+        continue;
+      }
+
+      if (!trimmedStart.startsWith("Content-Length:")) {
+        const newline = this.#buffer.indexOf("\n");
+        if (newline === -1) {
+          return;
+        }
+        this.#buffer = this.#buffer.slice(newline + 1);
+        continue;
+      }
+
+      if (this.#buffer !== trimmedStart) {
+        this.#buffer = trimmedStart;
+      }
       const boundary = this.#buffer.indexOf("\r\n\r\n");
       if (boundary === -1) {
         return;
@@ -364,10 +401,6 @@ export class MCPClient {
     }
     pending.resolve(message.result);
   }
-}
-
-function frameMessage(body: string): string {
-  return `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`;
 }
 
 function buildStdioEnv(customEnv: Record<string, string> | undefined): Record<string, string> {
@@ -413,3 +446,120 @@ const defaultFetch: MCPFetchLike = async (input, init) => {
     text: async () => await response.text()
   };
 };
+
+async function resolveStdioCommand(command: string, args: string[]): Promise<{
+  command: string;
+  args: string[];
+}> {
+  if (basename(command) !== "npx") {
+    return { command, args };
+  }
+
+  const spec = parseNpxPackageSpec(args);
+  if (spec === undefined) {
+    return { command, args };
+  }
+
+  const binary = await resolveNpxCachedBinary(spec.packageName);
+  if (binary === undefined) {
+    return { command, args };
+  }
+
+  return {
+    command: binary,
+    args: spec.serverArgs
+  };
+}
+
+function parseNpxPackageSpec(args: string[]): {
+  packageName: string;
+  serverArgs: string[];
+} | undefined {
+  let index = 0;
+  while (index < args.length) {
+    const value = args[index];
+    if (value === "--") {
+      index += 1;
+      break;
+    }
+    if (value === "-y" || value === "--yes" || value === "--quiet" || value === "-q") {
+      index += 1;
+      continue;
+    }
+    if (value.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    return {
+      packageName: value,
+      serverArgs: args.slice(index + 1)
+    };
+  }
+
+  return undefined;
+}
+
+async function resolveNpxCachedBinary(packageName: string): Promise<string | undefined> {
+  const npmCacheRoot = join(resolveUserHome(), ".npm", "_npx");
+  let cacheDirs: string[];
+  try {
+    cacheDirs = await readdir(npmCacheRoot);
+  } catch {
+    return undefined;
+  }
+
+  for (const cacheDir of cacheDirs) {
+    const packageRoot = join(npmCacheRoot, cacheDir, "node_modules", packageName);
+    const packageJsonPath = join(packageRoot, "package.json");
+    try {
+      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+        bin?: string | Record<string, string>;
+        name?: string;
+      };
+      const binaryName = pickPackageBinaryName(packageJson, packageName);
+      if (binaryName === undefined) {
+        continue;
+      }
+      const candidate = join(npmCacheRoot, cacheDir, "node_modules", ".bin", binaryName);
+      await access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+function pickPackageBinaryName(packageJson: {
+  bin?: string | Record<string, string>;
+  name?: string;
+}, packageName: string): string | undefined {
+  if (typeof packageJson.bin === "string") {
+    const fallback = packageJson.name ?? packageName;
+    return fallback.startsWith("@")
+      ? fallback.slice(fallback.indexOf("/") + 1)
+      : fallback;
+  }
+
+  if (typeof packageJson.bin === "object" && packageJson.bin !== null) {
+    const entries = Object.keys(packageJson.bin);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    const unscoped = packageName.startsWith("@")
+      ? packageName.slice(packageName.indexOf("/") + 1)
+      : packageName;
+    return entries.find((entry) => entry === unscoped) ?? entries[0];
+  }
+
+  return undefined;
+}
+
+function resolveUserHome(): string {
+  return process.env.HOME
+    ?? process.env.USERPROFILE
+    ?? homedir();
+}
+
+export const __resolveNpxCachedBinaryForTest = resolveNpxCachedBinary;

@@ -157,16 +157,16 @@ Next:
 
 ### 8. MCP and ACP
 
-State: MCP client foundation now includes stdio + HTTP; ACP is still not implemented.
+State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP is still not implemented.
 
 Done:
 
-- stdio MCP client transport `smoke-tested`
+- stdio MCP client transport `live-proven`
 - HTTP MCP client transport `smoke-tested`
-- config-driven MCP server registration/discovery `smoke-tested`
-- MCP tool/resource/prompt discovery and registration into the normal runtime loop `smoke-tested`
-- reload semantics via `estacoda mcp reload` and `/reload-mcp` `smoke-tested`
-- per-server trust metadata now maps MCP tools into runtime risk classes `smoke-tested`
+- config-driven MCP server registration/discovery `live-proven` on stdio, `smoke-tested` on HTTP
+- MCP tool/resource/prompt discovery and registration into the normal runtime loop `live-proven` on stdio, `smoke-tested` on HTTP
+- reload semantics via `estacoda mcp reload` and `/reload-mcp` `live-proven`
+- per-server trust metadata now maps MCP tools into runtime risk classes; trusted stdio filesystem execution is `live-proven`
 - auxiliary provider routing still reserves an `mcp` task label `implemented`
 
 Next:

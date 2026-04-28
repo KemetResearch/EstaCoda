@@ -216,13 +216,20 @@ async function handleSlashCommand(input: {
       };
     }
     case "trust":
+    case "workspace.trust.grant":
       await input.runtime.trustWorkspace();
       input.output.write("Workspace trusted. EstaCoda will proceed with normal local work here.\n\n");
       return false;
     case "untrust":
+    case "workspace.trust.revoke":
       await input.runtime.revokeWorkspaceTrust();
       input.output.write("Workspace trust revoked. EstaCoda will ask before workspace writes here.\n\n");
       return false;
+    case "workspace.trust.status": {
+      const trusted = await input.runtime.isWorkspaceTrusted();
+      input.output.write(`Workspace trust: ${trusted ? "trusted" : "not trusted"}\n\n`);
+      return false;
+    }
     case "doctor":
       input.output.write(`${await renderRuntimeDoctor(input.runtime)}\n\n`);
       return false;

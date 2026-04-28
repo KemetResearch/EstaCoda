@@ -88,7 +88,7 @@ Next acceptance checks:
 - Long sessions preserve recent tool-call/result pairs during compression.
 
 Follow-on protocol work after this milestone:
-- MCP client stdio + HTTP foundation is now in place with config-driven discovery, trust metadata, tool/resource/prompt registration, and reload semantics.
+- MCP client stdio + HTTP foundation is now in place with config-driven discovery, trust metadata, tool/resource/prompt registration, and reload semantics; the stdio path is now live-proven against a real filesystem MCP server.
 - ACP should still wait until after MCP HTTP support and stronger memory/session maturity, because ACP is primarily an editor-surface/runtime product rather than a capability substrate.
 - MCP server bridging should still come later than MCP client and likely later than ACP.
 
