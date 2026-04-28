@@ -13,6 +13,7 @@ import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-
 import { inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import type { SkillAutonomy } from "../skills/skill-learning.js";
 
 export type EstaCodaConfig = {
   model?: {
@@ -45,6 +46,7 @@ export type EstaCodaConfig = {
   };
   skills?: {
     externalDirs?: string[];
+    autonomy?: SkillAutonomy;
     config?: Record<string, Record<string, unknown>>;
   };
   channels?: {
@@ -90,6 +92,7 @@ export type LoadedRuntimeConfig = {
   };
   skills: {
     externalDirs: string[];
+    autonomy: SkillAutonomy;
     config: Record<string, Record<string, unknown>>;
   };
   channels: {
@@ -188,6 +191,7 @@ export async function loadRuntimeConfig(options: {
     },
     skills: {
       externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir),
+      autonomy: config.skills?.autonomy ?? "suggest",
       config: normalizeSkillConfig(config.skills?.config)
     },
     channels: {
@@ -229,6 +233,7 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     skills: {
       ...(merged.skills ?? {}),
       externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs,
+      autonomy: config.skills?.autonomy ?? merged.skills?.autonomy,
       config: {
         ...(merged.skills?.config ?? {}),
         ...(config.skills?.config ?? {})

@@ -14,8 +14,9 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 ## Memory
 
 - Repeated user preferences are now promoted into `USER.md` with contradiction handling, strengthening, forgetting, and inspection. `smoke-tested`
-- Repeated workflows are not yet promoted automatically into `MEMORY.md` or skills. `intended but not implemented`
-- Memory persistence exists, and user-preference learning is now real, but broader workflow/project-memory learning is still shallow. preference promotion `smoke-tested`; broader learning `intended but not implemented`
+- Repeated project facts/conventions are now promoted into `MEMORY.md`. `smoke-tested`
+- Workflow learning now exists through `skills.autonomy`, but it is intentionally conservative and currently limited to bounded local workflows; risky/external workflows remain candidates. `smoke-tested`
+- Autonomous workflow learning currently creates new project skills, but it does not yet patch or merge with existing skills intelligently. `implemented but not live-proven`
 
 ## Telegram / channels
 

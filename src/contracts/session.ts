@@ -202,6 +202,24 @@ export type SessionEvent =
       kind: "memory-conclusion";
       provider: string;
       conclusion: MemoryConclusion;
+    }
+  | {
+      kind: "skill-learned";
+      action: "observed" | "candidate" | "created";
+      record: {
+        key: string;
+        name: string;
+        content: string;
+        occurrences: number;
+        sourceSessionIds: string[];
+        tools: string[];
+        requiredToolsets: string[];
+        bounded: boolean;
+        status: "observed" | "candidate" | "created";
+        createdSkillName?: string;
+        createdSkillPath?: string;
+        updatedAt: string;
+      };
     };
 
 export type SessionSearchResult = {

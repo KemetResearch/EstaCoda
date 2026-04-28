@@ -106,7 +106,8 @@ Working but not yet fully proven live in operator testing:
 - Telegram image understanding on non-Kimi providers. `implemented but not live-proven`
 - Multi-provider live pass across Kimi/OpenRouter/Ollama/DeepSeek. Hosted-provider matrix is now `live-proven`; local/Ollama remains unproven in this environment.
 - Repeated user-preference promotion into `USER.md`, including contradiction handling, strengthening, forgetting, and inspection. `smoke-tested`
-- Repeated workflow/project-memory promotion into `MEMORY.md` or skills. `intended but not implemented`
+- Repeated project-fact/convention promotion into `MEMORY.md`. `smoke-tested`
+- Workflow learning with `skills.autonomy` (`none | suggest | proactive | autonomous`) now exists for bounded local workflows and creates project skills rather than writing procedures into `MEMORY.md`. `smoke-tested`
 
 ## 4. Architecture Overview
 
@@ -518,7 +519,7 @@ Best next development target:
 1. Broaden live Telegram image verification beyond Kimi. `implemented but not live-proven`
 2. Harden OpenRouter exactness/instruction fidelity after the live provider batch. OpenRouter runtime path is `live-proven`; exactness-sensitive tasks are still partial.
 3. Extend memory promotion beyond user preferences
-   - repeated workflows -> `MEMORY.md` or skill suggestions `intended but not implemented`
+   - refine workflow-learning heuristics, patching, and candidate quality now that `skills.autonomy` and project-fact promotion exist `smoke-tested`
 4. Expand the evaluation substrate into a scored skill-first benchmark layer. `implemented but not live-proven`
 5. Finish onboarding/distribution polish. `intended but not implemented`
 
@@ -539,7 +540,7 @@ This is the shortest honest path from strong internal alpha to a private MVP can
 
 ## 14. Open Questions
 
-- What is the exact policy for promoting memory into `USER.md` vs `MEMORY.md` vs a new skill?
+- What should the long-term threshold and patch/update policy be for autonomous workflow skills beyond the current `none | suggest | proactive | autonomous` ladder?
 - What should the first real channel verbosity/profile model look like?
 - Should the gateway become a true daemon/service with liveness tracking, or remain foreground-first?
 - What is the right packaging/distribution shape for MVP: Bun-based install, npm wrapper, packaged binary, Homebrew, or multiple?

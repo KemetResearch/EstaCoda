@@ -25,7 +25,7 @@ import { createMemoryTool } from "./memory/memory-tool.js";
 import { renderMemorySnapshot } from "./memory/memory-renderer.js";
 import { MemoryStore } from "./memory/memory-store.js";
 import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
-import { __detectForgetPreferenceForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
+import { __detectForgetPreferenceForTest, __detectProjectFactForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
 import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
 import { ProcessManager } from "./process/process-manager.js";
 import { createProcessTools } from "./process/process-tools.js";
@@ -53,6 +53,7 @@ import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
 import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
+import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
 import { createSkillTools } from "./skills/skill-tools.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
@@ -3827,6 +3828,8 @@ assert(__detectUserPreferenceForTest("I prefer concise Telegram replies") === "P
 assert(__detectUserPreferenceForTest("Please use Kimi by default") === "Use Kimi by default.", "expected preference detector to canonicalize default-use wording");
 assert(__detectUserPreferenceForTest("Actually give me detailed replies") === "Prefer detailed replies.", "expected preference detector to canonicalize contradiction wording");
 assert(__detectForgetPreferenceForTest("forget that I prefer detailed replies") === "Prefer detailed replies.", "expected forget detector to canonicalize removal wording");
+assert(__detectProjectFactForTest("Project uses Bun") === "Project uses Bun.", "expected project fact detector to canonicalize project stack facts");
+assert(__detectProjectFactForTest("Run checks with bun run typecheck and bun run smoke") === "Run checks with `bun run typecheck and bun run smoke`.", "expected project fact detector to canonicalize command conventions");
 assert(
   renderedMemory.usage.some((entry) => entry.kind === "MEMORY.md" && entry.maxChars === 2200),
   "expected memory usage with Hermes-aligned budget"
@@ -4428,6 +4431,200 @@ await preferenceRuntimeFive.handle({
 });
 const userMemoryAfterForget = await readFile(join(promotionUserMemoryRoot, "USER.md"), "utf8");
 const preferencePromotionsAfterForget = await preferenceRuntimeFive.inspectMemoryPromotions();
+const projectFactRuntimeOne = await preferenceRuntimeFactory("memory-project-fact-1");
+await projectFactRuntimeOne.handle({
+  text: "Project uses Bun",
+  channel: "cli"
+});
+const projectMemoryAfterFirstFact = await readFile(join(promotionProjectMemoryRoot, "MEMORY.md"), "utf8").catch(() => "");
+const projectFactRuntimeTwo = await preferenceRuntimeFactory("memory-project-fact-2");
+await projectFactRuntimeTwo.handle({
+  text: "Project uses Bun",
+  channel: "cli"
+});
+await projectFactRuntimeTwo.handle({
+  text: "Run checks with bun run typecheck and bun run smoke",
+  channel: "cli"
+});
+const projectFactRuntimeThree = await preferenceRuntimeFactory("memory-project-fact-3");
+await projectFactRuntimeThree.handle({
+  text: "Run checks with bun run typecheck and bun run smoke",
+  channel: "cli"
+});
+const projectMemoryAfterRepeatedFacts = await readFile(join(promotionProjectMemoryRoot, "MEMORY.md"), "utf8");
+const projectFactPromotions = await projectFactRuntimeThree.inspectMemoryPromotions();
+const skillLearningWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-learning-"));
+const skillLearningProjectRoot = join(skillLearningWorkspace, ".estacoda", "skills");
+const skillLearningStorePath = join(skillLearningWorkspace, ".estacoda", "skill-learning.json");
+const skillLearningSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:00:00.000Z")
+});
+const skillLearningRegistry = new SkillRegistry();
+const skillLearningExecutions: ToolExecutionRecord[] = [
+  {
+    tool: {
+      name: "file.read",
+      description: "Read file",
+      inputSchema: {},
+      riskClass: "read-only-local",
+      toolsets: ["files"],
+      progressLabel: "reading files",
+      maxResultSizeChars: 4000
+    },
+    decision: "allow",
+    riskClass: "read-only-local",
+    result: {
+      ok: true,
+      content: "read ok"
+    }
+  },
+  {
+    tool: {
+      name: "terminal.run",
+      description: "Run command",
+      inputSchema: {},
+      riskClass: "workspace-write",
+      toolsets: ["shell-write"],
+      progressLabel: "running command",
+      maxResultSizeChars: 4000
+    },
+    decision: "allow",
+    riskClass: "workspace-write",
+    result: {
+      ok: true,
+      content: "command ok"
+    }
+  }
+];
+const riskySkillLearningExecutions: ToolExecutionRecord[] = [
+  {
+    tool: {
+      name: "web.post",
+      description: "Send external update",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["web"],
+      progressLabel: "sending update",
+      maxResultSizeChars: 4000
+    },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    result: {
+      ok: true,
+      content: "sent"
+    }
+  },
+  ...skillLearningExecutions
+];
+const makeSkillLearningManager = (autonomy: "none" | "suggest" | "proactive" | "autonomous") => new SkillLearningManager({
+  autonomy,
+  registry: skillLearningRegistry,
+  projectSkillsRoot: skillLearningProjectRoot,
+  storePath: skillLearningStorePath,
+  sessionDb: skillLearningSessionDb
+});
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-none",
+  profileId: "smoke"
+});
+const skillLearningNone = makeSkillLearningManager("none");
+const noneLearningResult = await skillLearningNone.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-none",
+  userText: "Validate telegram attachment flow end to end",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const skillLearningNoneStore = await readFile(skillLearningStorePath, "utf8").catch(() => "");
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-suggest-1",
+  profileId: "smoke"
+});
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-suggest-2",
+  profileId: "smoke"
+});
+const skillLearningSuggest = makeSkillLearningManager("suggest");
+const suggestFirst = await skillLearningSuggest.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-suggest-1",
+  userText: "Validate telegram attachment flow end to end",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const suggestSecond = await skillLearningSuggest.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-suggest-2",
+  userText: "Validate telegram attachment flow end to end",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const suggestRecords = await skillLearningSuggest.inspect();
+const skillLearningProjectFileAfterSuggest = await readFile(join(skillLearningProjectRoot, "validate-telegram-attachment-flow-end-workflow", "SKILL.md"), "utf8").catch(() => "");
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-proactive-1",
+  profileId: "smoke"
+});
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-proactive-2",
+  profileId: "smoke"
+});
+const skillLearningProactive = makeSkillLearningManager("proactive");
+await skillLearningProactive.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-proactive-1",
+  userText: "Build provider hardening acceptance matrix",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const proactiveSecond = await skillLearningProactive.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-proactive-2",
+  userText: "Build provider hardening acceptance matrix",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const proactiveSkillPath = join(skillLearningProjectRoot, "build-provider-hardening-acceptance-matrix-workflow", "SKILL.md");
+const proactiveSkillFile = await readFile(proactiveSkillPath, "utf8");
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-autonomous-1",
+  profileId: "smoke"
+});
+const skillLearningAutonomous = makeSkillLearningManager("autonomous");
+const autonomousFirst = await skillLearningAutonomous.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-autonomous-1",
+  userText: "Inspect release screenshot and extract visible text",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const autonomousSkillFile = await readFile(join(skillLearningProjectRoot, "inspect-release-screenshot-extract-visible-workflow", "SKILL.md"), "utf8");
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-risky-1",
+  profileId: "smoke"
+});
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-risky-2",
+  profileId: "smoke"
+});
+const skillLearningRisky = makeSkillLearningManager("autonomous");
+await skillLearningRisky.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-risky-1",
+  userText: "Post the release note externally",
+  selectedSkill: undefined,
+  toolExecutions: riskySkillLearningExecutions
+});
+const riskySecond = await skillLearningRisky.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-risky-2",
+  userText: "Post the release note externally",
+  selectedSkill: undefined,
+  toolExecutions: riskySkillLearningExecutions
+});
+const riskyRecords = await skillLearningRisky.inspect();
+const riskySkillFile = await readFile(join(skillLearningProjectRoot, "post-release-note-externally-workflow", "SKILL.md"), "utf8").catch(() => "");
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   browserBackend: createLocalCdpBrowserBackend({
@@ -4610,6 +4807,38 @@ assert(
   preferencePromotionsAfterForget.some((record) => record.content === "Prefer detailed replies." && !record.active && record.forgottenAt !== undefined),
   "expected inspection to show forgotten preference state"
 );
+assert(!projectMemoryAfterFirstFact.includes("Project uses Bun."), "expected a single project fact mention not to promote immediately");
+assert(projectMemoryAfterRepeatedFacts.includes("Project uses Bun."), "expected repeated project fact promotion into MEMORY.md");
+assert(projectMemoryAfterRepeatedFacts.includes("Run checks with `bun run typecheck and bun run smoke`."), "expected repeated command convention promotion into MEMORY.md");
+assert(
+  projectFactPromotions.some((record) => record.kind === "project-fact" && record.active && record.content === "Project uses Bun."),
+  "expected inspection to show active project fact promotion"
+);
+assert(
+  projectFactPromotions.some((record) => record.kind === "project-fact" && record.active && record.content === "Run checks with `bun run typecheck and bun run smoke`."),
+  "expected inspection to show active project command convention promotion"
+);
+assert(noneLearningResult === undefined, "expected skill learning autonomy=none to skip workflow learning");
+assert(skillLearningNoneStore.trim().length === 0, "expected autonomy=none not to persist workflow observations");
+assert(suggestFirst?.action === "observed", "expected suggest mode to record the first workflow observation");
+assert(suggestSecond?.action === "candidate", "expected suggest mode to emit a workflow candidate after repeated success");
+assert(
+  suggestRecords.some((record) => record.status === "candidate" && record.content.includes("Validate telegram attachment flow end to end")),
+  "expected suggest mode to persist a workflow candidate"
+);
+assert(skillLearningProjectFileAfterSuggest.length === 0, "expected suggest mode not to auto-create a project skill");
+assert(proactiveSecond?.action === "created", "expected proactive mode to auto-create a bounded repeated workflow skill");
+assert(proactiveSkillFile.includes("Build provider hardening acceptance matrix"), "expected proactive mode to create the learned project skill");
+assert(proactiveSkillFile.includes("Run `file.read`."), "expected learned skill to include the observed tool workflow");
+assert(autonomousFirst?.action === "created", "expected autonomous mode to create a bounded workflow skill after one success");
+assert(autonomousSkillFile.includes("Inspect release screenshot and extract visible text"), "expected autonomous skill content");
+assert(riskySecond?.action === "candidate", "expected risky workflow to stay a candidate even in autonomous mode");
+assert(
+  riskyRecords.some((record) => record.status === "candidate" && record.bounded === false),
+  "expected risky workflow inspection to show an unbounded candidate"
+);
+assert(riskySkillFile.length === 0, "expected risky workflows not to auto-create project skills");
+assert(!projectMemoryAfterRepeatedFacts.includes("Validate telegram attachment flow"), "expected workflows to stay out of MEMORY.md");
 assert(
   runtimeEvents.some((event) => event.kind === "skill-workflow-step" && event.stepId === "structure-knowledge" && event.status === "tool-executed"),
   "expected runtime to execute a workflow step with an available tool"

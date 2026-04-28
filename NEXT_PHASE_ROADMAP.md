@@ -78,11 +78,12 @@ Remaining hardening:
 
 ### 3. Memory And Sessions
 
-Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, prompt cache, skill outcome persistence, and repeated user-preference promotion exist.
+Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, prompt cache, skill outcome persistence, repeated user-preference promotion, repeated project-fact promotion, and bounded workflow-to-skill learning exist.
 
 Next acceptance checks:
 - Done: repeated user preferences are promoted into `USER.md` with contradiction handling, strengthening, forgetting, and inspection.
-- Repeated workflows are promoted into `MEMORY.md` or skills.
+- Done: repeated project facts/conventions are promoted into `MEMORY.md`.
+- Done: repeated bounded local workflows can become candidates or project skills depending on `skills.autonomy`.
 - Session summaries preserve active task state.
 - Long sessions preserve recent tool-call/result pairs during compression.
 
@@ -135,7 +136,7 @@ Remaining hardening:
 
 Move from strong internal alpha behavior to MVP launch hardening:
 
-1. Promote repeated workflows into `MEMORY.md` or skill suggestions.
+1. Refine workflow-learning heuristics and skill patching behavior now that project-fact promotion and `skills.autonomy` exist.
 2. Build the MCP client foundation with stdio server support and config-driven discovery.
 3. Finish first-run install/onboarding polish and define the external distribution path.
 4. Expand the evaluation substrate into stronger scored comparisons.

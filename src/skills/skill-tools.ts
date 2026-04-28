@@ -482,7 +482,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.export requires destination");
         }
 
-        const destination = resolve(input.destination, slugify(foundSkill.name), "SKILL.md");
+        const destination = resolve(input.destination, slugifySkillName(foundSkill.name), "SKILL.md");
         await mkdir(dirname(destination), { recursive: true });
 
         if ("sourcePath" in foundSkill) {
@@ -583,7 +583,7 @@ function renderSkillFile(definition: SkillDefinition, instructions: string): str
   return `---\n${renderYamlFrontmatter(definition)}---\n${instructions.trim()}\n`;
 }
 
-function buildSkillFileContent(input: {
+export function buildSkillFileContent(input: {
   name?: string;
   description?: string;
   category?: string;
@@ -605,7 +605,7 @@ function buildSkillFileContent(input: {
   return renderSkillFile(definition, input.instructions);
 }
 
-function slugify(value: string): string {
+export function slugifySkillName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, "-").replace(/^-|-$/g, "") || basename(value);
 }
 
@@ -640,7 +640,7 @@ function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSki
 }
 
 function personalSkillDirectory(options: SkillToolsOptions, name: string): string {
-  return join(options.personalSkillsRoot, slugify(name));
+  return join(options.personalSkillsRoot, slugifySkillName(name));
 }
 
 function requirePersonalSkill(

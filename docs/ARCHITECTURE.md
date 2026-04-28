@@ -334,9 +334,19 @@ Important traits:
 - `LocalMemoryProvider` currently persists:
   - manual conclusions
   - promoted user preferences
+  - promoted project facts/conventions
   - skill outcomes
 - contradiction/forget/inspection for promoted user preferences now exists through the local promotion store
-- true repeated workflow/project-memory promotion is still an open product gap
+- bounded workflow learning is now separated from memory files:
+  - facts/conventions -> `MEMORY.md`
+  - user preferences -> `USER.md`
+  - reusable procedures -> project skills under `<workspace>/.estacoda/skills/`
+  - workflow learning state -> `<workspace>/.estacoda/skill-learning.json`
+- `skills.autonomy` controls workflow-learning behavior:
+  - `none`
+  - `suggest`
+  - `proactive`
+  - `autonomous`
 
 ### Trajectory persistence
 
@@ -363,7 +373,7 @@ The most important end-to-end path today is:
 
 ## Current Architectural Weak Spots
 
-- memory promotion now exists for repeated user preferences, but it is not yet a sophisticated full-memory subsystem
+- memory promotion now exists for repeated user preferences and project facts, but the broader learning system still needs better workflow heuristics and skill patch/update behavior
 - provider message content types were only recently widened enough to support vision
 - Telegram is the only real launch channel today
 - gateway liveness is readiness-focused, not daemon/service-tracking

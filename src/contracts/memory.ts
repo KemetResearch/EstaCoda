@@ -63,7 +63,7 @@ export type MemoryConclusion = {
 
 export type MemoryPromotionRecord = {
   id: string;
-  kind: "user-preference";
+  kind: "user-preference" | "project-fact";
   content: string;
   active: boolean;
   confidence: number;

@@ -97,6 +97,21 @@ export class LocalMemoryProvider implements MemoryProvider {
       await this.#save();
       return;
     }
+    if (conclusion.kind === "project-fact" && this.#promotionStore !== undefined) {
+      const applied = await this.#promotionStore.applyProjectFact({
+        id: conclusion.id,
+        content: conclusion.content,
+        confidence: conclusion.confidence,
+        occurrences: conclusion.occurrences ?? 1,
+        source: conclusion.source ?? "unknown",
+        sourceSessionIds: conclusion.sourceSessionIds ?? []
+      });
+      if (applied.action === "created") {
+        this.#appendDedupe(target, `- ${conclusion.content}`);
+      }
+      await this.#save();
+      return;
+    }
 
     this.#appendDedupe(target, `- ${conclusion.content}`);
     await this.#save();

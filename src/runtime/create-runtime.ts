@@ -35,6 +35,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
 import { builtinTools } from "../tools/builtin-tools.js";
@@ -62,6 +63,7 @@ export type RuntimeOptions = {
   personalSkillsRoot?: string;
   projectSkillsRoot?: string;
   externalSkillRoots?: string[];
+  skillAutonomy?: SkillAutonomy;
   skillConfig?: Record<string, Record<string, unknown>>;
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
@@ -273,6 +275,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const userMemoryRoot = options.userMemoryRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/memory/default`;
   const projectMemoryRoot = options.projectMemoryRoot ?? `${workspaceRoot}/.estacoda/memory`;
+  const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
   await memoryStore.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
   await memoryStore.loadFromDirectory(userMemoryRoot);
   await memoryStore.loadFromDirectory(projectMemoryRoot);
@@ -285,6 +288,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       "AGENTS.md": projectMemoryRoot
     },
     promotionStorePath: join(userMemoryRoot, "promotions.json")
+  });
+  const skillLearningManager = new SkillLearningManager({
+    autonomy: options.skillAutonomy ?? "suggest",
+    registry: skillRegistry,
+    projectSkillsRoot,
+    storePath: skillLearningStorePath,
+    sessionDb
   });
   const frozenMemorySnapshot = memoryStore.snapshot();
   const memoryContext = await memoryProvider.context();
@@ -373,7 +383,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
     skillsIndex: sessionSkillCatalog,
-    skillConfig: options.skillConfig
+    skillConfig: options.skillConfig,
+    skillLearningManager
   });
 
   return {
@@ -429,6 +440,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `auxiliary routes: ${auxiliaryRoutes.length === 0 ? "unavailable" : summarizeAuxiliaryRoutes(auxiliaryRoutes)}`,
         `tools: ${toolRegistry.list().length}`,
         `skills: ${sessionSkillCatalog.length}`,
+        `skill autonomy: ${options.skillAutonomy ?? "suggest"}`,
         `project context files: ${projectContext.files.length}`,
         `project context bytes: ${renderedProjectContext.length}`,
         `trust store: ${trustStore.path}`,

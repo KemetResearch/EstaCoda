@@ -121,6 +121,27 @@ Project-local overlays:
 
 - `<workspace>/.estacoda/skills/`
 - `<workspace>/.estacoda/`
+- `<workspace>/.estacoda/skill-learning.json`
+
+## Skill Autonomy
+
+Config path:
+
+- `skills.autonomy`
+
+Allowed values:
+
+- `none`
+- `suggest`
+- `proactive`
+- `autonomous`
+
+User-facing meanings:
+
+- `none`: Off. No workflow learning. EstaCoda will not create or suggest skills from observed work.
+- `suggest`: Suggest only. Records reusable workflow candidates after repeated success. No skill files are written automatically.
+- `proactive`: Auto-create after repeated success. Creates project skills automatically after repeated successful bounded local workflows.
+- `autonomous`: Auto-create after first safe success. Creates project skills automatically after the first successful bounded local workflow. Risky or external workflows remain candidates.
 
 ## Vision Route Requirement
 

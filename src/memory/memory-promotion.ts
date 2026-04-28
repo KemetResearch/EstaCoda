@@ -11,6 +11,11 @@ export type UserPreferencePromotionResult =
       content: string;
     };
 
+export type ProjectFactPromotionResult = {
+  kind: "conclusion";
+  conclusion: MemoryConclusion;
+};
+
 export async function resolveUserPreferencePromotion(options: {
   profileId: string;
   currentUserText: string;
@@ -60,6 +65,57 @@ export async function resolveUserPreferencePromotion(options: {
     id: `memory-preference-${currentPreference.key}`,
     kind: "user-preference",
     content: currentPreference.content,
+    confidence: Math.min(0.95, 0.55 + (matchingSessionIds.size - 2) * 0.15),
+    source: "repeated-user-input",
+    occurrences: matchingSessionIds.size,
+    sourceSessionIds: [...matchingSessionIds]
+  };
+
+  await options.memoryProvider.conclude(conclusion);
+  return {
+    kind: "conclusion",
+    conclusion
+  };
+}
+
+export async function resolveProjectFactPromotion(options: {
+  profileId: string;
+  currentUserText: string;
+  sessionDb: SessionDB;
+  memoryProvider: MemoryProvider;
+}): Promise<ProjectFactPromotionResult | undefined> {
+  const currentFact = detectProjectFact(options.currentUserText);
+
+  if (currentFact === undefined) {
+    return undefined;
+  }
+
+  const sessions = await options.sessionDb.listSessions(options.profileId);
+  const matchingSessionIds = new Set<string>();
+
+  for (const session of sessions) {
+    const messages = await options.sessionDb.listMessages(session.id);
+
+    for (const message of messages) {
+      if (message.role !== "user") {
+        continue;
+      }
+
+      const candidate = detectProjectFact(message.content);
+      if (candidate?.key === currentFact.key) {
+        matchingSessionIds.add(session.id);
+      }
+    }
+  }
+
+  if (matchingSessionIds.size < 2) {
+    return undefined;
+  }
+
+  const conclusion: MemoryConclusion = {
+    id: `memory-project-fact-${currentFact.key}`,
+    kind: "project-fact",
+    content: currentFact.content,
     confidence: Math.min(0.95, 0.55 + (matchingSessionIds.size - 2) * 0.15),
     source: "repeated-user-input",
     occurrences: matchingSessionIds.size,
@@ -133,6 +189,59 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
   return undefined;
 }
 
+function detectProjectFact(text: string): PreferenceCandidate | undefined {
+  const normalized = normalize(text);
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  const patterns: Array<{
+    regex: RegExp;
+    render: (...groups: string[]) => string;
+  }> = [
+    {
+      regex: /^project uses (.+)$/iu,
+      render: (value) => `Project uses ${stripTrailingPunctuation(value)}.`
+    },
+    {
+      regex: /^run checks with (.+)$/iu,
+      render: (value) => `Run checks with ${ensureWrappedCommand(stripTrailingPunctuation(value))}.`
+    },
+    {
+      regex: /^(.+?) is stored under [`'"]?(.+?)[`'"]?$/iu,
+      render: (subject, path) => `${capitalize(stripTrailingPunctuation(subject))} is stored under ${ensureWrappedCommand(stripTrailingPunctuation(path))}.`
+    },
+    {
+      regex: /^(.+?) is persisted in [`'"]?(.+?)[`'"]?$/iu,
+      render: (subject, path) => `${capitalize(stripTrailingPunctuation(subject))} is persisted in ${ensureWrappedCommand(stripTrailingPunctuation(path))}.`
+    },
+    {
+      regex: /^run tests with (.+)$/iu,
+      render: (value) => `Run tests with ${ensureWrappedCommand(stripTrailingPunctuation(value))}.`
+    }
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern.regex);
+    if (match === null) {
+      continue;
+    }
+
+    const groups = match.slice(1).map((group) => stripTrailingPunctuation(group.trim()));
+    if (groups.some((group) => group.length === 0)) {
+      continue;
+    }
+
+    const content = pattern.render(...groups);
+    return {
+      key: content.toLowerCase(),
+      content
+    };
+  }
+
+  return undefined;
+}
+
 function detectVerbosityPreference(normalized: string): PreferenceCandidate | undefined {
   const concisePatterns = [
     /^(?:i\s+)?prefer\s+concise(?:\s+telegram)?\s+repl(?:y|ies)$/iu,
@@ -186,10 +295,34 @@ function normalize(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
 }
 
+function stripTrailingPunctuation(value: string): string {
+  return value.replace(/[.?!]+$/u, "").trim();
+}
+
+function ensureWrappedCommand(value: string): string {
+  if (value.startsWith("`") && value.endsWith("`")) {
+    return value;
+  }
+
+  return `\`${value}\``;
+}
+
+function capitalize(value: string): string {
+  if (value.length === 0) {
+    return value;
+  }
+
+  return `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
+}
+
 export function __detectUserPreferenceForTest(text: string): string | undefined {
   return detectUserPreference(text)?.content;
 }
 
 export function __detectForgetPreferenceForTest(text: string): string | undefined {
   return detectForgetPreference(text);
+}
+
+export function __detectProjectFactForTest(text: string): string | undefined {
+  return detectProjectFact(text)?.content;
 }

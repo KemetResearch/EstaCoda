@@ -91,6 +91,58 @@ export class MemoryPromotionStore {
     };
   }
 
+  async applyProjectFact(input: {
+    id: string;
+    content: string;
+    confidence: number;
+    occurrences: number;
+    source: string;
+    sourceSessionIds: string[];
+  }): Promise<{
+    action: "created" | "strengthened";
+    record: MemoryPromotionRecord;
+  }> {
+    await this.#ensureLoaded();
+    const now = this.#now().toISOString();
+    const key = normalizeContentKey(input.content);
+    const existing = this.#records.get(key);
+
+    if (existing !== undefined) {
+      const updated: MemoryPromotionRecord = {
+        ...existing,
+        active: true,
+        confidence: Math.max(existing.confidence, input.confidence),
+        occurrences: Math.max(existing.occurrences, input.occurrences),
+        sourceSessionIds: unique([...existing.sourceSessionIds, ...input.sourceSessionIds]),
+        updatedAt: now
+      };
+      this.#records.set(key, updated);
+      await this.#flush();
+      return {
+        action: "strengthened",
+        record: updated
+      };
+    }
+
+    const record: MemoryPromotionRecord = {
+      id: input.id,
+      kind: "project-fact",
+      content: input.content,
+      active: true,
+      confidence: input.confidence,
+      occurrences: input.occurrences,
+      source: input.source,
+      sourceSessionIds: unique(input.sourceSessionIds),
+      updatedAt: now
+    };
+    this.#records.set(key, record);
+    await this.#flush();
+    return {
+      action: "created",
+      record
+    };
+  }
+
   async forgetUserPreference(content: string): Promise<MemoryPromotionRecord | undefined> {
     await this.#ensureLoaded();
     const match = this.#findMatchingActiveRecord(content);

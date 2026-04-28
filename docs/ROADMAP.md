@@ -177,7 +177,7 @@ Next:
 
 The best next milestone is:
 
-1. **workflow/project-memory promotion**
+1. **workflow-learning refinement**
 2. **MCP client foundation (stdio first)**
 3. **evaluation substrate expansion**
 4. **onboarding/distribution polish**
@@ -337,7 +337,8 @@ Closest honest label:
 
 Main blockers to MVP:
 
-- workflow/project-memory promotion is still missing even though repeated user-preference promotion now exists
+- repeated user preferences and project facts now promote cleanly, and bounded workflow learning now exists through `skills.autonomy`
+- the next gap is better workflow heuristics, candidate quality, and skill patch/update behavior rather than basic workflow learning itself
 - provider-route hardening is incomplete
 - Telegram image path is live-proven with Kimi, but not yet broadly proven across providers
 - install/distribution polish is not done

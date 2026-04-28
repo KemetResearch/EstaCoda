@@ -29,7 +29,8 @@ import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
+import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
+import type { SkillLearningManager } from "../skills/skill-learning.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import {
   assembleProviderContinuationPrompt,
@@ -91,6 +92,7 @@ export type AgentLoopOptions = {
   };
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
+  skillLearningManager?: SkillLearningManager;
   maxProviderIterations?: number;
   budgets?: Partial<AgentLoopBudgets>;
 };
@@ -146,6 +148,7 @@ export class AgentLoop {
   readonly #frozenMemory: { user?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
+  readonly #skillLearningManager: SkillLearningManager | undefined;
   readonly #budgets: AgentLoopBudgets;
 
   constructor(options: AgentLoopOptions) {
@@ -171,6 +174,7 @@ export class AgentLoop {
     this.#frozenMemory = options.frozenMemory;
     this.#skillsIndex = options.skillsIndex ?? [];
     this.#skillConfig = options.skillConfig ?? {};
+    this.#skillLearningManager = options.skillLearningManager;
     this.#budgets = {
       maxProviderIterations: options.budgets?.maxProviderIterations ?? options.maxProviderIterations ?? 4,
       maxProviderToolCalls: options.budgets?.maxProviderToolCalls ?? 12,
@@ -580,6 +584,14 @@ export class AgentLoop {
               `provider failed: ${effectiveProviderExecution.attempts.map((attempt) => `${attempt.provider}/${attempt.model}:${attempt.errorClass ?? "unknown"}`).join(", ") || "no route"}`
             ]
           };
+
+    await this.#skillLearningManager?.observeTurn({
+      profileId: this.#profileId,
+      sessionId: this.#sessionId,
+      userText: effectiveText,
+      selectedSkill,
+      toolExecutions
+    }).catch(() => undefined);
 
     this.#trajectoryRecorder.record("assistant-output", {
       text: response.text,
@@ -1062,17 +1074,42 @@ export class AgentLoop {
       return;
     }
 
-    const result = await resolveUserPreferencePromotion({
+    const preferenceResult = await resolveUserPreferencePromotion({
       profileId: this.#profileId,
       currentUserText: userText,
       sessionDb: this.#sessionDb,
       memoryProvider: this.#memoryProvider
     });
 
-    if (result === undefined || result.kind !== "conclusion") {
+    if (preferenceResult?.kind === "conclusion") {
+      const { conclusion } = preferenceResult;
+
+      this.#trajectoryRecorder.record("memory-conclusion", {
+        provider: this.#memoryProvider.id,
+        conclusion
+      });
+      await this.#sessionDb.appendEvent(this.#sessionId, {
+        kind: "memory-conclusion",
+        provider: this.#memoryProvider.id,
+        conclusion
+      });
       return;
     }
-    const { conclusion } = result;
+    if (preferenceResult?.kind === "forgotten") {
+      return;
+    }
+
+    const projectFactResult = await resolveProjectFactPromotion({
+      profileId: this.#profileId,
+      currentUserText: userText,
+      sessionDb: this.#sessionDb,
+      memoryProvider: this.#memoryProvider
+    });
+
+    if (projectFactResult?.kind !== "conclusion") {
+      return;
+    }
+    const { conclusion } = projectFactResult;
 
     this.#trajectoryRecorder.record("memory-conclusion", {
       provider: this.#memoryProvider.id,
