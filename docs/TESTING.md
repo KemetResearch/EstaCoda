@@ -69,7 +69,9 @@ Current evidence level:
 - ACP stdio server foundation: `live-proven`
 - ACP initialize/session/new/session/prompt/session/load/session/cancel flow: `live-proven`
 - real editor/operator ACP integration: basic chat + editor-backed file reads are `live-proven`
-- ACP permission handshake: `implemented and smoke-tested`, but still not live-proven in an editor client
+- ACP permission handshake in JetBrains: `live-proven`
+- ACP shell execution in JetBrains: `live-proven`
+- richer terminal/process rendering and broader editor polish: still `implemented but not fully polished`
 
 ## CLI Sanity Checks
 

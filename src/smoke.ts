@@ -2526,6 +2526,32 @@ const acpAllowServer = new AcpServer({
       trustWorkspace: async () => {},
       isWorkspaceTrusted: async () => false,
       revokeWorkspaceTrust: async () => false,
+      executeTool: async ({ tool, toolInput }) => {
+        if (tool !== "terminal.run") {
+          return undefined;
+        }
+        return {
+          tool: acpPermissionTool,
+          decision: securityPolicy.decide({
+            riskClass: "destructive-local",
+            description: "run tool terminal.run",
+            toolName: "terminal.run",
+            targetKey: acpPermissionTargetKey,
+            targetSummary: "rm -rf /tmp/demo",
+            context: {
+              trustedWorkspace: false,
+              targetConversationIsActive: true
+            }
+          }),
+          riskClass: "destructive-local",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: typeof toolInput.command === "string" ? toolInput.command : "rm -rf /tmp/demo",
+          result: {
+            ok: true,
+            content: "ok"
+          }
+        };
+      },
       dispose: async () => undefined,
       sessionDb,
       sessionId,
@@ -2633,13 +2659,15 @@ await acpAllowRpc.request("initialize", { protocolVersion: 1, clientCapabilities
 const acpAllowSession = await acpAllowRpc.request("session/new", { cwd: acpPermissionWorkspace });
 const acpAllowPromptPromise = acpAllowRpc.request("session/prompt", {
   sessionId: acpAllowSession.sessionId,
-  prompt: "Try the risky command."
+  prompt: "Run `rm -rf /tmp/demo` and tell me when it finishes."
 });
 const acpAllowPermissionRequest = await acpAllowRpc.nextServerRequest("session/request_permission");
 await acpAllowRpc.respond(acpAllowPermissionRequest.id, {
-  outcome: "selected",
-  optionId: "allow-once",
-  source: "client"
+  outcome: {
+    outcome: "selected",
+    optionId: "allow-once",
+    source: "client"
+  }
 });
 const acpAllowPrompt = await acpAllowPromptPromise;
 const acpAllowNotifications = await acpAllowRpc.collectFor(50);
@@ -2678,6 +2706,32 @@ const acpDenyServer = new AcpServer({
       trustWorkspace: async () => {},
       isWorkspaceTrusted: async () => false,
       revokeWorkspaceTrust: async () => false,
+      executeTool: async ({ tool, toolInput }) => {
+        if (tool !== "terminal.run") {
+          return undefined;
+        }
+        return {
+          tool: acpPermissionTool,
+          decision: securityPolicy.decide({
+            riskClass: "destructive-local",
+            description: "run tool terminal.run",
+            toolName: "terminal.run",
+            targetKey: acpPermissionTargetKey,
+            targetSummary: "rm -rf /tmp/demo",
+            context: {
+              trustedWorkspace: false,
+              targetConversationIsActive: true
+            }
+          }),
+          riskClass: "destructive-local",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: typeof toolInput.command === "string" ? toolInput.command : "rm -rf /tmp/demo",
+          result: {
+            ok: true,
+            content: "ok"
+          }
+        };
+      },
       dispose: async () => undefined,
       sessionDb,
       sessionId,
@@ -2733,13 +2787,15 @@ await acpDenyRpc.request("initialize", { protocolVersion: 1, clientCapabilities:
 const acpDenySession = await acpDenyRpc.request("session/new", { cwd: acpPermissionWorkspace });
 const acpDenyPromptPromise = acpDenyRpc.request("session/prompt", {
   sessionId: acpDenySession.sessionId,
-  prompt: "Try the risky command."
+  prompt: "Run `rm -rf /tmp/demo` and tell me when it finishes."
 });
 const acpDenyPermissionRequest = await acpDenyRpc.nextServerRequest("session/request_permission");
 await acpDenyRpc.respond(acpDenyPermissionRequest.id, {
-  outcome: "selected",
-  optionId: "reject-once",
-  source: "client"
+  outcome: {
+    outcome: "selected",
+    optionId: "reject-once",
+    source: "client"
+  }
 });
 const acpDenyPrompt = await acpDenyPromptPromise;
 const acpDenyNotifications = await acpDenyRpc.collectFor(50);
@@ -2779,6 +2835,32 @@ const acpTimeoutServer = new AcpServer({
       trustWorkspace: async () => {},
       isWorkspaceTrusted: async () => false,
       revokeWorkspaceTrust: async () => false,
+      executeTool: async ({ tool, toolInput }) => {
+        if (tool !== "terminal.run") {
+          return undefined;
+        }
+        return {
+          tool: acpPermissionTool,
+          decision: securityPolicy.decide({
+            riskClass: "destructive-local",
+            description: "run tool terminal.run",
+            toolName: "terminal.run",
+            targetKey: acpPermissionTargetKey,
+            targetSummary: "rm -rf /tmp/demo",
+            context: {
+              trustedWorkspace: false,
+              targetConversationIsActive: true
+            }
+          }),
+          riskClass: "destructive-local",
+          targetKey: acpPermissionTargetKey,
+          targetSummary: typeof toolInput.command === "string" ? toolInput.command : "rm -rf /tmp/demo",
+          result: {
+            ok: true,
+            content: "ok"
+          }
+        };
+      },
       dispose: async () => undefined,
       sessionDb,
       sessionId,
@@ -2834,7 +2916,7 @@ await acpTimeoutRpc.request("initialize", { protocolVersion: 1, clientCapabiliti
 const acpTimeoutSession = await acpTimeoutRpc.request("session/new", { cwd: acpPermissionWorkspace });
 const acpTimeoutPromptPromise = acpTimeoutRpc.request("session/prompt", {
   sessionId: acpTimeoutSession.sessionId,
-  prompt: "Try the risky command."
+  prompt: "Run `rm -rf /tmp/demo` and tell me when it finishes."
 });
 const acpTimeoutPermissionRequest = await acpTimeoutRpc.nextServerRequest("session/request_permission");
 const acpTimeoutPrompt = await acpTimeoutPromptPromise;
@@ -2912,7 +2994,8 @@ assert(acpEditorReadPromptText.includes("Path: package.json"), "expected ACP run
 assert(acpEditorReadPromptText.includes("\"dev\": \"bun run dev\""), "expected ACP runtime prompt to include editor-backed package.json content");
 assert(acpAllowPermissionRequest.method === "session/request_permission", "expected ACP to issue a permission request");
 assert(acpAllowPrompt.stopReason === "end_turn", "expected ACP allow-once prompt to resume and finish");
-assert(acpAllowHandleCalls === 2, "expected ACP allow-once flow to rerun the blocked action once");
+assert(acpAllowHandleCalls === 0, "expected ACP explicit shell allow-once flow to bypass provider.handle");
+assert(extractExplicitShellCommandForSmoke("Run mkdir -p /tmp/demo && echo ok > /tmp/demo/out.txt and tell me when it finishes.") === "mkdir -p /tmp/demo && echo ok > /tmp/demo/out.txt", "expected ACP shell extraction to support plain Run <cmd> phrasing");
 assert(
   acpAllowNotifications.some((message) =>
     message.method === "session/update" &&
@@ -2937,8 +3020,8 @@ assert(
   ),
   "expected ACP allow-once flow to emit a completed tool update"
 );
-assert(acpDenyPrompt.stopReason === "cancelled", "expected ACP deny flow to cancel cleanly");
-assert(acpDenyHandleCalls === 1, "expected ACP deny flow to avoid rerunning the blocked action");
+assert(acpDenyPrompt.stopReason === "end_turn", "expected ACP deny flow to end cleanly");
+assert(acpDenyHandleCalls === 0, "expected ACP explicit shell deny flow to bypass provider.handle");
 assert(
   acpDenyNotifications.some((message) =>
     message.method === "session/update" &&
@@ -2949,7 +3032,7 @@ assert(
 );
 assert(acpTimeoutPermissionRequest.method === "session/request_permission", "expected ACP timeout flow to request permission");
 assert(acpTimeoutPrompt.stopReason === "end_turn", "expected ACP timeout flow to deny by default and end the turn");
-assert(acpTimeoutHandleCalls === 1, "expected ACP timeout flow to avoid rerunning the blocked action");
+assert(acpTimeoutHandleCalls === 0, "expected ACP explicit shell timeout flow to bypass provider.handle");
 assert(
   acpTimeoutNotifications.some((message) =>
     message.method === "session/update" &&
@@ -9364,6 +9447,15 @@ function assert(condition: boolean, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function extractExplicitShellCommandForSmoke(text: string): string | undefined {
+  const fenced = text.match(/(?:^|\b)(?:run|execute)\s+`([^`]+)`/iu);
+  if (fenced?.[1] !== undefined) return fenced[1].trim();
+  const quoted = text.match(/(?:^|\b)(?:run|execute)\s+"([^"]+)"/iu);
+  if (quoted?.[1] !== undefined) return quoted[1].trim();
+  const plain = text.match(/(?:^|\b)(?:run|execute)\s+(.+?)(?=(?:\s+(?:and|then)\s+tell\b|[.!?]\s*$|$))/iu);
+  return plain?.[1]?.trim();
 }
 
 function assertThrows(action: () => void, message: string): void {

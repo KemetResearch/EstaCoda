@@ -13,7 +13,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - MCP client support now covers stdio + HTTP; stdio is live-proven against a real filesystem MCP server, but HTTP and broader third-party server coverage still need operator validation. `live-proven` / `smoke-tested`
 - Default MCP trust is intentionally conservative; arbitrary third-party MCP tools still start as `external-side-effect` unless a server trust level is configured. `implemented`
 - MCP workspace-trust ergonomics were recently normalized so `/trust` and `/workspace.trust.*` both work, but the trust policy is still coarse-grained compared with future per-tool/per-server UX. `implemented but not live-proven`
-- ACP editor integration is now live-proven for basic chat and editor-backed file reads, but it is still a first slice: the approval handshake is not yet live-proven, and terminal/process mirror plus richer command/mode/config updates are still missing.
+- ACP editor integration is now live-proven for basic chat, editor-backed file reads, and the JetBrains approval handshake, but it is still a first slice: terminal/process mirror polish plus richer command/mode/config updates are still missing.
 
 ## Memory
 

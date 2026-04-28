@@ -59,7 +59,7 @@ What has been achieved:
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
 - A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
-- An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, and editor-backed file reads.
+- An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, editor-backed file reads, and a live-proven JetBrains approval flow.
 
 Evidence:
 
@@ -73,7 +73,7 @@ Evidence:
 - provider acceptance matrix: Kimi/OpenAI/DeepSeek full pass, OpenRouter partial on exactness-sensitive tasks, local/Ollama unproven in this environment `live-proven`
 - evaluation substrate: `implemented but not live-proven`
 - MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
-- ACP foundation: basic editor flow is `live-proven`
+- ACP foundation: JetBrains chat, file reads, shell execution, and approval prompts are `live-proven`
 
 ## 3. Current Working Capabilities
 

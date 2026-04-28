@@ -157,7 +157,7 @@ Next:
 
 ### 8. MCP and ACP
 
-State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP foundation now exists as a stdio JSON-RPC server, and the basic JetBrains editor flow is now live-proven for chat plus editor-backed file reads, but full editor parity is still not implemented.
+State: MCP client foundation now includes stdio + HTTP; the stdio path is now live-proven against a real filesystem MCP server. ACP foundation now exists as a stdio JSON-RPC server, and the JetBrains editor flow is now live-proven for chat, editor-backed file reads, shell execution, and approval prompts, but full editor parity is still not implemented.
 
 Done:
 
@@ -175,6 +175,7 @@ Done:
   - core methods: `initialize`, `authenticate`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`
   - streaming `session/update` notifications for session info, thought chunks, tool calls, agent message chunks, and usage
   - editor-backed file reads in JetBrains
+  - approval prompts and explicit shell execution in JetBrains
   `basic editor flow live-proven`
 
 Next:
@@ -182,7 +183,7 @@ Next:
 - add richer per-server trust/visibility controls
 - refine resource/prompt ergonomics
 - deepen ACP toward Hermes parity after MCP client and memory/session maturity
-  The next explicit live proof should be the approval handshake in a real editor client.
+  The next explicit live proof should be richer terminal/process rendering and cleaner result formatting across editor clients.
 - treat MCP server bridging as later than MCP client and ACP
 
 ## Correct Next Milestone

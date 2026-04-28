@@ -105,6 +105,11 @@ export type Runtime = {
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   inspectMcpServers(): MCPServerSnapshot[];
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
+  executeTool?(input: {
+    tool: string;
+    toolInput: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
@@ -432,6 +437,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return agentLoop.handle({
         ...input,
         trustedWorkspace
+      });
+    },
+    async executeTool(input) {
+      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot, { profileId });
+      activeTrustedWorkspace = trustedWorkspace;
+      return await toolExecutor.executeTool({
+        tool: input.tool,
+        input: input.toolInput,
+        trustedWorkspace,
+        sessionId,
+        signal: input.signal
       });
     },
     async trustWorkspace() {

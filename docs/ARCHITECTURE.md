@@ -66,7 +66,7 @@ Evidence note:
 ### ACP
 
 - [src/acp/server.ts](/Users/ahnwy/estacoda-v2/src/acp/server.ts)
-  ACP stdio JSON-RPC server, in-process ACP session manager, cwd-bound runtime creation, `session/update` streaming, and editor-backed file reads via ACP fs requests. Basic JetBrains chat + file-read flow is `live-proven`.
+  ACP stdio JSON-RPC server, in-process ACP session manager, cwd-bound runtime creation, `session/update` streaming, editor-backed file reads via ACP fs requests, and approval bridging for gated shell actions. Basic JetBrains chat + file-read + approval flow is `live-proven`.
 
 ### Skills
 

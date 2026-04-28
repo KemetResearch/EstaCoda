@@ -7,10 +7,12 @@ import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy, ty
 import type { SessionDB } from "../contracts/session.js";
 import type { SessionMessage } from "../contracts/session.js";
 import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
+import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
 type JsonRpcId = string | number | null;
 
@@ -406,6 +408,7 @@ export class AcpServer {
     if (session === undefined) {
       throw new Error(`Unknown session: ${acpSessionId}`);
     }
+    const explicitShellCommand = extractExplicitShellCommand(prompt);
 
     session.activeTurn?.abort("replaced");
     const controller = new AbortController();
@@ -414,150 +417,153 @@ export class AcpServer {
     let streamedAgentText = false;
 
     try {
-      let response = await session.runtime.handle({
-        text: runtimeText,
-        channel: "web",
-        workspaceRoot: session.workspaceRoot,
-        signal: controller.signal,
-        onEvent: async (event) => {
-          switch (event.kind) {
-            case "agent-start":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "thought_message_chunk",
-                    content: { type: "text", text: `thinking: ${event.input}` }
-                  }
-                }
-              });
-              break;
-            case "intent":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "plan_update",
-                    entries: event.labels.map((label) => ({
-                      label,
-                      state: "selected"
-                    }))
-                  }
-                }
-              });
-              break;
-            case "skill":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "thought_message_chunk",
-                    content: { type: "text", text: `skill selected: ${event.name}` }
-                  }
-                }
-              });
-              break;
-            case "tool-start":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.stepId ?? event.tool,
-                    title: event.tool,
-                    kind: classifyToolKind(event.tool),
-                    status: "in_progress"
-                  }
-                }
-              });
-              break;
-            case "tool-result":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.tool,
-                    title: event.tool,
-                    kind: classifyToolKind(event.tool),
-                    status: event.decision === "ask"
-                      ? "blocked"
-                      : event.ok === false
-                        ? "failed"
-                        : "completed",
-                    content: summarizeToolResult(event)
-                  }
-                }
-              });
-              break;
-            case "provider-token":
-              streamedAgentText = true;
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text: event.text }
-                  }
-                }
-              });
-              break;
-            case "provider-attempt":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "session_info_update",
-                    model: `${event.provider}/${event.model}`
-                  }
-                }
-              });
-              break;
-            case "agent-cancelled":
-              this.#notify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId: acpSessionId,
-                  update: {
-                    sessionUpdate: "thought_message_chunk",
-                    content: { type: "text", text: `cancelled: ${event.reason}` }
-                  }
-                }
-              });
-              break;
-            case "agent-final":
-              if (streamedAgentText === false) {
-                this.#notify({
-                  jsonrpc: "2.0",
-                  method: "session/update",
-                  params: {
-                    sessionId: acpSessionId,
-                    update: {
-                      sessionUpdate: "agent_message_chunk",
-                      content: { type: "text", text: event.text }
+      let response = explicitShellCommand !== undefined
+        ? await this.#executeExplicitShellFallback({
+            session,
+            acpSessionId,
+            command: explicitShellCommand,
+            signal: controller.signal
+          })
+        : await session.runtime.handle({
+            text: runtimeText,
+            channel: "web",
+            workspaceRoot: session.workspaceRoot,
+            signal: controller.signal,
+            onEvent: async (event) => {
+              switch (event.kind) {
+                case "agent-start":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "thought_message_chunk",
+                        content: { type: "text", text: `thinking: ${event.input}` }
+                      }
                     }
+                  });
+                  break;
+                case "intent":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "plan_update",
+                        entries: event.labels.map((label) => ({
+                          label,
+                          state: "selected"
+                        }))
+                      }
+                    }
+                  });
+                  break;
+                case "skill":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "thought_message_chunk",
+                        content: { type: "text", text: `skill selected: ${event.name}` }
+                      }
+                    }
+                  });
+                  break;
+                case "tool-start":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: event.stepId ?? event.tool,
+                        title: event.tool,
+                        kind: classifyToolKind(event.tool),
+                        status: "in_progress"
+                      }
+                    }
+                  });
+                  break;
+                case "tool-result":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: event.tool,
+                        title: event.tool,
+                        kind: classifyToolKind(event.tool),
+                        status: event.ok === false ? "completed" : "completed",
+                        content: summarizeToolResult(event)
+                      }
+                    }
+                  });
+                  break;
+                case "provider-token":
+                  streamedAgentText = true;
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "agent_message_chunk",
+                        content: { type: "text", text: event.text }
+                      }
+                    }
+                  });
+                  break;
+                case "provider-attempt":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "session_info_update",
+                        model: `${event.provider}/${event.model}`
+                      }
+                    }
+                  });
+                  break;
+                case "agent-cancelled":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: {
+                        sessionUpdate: "thought_message_chunk",
+                        content: { type: "text", text: `cancelled: ${event.reason}` }
+                      }
+                    }
+                  });
+                  break;
+                case "agent-final":
+                  if (streamedAgentText === false) {
+                    this.#notify({
+                      jsonrpc: "2.0",
+                      method: "session/update",
+                      params: {
+                        sessionId: acpSessionId,
+                        update: {
+                          sessionUpdate: "agent_message_chunk",
+                          content: { type: "text", text: event.text }
+                        }
+                      }
+                    });
                   }
-                });
+                  break;
               }
-              break;
-          }
-        }
-      });
+            }
+          });
 
       while (true) {
         const gated = response.toolExecutions.find((execution) => execution.decision === "ask");
@@ -567,6 +573,7 @@ export class AcpServer {
 
         const permissionOutcome = await this.#requestPermission(session, gated);
         if (permissionOutcome.outcome !== "selected") {
+          const finalText = "Permission request was cancelled.";
           this.#notify({
             jsonrpc: "2.0",
             method: "session/update",
@@ -578,14 +585,28 @@ export class AcpServer {
                 title: gated.targetSummary ?? gated.tool.name,
                 kind: classifyToolKind(gated.tool.name),
                 status: "completed",
-                content: [{ type: "content", content: { type: "text", text: "Permission denied or cancelled." } }]
+                content: [{ type: "content", content: { type: "text", text: finalText } }]
               }
             }
           });
-          return { stopReason: permissionOutcome.outcome === "cancelled" ? "cancelled" : "end_turn" };
+          this.#notify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: acpSessionId,
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: finalText }
+              }
+            }
+          });
+          return { stopReason: "end_turn" };
         }
 
         if (permissionOutcome.optionId.startsWith("reject")) {
+          const finalText = permissionOutcome.source === "default-deny"
+            ? "Permission request timed out or failed. Denied by default."
+            : "Permission denied.";
           this.#notify({
             jsonrpc: "2.0",
             method: "session/update",
@@ -595,14 +616,23 @@ export class AcpServer {
                 sessionUpdate: "thought_message_chunk",
                 content: {
                   type: "text",
-                  text: permissionOutcome.source === "default-deny"
-                    ? "Permission request timed out or failed. Denied by default."
-                    : "Permission denied."
+                  text: finalText
                 }
               }
             }
           });
-          return { stopReason: permissionOutcome.source === "default-deny" ? "end_turn" : "cancelled" };
+          this.#notify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: acpSessionId,
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: finalText }
+              }
+            }
+          });
+          return { stopReason: "end_turn" };
         }
 
         applyPermissionSelection(session, gated.targetKey, permissionOutcome.optionId);
@@ -621,18 +651,38 @@ export class AcpServer {
             }
           }
         });
-        response = await session.runtime.handle({
-          text: runtimeText,
-          channel: "web",
-          workspaceRoot: session.workspaceRoot,
-          signal: controller.signal,
-          onEvent: async (event) => {
-            await this.#emitRuntimeEvent(acpSessionId, event);
-          }
-        });
+        response = explicitShellCommand !== undefined && gated.tool.name === "terminal.run"
+          ? await this.#executeExplicitShellFallback({
+              session,
+              acpSessionId,
+              command: explicitShellCommand,
+              signal: controller.signal
+            })
+          : await session.runtime.handle({
+              text: runtimeText,
+              channel: "web",
+              workspaceRoot: session.workspaceRoot,
+              signal: controller.signal,
+              onEvent: async (event) => {
+                await this.#emitRuntimeEvent(acpSessionId, event);
+              }
+            });
       }
 
       session.messages = await this.#sessionDb.listMessages(session.estacodaSessionId);
+      if ((explicitShellCommand !== undefined || response.providerExecution === undefined) && streamedAgentText === false && response.text.trim().length > 0) {
+        this.#notify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: acpSessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: response.text }
+            }
+          }
+        });
+      }
       const usage = response.providerExecution?.response?.usage;
       if (usage !== undefined) {
         this.#notify({
@@ -753,6 +803,115 @@ export class AcpServer {
     });
   }
 
+  async #executeExplicitShellFallback(input: {
+    session: AcpSession;
+    acpSessionId: string;
+    command: string;
+    signal?: AbortSignal;
+  }): Promise<AgentLoopResponse> {
+    const execution = await input.session.runtime.executeTool?.({
+      tool: "terminal.run",
+      toolInput: {
+        command: input.command
+      },
+      signal: input.signal
+    });
+
+    if (execution === undefined) {
+      return {
+        label: "EstaCoda",
+        text: "I couldn't execute the requested command because terminal.run is unavailable.",
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 0.5,
+          suggestedToolsets: [],
+          suggestedSkills: [],
+          confirmationRequired: false,
+          rationale: "ACP explicit shell fallback"
+        },
+        securityDecision: "deny",
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        providerExecution: undefined,
+        progress: []
+      };
+    }
+
+    await this.#notifyToolExecution(input.acpSessionId, execution);
+
+    const text = formatExplicitShellExecutionMessage(execution);
+
+    return {
+      label: "EstaCoda",
+      text,
+      matchedSkills: [],
+      intent: {
+        labels: ["general"],
+        confidence: 0.9,
+        suggestedToolsets: ["shell-write"],
+        suggestedSkills: [],
+        confirmationRequired: execution.decision !== "allow",
+        rationale: "ACP explicit shell fallback"
+      },
+      securityDecision: execution.decision,
+      toolExecutions: [execution],
+      toolPlans: [],
+      skillOutcomes: [],
+      artifacts: [],
+      context: undefined,
+      projectContext: undefined,
+      providerExecution: undefined,
+      progress: []
+    };
+  }
+
+  async #notifyToolExecution(acpSessionId: string, execution: ToolExecutionRecord): Promise<void> {
+    const contentText = formatToolExecutionSummary(execution);
+    this.#notify({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: acpSessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: execution.targetKey ?? execution.tool.name,
+          title: execution.targetSummary ?? execution.tool.name,
+          kind: classifyToolKind(execution.tool.name),
+          status: execution.decision === "allow"
+            ? execution.result?.ok === false
+              ? "failed"
+              : "completed"
+            : "blocked",
+          content: contentText.length === 0
+            ? []
+            : [{ type: "content", content: { type: "text", text: contentText } }]
+        }
+      }
+    });
+
+    if (execution.decision === "allow" && execution.result?.content !== undefined) {
+      this.#notify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: execution.result.content
+            }
+          }
+        }
+      });
+    }
+  }
+
   async #loadEditorFileContext(
     acpSessionId: string,
     workspaceRoot: string,
@@ -794,8 +953,8 @@ export class AcpServer {
       sessionUpdate: "tool_call_update",
       toolCallId,
       title,
-      kind: classifyToolKind(gated.tool.name),
-      status: "blocked",
+      kind: classifyPermissionToolKind(gated.tool.name, gated.riskClass),
+      status: "pending",
       rawInput: {
         toolName: gated.tool.name,
         riskClass: gated.riskClass,
@@ -813,7 +972,7 @@ export class AcpServer {
       }
     });
 
-    const outcome = await this.#callClient<RequestPermissionOutcome>("session/request_permission", {
+    const rawOutcome = await this.#callClient<unknown>("session/request_permission", {
       sessionId: session.acpSessionId,
       toolCall,
       options: [
@@ -826,7 +985,7 @@ export class AcpServer {
       source: "default-deny"
     } satisfies RequestPermissionOutcome));
 
-    return outcome;
+    return normalizePermissionOutcome(rawOutcome);
   }
 
   async #emitRuntimeEvent(acpSessionId: string, event: {
@@ -1167,12 +1326,15 @@ function replayUpdateForMessage(message: SessionMessage): Record<string, unknown
 
 function classifyToolKind(toolName: string): string {
   if (toolName.startsWith("terminal.") || toolName.startsWith("process.")) {
-    return "shell";
+    return "execute";
   }
-  if (toolName.startsWith("file.") || toolName.startsWith("workspace.") || toolName.startsWith("mcp.")) {
+  if (toolName.startsWith("file.read") || toolName.startsWith("workspace.") || toolName.startsWith("mcp.")) {
     return "read";
   }
-  return "task";
+  if (toolName.startsWith("file.write") || toolName.startsWith("file.replace")) {
+    return "edit";
+  }
+  return "other";
 }
 
 function summarizeToolResult(event: {
@@ -1208,12 +1370,86 @@ function summarizeToolContent(event: Record<string, unknown>): Array<Record<stri
     : [{ type: "content", content: { type: "text", text } }];
 }
 
+function formatToolExecutionSummary(execution: ToolExecutionRecord): string {
+  if (execution.decision !== "allow") {
+    return `Permission required for: ${execution.targetSummary ?? execution.tool.name}`;
+  }
+
+  if (execution.result?.ok === false) {
+    if (typeof execution.result.content === "string" && execution.result.content.length > 0) {
+      return execution.result.content;
+    }
+    return `Command failed: ${execution.targetSummary ?? execution.tool.name}`;
+  }
+
+  return execution.result?.content?.trim().length
+    ? execution.result.content.trim()
+    : "Command completed.";
+}
+
+function formatExplicitShellExecutionMessage(execution: ToolExecutionRecord): string {
+  if (execution.decision !== "allow") {
+    return "Permission required.";
+  }
+
+  if (execution.result?.ok === false) {
+    const detail = typeof execution.result.content === "string" ? execution.result.content.trim() : "";
+    if (detail === "command matches a destructive or privilege-escalating pattern") {
+      return "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.";
+    }
+    return detail.length > 0
+      ? `The command was blocked or failed: ${detail}`
+      : "The command was blocked or failed.";
+  }
+
+  const detail = typeof execution.result?.content === "string" ? execution.result.content.trim() : "";
+  return detail.length > 0
+    ? `Command completed successfully.\n\n${detail}`
+    : "Command completed successfully.";
+}
+
+function classifyPermissionToolKind(toolName: string, riskClass: string): string {
+  if (toolName.startsWith("terminal.") || toolName.startsWith("process.")) return "execute";
+  if (toolName.startsWith("file.read")) return "read";
+  if (toolName.startsWith("file.write") || toolName.startsWith("file.replace")) return "edit";
+  if (riskClass.includes("network")) return "fetch";
+  return "other";
+}
+
 function createSessionGrants(): SessionGrants {
   return {
     allowOnce: new Set(),
     allowAlways: new Set(),
     rejectAlways: new Set()
   };
+}
+
+function normalizePermissionOutcome(value: unknown): RequestPermissionOutcome {
+  if (isPermissionOutcome(value)) {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const nested = (value as { outcome?: unknown }).outcome;
+    if (isPermissionOutcome(nested)) {
+      return nested;
+    }
+  }
+
+  return { outcome: "cancelled" };
+}
+
+function isPermissionOutcome(value: unknown): value is RequestPermissionOutcome {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as { outcome?: unknown; optionId?: unknown };
+  if (candidate.outcome === "cancelled") {
+    return true;
+  }
+
+  return candidate.outcome === "selected" && typeof candidate.optionId === "string";
 }
 
 function applyPermissionSelection(session: AcpSession, targetKey: string | undefined, optionId: string): void {
@@ -1282,12 +1518,19 @@ function buildAcpRuntimePrompt(input: {
     content: string;
   }>;
 }): string {
+  const explicitShellCommand = extractExplicitShellCommand(input.userText);
   const contextLines = [
     `ACP editor session for workspace: ${input.workspaceRoot}.`,
     input.editorFsReadAvailable
       ? "Editor-backed file access is available. If the user asks about workspace files such as package.json, README.md, or source files, use file.read instead of asking the user to paste the file contents."
-      : "Editor-backed file access is not available in this ACP session."
+      : "Editor-backed file access is not available in this ACP session.",
+    "If the user explicitly asks to run a shell command, use terminal.run with the requested command instead of replying abstractly.",
+    "If terminal.run is gated, let the ACP permission flow handle it. Do not silently end the turn before the permission request is emitted."
   ];
+
+  if (explicitShellCommand !== undefined) {
+    contextLines.push(`Explicit shell command requested by the user: ${explicitShellCommand}`);
+  }
 
   const editorFileSection = input.editorFileContext === undefined || input.editorFileContext.length === 0
     ? []
@@ -1310,6 +1553,48 @@ function buildAcpRuntimePrompt(input: {
     "[User Request]",
     input.userText
   ].join("\n");
+}
+
+function extractExplicitShellCommand(text: string): string | undefined {
+  const fenced = text.match(/(?:^|\b)(?:run|execute)\s+`([^`]+)`/iu);
+  if (fenced?.[1] !== undefined) {
+    return fenced[1].trim();
+  }
+
+  const quoted = text.match(/(?:^|\b)(?:run|execute)\s+"([^"]+)"/iu);
+  if (quoted?.[1] !== undefined) {
+    return quoted[1].trim();
+  }
+
+  const plain = text.match(/(?:^|\b)(?:run|execute)\s+(.+?)(?=(?:\s+(?:and|then)\s+tell\b|[.!?]\s*$|$))/iu);
+  if (plain?.[1] !== undefined) {
+    const candidate = plain[1].trim();
+    if (looksLikeShellCommand(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function shouldFallbackToExplicitShellExecution(
+  response: AgentLoopResponse,
+  explicitShellCommand: string | undefined
+): explicitShellCommand is string {
+  if (explicitShellCommand === undefined) {
+    return false;
+  }
+
+  if (response.toolExecutions.length > 0 || response.toolPlans.length > 0) {
+    return false;
+  }
+
+  return true;
+}
+
+function looksLikeShellCommand(text: string): boolean {
+  return /[|&;><]/u.test(text) ||
+    /\b(mkdir|rm|mv|cp|cat|echo|touch|ls|pwd|bun|npm|node|python|git|find|grep|rg|sed|awk|chmod|chown)\b/u.test(text);
 }
 
 function extractWorkspaceFileReferences(
