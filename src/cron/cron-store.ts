@@ -11,6 +11,9 @@ export type CronJob = {
   id: string;
   name: string;
   prompt: string;
+  script?: string;
+  scriptArgs?: string[];
+  scriptTimeoutMs?: number;
   schedule: string;
   scheduleKind: CronScheduleKind;
   skills: string[];
@@ -68,6 +71,9 @@ export class CronStore {
     prompt: string;
     schedule: string;
     name?: string;
+    script?: string;
+    scriptArgs?: string[];
+    scriptTimeoutMs?: number;
     skills?: string[];
     delivery?: CronDelivery;
     repeat?: number;
@@ -80,6 +86,9 @@ export class CronStore {
       id: `cron-${this.#id()}`,
       name: input.name ?? summarizePrompt(input.prompt),
       prompt: input.prompt,
+      script: input.script,
+      scriptArgs: input.scriptArgs,
+      scriptTimeoutMs: input.scriptTimeoutMs,
       schedule: input.schedule,
       scheduleKind: parsed.kind,
       skills: input.skills ?? [],
@@ -96,7 +105,7 @@ export class CronStore {
     return structuredClone(job);
   }
 
-  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
     if (patch.prompt !== undefined) {
       assertCronPromptSafe(patch.prompt);
     }
@@ -332,6 +341,7 @@ function cronFieldMatches(field: string, value: number, min: number, max: number
 function normalizeJob(job: CronJob): CronJob {
   return {
     ...job,
+    scriptArgs: Array.isArray(job.scriptArgs) ? job.scriptArgs : undefined,
     skills: Array.isArray(job.skills) ? job.skills : [],
     runCount: Number.isFinite(job.runCount) ? job.runCount : 0,
     status: job.status ?? "active",

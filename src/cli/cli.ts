@@ -505,7 +505,8 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
           runner: createRuntimeCronRunner({
             runtimeFactory: async () => options.runtime!,
             wrapResponse: true,
-            disposeRuntime: false
+            disposeRuntime: false,
+            workspaceRoot: options.workspaceRoot
           })
         });
         return results.length === 0

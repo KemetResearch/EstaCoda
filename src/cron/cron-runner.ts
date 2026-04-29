@@ -1,5 +1,6 @@
-import { mkdir, open, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
+import { mkdir, open, realpath, rm } from "node:fs/promises";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { CronJob } from "./cron-store.js";
@@ -14,6 +15,14 @@ export type CronRunResult = {
 
 export type CronRunner = {
   runJob(job: CronJob): Promise<CronRunResult>;
+};
+
+type CronScriptResult = {
+  ok: boolean;
+  summary: string;
+  stdout: string;
+  stderr: string;
+  exitCode?: number;
 };
 
 export async function tickCron(input: {
@@ -44,13 +53,29 @@ export function createRuntimeCronRunner(input: {
   deliver?: (job: CronJob, content: string) => Promise<boolean>;
   wrapResponse?: boolean;
   disposeRuntime?: boolean;
+  workspaceRoot?: string;
 }): CronRunner {
   return {
     async runJob(job) {
+      const scriptResult = job.script === undefined
+        ? undefined
+        : await runCronScript(job, input.workspaceRoot);
+
+      if (scriptResult !== undefined && !scriptResult.ok) {
+        const content = formatCronOutput(job, `Cron script failed: ${scriptResult.summary}\n\n${renderScriptResult(scriptResult)}`, input.wrapResponse ?? true);
+        const delivered = await input.deliver?.(job, content) ?? false;
+        return {
+          job,
+          ok: false,
+          output: content,
+          delivered
+        };
+      }
+
       const runtime = await input.runtimeFactory(job);
       try {
         const response = await runtime.handle({
-          text: buildCronPrompt(job),
+          text: buildCronPrompt(job, scriptResult),
           channel: "cli",
           trustedWorkspace: true
         });
@@ -82,11 +107,12 @@ export function createRuntimeCronRunner(input: {
   };
 }
 
-export function buildCronPrompt(job: CronJob): string {
+export function buildCronPrompt(job: CronJob, scriptResult?: CronScriptResult): string {
   return [
     "Scheduled task execution.",
     "The task prompt must be treated as self-contained; do not ask clarifying questions.",
     job.skills.length === 0 ? undefined : `Attached skills: ${job.skills.join(", ")}`,
+    scriptResult === undefined ? undefined : renderScriptResult(scriptResult),
     "",
     job.prompt
   ].filter((line) => line !== undefined).join("\n");
@@ -140,4 +166,141 @@ async function mkdirSafe(path: string): Promise<void> {
 
 function defaultLockPath(store: CronStore): string {
   return join(dirname(store.path), ".tick.lock");
+}
+
+async function runCronScript(job: CronJob, workspaceRoot: string | undefined): Promise<CronScriptResult> {
+  if (workspaceRoot === undefined || workspaceRoot.trim().length === 0) {
+    return failedScript("script-backed cron jobs require a workspace root");
+  }
+
+  const rawScript = job.script;
+  if (rawScript === undefined || rawScript.trim().length === 0) {
+    return failedScript("script path is empty");
+  }
+
+  try {
+    const workspaceReal = await realpath(workspaceRoot);
+    const scriptCandidate = isAbsolute(rawScript) ? rawScript : resolve(workspaceReal, rawScript);
+    const scriptReal = await realpath(scriptCandidate);
+    const relativePath = relative(workspaceReal, scriptReal);
+    if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+      return failedScript("script path must stay inside the active workspace");
+    }
+
+    const invocation = scriptInvocation(scriptReal);
+    if (invocation === undefined) {
+      return failedScript("script extension is not supported; use .sh, .bash, .zsh, .py, .js, .mjs, or .ts");
+    }
+
+    return await spawnCronScript({
+      command: invocation.command,
+      args: [...invocation.args, ...(job.scriptArgs ?? [])],
+      cwd: workspaceReal,
+      timeoutMs: boundedTimeout(job.scriptTimeoutMs)
+    });
+  } catch (error) {
+    return failedScript(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function scriptInvocation(scriptPath: string): { command: string; args: string[] } | undefined {
+  const extension = extname(scriptPath).toLowerCase();
+  if (extension === ".sh" || extension === ".bash") return { command: "bash", args: [scriptPath] };
+  if (extension === ".zsh") return { command: "zsh", args: [scriptPath] };
+  if (extension === ".py") return { command: "python3", args: [scriptPath] };
+  if (extension === ".js" || extension === ".mjs") return { command: "node", args: [scriptPath] };
+  if (extension === ".ts") return { command: process.execPath, args: [scriptPath] };
+  return undefined;
+}
+
+function spawnCronScript(input: {
+  command: string;
+  args: string[];
+  cwd: string;
+  timeoutMs: number;
+}): Promise<CronScriptResult> {
+  return new Promise((resolveScript) => {
+    const child = spawn(input.command, input.args, {
+      cwd: input.cwd,
+      shell: false,
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, input.timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout = appendBounded(stdout, chunk);
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr = appendBounded(stderr, chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolveScript({
+        ok: false,
+        summary: error.message,
+        stdout,
+        stderr
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolveScript({
+          ok: false,
+          summary: `script timed out after ${input.timeoutMs}ms`,
+          stdout,
+          stderr
+        });
+        return;
+      }
+      resolveScript({
+        ok: code === 0,
+        summary: code === 0 ? "script completed successfully" : `script exited with code ${code ?? "unknown"}`,
+        stdout,
+        stderr,
+        exitCode: code ?? undefined
+      });
+    });
+  });
+}
+
+function failedScript(summary: string): CronScriptResult {
+  return {
+    ok: false,
+    summary,
+    stdout: "",
+    stderr: ""
+  };
+}
+
+function renderScriptResult(result: CronScriptResult): string {
+  return [
+    "Cron script result:",
+    `status: ${result.ok ? "succeeded" : "failed"}`,
+    `summary: ${result.summary}`,
+    result.exitCode === undefined ? undefined : `exit code: ${result.exitCode}`,
+    "stdout:",
+    result.stdout.trim().length === 0 ? "(empty)" : result.stdout.trim(),
+    "stderr:",
+    result.stderr.trim().length === 0 ? "(empty)" : result.stderr.trim()
+  ].filter((line) => line !== undefined).join("\n");
+}
+
+function appendBounded(current: string, chunk: string): string {
+  const maxChars = 8_000;
+  const next = `${current}${chunk}`;
+  return next.length <= maxChars ? next : `${next.slice(0, maxChars)}\n[truncated]`;
+}
+
+function boundedTimeout(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 30_000;
+  return Math.max(1_000, Math.min(120_000, Math.floor(value)));
 }

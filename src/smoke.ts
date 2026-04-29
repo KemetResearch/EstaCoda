@@ -3219,6 +3219,7 @@ const lockedCronRuns = await tickCron({
   now: new Date("2026-04-16T00:31:00.000Z"),
   runner: createRuntimeCronRunner({
     disposeRuntime: false,
+    workspaceRoot: contextWorkspace,
     runtimeFactory: async () => fakeRuntime({
       sessionId: "cron-locked-runtime",
       handle: async () => {
@@ -3235,6 +3236,7 @@ const cronRuns = await tickCron({
   now: cronNow,
   runner: createRuntimeCronRunner({
     disposeRuntime: false,
+    workspaceRoot: contextWorkspace,
     runtimeFactory: async () => fakeRuntime({
       sessionId: "cron-smoke-runtime",
       handle: async (input) => ({
@@ -3267,6 +3269,82 @@ assert(cronRuns.length === 1 && cronRuns[0]?.ok === true, "expected cron tick to
 assert(cronRuns[0]?.output.includes("Cronjob Response: Build check"), "expected wrapped cron output");
 assert(cronAfterRun?.status === "completed", "expected one-shot cron to complete");
 assert(cronOutputFiles.includes("Build check"), "expected cron jobs to persist");
+await writeFile(join(contextWorkspace, "cron-proof.ts"), "console.log('script-backed-ok')\nconsole.error('script-backed-stderr-ok')\n", "utf8");
+const cronScriptJob = await cronStore.create({
+  schedule: "30m",
+  prompt: "Summarize the script result",
+  name: "Script proof",
+  script: "cron-proof.ts"
+});
+await cronStore.requestRun(cronScriptJob.id);
+const cronScriptRuns = await tickCron({
+  store: cronStore,
+  now: cronNow,
+  runner: createRuntimeCronRunner({
+    disposeRuntime: false,
+    workspaceRoot: contextWorkspace,
+    runtimeFactory: async () => fakeRuntime({
+      sessionId: "cron-script-runtime",
+      handle: async (input) => ({
+        label: "EstaCoda",
+        text: `script cron handled: ${input.text.includes("script-backed-ok") ? "yes" : "no"}`,
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 1,
+          suggestedSkills: [],
+          suggestedToolsets: [],
+          confirmationRequired: false,
+          rationale: "cron script smoke"
+        },
+        securityDecision: "allow",
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      })
+    })
+  })
+});
+assert(cronScriptRuns[0]?.ok === true, "expected script-backed cron job to run");
+assert(cronScriptRuns[0]?.output.includes("script cron handled: yes"), "expected script output in cron prompt");
+const cronScriptEdit = await runCliCommand({
+  argv: ["cron", "edit", cronScriptJob.id, "--script-arg", "--dry-run", "--script-timeout-ms", "5000"],
+  workspaceRoot: contextWorkspace,
+  homeDir: cronHome
+});
+const cronScriptEditedJob = await cronStore.get(cronScriptJob.id);
+assert(cronScriptEdit.output.includes("Updated cron job"), "expected CLI cron script edit output");
+assert(cronScriptEditedJob?.scriptArgs?.[0] === "--dry-run", "expected CLI cron edit to store script args");
+assert(cronScriptEditedJob?.scriptTimeoutMs === 5000, "expected CLI cron edit to store script timeout");
+const outsideCronScript = join(cronHome, "outside-cron-proof.ts");
+await writeFile(outsideCronScript, "console.log('outside')\n", "utf8");
+const blockedCronScriptJob = await cronStore.create({
+  schedule: "30m",
+  prompt: "This should not run",
+  name: "Blocked script proof",
+  script: outsideCronScript
+});
+await cronStore.requestRun(blockedCronScriptJob.id);
+const blockedCronScriptRuns = await tickCron({
+  store: cronStore,
+  now: cronNow,
+  runner: createRuntimeCronRunner({
+    disposeRuntime: false,
+    workspaceRoot: contextWorkspace,
+    runtimeFactory: async () => fakeRuntime({
+      sessionId: "cron-blocked-script-runtime",
+      handle: async () => {
+        throw new Error("blocked cron script should not reach runtime");
+      }
+    })
+  })
+});
+assert(blockedCronScriptRuns[0]?.ok === false, "expected outside-workspace cron script to fail");
+assert(blockedCronScriptRuns[0]?.output.includes("script path must stay inside the active workspace"), "expected cron script boundary error");
 const cronOriginJob = await cronStore.create({
   schedule: "30m",
   prompt: "Send origin delivery proof",
@@ -3283,6 +3361,7 @@ const cronDeliveryRuns = await tickCron({
   now: new Date(cronOriginJob.nextRunAt!),
   runner: createRuntimeCronRunner({
     disposeRuntime: false,
+    workspaceRoot: contextWorkspace,
     deliver: async (_job, content) => {
       cronDelivered = content;
       return true;

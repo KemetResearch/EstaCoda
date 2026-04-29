@@ -15,8 +15,8 @@ export async function runCronCommand(input: {
       ok: true,
       output: [
         "EstaCoda cron",
-        "  cron add <schedule> \"<prompt>\" [--name name] [--skill skill] [--delivery local]",
-        "  cron edit <job-id> [--schedule expr] [--prompt text] [--skill skill] [--add-skill skill] [--remove-skill skill] [--clear-skills]",
+        "  cron add <schedule> \"<prompt>\" [--name name] [--skill skill] [--delivery local] [--script path] [--script-arg arg]",
+        "  cron edit <job-id> [--schedule expr] [--prompt text] [--script path] [--clear-script] [--skill skill] [--add-skill skill] [--remove-skill skill] [--clear-skills]",
         "  cron list",
         "  cron pause <job-id>",
         "  cron resume <job-id>",
@@ -86,12 +86,15 @@ function parseCronAddArgs(args: string[]): {
   schedule?: string;
   prompt?: string;
   name?: string;
+  script?: string;
+  scriptArgs?: string[];
+  scriptTimeoutMs?: number;
   skills: string[];
   delivery?: string;
   repeat?: number;
 } {
   const positional: string[] = [];
-  const parsed: ReturnType<typeof parseCronAddArgs> = { skills: [] };
+  const parsed: ReturnType<typeof parseCronAddArgs> = { skills: [], scriptArgs: [] };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -104,6 +107,15 @@ function parseCronAddArgs(args: string[]): {
       index += 1;
     } else if (arg === "--delivery") {
       parsed.delivery = next;
+      index += 1;
+    } else if (arg === "--script") {
+      parsed.script = next;
+      index += 1;
+    } else if (arg === "--script-arg") {
+      if (next !== undefined) parsed.scriptArgs?.push(next);
+      index += 1;
+    } else if (arg === "--script-timeout-ms") {
+      parsed.scriptTimeoutMs = next === undefined ? undefined : Number(next);
       index += 1;
     } else if (arg === "--repeat") {
       parsed.repeat = next === undefined ? undefined : Number(next);
@@ -127,6 +139,9 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   schedule?: string;
   prompt?: string;
   name?: string;
+  script?: string;
+  scriptArgs?: string[];
+  scriptTimeoutMs?: number;
   skills?: string[];
   delivery?: string;
   repeat?: number;
@@ -150,6 +165,21 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
     } else if (arg === "--delivery") {
       parsed.delivery = next;
       index += 1;
+    } else if (arg === "--script") {
+      parsed.script = next;
+      index += 1;
+    } else if (arg === "--script-arg") {
+      parsed.scriptArgs = [...(parsed.scriptArgs ?? []), next].filter((value): value is string => value !== undefined);
+      index += 1;
+    } else if (arg === "--clear-script-args") {
+      parsed.scriptArgs = [];
+    } else if (arg === "--script-timeout-ms") {
+      parsed.scriptTimeoutMs = next === undefined ? undefined : Number(next);
+      index += 1;
+    } else if (arg === "--clear-script") {
+      parsed.script = undefined;
+      parsed.scriptArgs = [];
+      parsed.scriptTimeoutMs = undefined;
     } else if (arg === "--repeat") {
       parsed.repeat = next === undefined ? undefined : Number(next);
       index += 1;
@@ -184,8 +214,9 @@ function renderCreated(job: CronJob): string {
     `Created cron job ${job.id}: ${job.name}`,
     `Schedule: ${job.schedule}`,
     `Next run: ${job.nextRunAt ?? "none"}`,
+    job.script === undefined ? undefined : `Script: ${job.script}`,
     `Delivery: ${job.delivery}`
-  ].join("\n");
+  ].filter((line) => line !== undefined).join("\n");
 }
 
 function renderMaybe(prefix: string, job: CronJob | undefined, id: string): { ok: boolean; output: string } {

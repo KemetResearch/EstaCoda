@@ -108,6 +108,7 @@ if (command.handled) {
 if (argv.length === 0 && canRunInteractive()) {
   await runSessionLoop({
     runtime,
+    workspaceRoot,
     refreshRuntime: async (options) => {
       const nextRuntime = await buildRuntime({
         sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),

@@ -288,6 +288,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
             return false;
           },
           disposeRuntime: true,
+          workspaceRoot: options.workspaceRoot,
           runtimeFactory: async (job) => {
             const latestConfig = await loadRuntimeConfig(options);
             return createRuntime({

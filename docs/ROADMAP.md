@@ -243,7 +243,7 @@ State: partially built.
 - adaptive assessor now defaults to a dedicated `approval` auxiliary route when enabled without an explicit provider/model override `smoke-tested`
 - CLI security audit/debug views now exist for recent decisions `smoke-tested`
 - `/yolo` session-scoped open-mode toggles now exist in CLI and gateway `smoke-tested`
-- cron foundation now exists: `cronjob`, `estacoda cron`, `/cron`, persistent jobs, prompt scanning, tick locking, local output, origin/Telegram delivery hooks, and gateway ticks `smoke-tested`
+- cron foundation now exists: `cronjob`, `estacoda cron`, `/cron`, persistent jobs, prompt scanning, bounded workspace-local script-backed jobs, tick locking, local output, origin/Telegram delivery hooks, and gateway ticks `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

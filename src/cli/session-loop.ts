@@ -19,6 +19,7 @@ export type SessionLoopOptions = {
   output?: NodeJS.WritableStream;
   prompt?: (question: string) => Promise<string>;
   close?: () => void;
+  workspaceRoot?: string;
 };
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
@@ -73,7 +74,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           runtime,
           output,
           refreshRuntime: options.refreshRuntime,
-          switchRuntime: options.switchRuntime
+          switchRuntime: options.switchRuntime,
+          workspaceRoot: options.workspaceRoot
         });
 
         if (typeof shouldExit !== "boolean") {
@@ -146,6 +148,7 @@ async function handleSlashCommand(input: {
   refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   output: NodeJS.WritableStream;
+  workspaceRoot?: string;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
 
@@ -240,7 +243,8 @@ async function handleSlashCommand(input: {
             runner: createRuntimeCronRunner({
               runtimeFactory: async () => input.runtime,
               wrapResponse: true,
-              disposeRuntime: false
+              disposeRuntime: false,
+              workspaceRoot: input.workspaceRoot
             })
           });
           return results.length === 0

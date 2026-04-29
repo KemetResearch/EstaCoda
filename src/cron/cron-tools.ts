@@ -6,6 +6,10 @@ type CronjobToolInput = {
   job_id?: string;
   jobId?: string;
   prompt?: string;
+  script?: string;
+  script_args?: string[];
+  script_timeout_ms?: number;
+  clear_script?: boolean;
   schedule?: string;
   name?: string;
   skill?: string;
@@ -27,6 +31,10 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         action: { type: "string", enum: ["create", "list", "update", "pause", "resume", "run", "remove"] },
         job_id: { type: "string" },
         prompt: { type: "string" },
+        script: { type: "string" },
+        script_args: { type: "array", items: { type: "string" } },
+        script_timeout_ms: { type: "number" },
+        clear_script: { type: "boolean" },
         schedule: { type: "string" },
         name: { type: "string" },
         skill: { type: "string" },
@@ -54,6 +62,9 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         }
         const job = await options.store.create({
           prompt: input.prompt,
+          script: input.script,
+          scriptArgs: input.script_args,
+          scriptTimeoutMs: input.script_timeout_ms,
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
@@ -76,7 +87,7 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         if (existing === undefined) {
           return { ok: false, content: `Cron job not found: ${id}` };
         }
-        const job = await options.store.update(id, {
+        const patch = omitUndefined({
           prompt: input.prompt,
           schedule: input.schedule,
           name: input.name,
@@ -84,6 +95,14 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
           delivery: input.delivery,
           repeat: input.repeat
         });
+        const scriptPatch = input.clear_script === true
+          ? { script: undefined, scriptArgs: [], scriptTimeoutMs: undefined }
+          : {
+              ...(input.script === undefined ? {} : { script: input.script }),
+              ...(input.script_args === undefined ? {} : { scriptArgs: input.script_args }),
+              ...(input.script_timeout_ms === undefined ? {} : { scriptTimeoutMs: input.script_timeout_ms })
+            };
+        const job = await options.store.update(id, { ...patch, ...scriptPatch });
         return job === undefined
           ? { ok: false, content: `Cron job not found: ${id}` }
           : { ok: true, content: `Updated cron job ${job.id}: ${job.name}` };
@@ -114,6 +133,7 @@ export function renderCronJobs(jobs: Awaited<ReturnType<CronStore["list"]>>): st
       `${job.id} [${job.status}] ${job.name}`,
       `  schedule: ${job.schedule}`,
       `  next: ${job.nextRunAt ?? "none"}`,
+      job.script === undefined ? undefined : `  script: ${job.script}`,
       `  runs: ${job.runCount}`,
       job.skills.length === 0 ? undefined : `  skills: ${job.skills.join(", ")}`
     ].filter((line) => line !== undefined).join("\n"))
@@ -137,4 +157,8 @@ function renderMaybeJob(prefix: string, job: Awaited<ReturnType<CronStore["get"]
   return job === undefined
     ? { ok: false, content: `Cron job not found: ${id}` }
     : { ok: true, content: `${prefix} cron job ${job.id}: ${job.name}` };
+}
+
+function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
 }

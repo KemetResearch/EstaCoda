@@ -60,7 +60,7 @@ What has been achieved:
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
 - A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
 - An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, editor-backed file reads, and a live-proven JetBrains approval flow.
-- A cron foundation now exists with persistent jobs, prompt safety scanning, tick locking, the `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks. It is `smoke-tested`; script-backed jobs and broader channel delivery remain follow-up work.
+- A cron foundation now exists with persistent jobs, prompt safety scanning, tick locking, bounded workspace-local script-backed jobs, the `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks. It is `smoke-tested`; broader channel delivery remains follow-up work.
 
 Evidence:
 
