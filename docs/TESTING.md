@@ -258,6 +258,9 @@ At a high level:
 - local STT custom-command transcription output
 - Telegram audio artifact delivery through `sendAudio` with artifact-notice fallback for non-uploadable artifacts
 - Telegram voice transcript injection before the agent turn and Opus/Ogg `sendVoice` voice-bubble delivery
+- FAL-compatible `image.generate` execution with mocked image URL, aspect-ratio mapping, image-cache write, and artifact recording
+- BytePlus/ModelArk Seedream `image.generate` execution with mocked image URL, seed support, image-cache write, and artifact recording
+- Telegram image artifact delivery through `sendPhoto` with artifact-notice fallback
 - setup/verify/settings onboarding copy, recommended paths, and next-action recovery guidance
 - profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
 - Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved

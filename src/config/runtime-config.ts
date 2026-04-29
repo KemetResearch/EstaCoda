@@ -28,6 +28,7 @@ export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral";
+export type ImageGenerationProvider = "fal" | "byteplus";
 
 export type TtsConfig = {
   provider?: TtsProvider;
@@ -127,6 +128,31 @@ export type SttConfig = {
   };
 };
 
+export type ImageGenerationConfig = {
+  provider?: ImageGenerationProvider;
+  model?: string;
+  useGateway?: boolean;
+  use_gateway?: boolean;
+  apiKeyEnv?: string;
+  api_key_env?: string;
+  baseUrl?: string;
+  base_url?: string;
+  fal?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    baseUrl?: string;
+    base_url?: string;
+  };
+  byteplus?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    baseUrl?: string;
+    base_url?: string;
+  };
+};
+
 export type MCPServerToolsConfig = {
   include?: string[];
   exclude?: string[];
@@ -187,6 +213,8 @@ export type EstaCodaConfig = {
     launchCommand?: string;
     autoLaunch?: boolean;
   };
+  imageGen?: ImageGenerationConfig;
+  image_gen?: ImageGenerationConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
   mcpServers?: Record<string, MCPServerConfig>;
@@ -253,6 +281,7 @@ export type LoadedRuntimeConfig = {
     launchCommand?: string;
     autoLaunch: boolean;
   };
+  imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
   mcp: {
@@ -441,6 +470,7 @@ export async function loadRuntimeConfig(options: {
       launchCommand: config.browser?.launchCommand,
       autoLaunch: config.browser?.autoLaunch ?? false
     },
+    imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),
     stt: normalizeSttConfig(config.stt),
     mcp: {
@@ -645,6 +675,32 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
       voice: value?.kittentts?.voice ?? "Jasper",
       speed: boundedNumber(value?.kittentts?.speed, 1, 0.5, 2),
       cleanText: value?.kittentts?.cleanText ?? value?.kittentts?.clean_text ?? true
+    }
+  };
+}
+
+function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
+  const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
+  const model = value?.model ??
+    (provider === "byteplus"
+      ? value?.byteplus?.model ?? "seedream-4-0-250828"
+      : value?.fal?.model ?? "fal-ai/flux-2/klein/9b");
+  return {
+    ...value,
+    provider,
+    model,
+    useGateway: value?.useGateway ?? value?.use_gateway ?? false,
+    apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY"),
+    baseUrl: value?.baseUrl ?? value?.base_url,
+    fal: {
+      model: value?.fal?.model ?? (provider === "fal" ? model : "fal-ai/flux-2/klein/9b"),
+      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? "FAL_KEY",
+      baseUrl: value?.fal?.baseUrl ?? value?.fal?.base_url ?? "https://fal.run"
+    },
+    byteplus: {
+      model: value?.byteplus?.model ?? (provider === "byteplus" ? model : "seedream-4-0-250828"),
+      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? "BYTEPLUS_ARK_API_KEY",
+      baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? "https://ark.ap-southeast.bytepluses.com/api/v3"
     }
   };
 }

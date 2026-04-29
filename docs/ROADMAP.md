@@ -347,7 +347,27 @@ What remains:
 - channel-specific mode settings
 - richer Arabic interface copy and localized approval cards beyond the security/skill settings
 
-### 9. Update story
+### 9. Image Generation
+
+State: Hermes-aligned first foundation exists.
+
+- `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
+- BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY` and Seedream defaults `smoke-tested`
+- `image.generate` accepts a minimal agent-facing schema: prompt, aspect ratio, model override, and seed `smoke-tested`
+- FAL aspect ratios map to model-native `image_size` presets `smoke-tested`
+- BytePlus/Seedream aspect ratios map to concrete image sizes `smoke-tested`
+- generated image URLs are downloaded into `.estacoda/image-cache/` and recorded as image artifacts `smoke-tested`
+- Telegram image artifacts upload through `sendPhoto` with artifact-notice fallback `smoke-tested`
+
+What remains:
+
+- live provider proof with real FAL and BytePlus credentials
+- model picker/setup UX similar to Hermes' `hermes tools`
+- Nous gateway/proxy path
+- FAL Clarity upscaler policy
+- richer per-model capability filtering beyond the first FAL/Seedream payload mapping
+
+### 10. Update story
 
 State: not built.
 
@@ -361,7 +381,7 @@ What remains:
 - version/update command or package-manager path
 - migration behavior across releases
 
-### 10. MCP / ACP
+### 11. MCP / ACP
 
 State: MCP client foundation now exists across stdio + HTTP; ACP foundation now exists, and basic editor chat plus editor-backed file reads are now live-proven, but only the first editor slice is implemented.
 

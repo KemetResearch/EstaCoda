@@ -48,6 +48,7 @@ import { builtinTools } from "../tools/builtin-tools.js";
 import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
 import { createPythonTools } from "../tools/python-tools.js";
 import { createMediaTools } from "../tools/media-tools.js";
+import { createImageGenerationTools, type ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { createVoiceTools, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { analyzeImageWithVision, createVisionTools } from "../tools/vision-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -97,6 +98,8 @@ export type RuntimeOptions = {
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
   voiceFetch?: VoiceFetchLike;
+  imageGen?: LoadedRuntimeConfig["imageGen"];
+  imageGenerationFetch?: ImageGenerationFetchLike;
   ui?: {
     language: UiLanguage;
     flavor: UiFlavor;
@@ -197,6 +200,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const processManager = new ProcessManager({ workspaceRoot });
   const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
   const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
+  const imageCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "image-cache");
   let activeTrustedWorkspace = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
@@ -301,6 +305,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     tts: options.tts,
     stt: options.stt,
     fetch: options.voiceFetch
+  })) {
+    toolRegistry.register(tool);
+  }
+  for (const tool of createImageGenerationTools({
+    imageCacheRoot,
+    artifactStore,
+    imageGen: options.imageGen,
+    fetch: options.imageGenerationFetch
   })) {
     toolRegistry.register(tool);
   }

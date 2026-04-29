@@ -772,6 +772,7 @@ export class AcpServer {
       auxiliaryProviders: config.auxiliaryProviders,
       mcpServers: config.mcp.servers,
       browser: config.browser,
+      imageGen: config.imageGen,
       tts: config.tts,
       stt: config.stt,
       telegramReady: config.channels.telegram.ready,

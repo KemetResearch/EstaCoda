@@ -73,6 +73,7 @@ async function buildRuntime(input: {
     auxiliaryProviders: latestConfig.auxiliaryProviders,
     mcpServers: latestConfig.mcp.servers,
     browser: latestConfig.browser,
+    imageGen: latestConfig.imageGen,
     tts: latestConfig.tts,
     stt: latestConfig.stt,
     telegramReady: latestConfig.channels.telegram.ready,

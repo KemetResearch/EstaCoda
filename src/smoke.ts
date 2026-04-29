@@ -69,6 +69,7 @@ import { createSkillTools } from "./skills/skill-tools.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { builtinTools } from "./tools/builtin-tools.js";
 import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
+import { createImageGenerationTools } from "./tools/image-generation-tools.js";
 import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
 import { createVoiceTools, transcribeAudioFile } from "./tools/voice-tools.js";
@@ -1987,6 +1988,131 @@ const voiceTranscribe = await voiceExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const imageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-image-gen-"));
+const imageArtifacts = new ArtifactStore({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:00:00.000Z")
+});
+const imageRegistry = new ToolRegistry();
+let falImageRequestUrl = "";
+let falImageRequestBody: any;
+process.env.FAL_KEY = "fal-smoke-key";
+for (const tool of createImageGenerationTools({
+  imageCacheRoot: join(imageWorkspace, ".estacoda", "image-cache"),
+  artifactStore: imageArtifacts,
+  imageGen: {
+    provider: "fal",
+    model: "fal-ai/flux-2/klein/9b",
+    useGateway: false,
+    fal: {
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_KEY",
+      baseUrl: "https://fal.run"
+    }
+  },
+  fetch: async (url, init) => {
+    if (url.startsWith("https://fal.run/")) {
+      falImageRequestUrl = url;
+      falImageRequestBody = JSON.parse(init?.body ?? "{}");
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: async () => Buffer.from(JSON.stringify({ images: [{ url: "https://images.example/fal.png" }] })).buffer,
+        text: async () => JSON.stringify({ images: [{ url: "https://images.example/fal.png" }] })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => Buffer.from("fake png bytes").buffer,
+      text: async () => "fake png bytes"
+    };
+  },
+  id: () => "fal-image-smoke"
+})) {
+  imageRegistry.register(tool);
+}
+const imageExecutor = new ToolExecutor({
+  registry: imageRegistry,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory
+});
+const falImageGenerate = await imageExecutor.executeTool({
+  tool: "image.generate",
+  input: {
+    prompt: "A blue lotus sigil in a clean product illustration style.",
+    aspectRatio: "landscape",
+    seed: 42
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+delete process.env.FAL_KEY;
+const bytePlusImageRegistry = new ToolRegistry();
+let bytePlusImageRequestUrl = "";
+let bytePlusImageRequestBody: any;
+process.env.BYTEPLUS_ARK_API_KEY = "byteplus-smoke-key";
+for (const tool of createImageGenerationTools({
+  imageCacheRoot: join(imageWorkspace, ".estacoda", "image-cache"),
+  artifactStore: imageArtifacts,
+  imageGen: {
+    provider: "byteplus",
+    model: "seedream-4-0-250828",
+    useGateway: false,
+    byteplus: {
+      model: "seedream-4-0-250828",
+      apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+      baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+    }
+  },
+  fetch: async (url, init) => {
+    if (url.endsWith("/images/generations")) {
+      bytePlusImageRequestUrl = url;
+      bytePlusImageRequestBody = JSON.parse(init?.body ?? "{}");
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: async () => Buffer.from(JSON.stringify({ data: [{ url: "https://images.example/seedream.png" }] })).buffer,
+        text: async () => JSON.stringify({ data: [{ url: "https://images.example/seedream.png" }] })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => Buffer.from("fake seedream png bytes").buffer,
+      text: async () => "fake seedream png bytes"
+    };
+  },
+  id: () => "byteplus-image-smoke"
+})) {
+  bytePlusImageRegistry.register(tool);
+}
+const bytePlusImageExecutor = new ToolExecutor({
+  registry: bytePlusImageRegistry,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory
+});
+const bytePlusImageGenerate = await bytePlusImageExecutor.executeTool({
+  tool: "image.generate",
+  input: {
+    prompt: "A cinematic desert observatory at sunrise.",
+    aspectRatio: "square",
+    seed: 7
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+delete process.env.BYTEPLUS_ARK_API_KEY;
 const injectedVoiceMessage = await injectVoiceTranscripts({
   id: "voice-channel-message",
   channel: "telegram",
@@ -2278,6 +2404,15 @@ assert(String(voiceTranscribe.result.content).includes("transcribed smoke audio"
 assert(voiceArtifacts.list().some((artifact) => artifact.kind === "data" && artifact.mimeType === "text/plain"), "expected voice.transcribe to record transcript artifact");
 assert(injectedVoiceMessage.text.includes("auto injected transcript"), "expected channel voice transcription to inject transcript text");
 assert(localVoiceTranscribe.ok === true && localVoiceTranscribe.text === "local command transcript", "expected local STT command to produce transcript text");
+assert(falImageGenerate?.result?.ok === true, "expected FAL image generation to succeed");
+assert(falImageRequestUrl.endsWith("/fal-ai/flux-2/klein/9b"), "expected FAL image generation to call configured model endpoint");
+assert(falImageRequestBody.image_size === "landscape_16_9", "expected FAL image generation to map landscape aspect ratio");
+assert(falImageRequestBody.seed === 42, "expected FAL image generation to pass seed");
+assert(bytePlusImageGenerate?.result?.ok === true, "expected BytePlus image generation to succeed");
+assert(bytePlusImageRequestUrl.endsWith("/images/generations"), "expected BytePlus image generation endpoint");
+assert(bytePlusImageRequestBody.model === "seedream-4-0-250828", "expected BytePlus image generation to pass Seedream model");
+assert(bytePlusImageRequestBody.size === "1024x1024", "expected BytePlus image generation to map square size");
+assert(imageArtifacts.list().filter((artifact) => artifact.kind === "image" && artifact.mimeType === "image/png").length >= 2, "expected image generation to record image artifacts");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
   tools: tools.list(),
@@ -9623,8 +9758,10 @@ const telegramRequests: Array<{
 const telegramAudioArtifactDir = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-audio-artifact-"));
 const telegramAudioArtifactPath = join(telegramAudioArtifactDir, "speech.mp3");
 const telegramVoiceArtifactPath = join(telegramAudioArtifactDir, "speech.ogg");
+const telegramImageArtifactPath = join(telegramAudioArtifactDir, "generated.png");
 await writeFile(telegramAudioArtifactPath, "fake speech audio");
 await writeFile(telegramVoiceArtifactPath, "fake opus audio");
+await writeFile(telegramImageArtifactPath, "fake image bytes");
 const telegramAdapter = new TelegramAdapter({
   botToken: "telegram-token",
   mediaRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-media-")),
@@ -9791,6 +9928,18 @@ await telegramAdapter.delivery.sendArtifact({
   mimeType: "audio/ogg",
   summary: "Telegram generated voice bubble"
 });
+await telegramAdapter.delivery.sendArtifact({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  id: "telegram-image-artifact",
+  path: telegramImageArtifactPath,
+  kind: "image",
+  bytes: 16,
+  createdAt: "2026-04-16T00:00:00.000Z",
+  mimeType: "image/png",
+  summary: "Telegram generated image"
+});
 await telegramAdapter.stop();
 const convertedTelegramMessage = updateToChannelMessage({
   update_id: 43,
@@ -9877,6 +10026,15 @@ assert(
       String(request.body.caption).includes("Telegram generated voice bubble")
   ),
   "expected Telegram Opus/Ogg audio artifacts to upload as voice bubbles"
+);
+assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendPhoto") &&
+      request.body.chat_id === "1254738091" &&
+      request.body.photo === "blob" &&
+      String(request.body.caption).includes("Telegram generated image")
+  ),
+  "expected Telegram image artifacts to upload as photos"
 );
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");

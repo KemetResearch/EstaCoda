@@ -14,7 +14,7 @@ export type OpenAICompatibleToolSchema = {
   };
 };
 
-const DEFAULT_MAX_PROVIDER_TOOLS = 40;
+const DEFAULT_MAX_PROVIDER_TOOLS = 64;
 const BLOCKED_PROVIDER_RISKS = new Set<ToolRiskClass>([
   "credential-access",
   "destructive-local",

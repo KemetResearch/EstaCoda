@@ -1,0 +1,329 @@
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { RegisteredTool } from "../contracts/tool.js";
+
+export type ImageGenerationFetchLike = (url: string, init?: {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+}>;
+
+export type ImageGenerationToolOptions = {
+  imageCacheRoot: string;
+  artifactStore: ArtifactStore;
+  imageGen?: LoadedRuntimeConfig["imageGen"];
+  fetch?: ImageGenerationFetchLike;
+  id?: () => string;
+};
+
+type ImageAspect = "square" | "landscape" | "portrait";
+
+export function createImageGenerationTools(options: ImageGenerationToolOptions): readonly RegisteredTool[] {
+  const imageGen = options.imageGen ?? defaultImageGen();
+
+  return [{
+    name: "image.generate",
+    description: "Generate an image from a text prompt using the configured image generation provider.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        aspectRatio: { type: "string" },
+        model: { type: "string" },
+        seed: { type: "number" }
+      },
+      required: ["prompt"]
+    },
+    riskClass: "external-side-effect",
+    toolsets: ["media", "telegram"],
+    progressLabel: "generating image",
+    maxResultSizeChars: 4000,
+    isAvailable: () => true,
+    run: async (input: { prompt?: string; aspectRatio?: string; model?: string; seed?: number }, context) => {
+      const prompt = input.prompt?.trim();
+      if (prompt === undefined || prompt.length === 0) {
+        return { ok: false, content: "image.generate requires a prompt." };
+      }
+
+      const result = await generateImage({
+        prompt,
+        aspectRatio: normalizeAspectRatio(input.aspectRatio),
+        model: input.model,
+        seed: input.seed,
+        imageGen,
+        fetch: options.fetch,
+        signal: context?.signal
+      });
+      if (!result.ok) {
+        return result;
+      }
+
+      await mkdir(options.imageCacheRoot, { recursive: true });
+      const fileName = `${safeId(options.id?.() ?? randomUUID())}.${extensionForMime(result.mimeType)}`;
+      const filePath = join(options.imageCacheRoot, fileName);
+      await writeFile(filePath, result.bytes);
+      const fileStat = await stat(filePath);
+      const artifact = options.artifactStore.record({
+        path: filePath,
+        kind: "image",
+        bytes: fileStat.size,
+        mimeType: result.mimeType,
+        summary: `Image generated from prompt: ${prompt.slice(0, 120)}`,
+        metadata: {
+          provider: imageGen.provider,
+          model: result.model,
+          aspectRatio: result.aspectRatio,
+          seed: result.seed,
+          sourceUrl: result.sourceUrl
+        }
+      });
+
+      return {
+        ok: true,
+        content: [
+          `Generated image: ${filePath}`,
+          `Provider: ${imageGen.provider}`,
+          `Model: ${result.model}`,
+          `Aspect ratio: ${result.aspectRatio}`,
+          result.seed === undefined ? undefined : `Seed: ${result.seed}`,
+          result.sourceUrl === undefined ? undefined : `Source URL: ${result.sourceUrl}`,
+          `Artifact: ${artifact.id}`
+        ].filter((line) => line !== undefined).join("\n"),
+        metadata: artifact
+      };
+    }
+  }];
+}
+
+async function generateImage(input: {
+  prompt: string;
+  aspectRatio: ImageAspect;
+  model?: string;
+  seed?: number;
+  imageGen: LoadedRuntimeConfig["imageGen"];
+  fetch?: ImageGenerationFetchLike;
+  signal?: AbortSignal;
+}): Promise<
+  | { ok: true; bytes: Buffer; mimeType: string; model: string; aspectRatio: ImageAspect; seed?: number; sourceUrl?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  const provider = input.imageGen.provider;
+  const fetcher = input.fetch ?? globalImageFetch;
+  const generated = provider === "byteplus"
+    ? await submitBytePlusRequest(input, fetcher)
+    : await submitFalRequest(input, fetcher);
+  if (!generated.ok) {
+    return generated;
+  }
+
+  const imageBytes = await fetcher(generated.url, { signal: input.signal });
+  if (!imageBytes.ok) {
+    return {
+      ok: false,
+      content: `Generated image URL could not be downloaded: ${imageBytes.status} ${imageBytes.statusText}`,
+      metadata: {
+        provider,
+        model: generated.model,
+        url: generated.url
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    bytes: Buffer.from(await imageBytes.arrayBuffer()),
+    mimeType: mimeFromUrl(generated.url),
+    model: generated.model,
+    aspectRatio: input.aspectRatio,
+    seed: input.seed,
+    sourceUrl: generated.url
+  };
+}
+
+async function submitFalRequest(
+  input: {
+    prompt: string;
+    aspectRatio: ImageAspect;
+    model?: string;
+    seed?: number;
+    imageGen: LoadedRuntimeConfig["imageGen"];
+    signal?: AbortSignal;
+  },
+  fetcher: ImageGenerationFetchLike
+): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = input.model ?? input.imageGen.fal?.model ?? input.imageGen.model;
+  const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "FAL_KEY";
+  const apiKey = process.env[apiKeyEnv];
+  if (apiKey === undefined || apiKey.length === 0) {
+    return { ok: false, content: `Missing image generation API key. Export ${apiKeyEnv}.`, metadata: { provider: "fal", apiKeyEnv } };
+  }
+
+  const baseUrl = (input.imageGen.fal?.baseUrl ?? input.imageGen.baseUrl ?? "https://fal.run").replace(/\/$/, "");
+  const response = await fetcher(`${baseUrl}/${model}`, {
+    method: "POST",
+    headers: {
+      authorization: `Key ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      image_size: falImageSize(input.aspectRatio),
+      seed: input.seed
+    }),
+    signal: input.signal
+  });
+  return parseImageResponse(response, "fal", model);
+}
+
+async function submitBytePlusRequest(
+  input: {
+    prompt: string;
+    aspectRatio: ImageAspect;
+    model?: string;
+    seed?: number;
+    imageGen: LoadedRuntimeConfig["imageGen"];
+    signal?: AbortSignal;
+  },
+  fetcher: ImageGenerationFetchLike
+): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = input.model ?? input.imageGen.byteplus?.model ?? input.imageGen.model;
+  const apiKeyEnv = input.imageGen.byteplus?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY";
+  const apiKey = process.env[apiKeyEnv];
+  if (apiKey === undefined || apiKey.length === 0) {
+    return { ok: false, content: `Missing BytePlus image generation API key. Export ${apiKeyEnv}.`, metadata: { provider: "byteplus", apiKeyEnv } };
+  }
+
+  const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? "https://ark.ap-southeast.bytepluses.com/api/v3").replace(/\/$/, "");
+  const response = await fetcher(`${baseUrl}/images/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      prompt: input.prompt,
+      size: bytePlusSize(input.aspectRatio),
+      seed: input.seed,
+      response_format: "url"
+    }),
+    signal: input.signal
+  });
+  return parseImageResponse(response, "byteplus", model);
+}
+
+async function parseImageResponse(
+  response: Awaited<ReturnType<ImageGenerationFetchLike>>,
+  provider: string,
+  model: string
+): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const raw = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      content: `Image generation request failed: ${response.status} ${response.statusText}\n${raw}`,
+      metadata: { provider, model }
+    };
+  }
+
+  const parsed = tryJson(raw);
+  const url = firstImageUrl(parsed);
+  if (url === undefined) {
+    return {
+      ok: false,
+      content: "Image generation response did not include an image URL.",
+      metadata: { provider, model, response: parsed ?? raw }
+    };
+  }
+
+  return { ok: true, url, model };
+}
+
+async function globalImageFetch(url: string, init?: Parameters<ImageGenerationFetchLike>[1]): ReturnType<ImageGenerationFetchLike> {
+  const response = await fetch(url, init as RequestInit);
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    arrayBuffer: async () => await response.arrayBuffer(),
+    text: async () => await response.text()
+  };
+}
+
+function firstImageUrl(value: any): string | undefined {
+  if (typeof value?.images?.[0]?.url === "string") return value.images[0].url;
+  if (typeof value?.image?.url === "string") return value.image.url;
+  if (typeof value?.data?.[0]?.url === "string") return value.data[0].url;
+  if (typeof value?.url === "string") return value.url;
+  return undefined;
+}
+
+function falImageSize(aspectRatio: ImageAspect): string {
+  if (aspectRatio === "landscape") return "landscape_16_9";
+  if (aspectRatio === "portrait") return "portrait_16_9";
+  return "square_hd";
+}
+
+function bytePlusSize(aspectRatio: ImageAspect): string {
+  if (aspectRatio === "landscape") return "1536x1024";
+  if (aspectRatio === "portrait") return "1024x1536";
+  return "1024x1024";
+}
+
+function normalizeAspectRatio(value: string | undefined): ImageAspect {
+  if (value === "landscape" || value === "portrait") return value;
+  return "square";
+}
+
+function mimeFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.includes(".jpg") || lower.includes(".jpeg")) return "image/jpeg";
+  if (lower.includes(".webp")) return "image/webp";
+  return "image/png";
+}
+
+function extensionForMime(mimeType: string): string {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  return "png";
+}
+
+function safeId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80) || "image";
+}
+
+function tryJson(value: string): any {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function defaultImageGen(): LoadedRuntimeConfig["imageGen"] {
+  return {
+    provider: "fal",
+    model: "fal-ai/flux-2/klein/9b",
+    useGateway: false,
+    fal: {
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_KEY",
+      baseUrl: "https://fal.run"
+    },
+    byteplus: {
+      model: "seedream-4-0-250828",
+      apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+      baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+    }
+  };
+}

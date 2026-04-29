@@ -174,6 +174,12 @@ export class TelegramAdapter implements ChannelAdapter {
           return;
         }
       }
+      if (artifact.kind === "image") {
+        const delivered = await this.#sendImageArtifact(sessionKey.chatId, artifact);
+        if (delivered) {
+          return;
+        }
+      }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
     }
   };
@@ -474,6 +480,28 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
+  async #sendImageArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      if (isHttpUrl(artifact.path)) {
+        form.set("photo", artifact.path);
+      } else {
+        const bytes = await readFile(artifact.path);
+        form.set("photo", new Blob([bytes], { type: artifact.mimeType ?? "image/png" }), basename(artifact.path));
+      }
+      const caption = renderImageArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_photo");
+      await this.#callMultipart<TelegramSentMessage>("sendPhoto", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
     const response = await this.#fetch(`https://api.telegram.org/bot${this.#botToken}/${method}`, {
       method: "POST",
@@ -694,6 +722,17 @@ function renderAudioArtifactCaption(artifact: ArtifactRecord): string {
     artifact.summary ?? "Generated audio",
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
+}
+
+function renderImageArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? "Generated image",
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
+function isHttpUrl(value: string): boolean {
+  return value.startsWith("https://") || value.startsWith("http://");
 }
 
 function isTelegramVoiceBubbleArtifact(artifact: ArtifactRecord): boolean {
