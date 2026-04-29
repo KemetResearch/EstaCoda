@@ -1699,6 +1699,26 @@ const browserNavigate = await browserExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const browserSnapshot = await browserExecutor.executeTool({
+  tool: "browser.snapshot",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const browserClick = await browserExecutor.executeTool({
+  tool: "browser.click",
+  input: {
+    ref: "@e1"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const browserImages = await browserExecutor.executeTool({
+  tool: "browser.get_images",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const browserStatus = await browserExecutor.executeTool({
   tool: "browser.status",
   input: {},
@@ -3583,6 +3603,11 @@ assert(webExtract.result.content.includes("Hello web extraction"), "expected web
 assert(browserNavigate?.result?.ok === true, "expected browser.navigate to succeed with mock backend");
 assert(browserNavigate.result.content.includes("Browser Smoke"), "expected browser.navigate title");
 assert(browserNavigate.result.content.includes("Browser snapshot text"), "expected browser.navigate snapshot text");
+assert(browserSnapshot?.result?.ok === true, "expected browser.snapshot to succeed with mock backend");
+assert(browserSnapshot.result.content.includes("@e1 button Mock Button"), "expected browser.snapshot refs");
+assert(browserClick?.result?.ok === true, "expected browser.click to succeed with mock backend");
+assert(browserImages?.result?.ok === true, "expected browser.get_images to succeed with mock backend");
+assert(browserImages.result.content.includes("https://example.com/mock.png"), "expected browser image listing");
 assert(browserStatus?.result?.ok === true, "expected browser.status to succeed");
 assert(browserStatus.result.content.includes("Browser backend: mock"), "expected browser.status mock backend");
 assert(browserStatus.result.content.includes("Available: yes"), "expected browser.status availability");
@@ -6266,6 +6291,21 @@ const cdpBrowserNavigate = await cdpToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const cdpBrowserSnapshot = await cdpToolExecutor.executeTool({
+  tool: "browser.snapshot",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const cdpBrowserScroll = await cdpToolExecutor.executeTool({
+  tool: "browser.scroll",
+  input: {
+    direction: "down",
+    amount: 100
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 
 assert(
   response.matchedSkills.includes("youtube-knowledge-base"),
@@ -6290,6 +6330,9 @@ assert(cdpBrowserNavigate?.result?.ok === true, "expected CDP browser.navigate t
 assert(cdpBrowserNavigate.result.content.includes("Browser: local-cdp"), "expected CDP navigate backend");
 assert(cdpBrowserNavigate.result.content.includes("CDP Smoke Page"), "expected CDP navigate title");
 assert(cdpBrowserNavigate.result.content.includes("CDP browser navigation text."), "expected CDP navigate text");
+assert(cdpBrowserSnapshot?.result?.ok === true, "expected CDP browser.snapshot to succeed");
+assert(cdpBrowserSnapshot.result.content.includes("CDP browser navigation text."), "expected CDP snapshot text");
+assert(cdpBrowserScroll?.result?.ok === true, "expected CDP browser.scroll to succeed");
 assert(response.securityDecision === "allow", "expected runtime to auto-allow safe initial workflow");
 assert(
   response.toolExecutions.some((execution) => execution.tool.name === "workflow.plan" && execution.result?.ok),

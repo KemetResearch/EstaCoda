@@ -1,4 +1,4 @@
-import type { BrowserBackend, BrowserBackendStatus, BrowserNavigateInput, BrowserNavigateResult } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserNavigateInput, BrowserNavigateResult, BrowserSnapshot } from "../contracts/browser.js";
 
 export type UnconfiguredBrowserBackendOptions = {
   reason?: string;
@@ -24,6 +24,15 @@ export function createMockBrowserBackend(input: {
   title?: string;
   text?: string;
 } = {}): BrowserBackend {
+  const sessionId = input.sessionId ?? "mock-browser-session";
+  const snapshot = (url = "mock://browser"): BrowserSnapshot => ({
+    sessionId,
+    url,
+    title: input.title ?? "Mock Browser Page",
+    text: input.text ?? `Mock browser snapshot for ${url}.`,
+    elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
+  });
+
   return {
     kind: "mock",
     isAvailable: () => true,
@@ -33,24 +42,23 @@ export function createMockBrowserBackend(input: {
       browser: input.title ?? "Mock Browser"
     }),
     async navigate(request) {
-      const sessionId = request.sessionId ?? input.sessionId ?? "mock-browser-session";
-
       return {
         session: {
-          id: sessionId,
+          id: request.sessionId ?? sessionId,
           backend: "mock",
           currentUrl: request.url,
           createdAt: new Date("2026-04-18T00:00:00.000Z").toISOString()
         },
-        snapshot: {
-          sessionId,
-          url: request.url,
-          title: input.title ?? "Mock Browser Page",
-          text: input.text ?? `Mock browser snapshot for ${request.url}.`,
-          elements: []
-        }
+        snapshot: snapshot(request.url)
       };
-    }
+    },
+    snapshot: async () => snapshot(),
+    click: async () => snapshot(),
+    type: async () => snapshot(),
+    scroll: async () => snapshot(),
+    press: async () => snapshot(),
+    back: async () => snapshot(),
+    getImages: async () => [{ src: "https://example.com/mock.png", alt: "Mock image" }]
   };
 }
 
@@ -90,6 +98,11 @@ export type CdpWebSocketFactory = (url: string) => CdpWebSocketLike;
 
 export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOptions = {}): BrowserBackend {
   const endpoint = normalizeCdpUrl(options.cdpUrl);
+  const sessions = new Map<string, {
+    id: string;
+    webSocketDebuggerUrl: string;
+  }>();
+  let latestSessionId: string | undefined;
 
   return {
     kind: "local-cdp",
@@ -100,10 +113,199 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         endpoint,
         input,
         fetch: options.fetch,
-        webSocketFactory: options.webSocketFactory
+        webSocketFactory: options.webSocketFactory,
+        sessions,
+        setLatestSessionId: (sessionId) => {
+          latestSessionId = sessionId;
+        }
       });
-    }
+    },
+    snapshot: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => evaluateCdpSnapshot(client, sessionId)
+    }),
+    click: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        await client.send("Runtime.evaluate", {
+          expression: refActionExpression(input.ref, "click"),
+          awaitPromise: true
+        });
+        return evaluateCdpSnapshot(client, sessionId);
+      }
+    }),
+    type: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        await client.send("Runtime.evaluate", {
+          expression: refActionExpression(input.ref, "type", input.text ?? ""),
+          awaitPromise: true
+        });
+        return evaluateCdpSnapshot(client, sessionId);
+      }
+    }),
+    scroll: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        const amount = input.amount ?? 700;
+        const delta = input.direction === "up" ? -amount : amount;
+        await client.send("Runtime.evaluate", {
+          expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
+          returnByValue: true
+        });
+        return evaluateCdpSnapshot(client, sessionId);
+      }
+    }),
+    press: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        const key = input.key ?? "Enter";
+        await client.send("Input.dispatchKeyEvent", { type: "keyDown", key });
+        await client.send("Input.dispatchKeyEvent", { type: "keyUp", key });
+        return evaluateCdpSnapshot(client, sessionId);
+      }
+    }),
+    back: (input = {}) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        await client.send("Runtime.evaluate", {
+          expression: "history.back(); 'ok';",
+          returnByValue: true
+        });
+        await client.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
+        return evaluateCdpSnapshot(client, sessionId);
+      }
+    }),
+    getImages: (input = {}) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client) => {
+        const evaluated = await client.send("Runtime.evaluate", {
+          expression: "JSON.stringify(Array.from(document.images).slice(0, 100).map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || undefined })))",
+          returnByValue: true
+        }) as { result?: { value?: unknown } };
+        return parseJsonArray(evaluated.result?.value);
+      }
+    })
   };
+}
+
+async function runCdpSessionAction<T>(input: {
+  sessions: Map<string, { id: string; webSocketDebuggerUrl: string }>;
+  latestSessionId: string | undefined;
+  input: BrowserActionInput | undefined;
+  webSocketFactory: CdpWebSocketFactory | undefined;
+  action(client: CdpClient, sessionId: string): Promise<T>;
+}): Promise<T> {
+  const sessionId = input.input?.sessionId ?? input.latestSessionId;
+  if (sessionId === undefined) {
+    throw new Error("No active browser session. Call browser.navigate first.");
+  }
+  const session = input.sessions.get(sessionId);
+  if (session === undefined) {
+    throw new Error(`Browser session not found: ${sessionId}`);
+  }
+  const client = await connectCdp({
+    webSocketUrl: session.webSocketDebuggerUrl,
+    webSocketFactory: input.webSocketFactory
+  });
+  try {
+    await client.send("Page.enable");
+    await client.send("Runtime.enable");
+    return await input.action(client, session.id);
+  } finally {
+    client.close();
+  }
+}
+
+async function evaluateCdpSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot> {
+  const evaluated = await client.send("Runtime.evaluate", {
+    expression: snapshotExpression(),
+    returnByValue: true
+  }) as { result?: { value?: unknown } };
+  return parseCdpSnapshot(evaluated.result?.value, sessionId);
+}
+
+function snapshotExpression(): string {
+  return `(() => {
+    const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
+    window.__estacodaElements = candidates;
+    const label = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('name') || el.id || '').trim().slice(0, 160);
+    return JSON.stringify({
+      url: location.href,
+      title: document.title,
+      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
+      elements: candidates.map((el, index) => ({
+        ref: '@e' + (index + 1),
+        role: el.getAttribute('role') || el.tagName.toLowerCase(),
+        name: label(el)
+      }))
+    });
+  })()`;
+}
+
+function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
+  const index = refToIndex(ref);
+  if (action === "click") {
+    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
+  }
+  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+}
+
+function refToIndex(ref: string | undefined): number {
+  const match = /^@?e(\d+)$/u.exec(ref ?? "");
+  if (match === null) {
+    throw new Error(`Invalid browser element ref: ${ref ?? ""}`);
+  }
+  return Number(match[1]) - 1;
+}
+
+function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {
+  if (typeof value !== "string") {
+    return { sessionId, url: "about:blank", text: "", elements: [] };
+  }
+  try {
+    const parsed = JSON.parse(value) as BrowserSnapshot;
+    return {
+      sessionId,
+      url: parsed.url,
+      title: parsed.title,
+      text: parsed.text,
+      elements: Array.isArray(parsed.elements) ? parsed.elements : []
+    };
+  } catch {
+    return { sessionId, url: "about:blank", text: value, elements: [] };
+  }
+}
+
+function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value) as Array<{ src?: string; alt?: string }>;
+    return parsed.flatMap((entry) => entry.src === undefined ? [] : [{ src: entry.src, alt: entry.alt }]);
+  } catch {
+    return [];
+  }
 }
 
 async function navigateWithLocalCdp(input: {
@@ -111,6 +313,8 @@ async function navigateWithLocalCdp(input: {
   input: BrowserNavigateInput;
   fetch: CdpFetchLike | undefined;
   webSocketFactory: CdpWebSocketFactory | undefined;
+  sessions: Map<string, { id: string; webSocketDebuggerUrl: string }>;
+  setLatestSessionId(sessionId: string): void;
 }): Promise<BrowserNavigateResult> {
   if (input.endpoint === undefined) {
     throw new Error("CDP URL is not configured.");
@@ -134,22 +338,13 @@ async function navigateWithLocalCdp(input: {
     });
     await client.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
-    const evaluated = await client.send("Runtime.evaluate", {
-      expression: [
-        "JSON.stringify({",
-        "url: location.href,",
-        "title: document.title,",
-        "text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000)",
-        "})"
-      ].join(""),
-      returnByValue: true
-    }) as {
-      result?: {
-        value?: unknown;
-      };
-    };
-    const snapshot = parseEvaluatedSnapshot(evaluated.result?.value, target.url ?? input.input.url);
     const sessionId = input.input.sessionId ?? target.id ?? `cdp-${Date.now()}`;
+    const snapshot = await evaluateCdpSnapshot(client, sessionId);
+    input.sessions.set(sessionId, {
+      id: sessionId,
+      webSocketDebuggerUrl: target.webSocketDebuggerUrl
+    });
+    input.setLatestSessionId(sessionId);
 
     return {
       session: {
@@ -158,13 +353,7 @@ async function navigateWithLocalCdp(input: {
         currentUrl: snapshot.url,
         createdAt: new Date().toISOString()
       },
-      snapshot: {
-        sessionId,
-        url: snapshot.url,
-        title: snapshot.title,
-        text: snapshot.text,
-        elements: []
-      }
+      snapshot
     };
   } finally {
     client.close();
@@ -374,38 +563,6 @@ class CdpClient {
     }
 
     this.#pending.clear();
-  }
-}
-
-function parseEvaluatedSnapshot(value: unknown, fallbackUrl: string): {
-  url: string;
-  title?: string;
-  text: string;
-} {
-  if (typeof value !== "string") {
-    return {
-      url: fallbackUrl,
-      text: ""
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(value) as {
-      url?: string;
-      title?: string;
-      text?: string;
-    };
-
-    return {
-      url: parsed.url ?? fallbackUrl,
-      title: parsed.title,
-      text: parsed.text ?? ""
-    };
-  } catch {
-    return {
-      url: fallbackUrl,
-      text: value
-    };
   }
 }
 

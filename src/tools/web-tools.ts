@@ -1,5 +1,5 @@
 import type { RegisteredTool } from "../contracts/tool.js";
-import type { BrowserBackend, WebExtractionResult } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 
 export type WebToolOptions = {
@@ -107,6 +107,115 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         };
       }
     },
+    createBrowserSnapshotTool(browserBackend),
+    createBrowserActionTool({
+      name: "browser.click",
+      description: "Click an interactive browser element by ref from browser.snapshot.",
+      progressLabel: "clicking browser element",
+      browserBackend,
+      method: "click",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ref: { type: "string" },
+          sessionId: { type: "string" }
+        },
+        required: ["ref"]
+      }
+    }),
+    createBrowserActionTool({
+      name: "browser.type",
+      description: "Type text into an input element by ref from browser.snapshot.",
+      progressLabel: "typing in browser",
+      browserBackend,
+      method: "type",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ref: { type: "string" },
+          text: { type: "string" },
+          sessionId: { type: "string" }
+        },
+        required: ["ref", "text"]
+      }
+    }),
+    createBrowserActionTool({
+      name: "browser.scroll",
+      description: "Scroll the current browser page up or down.",
+      progressLabel: "scrolling browser",
+      browserBackend,
+      method: "scroll",
+      inputSchema: {
+        type: "object",
+        properties: {
+          direction: { type: "string", enum: ["up", "down"] },
+          amount: { type: "number" },
+          sessionId: { type: "string" }
+        }
+      }
+    }),
+    createBrowserActionTool({
+      name: "browser.press",
+      description: "Press a keyboard key in the current browser page.",
+      progressLabel: "pressing browser key",
+      browserBackend,
+      method: "press",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string" },
+          sessionId: { type: "string" }
+        }
+      }
+    }),
+    createBrowserActionTool({
+      name: "browser.back",
+      description: "Navigate the current browser page back in history.",
+      progressLabel: "going back in browser",
+      browserBackend,
+      method: "back",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
+      }
+    }),
+    {
+      name: "browser.get_images",
+      description: "List images on the current browser page with source URLs and alt text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "listing browser images",
+      maxResultSizeChars: 5000,
+      isAvailable: () => browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput) => {
+        if (browserBackend.getImages === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.get_images");
+        }
+        const images = await browserBackend.getImages(input).catch((error: unknown) => ({ error }));
+        if ("error" in images) {
+          return {
+            ok: false,
+            content: images.error instanceof Error ? images.error.message : "Browser image listing failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        return {
+          ok: true,
+          content: images.length === 0
+            ? "No images found on the current browser page."
+            : images.map((image, index) => `${index + 1}. ${image.src}${image.alt === undefined ? "" : ` — ${image.alt}`}`).join("\n"),
+          metadata: { backend: browserBackend.kind, images }
+        };
+      }
+    },
     {
       name: "browser.navigate",
       description: "Navigate a browser backend to a URL and return a first snapshot when a backend is configured.",
@@ -121,7 +230,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "navigating browser",
       maxResultSizeChars: 4000,
-      isAvailable: () => true,
+      isAvailable: () => browserBackend.isAvailable(),
       run: async (input: { url?: string; text?: string }, context) => {
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -186,8 +295,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             `URL: ${result.snapshot.url}`,
             result.snapshot.title === undefined ? undefined : `Title: ${result.snapshot.title}`,
             "",
-            result.snapshot.text
-          ].join("\n"),
+            renderBrowserSnapshot(result.snapshot)
+          ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             url,
             backend: result.session.backend,
@@ -198,6 +307,102 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       }
     }
   ];
+}
+
+function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {
+  return {
+    name: "browser.snapshot",
+    description: "Get a text snapshot of the current browser page with interactive element refs like @e1.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }
+      }
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "snapshotting browser",
+    maxResultSizeChars: 8000,
+    isAvailable: () => browserBackend.isAvailable(),
+    run: async (input: BrowserActionInput) => {
+      if (browserBackend.snapshot === undefined) {
+        return unsupportedBrowserTool(browserBackend, "browser.snapshot");
+      }
+      const snapshot = await browserBackend.snapshot(input).catch((error: unknown) => ({ error }));
+      if ("error" in snapshot) {
+        return {
+          ok: false,
+          content: snapshot.error instanceof Error ? snapshot.error.message : "Browser snapshot failed.",
+          metadata: { backend: browserBackend.kind }
+        };
+      }
+      return {
+        ok: true,
+        content: renderBrowserSnapshot(snapshot),
+        metadata: { backend: browserBackend.kind, snapshot }
+      };
+    }
+  };
+}
+
+function createBrowserActionTool(input: {
+  name: string;
+  description: string;
+  progressLabel: string;
+  browserBackend: BrowserBackend;
+  method: "click" | "type" | "scroll" | "press" | "back";
+  inputSchema: RegisteredTool["inputSchema"];
+}): RegisteredTool {
+  return {
+    name: input.name,
+    description: input.description,
+    inputSchema: input.inputSchema,
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: input.progressLabel,
+    maxResultSizeChars: 8000,
+    isAvailable: () => input.browserBackend.isAvailable(),
+    run: async (toolInput: BrowserActionInput) => {
+      const method = input.browserBackend[input.method];
+      if (method === undefined) {
+        return unsupportedBrowserTool(input.browserBackend, input.name);
+      }
+      const snapshot = await method(toolInput).catch((error: unknown) => ({ error }));
+      if ("error" in snapshot) {
+        return {
+          ok: false,
+          content: snapshot.error instanceof Error ? snapshot.error.message : `${input.name} failed.`,
+          metadata: { backend: input.browserBackend.kind }
+        };
+      }
+      return {
+        ok: true,
+        content: renderBrowserSnapshot(snapshot),
+        metadata: { backend: input.browserBackend.kind, snapshot }
+      };
+    }
+  };
+}
+
+function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
+  const elements = snapshot.elements ?? [];
+  return [
+    snapshot.text,
+    elements.length === 0 ? undefined : "",
+    elements.length === 0 ? undefined : "Interactive elements:",
+    ...elements.map((element) => `${element.ref} ${element.role ?? "element"} ${element.name ?? ""}`.trim())
+  ].filter((line) => line !== undefined).join("\n");
+}
+
+function unsupportedBrowserTool(browserBackend: BrowserBackend, tool: string) {
+  return {
+    ok: false,
+    content: `${tool} is not supported by the ${browserBackend.kind} browser backend yet.`,
+    metadata: {
+      backend: browserBackend.kind,
+      reason: "unsupported-browser-tool"
+    }
+  };
 }
 
 async function extractWithFetch(input: {

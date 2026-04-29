@@ -449,8 +449,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionId,
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
   }));
+  const providerToolAvailability = await toolRegistry.snapshot();
   const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
-    tools: toolRegistry.list()
+    tools: providerToolAvailability.available
   });
   const toolCallPlanner = new ToolCallPlanner({
     registry: toolRegistry,
@@ -679,7 +680,7 @@ function isSkillVisibleToolUsable(
     return input.webEnabled;
   }
 
-  if (toolName === "browser.navigate" || toolName === "browser.status") {
+  if (toolName.startsWith("browser.")) {
     return input.browserAvailable;
   }
 

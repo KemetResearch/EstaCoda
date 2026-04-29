@@ -34,6 +34,16 @@ export type BrowserSnapshot = {
   }>;
 };
 
+export type BrowserActionInput = {
+  sessionId?: string;
+  ref?: string;
+  text?: string;
+  key?: string;
+  direction?: "up" | "down";
+  amount?: number;
+  signal?: AbortSignal;
+};
+
 export type BrowserNavigateInput = {
   url: string;
   sessionId?: string;
@@ -59,4 +69,14 @@ export type BrowserBackend = {
   isAvailable(): Promise<boolean> | boolean;
   status(): Promise<BrowserBackendStatus> | BrowserBackendStatus;
   navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult>;
+  snapshot?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
+  click?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  type?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  scroll?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  press?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  back?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
+  getImages?(input?: BrowserActionInput): Promise<Array<{
+    src: string;
+    alt?: string;
+  }>>;
 };
