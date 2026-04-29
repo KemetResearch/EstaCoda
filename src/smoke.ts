@@ -446,7 +446,7 @@ const cliSetupPrompt = await runCliCommand({
 const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-workspace-"));
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
-const cliInteractiveAnswers = ["", "", "", "2", "", "", "interactive-secret", "", "", ""];
+const cliInteractiveAnswers = ["", "", "", "2", "", "", "TEST_KIMI_SECRET", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -683,7 +683,7 @@ const cliBrowserStatus = await runCliCommand({
   homeDir: cliHome
 });
 const cliTelegramConfigure = await runCliCommand({
-  argv: ["telegram", "configure", "--bot-token", "telegram-secret", "--default-chat-id", "1254738091", "--allow-user", "1254738091"],
+  argv: ["telegram", "configure", "--bot-token", "TEST_TELEGRAM_SECRET", "--default-chat-id", "1254738091", "--allow-user", "1254738091"],
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
@@ -692,7 +692,7 @@ const cliTelegramStatusMissing = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
-process.env.ESTACODA_TELEGRAM_BOT_TOKEN = "telegram-secret";
+process.env.ESTACODA_TELEGRAM_BOT_TOKEN = "TEST_TELEGRAM_SECRET";
 const cliTelegramStatusReady = await runCliCommand({
   argv: ["telegram", "status"],
   workspaceRoot: cliWorkspace,
@@ -3159,7 +3159,7 @@ assert(cliInteractivePrompts.length === 10, "expected interactive setup prompts"
 assert(cliInteractiveConfig.model.provider === "kimi", "expected interactive setup to save provider");
 assert(cliInteractiveConfig.security.approvalMode === "adaptive", "expected interactive setup to save default security mode");
 assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive setup to save default skill autonomy");
-assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"interactive-secret\""), "expected interactive setup to write local env secret");
+assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"TEST_KIMI_SECRET\""), "expected interactive setup to write local env secret");
 assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret mode 0600");
 assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
 assert(cliSettings.output.includes("EstaCoda settings"), "expected CLI settings output");

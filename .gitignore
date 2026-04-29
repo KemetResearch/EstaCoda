@@ -1,8 +1,14 @@
 .DS_Store
+.idea/
 node_modules/
 dist/
 build/
 coverage/
+ONBOARDING.md
+acp-proof.txt
+agent-proof-live.md
+alpha-proof.md
+live-tool-smoke.ts
 .env
 .env.*
 !.env.example
