@@ -255,6 +255,7 @@ At a high level:
 - voice setup/status/settings config for Hermes-aligned TTS/STT defaults and provider key-env persistence
 - OpenAI-compatible `voice.speak` execution with mocked audio response, audio-cache write, and artifact recording
 - OpenAI-compatible `voice.transcribe` execution with mocked transcription response, transcript-cache write, artifact recording, and audio prompt-tool suggestion
+- artifact hardening for prompt-safe generated artifact references, internal `localPath` delivery, invalid kind rejection, summary truncation, and invalid image aspect-ratio rejection
 - local STT custom-command transcription output
 - Telegram audio artifact delivery through `sendAudio` with artifact-notice fallback for non-uploadable artifacts
 - Telegram voice transcript injection before the agent turn and Opus/Ogg `sendVoice` voice-bubble delivery

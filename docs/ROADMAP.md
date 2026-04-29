@@ -378,7 +378,7 @@ State: Hermes-aligned first foundation exists.
 What remains:
 
 - live provider proof with real FAL and BytePlus credentials
-- CLI image/audio artifact rendering should use a clean artifact card/path instead of raw Markdown `file://` links
+- richer CLI image/audio artifact cards remain follow-up; generated artifact prompt paths are now safe `artifact://<id>` references with internal `localPath` delivery support
 - Telegram/channel protected credential capture and resume UX
 - richer model picker UX similar to Hermes' `hermes tools`
 - Nous gateway/proxy path

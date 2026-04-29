@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
-import type { ArtifactRecord } from "../contracts/artifact.js";
+import { isArtifactKind, type ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -2115,7 +2115,7 @@ function renderToolPlanProgress(plans: ToolCallPlan[]): string[] {
 }
 
 function renderArtifactProgress(artifacts: ArtifactRecord[]): string[] {
-  return artifacts.map((artifact) => `artifact: ${artifact.path} (${artifact.kind}, ${formatBytes(artifact.bytes)})`);
+  return artifacts.map((artifact) => `artifact: ${artifactReference(artifact)} (${artifact.kind}, ${formatBytes(artifact.bytes)})`);
 }
 
 function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): string {
@@ -2124,7 +2124,7 @@ function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): strin
   }
 
   const lower = text.toLowerCase();
-  const missingArtifacts = artifacts.filter((artifact) => !lower.includes(artifact.path.toLowerCase()));
+  const missingArtifacts = artifacts.filter((artifact) => !lower.includes(artifactReference(artifact).toLowerCase()));
   if (missingArtifacts.length === 0) {
     return text;
   }
@@ -2134,7 +2134,7 @@ function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): strin
     "",
     "Artifacts:",
     ...missingArtifacts.map((artifact) =>
-      `- ${artifact.path} (${artifact.kind}, ${formatBytes(artifact.bytes)})${artifact.summary === undefined ? "" : ` - ${artifact.summary}`}`
+      `- ${artifactReference(artifact)} (${artifact.kind}, ${formatBytes(artifact.bytes)})${artifact.summary === undefined ? "" : ` - ${truncateSummary(artifact.summary)}`}`
     )
   ].join("\n");
 }
@@ -2146,12 +2146,12 @@ function renderArtifactSummary(artifacts: ArtifactRecord[]): string {
 
   return artifacts
     .map((artifact) => [
-      `- ${artifact.path}`,
+      `- ${artifactReference(artifact)}`,
       `  id: ${artifact.id}`,
       `  kind: ${artifact.kind}`,
       `  size: ${formatBytes(artifact.bytes)}`,
       artifact.mimeType === undefined ? undefined : `  mime: ${artifact.mimeType}`,
-      artifact.summary === undefined ? undefined : `  summary: ${artifact.summary}`
+      artifact.summary === undefined ? undefined : `  summary: ${truncateSummary(artifact.summary)}`
     ].filter((line) => line !== undefined).join("\n"))
     .join("\n");
 }
@@ -2191,9 +2191,17 @@ function isArtifactRecord(value: unknown): value is ArtifactRecord {
   const candidate = value as Partial<ArtifactRecord>;
   return typeof candidate.id === "string" &&
     typeof candidate.path === "string" &&
-    typeof candidate.kind === "string" &&
+    isArtifactKind(candidate.kind) &&
     typeof candidate.bytes === "number" &&
     typeof candidate.createdAt === "string";
+}
+
+function artifactReference(artifact: ArtifactRecord): string {
+  return isAbsolute(artifact.path) ? `artifact://${artifact.id}` : artifact.path;
+}
+
+function truncateSummary(value: string, maxChars = 240): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
 }
 
 function formatBytes(bytes: number): string {

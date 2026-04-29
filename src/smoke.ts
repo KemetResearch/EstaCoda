@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { AcpServer } from "./acp/server.js";
@@ -2172,6 +2172,24 @@ const artifactRecord = await mediaExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const invalidArtifactKind = await mediaExecutor.executeTool({
+  tool: "artifact.record",
+  input: {
+    path: "assets/sample.mp4",
+    kind: "archive"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const longArtifactSummary = await mediaExecutor.executeTool({
+  tool: "artifact.record",
+  input: {
+    path: "assets/sample.mp4",
+    summary: "x".repeat(400)
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const voiceWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-"));
 const voiceArtifacts = new ArtifactStore({
   id: sequenceId(),
@@ -2319,6 +2337,15 @@ const falImageGenerate = await imageExecutor.executeTool({
     prompt: "A blue lotus sigil in a clean product illustration style.",
     aspectRatio: "landscape",
     seed: 42
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const invalidImageAspect = await imageExecutor.executeTool({
+  tool: "image.generate",
+  input: {
+    prompt: "A blue lotus sigil.",
+    aspectRatio: "wide"
   },
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -2742,11 +2769,15 @@ assert(mediaInspect?.result?.ok === true, "expected media inspect to succeed for
 assert(mediaInspect.result.content.includes("Kind: video"), "expected media inspect to infer video kind");
 assert(artifactRecord?.result?.ok === true, "expected artifact record to succeed");
 assert(mediaArtifacts.list().some((artifact) => artifact.path === "assets/sample.mp4" && artifact.kind === "video"), "expected recorded media artifact");
+assert(invalidArtifactKind?.result?.ok === false, "expected invalid artifact kind to be rejected");
+assert(longArtifactSummary?.result?.ok === true, "expected long artifact summary record to succeed");
+assert(mediaArtifacts.list().some((artifact) => artifact.summary !== undefined && artifact.summary.length <= 240), "expected artifact summaries to be truncated");
 assert(voiceSpeak?.result?.ok === true, "expected voice.speak to generate audio");
 assert(voiceFetchUrl.endsWith("/audio/speech"), "expected voice.speak to call OpenAI-compatible speech endpoint");
 assert(voiceFetchBody.model === "gpt-4o-mini-tts", "expected voice.speak to send configured TTS model");
 assert(voiceFetchBody.voice === "alloy", "expected voice.speak to send configured TTS voice");
 assert(voiceArtifacts.list().some((artifact) => artifact.kind === "audio" && artifact.mimeType === "audio/mpeg"), "expected voice.speak to record an audio artifact");
+assert(voiceArtifacts.list().some((artifact) => artifact.kind === "audio" && artifact.path.startsWith("artifact://") && artifact.localPath !== undefined && isAbsolute(artifact.localPath)), "expected voice artifact prompt path to be safe and localPath to be absolute");
 assert(voiceTranscribe?.result?.ok === true, "expected voice.transcribe to transcribe audio");
 assert(voiceTranscribeFetchUrl.endsWith("/audio/transcriptions"), "expected voice.transcribe to call OpenAI-compatible transcription endpoint");
 assert(voiceTranscribeModel === "whisper-1", "expected voice.transcribe to send configured STT model");
@@ -2758,6 +2789,7 @@ assert(falImageGenerate?.result?.ok === true, "expected FAL image generation to 
 assert(falImageRequestUrl.endsWith("/fal-ai/flux-2/klein/9b"), "expected FAL image generation to call configured model endpoint");
 assert(falImageRequestBody.image_size === "landscape_16_9", "expected FAL image generation to map landscape aspect ratio");
 assert(falImageRequestBody.seed === 42, "expected FAL image generation to pass seed");
+assert(invalidImageAspect?.result?.ok === false, "expected invalid image aspectRatio to be rejected");
 assert(missingImageGenerate?.result?.ok === false, "expected missing image key to fail before network");
 assert((missingImageGenerate?.result?.metadata as any)?.kind === "setup_needed", "expected missing image key to return setup_needed metadata");
 assert((missingImageGenerate?.result?.metadata as any)?.capability === "image_generation", "expected setup_needed metadata to name image generation capability");
@@ -2771,6 +2803,7 @@ assert(bytePlusModelClosedGenerate?.result?.ok === false, "expected closed ByteP
 assert(String(bytePlusModelClosedGenerate?.result?.content ?? "").includes("not activated"), "expected closed BytePlus model failure to explain activation");
 assert(String(bytePlusModelClosedGenerate?.result?.content ?? "").includes("estacoda image models --provider byteplus"), "expected closed BytePlus model failure to suggest model listing");
 assert(imageArtifacts.list().filter((artifact) => artifact.kind === "image" && artifact.mimeType === "image/png").length >= 2, "expected image generation to record image artifacts");
+assert(imageArtifacts.list().some((artifact) => artifact.kind === "image" && artifact.path.startsWith("artifact://") && artifact.localPath !== undefined && isAbsolute(artifact.localPath)), "expected image artifact prompt path to be safe and localPath to be absolute");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
   tools: tools.list(),

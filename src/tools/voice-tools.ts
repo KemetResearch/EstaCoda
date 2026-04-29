@@ -99,7 +99,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         return {
           ok: true,
           content: [
-            `Generated speech: ${filePath}`,
+            `Generated speech: ${artifact.path}`,
             `Provider: ${tts.provider}`,
             `Model: ${result.model}`,
             `Voice: ${result.voice}`,
@@ -158,7 +158,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           kind: "data",
           bytes: transcriptStat.size,
           mimeType: "text/plain",
-          summary: `Transcript generated from ${basename(path.path)}.`,
+          summary: truncateSummary(`Transcript generated from ${basename(path.path)}.`),
           metadata: {
             provider: stt.provider,
             model: result.model,
@@ -175,7 +175,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
             `Model: ${result.model}`,
             result.language === undefined ? undefined : `Language: ${result.language}`,
             `Transcript artifact: ${artifact.id}`,
-            `Transcript path: ${transcriptPath}`
+            `Transcript path: ${artifact.path}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: artifact
         };
@@ -548,6 +548,10 @@ function extensionForMime(mimeType: string): string {
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80) || "speech";
+}
+
+function truncateSummary(value: string, maxChars = 240): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
 }
 
 function defaultTts(): LoadedRuntimeConfig["tts"] {

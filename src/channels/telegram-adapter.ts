@@ -463,11 +463,12 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async #sendAudioArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
     try {
-      const bytes = await readFile(artifact.path);
+      const localPath = artifact.localPath ?? artifact.path;
+      const bytes = await readFile(localPath);
       const form = new FormData();
       const voiceBubble = isTelegramVoiceBubbleArtifact(artifact);
       form.set("chat_id", chatId);
-      form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(artifact.path));
+      form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(localPath));
       const caption = renderAudioArtifactCaption(artifact);
       if (caption.length > 0) {
         form.set("caption", caption);
@@ -487,8 +488,9 @@ export class TelegramAdapter implements ChannelAdapter {
       if (isHttpUrl(artifact.path)) {
         form.set("photo", artifact.path);
       } else {
-        const bytes = await readFile(artifact.path);
-        form.set("photo", new Blob([bytes], { type: artifact.mimeType ?? "image/png" }), basename(artifact.path));
+        const localPath = artifact.localPath ?? artifact.path;
+        const bytes = await readFile(localPath);
+        form.set("photo", new Blob([bytes], { type: artifact.mimeType ?? "image/png" }), basename(localPath));
       }
       const caption = renderImageArtifactCaption(artifact);
       if (caption.length > 0) {
@@ -713,7 +715,7 @@ function renderArtifactNotice(artifact: ArtifactRecord): string {
     "💎 Artifact ready",
     `Type: ${artifact.kind}`,
     `Path: ${artifact.path}`,
-    artifact.summary === undefined ? undefined : `Summary: ${artifact.summary}`
+    artifact.summary === undefined ? undefined : `Summary: ${truncateSummary(artifact.summary)}`
   ].filter((line) => line !== undefined).join("\n");
 }
 
@@ -737,7 +739,7 @@ function isHttpUrl(value: string): boolean {
 
 function isTelegramVoiceBubbleArtifact(artifact: ArtifactRecord): boolean {
   const mime = artifact.mimeType?.toLowerCase();
-  const path = artifact.path.toLowerCase();
+  const path = (artifact.localPath ?? artifact.path).toLowerCase();
   return mime === "audio/ogg" || path.endsWith(".ogg") || path.endsWith(".opus");
 }
 
@@ -836,4 +838,8 @@ function formatBytes(bytes: number): string {
   }
 
   return `${bytes} B`;
+}
+
+function truncateSummary(value: string, maxChars = 240): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
 }

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import type { ArtifactKind } from "../contracts/artifact.js";
+import { ARTIFACT_KINDS, isArtifactKind, type ArtifactKind } from "../contracts/artifact.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { explainPathBlock } from "../context/context-security.js";
@@ -162,6 +162,7 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
         const relPath = relative(canonicalRoot, output.path);
         const artifact = options.artifactStore.record({
           path: relPath,
+          localPath: output.path,
           kind: "image",
           bytes: fileStat.size,
           mimeType: inferMimeType(output.path),
@@ -186,7 +187,7 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
         type: "object",
         properties: {
           path: { type: "string" },
-          kind: { type: "string" },
+          kind: { type: "string", enum: [...ARTIFACT_KINDS] },
           summary: { type: "string" }
         },
         required: ["path"]
@@ -196,20 +197,24 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
       progressLabel: "recording artifact",
       maxResultSizeChars: 4000,
       isAvailable: () => true,
-      run: async (input: { path?: string; kind?: ArtifactKind; summary?: string }) => {
+      run: async (input: { path?: string; kind?: string; summary?: string }) => {
         const canonicalRoot = await realpath(root);
         const path = await resolveAllowedPath([canonicalRoot], input.path);
         if (!path.ok) {
           return path;
         }
+        if (input.kind !== undefined && !isArtifactKind(input.kind)) {
+          return { ok: false, content: `Invalid artifact kind: ${input.kind}. Expected ${ARTIFACT_KINDS.join(", ")}.` };
+        }
 
         const fileStat = await stat(path.path);
         const artifact = options.artifactStore.record({
           path: relative(canonicalRoot, path.path),
-          kind: normalizeArtifactKind(input.kind) ?? inferArtifactKind(path.path),
+          localPath: path.path,
+          kind: input.kind ?? inferArtifactKind(path.path),
           bytes: fileStat.size,
           mimeType: inferMimeType(path.path),
-          summary: input.summary
+          summary: input.summary === undefined ? undefined : truncateSummary(input.summary)
         });
 
         return {
@@ -362,28 +367,29 @@ export function inferMimeType(path: string): string {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
     ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".svg": "image/svg+xml",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
     ".pdf": "application/pdf",
     ".json": "application/json",
+    ".csv": "text/csv",
+    ".parquet": "application/vnd.apache.parquet",
     ".md": "text/markdown",
-    ".txt": "text/plain"
+    ".txt": "text/plain",
+    ".html": "text/html"
   };
 
   return mimeTypes[ext] ?? "application/octet-stream";
-}
-
-function normalizeArtifactKind(kind: ArtifactKind | undefined): ArtifactKind | undefined {
-  if (kind === undefined) {
-    return undefined;
-  }
-
-  return ["video", "image", "audio", "document", "data", "other"].includes(kind) ? kind : undefined;
 }
 
 function tryJson(content: string): unknown {
@@ -392,6 +398,10 @@ function tryJson(content: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function truncateSummary(value: string, maxChars = 240): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
 }
 
 function errorResult(content: string): ResolvedPath {

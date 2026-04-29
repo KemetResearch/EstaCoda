@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ArtifactKind, ArtifactRecord } from "../contracts/artifact.js";
+import { isAbsolute } from "node:path";
+import { isArtifactKind, type ArtifactKind, type ArtifactRecord } from "../contracts/artifact.js";
 
 export type ArtifactStoreOptions = {
   id?: () => string;
@@ -8,6 +9,8 @@ export type ArtifactStoreOptions = {
 
 export type RecordArtifactInput = {
   path: string;
+  displayPath?: string;
+  localPath?: string;
   kind: ArtifactKind;
   bytes: number;
   summary?: string;
@@ -26,9 +29,15 @@ export class ArtifactStore {
   }
 
   record(input: RecordArtifactInput): ArtifactRecord {
+    if (!isArtifactKind(input.kind)) {
+      throw new Error(`Invalid artifact kind: ${String(input.kind)}`);
+    }
+    const id = this.#id();
+    const localPath = input.localPath ?? (isAbsolute(input.path) ? input.path : undefined);
     const artifact: ArtifactRecord = {
-      id: this.#id(),
-      path: input.path,
+      id,
+      path: input.displayPath ?? (isAbsolute(input.path) ? `artifact://${id}` : input.path),
+      localPath,
       kind: input.kind,
       bytes: input.bytes,
       createdAt: this.#now().toISOString(),

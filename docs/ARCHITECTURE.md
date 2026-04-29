@@ -146,6 +146,8 @@ Key runtime products created here:
 - tool executor
 - agent loop
 
+Artifact records use prompt-safe references for `path` such as `artifact://<id>` when generated files live outside the workspace. Runtime/channel delivery keeps the real filesystem target in `localPath`, so prompts and final text do not need to expose raw absolute cache paths.
+
 ## Agent Loop Shape
 
 `AgentLoop.handle()` is roughly:
