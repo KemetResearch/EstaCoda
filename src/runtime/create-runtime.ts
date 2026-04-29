@@ -41,6 +41,7 @@ import { createSecurityPolicyForMode } from "../security/security-policy-factory
 import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
@@ -229,14 +230,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     servers: options.mcpServers ?? {}
   });
 
-  if (loadedOfficialSkills.errors.length > 0) {
-    throw new Error(
-      `Failed to load official skills: ${loadedOfficialSkills.errors
-        .map((error) => `${error.path}: ${error.message}`)
-        .join("; ")}`
-    );
-  }
-
   for (const skill of loadedOfficialSkills.skills) {
     skillRegistry.register(skill);
   }
@@ -359,6 +352,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   toolRegistry.register(createMemoryTool(memoryStore));
   const browserAvailable = await browserBackend.isAvailable();
   const toolAvailability = await toolRegistry.snapshot();
+  const skillEvolutionStore = new SkillEvolutionStore({
+    usagePath: join(workspaceRoot, ".estacoda", "skill-usage.json"),
+    evolutionRoot: join(workspaceRoot, ".estacoda", "skill-evolution")
+  });
   const skillVisibilityContext = createSkillVisibilityContext({
     availableTools: toolAvailability.available,
     browserAvailable,
@@ -377,7 +374,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: skillRegistry,
     visibleRegistry: sessionSkillRegistry,
     personalSkillsRoot,
-    projectSkillsRoot
+    projectSkillsRoot,
+    skillEvolutionStore
   })) {
     toolRegistry.register(tool);
   }
@@ -536,6 +534,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillsIndex: sessionSkillCatalog,
     skillConfig: options.skillConfig,
     skillLearningManager,
+    skillEvolutionStore,
     ui: options.ui,
     agentProfile: options.agentProfile
   });
@@ -665,6 +664,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `tools: ${toolRegistry.list().length}`,
         `mcp servers: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         `skills: ${sessionSkillCatalog.length}`,
+        loadedOfficialSkills.errors.length === 0 ? undefined : `skill load warnings: ${loadedOfficialSkills.errors.length}`,
         `skill autonomy: ${options.skillAutonomy ?? "suggest"}`,
         `profile: ${options.agentProfile?.mode ?? "builder"} (${options.agentProfile?.responseLanguage ?? "match-user"})`,
         `ui: ${options.ui?.language ?? "en"} / ${options.ui?.flavor ?? "standard"} / labels:${options.ui?.activityLabels ?? "en"}`,
@@ -683,7 +683,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `trajectory events: ${trajectory.events.length}`,
         `session: ${sessionId}`,
         "status: ready for first runtime loop"
-      ].join("\n");
+      ].filter((line) => line !== undefined).join("\n");
     }
   };
 }

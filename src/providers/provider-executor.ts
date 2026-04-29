@@ -329,11 +329,22 @@ async function collectProviderStream(input: {
     });
   }
 
-  return errorResponse ?? finalResponse ?? {
-    ok: true,
-    content,
+  if (errorResponse !== undefined) {
+    return errorResponse;
+  }
+
+  if (finalResponse !== undefined) {
+    return finalResponse;
+  }
+
+  return {
+    ok: false,
+    content: content.length === 0
+      ? "Provider stream ended before a done or error event."
+      : `Provider stream ended before completion after partial output:\n${content}`,
     model: input.model,
-    provider: input.provider
+    provider: input.provider,
+    errorClass: "incomplete-stream"
   };
 }
 

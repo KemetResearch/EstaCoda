@@ -13,6 +13,7 @@ export type SkillWorkflowStep = {
   description: string;
   toolsets?: ToolsetName[];
   preferredTool?: string;
+  toolCandidates?: string[];
   fallbackTo?: string[];
   successCriteria?: string[];
   outputTarget?: string;
@@ -32,6 +33,7 @@ export type SkillWorkflowPlanStep = {
   description: string;
   preferredToolsets: ToolsetName[];
   preferredTool?: string;
+  toolCandidates?: string[];
   fallbackTo: string[];
   successCriteria: string[];
   outputTarget?: string;
@@ -83,8 +85,12 @@ export type SkillDefinition = {
   platforms?: string[];
   references?: string[];
   metadata?: Record<string, unknown>;
+  intentLabels?: string[];
+  triggerPatterns?: string[];
+  negativePatterns?: string[];
   whenToUse: string[];
   requiredToolsets: ToolsetName[];
+  optionalToolsets?: ToolsetName[];
   requiredEnvironmentVariables?: string[];
   requiredCredentialFiles?: string[];
   configFields?: SkillConfigField[];

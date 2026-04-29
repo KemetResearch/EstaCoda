@@ -88,6 +88,8 @@ export class SkillRegistry {
       const searchable = [
         skill.name,
         skill.description,
+        ...(skill.intentLabels ?? []),
+        ...(skill.triggerPatterns ?? []),
         ...skill.whenToUse,
         ...skill.examples
       ]
@@ -97,7 +99,7 @@ export class SkillRegistry {
       return searchable
         .split(/\s+/)
         .filter((word) => word.length > 3 && !GENERIC_MATCH_WORDS.has(word))
-        .some((word) => normalizedPrompt.includes(word));
+        .some((word) => new RegExp(`(^|\\s)${escapeRegExp(word)}($|\\s)`, "u").test(normalizedPrompt));
     });
   }
 }
@@ -115,4 +117,8 @@ function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSki
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, " ").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

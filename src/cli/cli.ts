@@ -37,6 +37,12 @@ import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
+import {
+  defaultImageApiKeyEnv,
+  defaultImageModel,
+  IMAGE_MODEL_OPTIONS,
+  resolveImageModel
+} from "../contracts/image-generation.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
@@ -878,7 +884,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
 async function image(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "verify") {
+  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "verify" && subcommand !== "models") {
     return {
       handled: true,
       exitCode: 0,
@@ -886,9 +892,10 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "EstaCoda image generation",
         "Hermes-aligned text-to-image stack. In normal use, describe the image and EstaCoda will call image.generate automatically.",
         "  estacoda image status",
+        "  estacoda image models --provider byteplus",
         "  estacoda image verify",
         "  estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY",
-        "  estacoda image setup --provider byteplus --model seedream-4-0-250828 --api-key-env BYTEPLUS_ARK_API_KEY",
+        "  estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY",
         "  estacoda image setup --provider fal --api-key <key>",
         "",
         "Defaults:",
@@ -896,6 +903,15 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "  Model: fal-ai/flux-2/klein/9b",
         "  Cache: ~/.estacoda/image-cache/"
       ].join("\n")
+    };
+  }
+
+  if (subcommand === "models") {
+    const parsed = parseImageArgs(args.slice(1));
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderImageModels(parsed.provider)
     };
   }
 
@@ -971,28 +987,51 @@ function renderImageVerification(verification: ImageGenerationVerification): str
     `Telegram delivery: ${verification.telegramDelivery === "ready" ? "ready (sendPhoto)" : "not configured"}`,
     verification.ok
       ? "Next: ask EstaCoda to generate an image."
-      : `Next: run estacoda image setup --provider ${verification.provider} --model ${verification.model} --api-key-env ${verification.apiKeyEnv}`
-  ].join("\n");
+      : `Next: run estacoda image setup --provider ${verification.provider} --model ${verification.model} --api-key-env ${verification.apiKeyEnv}`,
+    verification.ok || verification.provider !== "byteplus"
+      ? undefined
+      : "Tip: BytePlus model access is version-specific. Run estacoda image models --provider byteplus to choose an enabled Seedream version."
+  ].filter((line) => line !== undefined).join("\n");
+}
+
+function renderImageModels(provider?: ImageGenerationProvider): string {
+  const providers: readonly ImageGenerationProvider[] = provider === undefined ? ["fal", "byteplus"] : [provider];
+  const lines = ["EstaCoda image model options"];
+  for (const current of providers) {
+    lines.push("", `${current}:`);
+    for (const option of IMAGE_MODEL_OPTIONS[current]) {
+      const defaultMarker = option.id === defaultImageModel(current) ? " (default)" : "";
+      lines.push(`  ${option.id}${defaultMarker}`);
+      lines.push(`    ${option.label}: ${option.description}`);
+      lines.push(`    aliases: ${option.aliases.join(", ")}`);
+    }
+  }
+  lines.push("", "Use --model for an exact provider model id, or --model-version for an alias such as seedream-5.");
+  return lines.join("\n");
 }
 
 function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   const key = imageApiKeyEnv(config.imageGen.provider, config);
+  const extra = config.imageGen.provider === "byteplus"
+    ? "Model note: BytePlus Seedream access is version-specific; run estacoda image models --provider byteplus if this model is not enabled."
+    : undefined;
   return [
     "EstaCoda image generation",
     `Provider: ${config.imageGen.provider}`,
     `Model: ${config.imageGen.model}`,
+    extra,
     `Gateway: ${config.imageGen.useGateway ? "yes" : "no"}`,
     `API key: ${key}`,
     `Cache: ~/.estacoda/image-cache/`,
     "Agent tool: image.generate",
     "Telegram delivery: generated images upload as photos when available."
-  ].join("\n");
+  ].filter((line) => line !== undefined).join("\n");
 }
 
 function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   return provider === "byteplus"
-    ? config.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
-    : config.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
+    ? config.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus")
+    : config.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
 }
 
 function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
@@ -1900,6 +1939,12 @@ function parseImageArgs(args: string[]): ImageGenerationSetupInput {
     } else if (arg === "--model") {
       parsed.model = next;
       index += 1;
+    } else if (arg === "--model-version") {
+      const provider = parsed.provider ?? "byteplus";
+      parsed.provider = provider;
+      parsed.modelVersion = next;
+      parsed.model = resolveImageModel(provider, next);
+      index += 1;
     } else if (arg === "--api-key-env") {
       parsed.apiKeyEnv = next;
       index += 1;
@@ -1928,10 +1973,6 @@ function parseImageProvider(value: string | undefined): ImageGenerationProvider 
     return value;
   }
   throw new Error("Expected --provider fal or byteplus");
-}
-
-function defaultImageApiKeyEnv(provider: ImageGenerationProvider): string {
-  return provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY";
 }
 
 function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvider"] {

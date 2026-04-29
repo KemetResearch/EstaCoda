@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
 import type { RegisteredTool } from "../contracts/tool.js";
 
 export type ImageGenerationFetchLike = (url: string, init?: {
@@ -202,7 +203,7 @@ async function submitBytePlusRequest(
   fetcher: ImageGenerationFetchLike
 ): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
   const model = input.model ?? input.imageGen.byteplus?.model ?? input.imageGen.model;
-  const apiKeyEnv = input.imageGen.byteplus?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY";
+  const apiKeyEnv = input.imageGen.byteplus?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus");
   const apiKey = process.env[apiKeyEnv];
   if (apiKey === undefined || apiKey.length === 0) {
     return imageSetupNeeded({
@@ -212,7 +213,7 @@ async function submitBytePlusRequest(
     });
   }
 
-  const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? "https://ark.ap-southeast.bytepluses.com/api/v3").replace(/\/$/, "");
+  const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("byteplus")).replace(/\/$/, "");
   const response = await fetcher(`${baseUrl}/images/generations`, {
     method: "POST",
     headers: {
@@ -240,7 +241,7 @@ async function parseImageResponse(
   if (!response.ok) {
     return {
       ok: false,
-      content: `Image generation request failed: ${response.status} ${response.statusText}\n${raw}`,
+      content: imageGenerationFailureMessage(response.status, response.statusText, raw, provider, model),
       metadata: { provider, model }
     };
   }
@@ -284,9 +285,29 @@ function falImageSize(aspectRatio: ImageAspect): string {
 }
 
 function bytePlusSize(aspectRatio: ImageAspect): string {
-  if (aspectRatio === "landscape") return "1536x1024";
-  if (aspectRatio === "portrait") return "1024x1536";
-  return "1024x1024";
+  if (aspectRatio === "landscape") return "2560x1440";
+  if (aspectRatio === "portrait") return "1440x2560";
+  return "1920x1920";
+}
+
+function imageGenerationFailureMessage(
+  status: number,
+  statusText: string,
+  raw: string,
+  provider: string,
+  model: string
+): string {
+  const parsed = tryJson(raw);
+  const code = parsed?.error?.code;
+  if (provider === "byteplus" && code === "ModelNotOpen") {
+    return [
+      `Image generation request failed: ${status} ${statusText}`,
+      `BytePlus ModelArk says model ${model} is not activated for this account.`,
+      "Activate this model in the Ark Console, or choose another enabled image model with `estacoda image models --provider byteplus` and `estacoda image setup --provider byteplus --model-version seedream-5`.",
+      raw
+    ].join("\n");
+  }
+  return `Image generation request failed: ${status} ${statusText}\n${raw}`;
 }
 
 function normalizeAspectRatio(value: string | undefined): ImageAspect {
@@ -322,17 +343,17 @@ function tryJson(value: string): any {
 function defaultImageGen(): LoadedRuntimeConfig["imageGen"] {
   return {
     provider: "fal",
-    model: "fal-ai/flux-2/klein/9b",
+    model: defaultImageModel("fal"),
     useGateway: false,
     fal: {
-      model: "fal-ai/flux-2/klein/9b",
-      apiKeyEnv: "FAL_KEY",
-      baseUrl: "https://fal.run"
+      model: defaultImageModel("fal"),
+      apiKeyEnv: defaultImageApiKeyEnv("fal"),
+      baseUrl: defaultImageBaseUrl("fal")
     },
     byteplus: {
-      model: "seedream-4-0-250828",
-      apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
-      baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+      model: defaultImageModel("byteplus"),
+      apiKeyEnv: defaultImageApiKeyEnv("byteplus"),
+      baseUrl: defaultImageBaseUrl("byteplus")
     }
   };
 }

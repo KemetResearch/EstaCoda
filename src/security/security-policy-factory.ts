@@ -289,6 +289,27 @@ async function assessWithAuxiliaryProvider(
       };
     }
 
+    const postAssessorHardBlock = hardBlockFor(request);
+    if (postAssessorHardBlock !== undefined) {
+      return {
+        decision: "deny",
+        mode: "adaptive",
+        reason: postAssessorHardBlock.reason,
+        risk: "high",
+        deterministicRule: postAssessorHardBlock.code,
+        assessor: {
+          used: true,
+          decision: parsed.decision,
+          risk: parsed.risk,
+          reason: parsed.reason,
+          confidence: parsed.confidence,
+          provider: execution.response.provider,
+          model: execution.response.model,
+          status: "hard-block-overrode-assessor"
+        }
+      };
+    }
+
     return {
       decision: parsed.decision,
       mode: "adaptive",

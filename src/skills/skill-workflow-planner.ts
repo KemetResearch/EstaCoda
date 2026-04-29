@@ -35,6 +35,7 @@ function compileStep(skill: LoadedSkill | SkillDefinition, step: SkillWorkflowSt
     description: step.description,
     preferredToolsets: preferredToolsets(skill, step),
     preferredTool: step.preferredTool,
+    toolCandidates: step.toolCandidates,
     fallbackTo: step.fallbackTo ?? [],
     successCriteria: step.successCriteria ?? [],
     outputTarget: step.outputTarget,

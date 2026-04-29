@@ -19,6 +19,12 @@ import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { normalizeSecurityApprovalMode } from "../security/security-policy-factory.js";
 import type { SecurityApprovalMode, SecurityAssessorConfig } from "../contracts/security.js";
+import {
+  defaultImageApiKeyEnv,
+  defaultImageBaseUrl,
+  defaultImageModel,
+  resolveImageModel
+} from "../contracts/image-generation.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -359,6 +365,7 @@ export type VoiceSetupInput = {
 export type ImageGenerationSetupInput = {
   provider?: ImageGenerationProvider;
   model?: string;
+  modelVersion?: string;
   apiKeyEnv?: string;
   apiKey?: string;
   baseUrl?: string;
@@ -692,26 +699,23 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
 
 function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
   const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
-  const model = value?.model ??
-    (provider === "byteplus"
-      ? value?.byteplus?.model ?? "seedream-4-0-250828"
-      : value?.fal?.model ?? "fal-ai/flux-2/klein/9b");
+  const model = value?.model ?? value?.[provider]?.model ?? defaultImageModel(provider);
   return {
     ...value,
     provider,
     model,
     useGateway: value?.useGateway ?? value?.use_gateway ?? false,
-    apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY"),
+    apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? defaultImageApiKeyEnv(provider),
     baseUrl: value?.baseUrl ?? value?.base_url,
     fal: {
-      model: value?.fal?.model ?? (provider === "fal" ? model : "fal-ai/flux-2/klein/9b"),
-      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? "FAL_KEY",
-      baseUrl: value?.fal?.baseUrl ?? value?.fal?.base_url ?? "https://fal.run"
+      model: value?.fal?.model ?? (provider === "fal" ? model : defaultImageModel("fal")),
+      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? defaultImageApiKeyEnv("fal"),
+      baseUrl: value?.fal?.baseUrl ?? value?.fal?.base_url ?? defaultImageBaseUrl("fal")
     },
     byteplus: {
-      model: value?.byteplus?.model ?? (provider === "byteplus" ? model : "seedream-4-0-250828"),
-      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? "BYTEPLUS_ARK_API_KEY",
-      baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? "https://ark.ap-southeast.bytepluses.com/api/v3"
+      model: value?.byteplus?.model ?? (provider === "byteplus" ? model : defaultImageModel("byteplus")),
+      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? defaultImageApiKeyEnv("byteplus"),
+      baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? defaultImageBaseUrl("byteplus")
     }
   };
 }
@@ -1100,9 +1104,11 @@ export async function setupImageGenerationConfig(options: {
   const existing = await readConfig(targetPath);
   const previous = normalizeImageGenerationConfig(existing.config.imageGen ?? existing.config.image_gen);
   const provider = options.input.provider ?? previous.provider;
-  const apiKeyEnv = options.input.apiKeyEnv ?? previous[provider]?.apiKeyEnv ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY");
+  const providerExplicit = options.input.provider !== undefined;
+  const apiKeyEnv = options.input.apiKeyEnv ?? previous[provider]?.apiKeyEnv ?? defaultImageApiKeyEnv(provider);
   const envExport = options.input.apiKey === undefined ? undefined : `export ${apiKeyEnv}=${shellQuote(options.input.apiKey)}`;
-  const model = options.input.model ?? previous[provider]?.model ?? previous.model;
+  const requestedModel = options.input.model ?? resolveImageModel(provider, options.input.modelVersion);
+  const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
   const config = mergeConfig(existing.config, {
     imageGen: {

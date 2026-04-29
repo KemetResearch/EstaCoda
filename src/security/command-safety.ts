@@ -7,6 +7,7 @@ export type HardCommandBlockCode =
   | "fork-bomb-or-killall"
   | "secret-read"
   | "pipe-to-interpreter"
+  | "inline-code-destructive"
   | "git-force-push";
 
 export type CommandSafetyAssessment = {
@@ -95,6 +96,13 @@ function detectHardBlock(command: string): { code: HardCommandBlockCode; reason:
     };
   }
 
+  if (matchesInlineCodeDestructive(command)) {
+    return {
+      code: "inline-code-destructive",
+      reason: "command runs inline code that can delete files, execute subprocesses, or bypass shell safety checks"
+    };
+  }
+
   if (matchesGitForcePush(command)) {
     return {
       code: "git-force-push",
@@ -141,15 +149,24 @@ function matchesForkBombOrKillall(command: string): boolean {
 
 function matchesSecretRead(command: string): boolean {
   return /\b(?:cat|less|more|head|tail|grep|sed|awk)\b.*(?:\.env(?:\b|$)|\.ssh\/|id_rsa\b|id_ed25519\b|\.aws\/credentials\b|\.npmrc\b|\.gnupg\/)/iu.test(command) ||
+    /(?:^|[;&|]\s*)(?:env|printenv|set)(?:\s|$)/iu.test(command) ||
     /\bsecurity\s+find-(?:generic-password|internet-password)\b/iu.test(command) ||
     /\bop\s+read\b/iu.test(command) ||
     /\bgh\s+auth\s+token\b/iu.test(command);
 }
 
 function matchesPipeToInterpreter(command: string): boolean {
-  return /\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash|zsh|fish|python|python3|node|ruby|perl)\b/iu.test(command);
+  return /\b(?:curl|wget|fetch)\b[^|;&]*(?:\|\s*|>\s*>\([^)]*\)\s*|\|\s*(?:sudo\s+)?)(?:sudo\s+)?(?:sh|bash|zsh|fish|python|python3|node|bun|ruby|perl|php|deno)\b/iu.test(command) ||
+    /\b(?:sh|bash|zsh|fish|python|python3|node|bun|ruby|perl|php|deno)\b\s*<\s*<\s*\(/iu.test(command);
 }
 
 function matchesGitForcePush(command: string): boolean {
   return /\bgit\s+push\b.*(?:--force|-f|--force-with-lease)\b/iu.test(command);
+}
+
+function matchesInlineCodeDestructive(command: string): boolean {
+  if (!/\b(?:python|python3)\s+-c\b|\b(?:node|bun|deno)\s+-e\b/iu.test(command)) {
+    return false;
+  }
+  return /\b(?:shutil\.rmtree|os\.remove|os\.unlink|subprocess\.|os\.system|child_process|execSync|spawnSync|rmSync|unlinkSync|rmdirSync|Deno\.remove|Bun\.spawn|Bun\.spawnSync)\b/iu.test(command);
 }

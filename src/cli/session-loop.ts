@@ -8,6 +8,7 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
+import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
@@ -516,7 +517,7 @@ async function maybeHandleSetupNeeded(input: {
   const provider = setup.provider === "byteplus" ? "byteplus" : "fal";
   const model = typeof setup.model === "string" && setup.model.length > 0
     ? setup.model
-    : provider === "byteplus" ? "seedream-4-0-250828" : "fal-ai/flux-2/klein/9b";
+    : defaultImageModel(provider);
   const requiredSecret = setup.requiredSecret;
   input.output.write([
     "",

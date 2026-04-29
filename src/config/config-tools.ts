@@ -18,6 +18,7 @@ import {
 } from "./runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
+import { defaultImageApiKeyEnv } from "../contracts/image-generation.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
@@ -489,6 +490,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {
           provider: { type: "string", enum: ["fal", "byteplus"] },
           model: { type: "string" },
+          modelVersion: { type: "string", description: "Friendly model alias such as seedream-5, seedream-4.5, or seedream-4." },
           apiKeyEnv: { type: "string" },
           baseUrl: { type: "string" },
           useGateway: { type: "boolean" },
@@ -504,7 +506,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         let secretPath: string | undefined;
         if (input.apiKey !== undefined && input.apiKey.trim().length > 0) {
           const provider = input.provider ?? "fal";
-          const envName = input.apiKeyEnv ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY");
+          const envName = input.apiKeyEnv ?? defaultImageApiKeyEnv(provider);
           secretPath = (await storeCapabilitySecret({
             homeDir: options.homeDir,
             envName,

@@ -4,12 +4,15 @@
   "description": "Create ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.",
   "version": "0.1.0",
   "category": "media",
+  "intentLabels": ["ascii-video"],
+  "triggerPatterns": ["ascii", "terminal-style animation", "logo animation", "animated logo"],
   "whenToUse": [
     "The user invokes /ascii-video.",
     "The user asks for an ASCII art animation, ASCII video, logo animation, or terminal-style motion piece.",
     "The user wants a generated video artifact based on source imagery, logos, text, or pure generative motion."
   ],
-  "requiredToolsets": ["media", "files", "shell-write", "web", "browser", "research"],
+  "requiredToolsets": ["media", "files", "shell-write"],
+  "optionalToolsets": ["web", "browser", "research"],
   "workflow": [
     {
       "id": "clarify-brief",

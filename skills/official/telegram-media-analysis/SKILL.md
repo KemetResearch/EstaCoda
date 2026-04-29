@@ -3,6 +3,8 @@
   "name": "telegram-media-analysis",
   "description": "Analyze media sent through a channel without asking the user for a local file path.",
   "version": "0.1.0",
+  "intentLabels": ["telegram-media"],
+  "triggerPatterns": ["telegram", "sent.*(image|file|pdf|document|voice note|video)", "uploaded here"],
   "whenToUse": [
     "The user references an image, PDF, audio, video, or document sent through Telegram or another channel.",
     "The user says they sent a file in chat and asks the agent to inspect it."
@@ -53,4 +55,3 @@ Default behavior:
 - Download or reference the media in local storage.
 - Use the best available media/document inspection path.
 - Reply to the same active channel unless the user asks for a different destination.
-

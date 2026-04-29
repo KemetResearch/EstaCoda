@@ -4,13 +4,18 @@ import type {
   LoadedSkill,
   SkillConfigField,
   SkillDefinition,
+  SkillEvaluation,
   SkillPermissionExpectation,
   SkillResourceEntry,
   SkillResourceKind,
   SkillSourceKind,
-  SkillVisibilityRules
+  SkillVisibilityRules,
+  SkillWorkflowStep
 } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
+
+const MAX_SKILL_SCAN_DEPTH = 8;
+const MAX_SKILL_FILES = 500;
 
 export type SkillLoadResult = {
   skills: LoadedSkill[];
@@ -20,6 +25,8 @@ export type SkillLoadResult = {
 export type SkillLoadOptions = {
   sourceKind?: SkillSourceKind;
   sourceRoot?: string;
+  maxDepth?: number;
+  maxFiles?: number;
 };
 
 export type SkillLoadError = {
@@ -30,7 +37,22 @@ export type SkillLoadError = {
 export async function loadSkillsFromDirectory(root: string, options: SkillLoadOptions = {}): Promise<SkillLoadResult> {
   const skills: LoadedSkill[] = [];
   const errors: SkillLoadError[] = [];
-  const skillFiles = await findSkillFiles(root);
+  let skillFiles: string[];
+
+  try {
+    skillFiles = await findSkillFiles(root, {
+      maxDepth: options.maxDepth ?? MAX_SKILL_SCAN_DEPTH,
+      maxFiles: options.maxFiles ?? MAX_SKILL_FILES
+    });
+  } catch (error) {
+    return {
+      skills,
+      errors: [{
+        path: root,
+        message: error instanceof Error ? error.message : String(error)
+      }]
+    };
+  }
 
   for (const path of skillFiles) {
     try {
@@ -80,20 +102,38 @@ export async function hydrateSkillResources(skill: LoadedSkill): Promise<LoadedS
   };
 }
 
-async function findSkillFiles(root: string): Promise<string[]> {
+async function findSkillFiles(
+  root: string,
+  options: { maxDepth: number; maxFiles: number },
+  depth = 0,
+  files: string[] = []
+): Promise<string[]> {
+  if (depth > options.maxDepth) {
+    throw new Error(`Skill directory scan exceeded max depth ${options.maxDepth}: ${root}`);
+  }
+  if (files.length >= options.maxFiles) {
+    throw new Error(`Skill directory scan exceeded max file count ${options.maxFiles}`);
+  }
+
   const entries = await readdir(root, { withFileTypes: true });
-  const files: string[] = [];
 
   for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
     const path = join(root, entry.name);
 
     if (entry.isDirectory()) {
-      files.push(...(await findSkillFiles(path)));
+      await findSkillFiles(path, options, depth + 1, files);
       continue;
     }
 
     if (entry.isFile() && entry.name === "SKILL.md") {
       files.push(path);
+      if (files.length >= options.maxFiles) {
+        throw new Error(`Skill directory scan exceeded max file count ${options.maxFiles}`);
+      }
     }
   }
 
@@ -114,6 +154,10 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     required_credential_files?: string[];
     permission_expectations?: string[];
     additional_files?: string[];
+    intent_labels?: string[];
+    trigger_patterns?: string[];
+    negative_patterns?: string[];
+    optional_toolsets?: string[];
     visibility?: Record<string, unknown>;
   };
   const inferredVisibility = mergeVisibilityRules(
@@ -136,29 +180,86 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
       ...stringArrayOrEmpty(definition.additional_files)
     ],
     metadata: definition.metadata,
+    intentLabels: stringArrayOrEmpty(definition.intentLabels ?? definition.intent_labels),
+    triggerPatterns: stringArrayOrEmpty(definition.triggerPatterns ?? definition.trigger_patterns),
+    negativePatterns: stringArrayOrEmpty(definition.negativePatterns ?? definition.negative_patterns),
     whenToUse: stringArrayOrDefault(definition.whenToUse ?? definition.when_to_use, [definition.description]),
     requiredToolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]),
+    optionalToolsets: stringArrayOrEmpty(definition.optionalToolsets ?? definition.optional_toolsets),
     requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
     requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
     configFields: inferredConfigFields,
     visibility: inferredVisibility,
     inputs: definition.inputs,
     outputs: definition.outputs,
-    workflow: Array.isArray(definition.workflow) && definition.workflow.length > 0
-      ? definition.workflow
-      : [
-          {
-            id: "run",
-            description: definition.description,
-            toolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"])
-          }
-        ],
+    workflow: normalizeWorkflow(definition.workflow, {
+      id: "run",
+      description: definition.description,
+      toolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"])
+    }),
     permissionExpectations: skillPermissionExpectations(definition.permissionExpectations ?? definition.permission_expectations),
     examples: stringArrayOrDefault(definition.examples, []),
-    evaluations: Array.isArray(definition.evaluations) ? definition.evaluations : []
+    evaluations: normalizeEvaluations(definition.evaluations)
   };
 
   return normalized;
+}
+
+function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWorkflowStep[] {
+  if (value === undefined) {
+    return [fallback];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("Skill field workflow must be an array of objects");
+  }
+
+  if (value.length === 0) {
+    return [fallback];
+  }
+
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Skill workflow[${index}] must be an object`);
+    }
+    assertString(entry.id, `workflow[${index}].id`);
+    assertString(entry.description, `workflow[${index}].description`);
+
+    return {
+      id: entry.id,
+      description: entry.description,
+      toolsets: stringArrayOrEmpty(entry.toolsets) as ToolsetName[],
+      preferredTool: firstNonEmptyString(entry.preferredTool, entry.preferred_tool),
+      toolCandidates: stringArrayOrEmpty(entry.toolCandidates ?? entry.tool_candidates),
+      fallbackTo: stringArrayOrEmpty(entry.fallbackTo ?? entry.fallback_to),
+      successCriteria: stringArrayOrEmpty(entry.successCriteria ?? entry.success_criteria),
+      outputTarget: firstNonEmptyString(entry.outputTarget, entry.output_target)
+    };
+  });
+}
+
+function normalizeEvaluations(value: unknown): SkillEvaluation[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("Skill field evaluations must be an array of objects");
+  }
+
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Skill evaluations[${index}] must be an object`);
+    }
+    assertString(entry.input, `evaluations[${index}].input`);
+
+    return {
+      input: entry.input,
+      shouldUseToolsets: stringArrayOrEmpty(entry.shouldUseToolsets ?? entry.should_use_toolsets) as ToolsetName[],
+      shouldNotAskUserFirst: entry.shouldNotAskUserFirst === true || entry.should_not_ask_user_first === true,
+      expectedOutcome: firstNonEmptyString(entry.expectedOutcome, entry.expected_outcome)
+    };
+  });
 }
 
 function assertString(value: unknown, field: string): asserts value is string {
@@ -173,6 +274,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  return values.find(isNonEmptyString);
 }
 
 function stringArrayOrDefault(value: unknown, fallback: string[]): string[] {
@@ -409,6 +514,10 @@ function collectIndentedArray(lines: string[], startIndex: number, parentIndent:
 
     if (indent <= parentIndent || !line.startsWith("- ")) {
       break;
+    }
+
+    if (/^-\s*[A-Za-z0-9_-]+:(?:\s|$)/u.test(line)) {
+      throw new Error("YAML object arrays are not supported in skill frontmatter yet; use JSON frontmatter for workflow/evaluations.");
     }
 
     values.push(stripYamlQuotes(line.slice(2).trim()));

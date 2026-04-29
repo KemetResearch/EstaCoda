@@ -32,6 +32,7 @@ import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-re
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
+import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import {
   assembleProviderContinuationPrompt,
@@ -94,6 +95,7 @@ export type AgentLoopOptions = {
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
   skillLearningManager?: SkillLearningManager;
+  skillEvolutionStore?: SkillEvolutionStore;
   ui?: {
     language: UiLanguage;
     flavor: UiFlavor;
@@ -159,6 +161,7 @@ export class AgentLoop {
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;
+  readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
   readonly #ui: AgentLoopOptions["ui"];
   readonly #agentProfile: AgentLoopOptions["agentProfile"];
   readonly #budgets: AgentLoopBudgets;
@@ -187,6 +190,7 @@ export class AgentLoop {
     this.#skillsIndex = options.skillsIndex ?? [];
     this.#skillConfig = options.skillConfig ?? {};
     this.#skillLearningManager = options.skillLearningManager;
+    this.#skillEvolutionStore = options.skillEvolutionStore;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
     this.#budgets = {
@@ -453,10 +457,17 @@ export class AgentLoop {
       await this.#recordWorkflowPlan(compileSkillWorkflowPlan(selectedSkill));
     }
 
+    const deterministicNativeTools = await this.#executeDeterministicNativeTools({
+      intent,
+      text: effectiveText,
+      trustedWorkspace,
+      signal: input.signal,
+      onEvent: input.onEvent
+    });
     const useDeterministicSkillWorkflow = this.#providerExecutor === undefined ||
       this.#model === undefined ||
       this.#model.provider === "unconfigured";
-    const toolExecutions = useDeterministicSkillWorkflow
+    const skillToolExecutions = useDeterministicSkillWorkflow
       ? await this.#executeSkillWorkflow({
       selectedSkill,
       intent,
@@ -466,9 +477,13 @@ export class AgentLoop {
       onEvent: input.onEvent
       })
       : [];
+    const toolExecutions = [
+      ...deterministicNativeTools.executions,
+      ...skillToolExecutions
+    ];
     const recordedArtifactIds = new Set<string>();
     const artifacts = await this.#recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
-    const toolPlans: ToolCallPlan[] = [];
+    const toolPlans: ToolCallPlan[] = [...deterministicNativeTools.plans];
 
     const fallbackResponse = buildFallbackResponse({
       label: this.#responseLabel,
@@ -483,28 +498,35 @@ export class AgentLoop {
       projectContext: this.#projectContext,
       memoryContext: this.#memoryContext
     });
+    const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
-    const providerLoop = await this.#runProviderLoop({
-      userText: effectiveText,
-      routedText,
-      selectedSkill,
-      selectedSkillInstructions,
-      selectedSkillResources,
-      selectedSkillSetup,
-      intent,
-      securityDecision,
-      toolExecutions,
-      context,
-      projectContext: this.#projectContext,
-      attachments,
-      memoryContext: this.#memoryContext,
-      providerTools,
-      fallbackText: fallbackResponse.text,
-      onEvent: input.onEvent,
-      toolPlans,
-      trustedWorkspace,
-      signal: input.signal
-    });
+    const providerLoop = deterministicImageGenerationRan
+      ? {
+          providerExecution: undefined,
+          toolExecutions: [],
+          iterations: 0
+        }
+      : await this.#runProviderLoop({
+          userText: effectiveText,
+          routedText,
+          selectedSkill,
+          selectedSkillInstructions,
+          selectedSkillResources,
+          selectedSkillSetup,
+          intent,
+          securityDecision,
+          toolExecutions,
+          context,
+          projectContext: this.#projectContext,
+          attachments,
+          memoryContext: this.#memoryContext,
+          providerTools,
+          fallbackText: fallbackResponse.text,
+          onEvent: input.onEvent,
+          toolPlans,
+          trustedWorkspace,
+          signal: input.signal
+        });
     const effectiveProviderExecution = providerLoop.providerExecution;
 
     toolExecutions.push(...providerLoop.toolExecutions);
@@ -550,6 +572,7 @@ export class AgentLoop {
     }
     const skillOutcomes = await this.#recordSkillOutcomes({
       selectedSkill,
+      userText: effectiveText,
       toolExecutions,
       toolPlans
     });
@@ -785,7 +808,7 @@ export class AgentLoop {
         stepDescription: input.step.description,
         previousResults: input.previousResults.map((result) => truncate(result, 500))
       };
-      const preferredTool = input.step.preferredTool ?? preferredToolForStep(input.step, toolset);
+      const preferredTool = firstAvailablePreferredTool(input.step, toolset, input.usedTools);
       let emittedStart = false;
       if (preferredTool !== undefined && !input.usedTools.has(preferredTool)) {
         await emit(input.onEvent, {
@@ -919,6 +942,68 @@ export class AgentLoop {
     return artifacts;
   }
 
+  async #executeDeterministicNativeTools(input: {
+    intent: IntentRoute;
+    text: string;
+    trustedWorkspace: boolean;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
+    if (
+      !input.intent.labels.includes("media-generation") ||
+      input.intent.suggestedSkills.some((skill) => skill.name === "ascii-video")
+    ) {
+      return { executions: [], plans: [] };
+    }
+
+    const tool = this.#toolExecutor.getToolDefinition("image.generate");
+    if (tool === undefined) {
+      return { executions: [], plans: [] };
+    }
+
+    const plan: ToolCallPlan = {
+      id: `native-image-${Date.now()}`,
+      tool: "image.generate",
+      input: {
+        prompt: input.text,
+        aspectRatio: inferImageAspectRatio(input.text)
+      },
+      source: "internal",
+      status: "planned"
+    };
+    await this.#recordToolPlan(plan);
+    await emit(input.onEvent, {
+      kind: "tool-start",
+      tool: plan.tool
+    });
+
+    const execution = await this.#toolExecutor.executeTool({
+      tool: plan.tool,
+      input: plan.input,
+      trustedWorkspace: input.trustedWorkspace,
+      sessionId: this.#sessionId,
+      signal: input.signal
+    });
+
+    if (execution === undefined) {
+      plan.status = "unavailable";
+      plan.error = `Tool is unavailable: ${plan.tool}`;
+      await this.#recordToolPlan(plan);
+      return { executions: [], plans: [plan] };
+    }
+
+    plan.status = execution.decision === "allow" && execution.result?.ok !== false
+      ? "executed"
+      : execution.decision === "allow"
+        ? "invalid"
+        : "blocked";
+    plan.result = execution.result;
+    plan.error = execution.result?.ok === false ? execution.result.content : undefined;
+    await this.#recordToolPlan(plan);
+
+    return { executions: [execution], plans: [plan] };
+  }
+
   async #executeProviderToolPlans(input: {
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
@@ -992,51 +1077,51 @@ export class AgentLoop {
   }): Promise<ToolExecutionRecord | undefined> {
     const plan = input.plan;
 
-      await emit(input.onEvent, {
-        kind: "tool-start",
-        tool: plan.tool
-      });
+    await emit(input.onEvent, {
+      kind: "tool-start",
+      tool: plan.tool
+    });
 
-      const execution = await this.#toolExecutor.executeTool({
-        tool: plan.tool,
-        input: plan.input,
-        trustedWorkspace: input.trustedWorkspace,
-        sessionId: this.#sessionId,
-        signal: input.signal
-      });
+    const execution = await this.#toolExecutor.executeTool({
+      tool: plan.tool,
+      input: plan.input,
+      trustedWorkspace: input.trustedWorkspace,
+      sessionId: this.#sessionId,
+      signal: input.signal
+    });
 
-      if (execution === undefined) {
-        plan.status = "unavailable";
-        plan.error = `Tool is unavailable: ${plan.tool}`;
-        await this.#recordToolPlan(plan);
-        return undefined;
-      }
-
-      plan.status = execution.decision === "allow" ? "executed" : "blocked";
-      plan.result = execution.result;
-      if (execution.decision !== "allow") {
-        plan.error = `security decision: ${execution.decision}`;
-      }
+    if (execution === undefined) {
+      plan.status = "unavailable";
+      plan.error = `Tool is unavailable: ${plan.tool}`;
       await this.#recordToolPlan(plan);
-      await emit(input.onEvent, {
-        kind: "tool-result",
-        tool: execution.tool.name,
-        decision: execution.decision,
-        riskClass: execution.riskClass,
-        ok: execution.result?.ok,
-        ...toolResultStats(execution)
-      });
+      return undefined;
+    }
 
-      return execution;
+    plan.status = execution.decision === "allow" ? "executed" : "blocked";
+    plan.result = execution.result;
+    if (execution.decision !== "allow") {
+      plan.error = `security decision: ${execution.decision}`;
+    }
+    await this.#recordToolPlan(plan);
+    await emit(input.onEvent, {
+      kind: "tool-result",
+      tool: execution.tool.name,
+      decision: execution.decision,
+      riskClass: execution.riskClass,
+      ok: execution.result?.ok,
+      ...toolResultStats(execution)
+    });
+
+    return execution;
   }
 
   async #recordSkillOutcomes(input: {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    userText: string;
     toolExecutions: ToolExecutionRecord[];
     toolPlans: ToolCallPlan[];
   }): Promise<SkillOutcome[]> {
     if (
-      this.#memoryProvider === undefined ||
       input.selectedSkill === undefined ||
       (input.toolExecutions.length === 0 && input.toolPlans.length === 0)
     ) {
@@ -1074,16 +1159,27 @@ export class AgentLoop {
       }
     };
 
-    await this.#memoryProvider.recordSkillOutcome(outcome);
-    this.#trajectoryRecorder.record("memory-write", {
-      provider: this.#memoryProvider.id,
-      outcome
-    });
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "memory-write",
-      provider: this.#memoryProvider.id,
-      outcome
-    });
+    if (this.#memoryProvider !== undefined) {
+      await this.#memoryProvider.recordSkillOutcome(outcome);
+      this.#trajectoryRecorder.record("memory-write", {
+        provider: this.#memoryProvider.id,
+        outcome
+      });
+      await this.#sessionDb.appendEvent(this.#sessionId, {
+        kind: "memory-write",
+        provider: this.#memoryProvider.id,
+        outcome
+      });
+    }
+
+    await this.#skillEvolutionStore?.recordSkillOutcome({
+      skill: input.selectedSkill,
+      outcome,
+      sessionId: this.#sessionId,
+      promptSummary: truncate(input.userText, 240),
+      selectedWorkflowStep: input.selectedSkill.workflow[0]?.id,
+      toolExecutions: input.toolExecutions
+    }).catch(() => undefined);
 
     return [outcome];
   }
@@ -1689,6 +1785,20 @@ function preferredToolForStep(
   return undefined;
 }
 
+function firstAvailablePreferredTool(
+  step: SkillWorkflowStep | SkillWorkflowPlanStep,
+  toolset: ToolsetName,
+  usedTools: Set<string>
+): string | undefined {
+  const candidates = [
+    step.preferredTool,
+    ...("toolCandidates" in step ? step.toolCandidates ?? [] : []),
+    preferredToolForStep(step, toolset)
+  ].filter((tool): tool is string => tool !== undefined && !usedTools.has(tool));
+
+  return candidates[0];
+}
+
 function nextFallbackIndex(
   plan: SkillWorkflowPlan,
   step: SkillWorkflowPlanStep,
@@ -1706,6 +1816,17 @@ function nextFallbackIndex(
 
 function extractFirstUrl(text: string): string | undefined {
   return /https?:\/\/[^\s<>"')]+/iu.exec(text)?.[0];
+}
+
+function inferImageAspectRatio(text: string): string {
+  const normalized = text.toLowerCase();
+  if (/\b(portrait|vertical|phone wallpaper|9:16|tall)\b/iu.test(normalized)) {
+    return "portrait";
+  }
+  if (/\b(landscape|wide|widescreen|16:9|banner|cinematic)\b/iu.test(normalized)) {
+    return "landscape";
+  }
+  return "square";
 }
 
 function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined) {

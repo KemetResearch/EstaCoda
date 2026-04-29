@@ -1,7 +1,8 @@
-import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile } from "./skill-loader.js";
 import type { SkillRegistry } from "./skill-registry.js";
 
@@ -10,6 +11,7 @@ export type SkillToolsOptions = {
   visibleRegistry?: SkillRegistry;
   personalSkillsRoot: string;
   projectSkillsRoot?: string;
+  skillEvolutionStore?: SkillEvolutionStore;
 };
 
 export function createSkillTools(options: SkillToolsOptions): readonly RegisteredTool[] {
@@ -112,6 +114,456 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       }
     },
     {
+      name: "skill.eval",
+      description: "Run lightweight skill eval gates for routing, workflow tool expectations, and degraded behavior metadata.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" }
+        },
+        required: ["name"]
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "running skill evals",
+      maxResultSizeChars: 12_000,
+      isAvailable: () => true,
+      run: async (input: { name?: string }) => {
+        const skill = getSkill(options.registry, input.name);
+        if (!skill.ok) {
+          return skill;
+        }
+        const result = await runSkillEvalGate(skill.skill);
+        if (options.skillEvolutionStore !== undefined) {
+          await recordSkillEvalRuns(options.skillEvolutionStore, skill.skill.name, result);
+        }
+        return {
+          ok: result.status !== "failed",
+          content: JSON.stringify(result, null, 2),
+          metadata: result
+        };
+      }
+    },
+    {
+      name: "skill.usage",
+      description: "Inspect per-skill usage, success/failure, patch, rollback, and lifecycle counters.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" }
+        }
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "inspecting skill usage",
+      maxResultSizeChars: 12_000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { name?: string }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill usage store is not configured.");
+        }
+        const usage = isNonEmptyString(input.name)
+          ? await options.skillEvolutionStore.getUsage(input.name)
+          : await options.skillEvolutionStore.usage();
+        return {
+          ok: true,
+          content: JSON.stringify(usage ?? null, null, 2),
+          metadata: {
+            usage
+          }
+        };
+      }
+    },
+    {
+      name: "skill.observe",
+      description: "Record an append-only skill learning observation without mutating SKILL.md.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          type: { type: "string" },
+          lesson: { type: "string" },
+          promptSummary: { type: "string" },
+          selectedWorkflowStep: { type: "string" },
+          toolsAttempted: { type: "array", items: { type: "string" } },
+          outcome: { type: "string" },
+          candidateImprovement: { type: "string" },
+          sourceTrust: { type: "string" },
+          mayPromoteAutomatically: { type: "boolean" },
+          requiresHumanApproval: { type: "boolean" }
+        },
+        required: ["name", "type", "lesson"]
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "files", "research"],
+      progressLabel: "recording skill observation",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: {
+        name?: string;
+        type?: "success" | "failure" | "blocked" | "partial" | "note";
+        lesson?: string;
+        promptSummary?: string;
+        selectedWorkflowStep?: string;
+        toolsAttempted?: string[];
+        outcome?: "succeeded" | "failed" | "blocked" | "partial";
+        candidateImprovement?: string;
+        sourceTrust?: SkillSourceTrust;
+        mayPromoteAutomatically?: boolean;
+        requiresHumanApproval?: boolean;
+      }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        if (!isNonEmptyString(input.name) || !isNonEmptyString(input.type) || !isNonEmptyString(input.lesson)) {
+          return errorResult("skill.observe requires name, type, and lesson");
+        }
+        const skill = options.registry.get(input.name);
+        const observation = await options.skillEvolutionStore.appendObservation({
+          skillName: input.name,
+          source: skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined,
+          type: input.type,
+          lesson: input.lesson,
+          promptSummary: input.promptSummary,
+          selectedWorkflowStep: input.selectedWorkflowStep,
+          toolsAttempted: input.toolsAttempted,
+          outcome: input.outcome,
+          candidateImprovement: input.candidateImprovement,
+          sourceTrust: normalizeSourceTrust(input.sourceTrust),
+          mayPromoteAutomatically: input.mayPromoteAutomatically,
+          requiresHumanApproval: input.requiresHumanApproval
+        });
+        return {
+          ok: true,
+          content: `Recorded skill observation ${observation.id} for ${observation.skillName}.`,
+          metadata: observation
+        };
+      }
+    },
+    {
+      name: "skill.propose_patch",
+      description: "Record a candidate skill improvement as a proposed patch without mutating SKILL.md.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          reason: { type: "string" },
+          confidence: { type: "number" },
+          observationIds: { type: "array", items: { type: "string" } },
+          successes: { type: "number" },
+          failures: { type: "number" },
+          sourceTrust: { type: "string" },
+          mayPromoteAutomatically: { type: "boolean" },
+          requiresHumanApproval: { type: "boolean" },
+          patch: { type: "object" }
+        },
+        required: ["name", "reason", "patch"]
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "files", "research"],
+      progressLabel: "proposing skill patch",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: {
+        name?: string;
+        reason?: string;
+        confidence?: number;
+        observationIds?: string[];
+        successes?: number;
+        failures?: number;
+        sourceTrust?: SkillSourceTrust;
+        mayPromoteAutomatically?: boolean;
+        requiresHumanApproval?: boolean;
+        patch?: SkillPatchOperation;
+      }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        if (!isNonEmptyString(input.name) || !isNonEmptyString(input.reason) || input.patch === undefined) {
+          return errorResult("skill.propose_patch requires name, reason, and patch");
+        }
+        const skill = options.registry.get(input.name);
+        const proposal = await options.skillEvolutionStore.proposePatch({
+          skillName: input.name,
+          source: skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined,
+          reason: input.reason,
+          confidence: input.confidence,
+          observationIds: input.observationIds,
+          successes: input.successes,
+          failures: input.failures,
+          sourceTrust: normalizeSourceTrust(input.sourceTrust),
+          mayPromoteAutomatically: input.mayPromoteAutomatically,
+          requiresHumanApproval: input.requiresHumanApproval,
+          patch: input.patch
+        });
+        return {
+          ok: true,
+          content: `Proposed skill patch ${proposal.id} for ${proposal.skillName}.`,
+          metadata: proposal
+        };
+      }
+    },
+    {
+      name: "skill.list_proposals",
+      description: "List proposed skill patches from the append-only evolution overlay.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          status: { type: "string" }
+        }
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "listing skill proposals",
+      maxResultSizeChars: 12_000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { name?: string; status?: "proposed" | "promoted" | "rejected" }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposals = await options.skillEvolutionStore.listProposals({
+          skillName: input.name,
+          status: input.status
+        });
+        return {
+          ok: true,
+          content: proposals.length === 0 ? "No skill patch proposals found." : JSON.stringify(proposals, null, 2),
+          metadata: {
+            proposals
+          }
+        };
+      }
+    },
+    {
+      name: "skill.review_proposals",
+      description: "Review proposed skill patches with risk, trust, evidence, diff, eval, and recommended action.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          status: { type: "string" }
+        }
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "reviewing skill proposals",
+      maxResultSizeChars: 16_000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { name?: string; status?: "proposed" | "promoted" | "rejected" }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposals = await options.skillEvolutionStore.listProposals({
+          skillName: input.name,
+          status: input.status ?? "proposed"
+        });
+        const reviews = [];
+        for (const proposal of proposals) {
+          reviews.push(await reviewSkillProposal(options, proposal));
+        }
+        return {
+          ok: true,
+          content: reviews.length === 0 ? "No skill patch proposals found for review." : JSON.stringify(reviews, null, 2),
+          metadata: {
+            reviews
+          }
+        };
+      }
+    },
+    {
+      name: "skill.review_proposal",
+      description: "Review one proposed skill patch with risk, trust, evidence, diff, eval, and recommended action.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          proposal_id: { type: "string" },
+          proposalId: { type: "string" }
+        }
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "reviewing skill proposal",
+      maxResultSizeChars: 12_000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { proposal_id?: string; proposalId?: string }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposalId = firstNonEmptyString(input.proposal_id, input.proposalId);
+        if (!isNonEmptyString(proposalId)) {
+          return errorResult("skill.review_proposal requires proposal_id");
+        }
+        const proposal = await options.skillEvolutionStore.findProposal(proposalId);
+        if (proposal === undefined) {
+          return errorResult(`Skill patch proposal not found: ${proposalId}`);
+        }
+        const review = await reviewSkillProposal(options, proposal);
+        return {
+          ok: true,
+          content: JSON.stringify(review, null, 2),
+          metadata: review
+        };
+      }
+    },
+    {
+      name: "skill.approve_patch",
+      description: "Mark a proposed skill patch as approved for later promotion.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          proposal_id: { type: "string" },
+          proposalId: { type: "string" },
+          approvedBy: { type: "string" }
+        }
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "research"],
+      progressLabel: "approving skill patch",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { proposal_id?: string; proposalId?: string; approvedBy?: string }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposalId = firstNonEmptyString(input.proposal_id, input.proposalId);
+        if (!isNonEmptyString(proposalId)) {
+          return errorResult("skill.approve_patch requires proposal_id");
+        }
+        const proposal = await options.skillEvolutionStore.approveProposal(proposalId, input.approvedBy ?? "user");
+        if (proposal === undefined) {
+          return errorResult(`Skill patch proposal not found: ${proposalId}`);
+        }
+        return {
+          ok: true,
+          content: `Approved skill patch ${proposal.id}.`,
+          metadata: proposal
+        };
+      }
+    },
+    {
+      name: "skill.reject_patch",
+      description: "Reject a proposed skill patch without mutating SKILL.md.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          proposal_id: { type: "string" },
+          proposalId: { type: "string" }
+        }
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "research"],
+      progressLabel: "rejecting skill patch",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { proposal_id?: string; proposalId?: string }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposalId = firstNonEmptyString(input.proposal_id, input.proposalId);
+        if (!isNonEmptyString(proposalId)) {
+          return errorResult("skill.reject_patch requires proposal_id");
+        }
+        const proposal = await options.skillEvolutionStore.rejectProposal(proposalId);
+        if (proposal === undefined) {
+          return errorResult(`Skill patch proposal not found: ${proposalId}`);
+        }
+        return {
+          ok: true,
+          content: `Rejected skill patch ${proposal.id}.`,
+          metadata: proposal
+        };
+      }
+    },
+    {
+      name: "skill.promote_patch",
+      description: "Promote a proposed patch into a local personal skill after snapshot and schema/frontmatter validation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          proposal_id: { type: "string" },
+          proposalId: { type: "string" }
+        },
+        required: ["proposal_id"]
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "files", "coding"],
+      progressLabel: "promoting skill patch",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.skillEvolutionStore !== undefined,
+      run: async (input: { proposal_id?: string; proposalId?: string }) => {
+        if (options.skillEvolutionStore === undefined) {
+          return errorResult("Skill evolution store is not configured.");
+        }
+        const proposalId = firstNonEmptyString(input.proposal_id, input.proposalId);
+        if (!isNonEmptyString(proposalId)) {
+          return errorResult("skill.promote_patch requires proposal_id");
+        }
+        const proposal = await options.skillEvolutionStore.findProposal(proposalId);
+        if (proposal === undefined) {
+          return errorResult(`Skill patch proposal not found: ${proposalId}`);
+        }
+        if (proposal.status !== "proposed") {
+          return errorResult(`Skill patch proposal ${proposalId} is ${proposal.status}, not proposed.`);
+        }
+        const proposalObservations = await options.skillEvolutionStore.listObservations({
+          skillName: proposal.skillName,
+          ids: proposal.evidence.observations
+        });
+        const riskLevel = classifyPatchRisk(proposal.patch);
+        const trustGate = evaluateProposalTrust(proposal, proposalObservations, riskLevel);
+        if (!trustGate.ok) {
+          return errorResult(trustGate.reason);
+        }
+        const target = requirePersonalSkill(options, proposal.skillName);
+        if (!isPersonalSkillTarget(target)) {
+          return errorResult(`Skill patch proposal ${proposalId} targets ${proposal.skillName}, but only local personal skills can be promoted directly.`);
+        }
+        const current = await readFile(target.skillPath, "utf8");
+        const currentSkill = options.registry.get(proposal.skillName);
+        const beforeEvalGate = currentSkill === undefined ? undefined : await runSkillEvalGate(currentSkill);
+        const next = applySkillPatch(current, proposal.patch);
+        const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, next, {
+          sourceKind: "personal",
+          sourceRoot: options.personalSkillsRoot
+        }));
+        if (loaded.name !== proposal.skillName) {
+          return errorResult(`Promoted patch changed skill name from ${proposal.skillName} to ${loaded.name}`);
+        }
+        const evalGate = await runSkillEvalGate(loaded);
+        await recordSkillEvalRuns(options.skillEvolutionStore, loaded.name, evalGate);
+        if (evalGate.status === "failed") {
+          return errorResult(`Skill patch proposal ${proposal.id} failed eval gate: ${evalGate.failures.join("; ")}`);
+        }
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, proposal.skillName);
+        await writeFile(target.skillPath, next, "utf8");
+        options.registry.register(loaded);
+        const promotion = await options.skillEvolutionStore.recordPromotion({
+          proposal,
+          skillName: proposal.skillName,
+          snapshotPath,
+          fromVersion: currentSkill?.version,
+          toVersion: loaded.version,
+          diffSummary: summarizePatchOperation(proposal.patch),
+          riskLevel,
+          evalDelta: compareEvalGates(beforeEvalGate, evalGate),
+          checks: {
+            evals: evalGate.status
+          }
+        });
+        return {
+          ok: true,
+          content: `Promoted skill patch ${proposal.id} into ${proposal.skillName}. Evals: ${evalGate.status}; smoke validation is recorded as not-run for this minimal gate.`,
+          metadata: {
+            promotion,
+            evalGate,
+            snapshotPath,
+            skill: toSkillMetadata(loaded)
+          }
+        };
+      }
+    },
+    {
       name: "skill.create",
       description: "Create a personal skill from full SKILL.md content or from metadata and instructions.",
       inputSchema: {
@@ -166,6 +618,11 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         await mkdir(skillDir, { recursive: true });
         await writeFile(skillPath, content, "utf8");
         options.registry.register(loaded);
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: loaded.name,
+          source: loaded.sourceKind,
+          kind: "created"
+        });
 
         return {
           ok: true,
@@ -184,7 +641,9 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           old_string: { type: "string" },
           new_string: { type: "string" },
           oldString: { type: "string" },
-          newString: { type: "string" }
+          newString: { type: "string" },
+          replace_all: { type: "boolean" },
+          replaceAll: { type: "boolean" }
         },
         required: ["name", "old_string", "new_string"]
       },
@@ -199,6 +658,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         new_string?: string;
         oldString?: string;
         newString?: string;
+        replace_all?: boolean;
+        replaceAll?: boolean;
       }) => {
         const oldString = firstNonEmptyString(input.old_string, input.oldString);
         const newString = firstDefinedString(input.new_string, input.newString);
@@ -212,18 +673,35 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         }
 
         const current = await readFile(target.skillPath, "utf8");
-        if (!current.includes(oldString)) {
+        const occurrences = countOccurrences(current, oldString);
+        if (occurrences === 0) {
           return errorResult(`skill.patch could not find target text in ${target.skillPath}`);
         }
+        const replaceAll = input.replace_all === true || input.replaceAll === true;
+        if (occurrences > 1 && !replaceAll) {
+          return errorResult(`skill.patch matched ${occurrences} occurrences. Pass replace_all=true to patch all occurrences, or use a more specific old_string.`);
+        }
 
-        const next = current.replace(oldString, newString);
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
+        const next = replaceAll
+          ? current.split(oldString).join(newString)
+          : current.replace(oldString, newString);
         await writeFile(target.skillPath, next, "utf8");
         const loaded = await reloadPersonalSkill(options, target.skillPath);
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: loaded.name,
+          source: loaded.sourceKind,
+          kind: "patched"
+        });
 
         return {
           ok: true,
           content: `Patched skill ${loaded.name} at ${target.skillPath}.`,
-          metadata: toSkillMetadata(loaded)
+          metadata: {
+            ...toSkillMetadata(loaded),
+            snapshotPath,
+            replaced: occurrences
+          }
         };
       }
     },
@@ -260,13 +738,22 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (loaded.name !== input.name) {
           return errorResult(`skill.edit content name mismatch: expected ${input.name}, found ${loaded.name}`);
         }
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
         await writeFile(target.skillPath, input.content, "utf8");
         options.registry.register(loaded);
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: loaded.name,
+          source: loaded.sourceKind,
+          kind: "edited"
+        });
 
         return {
           ok: true,
           content: `Edited skill ${loaded.name} at ${target.skillPath}.`,
-          metadata: toSkillMetadata(loaded)
+          metadata: {
+            ...toSkillMetadata(loaded),
+            snapshotPath
+          }
         };
       }
     },
@@ -295,8 +782,14 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return target;
         }
 
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
         await rm(target.skillDir, { recursive: true, force: true });
         options.registry.unregister(input.name);
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: input.name,
+          source: "personal",
+          kind: "deleted"
+        });
 
         return {
           ok: true,
@@ -304,7 +797,65 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           metadata: {
             name: input.name,
             deleted: true,
-            path: target.skillDir
+            path: target.skillDir,
+            snapshotPath
+          }
+        };
+      }
+    },
+    {
+      name: "skill.rollback",
+      description: "Restore a local personal skill from a versioned snapshot created before an edit, patch, or delete.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          snapshot_path: { type: "string" },
+          snapshotPath: { type: "string" }
+        },
+        required: ["name"]
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "files", "coding"],
+      progressLabel: "rolling back skill",
+      maxResultSizeChars: 4000,
+      isAvailable: () => true,
+      run: async (input: { name?: string; snapshot_path?: string; snapshotPath?: string }) => {
+        if (!isNonEmptyString(input.name)) {
+          return errorResult("skill.rollback requires name");
+        }
+        const snapshot = await resolveSkillSnapshotPath(options, input.name, firstNonEmptyString(input.snapshot_path, input.snapshotPath));
+        if (!("path" in snapshot)) {
+          return snapshot;
+        }
+        const skillDir = personalSkillDirectory(options, input.name);
+        const current = options.registry.get(input.name);
+        let preRollbackSnapshot: string | undefined;
+        if (current !== undefined && isLoadedSkill(current) && current.sourceKind === "personal") {
+          preRollbackSnapshot = await snapshotPersonalSkillTarget(options, {
+            ok: true,
+            skillDir: dirname(current.sourcePath),
+            skillPath: current.sourcePath
+          }, input.name);
+        }
+
+        await rm(skillDir, { recursive: true, force: true });
+        await mkdir(dirname(skillDir), { recursive: true });
+        await cp(snapshot.path, skillDir, { recursive: true });
+        const loaded = await reloadPersonalSkill(options, join(skillDir, "SKILL.md"));
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: loaded.name,
+          source: loaded.sourceKind,
+          kind: "rolled-back"
+        });
+
+        return {
+          ok: true,
+          content: `Rolled back skill ${loaded.name} from ${snapshot.path}.`,
+          metadata: {
+            ...toSkillMetadata(loaded),
+            snapshotPath: snapshot.path,
+            preRollbackSnapshot
           }
         };
       }
@@ -351,8 +902,14 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return supportFile;
         }
 
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
         await mkdir(dirname(supportFile.path), { recursive: true });
         await writeFile(supportFile.path, fileContent, "utf8");
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: input.name,
+          source: "personal",
+          kind: "edited"
+        });
 
         return {
           ok: true,
@@ -360,7 +917,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           metadata: {
             name: input.name,
             path: supportFile.relativePath,
-            bytes: Buffer.byteLength(fileContent)
+            bytes: Buffer.byteLength(fileContent),
+            snapshotPath
           }
         };
       }
@@ -398,7 +956,13 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return supportFile;
         }
 
+        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
         await rm(supportFile.path, { force: true });
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: input.name,
+          source: "personal",
+          kind: "edited"
+        });
 
         return {
           ok: true,
@@ -406,7 +970,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           metadata: {
             name: input.name,
             path: supportFile.relativePath,
-            removed: true
+            removed: true,
+            snapshotPath
           }
         };
       }
@@ -532,8 +1097,12 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     description: skill.description,
     version: skill.version,
     category: skill.category ?? "general",
+    intentLabels: skill.intentLabels,
+    triggerPatterns: skill.triggerPatterns,
+    negativePatterns: skill.negativePatterns,
     whenToUse: skill.whenToUse,
     requiredToolsets: skill.requiredToolsets,
+    optionalToolsets: skill.optionalToolsets,
     requiredEnvironmentVariables: skill.requiredEnvironmentVariables,
     requiredCredentialFiles: skill.requiredCredentialFiles,
     configFields: skill.configFields,
@@ -564,8 +1133,12 @@ function defaultSkillDefinition(input: {
     description: input.description,
     version: "0.1.0",
     category: input.category,
+    intentLabels: [],
+    triggerPatterns: [],
+    negativePatterns: [],
     whenToUse: input.whenToUse ?? [input.description],
     requiredToolsets: input.requiredToolsets ?? ["core"],
+    optionalToolsets: [],
     workflow: [
       {
         id: "run",
@@ -580,7 +1153,7 @@ function defaultSkillDefinition(input: {
 }
 
 function renderSkillFile(definition: SkillDefinition, instructions: string): string {
-  return `---\n${renderYamlFrontmatter(definition)}---\n${instructions.trim()}\n`;
+  return `---\n${renderJsonFrontmatter(definition)}\n---\n${instructions.trim()}\n`;
 }
 
 export function buildSkillFileContent(input: {
@@ -609,7 +1182,7 @@ export function slugifySkillName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, "-").replace(/^-|-$/g, "") || basename(value);
 }
 
-function firstNonEmptyString(...values: Array<string | undefined>): string | undefined {
+function firstNonEmptyString(...values: unknown[]): string | undefined {
   return values.find((value) => isNonEmptyString(value));
 }
 
@@ -619,6 +1192,27 @@ function firstDefinedString(...values: Array<string | undefined>): string | unde
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArrayOrEmpty(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(isNonEmptyString) : [];
+}
+
+function normalizeSourceTrust(value: unknown): SkillSourceTrust | undefined {
+  return isSourceTrust(value) ? value : undefined;
+}
+
+function isSourceTrust(value: unknown): value is SkillSourceTrust {
+  return value === "untrusted_web" ||
+    value === "untrusted_document" ||
+    value === "user_direct" ||
+    value === "tool_error" ||
+    value === "runtime_internal" ||
+    value === "developer";
 }
 
 function errorResult(content: string): ToolResult {
@@ -637,6 +1231,425 @@ function skillError(content: string): GetSkillResult {
 
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
   return "sourcePath" in skill && "instructions" in skill;
+}
+
+type SkillEvalGateResult = {
+  status: "passed" | "failed" | "not-run";
+  caseCount: number;
+  score: number;
+  threshold: number;
+  cases: Array<{
+    id: string;
+    score: number;
+    passed: boolean;
+    details: Record<string, boolean>;
+    threshold: number;
+  }>;
+  failures: string[];
+  checkedFiles: string[];
+};
+
+type SkillEvalCase = SkillEvaluation & {
+  id?: string;
+  prompt?: string;
+  availableToolsets?: string[];
+  passThreshold?: number;
+  scoring?: Record<string, number>;
+  shouldNotUseToolsets?: string[];
+  expected?: {
+    selectedSkill?: string;
+    workflowStep?: string;
+    mustAttempt?: string[];
+    mustUseOneOf?: string[];
+    mustNotUse?: string[];
+    mustEndState?: string;
+    skillVisible?: boolean;
+    degraded?: boolean;
+  };
+};
+
+async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Promise<SkillEvalGateResult> {
+  const loadedCases = await loadSkillEvalCases(skill);
+  const cases: SkillEvalCase[] = [
+    ...skill.evaluations.map((evaluation, index) => ({
+      ...evaluation,
+      id: `frontmatter-${index + 1}`
+    })),
+    ...loadedCases.cases
+  ];
+  if (cases.length === 0) {
+    return {
+      status: "not-run",
+      caseCount: 0,
+      score: 0,
+      threshold: 1,
+      cases: [],
+      failures: [],
+      checkedFiles: loadedCases.checkedFiles
+    };
+  }
+
+  const availableToolsets = new Set([
+    ...skill.requiredToolsets,
+    ...(skill.optionalToolsets ?? []),
+    ...skill.workflow.flatMap((step) => step.toolsets ?? [])
+  ]);
+  const declaredTools = new Set(skill.workflow.flatMap((step) => [
+    step.preferredTool,
+    ...(step.toolCandidates ?? [])
+  ].filter(isNonEmptyString)));
+  const failures: string[] = [];
+  const caseResults: SkillEvalGateResult["cases"] = [];
+
+  for (const [index, evaluation] of cases.entries()) {
+    const label = evaluation.id ?? evaluation.input ?? evaluation.prompt ?? `case-${index + 1}`;
+    const details: Record<string, boolean> = {};
+    for (const toolset of evaluation.shouldUseToolsets ?? []) {
+      details[`uses_toolset:${toolset}`] = availableToolsets.has(toolset);
+      if (!details[`uses_toolset:${toolset}`]) {
+        failures.push(`${label}: expected toolset ${toolset} is not declared by the skill workflow`);
+      }
+    }
+    for (const toolset of evaluation.shouldNotUseToolsets ?? []) {
+      details[`avoids_toolset:${toolset}`] = !availableToolsets.has(toolset);
+      if (!details[`avoids_toolset:${toolset}`]) {
+        failures.push(`${label}: forbidden toolset ${toolset} is still declared by the skill workflow`);
+      }
+    }
+    if (evaluation.shouldNotAskUserFirst === true) {
+      details.shouldNotAskUserFirst = !skill.permissionExpectations.some((expectation) => expectation.startsWith("ask-before"));
+    }
+    if (details.shouldNotAskUserFirst === false) {
+      failures.push(`${label}: shouldNotAskUserFirst conflicts with ask-before permission expectations`);
+    }
+    if (evaluation.expected?.selectedSkill !== undefined) {
+      details.selectedSkill = evaluation.expected.selectedSkill === skill.name;
+    }
+    if (details.selectedSkill === false) {
+      failures.push(`${label}: expected selectedSkill ${evaluation.expected?.selectedSkill}, got ${skill.name}`);
+    }
+    if (evaluation.expected?.workflowStep !== undefined) {
+      details.workflowStep = skill.workflow.some((step) => step.id === evaluation.expected?.workflowStep);
+    }
+    if (details.workflowStep === false) {
+      failures.push(`${label}: expected workflow step ${evaluation.expected?.workflowStep} is not declared`);
+    }
+    for (const tool of evaluation.expected?.mustAttempt ?? []) {
+      details[`must_attempt:${tool}`] = declaredTools.has(tool);
+      if (!details[`must_attempt:${tool}`]) {
+        failures.push(`${label}: expected tool candidate ${tool} is not declared by the workflow`);
+      }
+    }
+    if ((evaluation.expected?.mustUseOneOf ?? []).length > 0) {
+      details.mustUseOneOf = evaluation.expected!.mustUseOneOf!.some((tool) => declaredTools.has(tool));
+      if (!details.mustUseOneOf) {
+        failures.push(`${label}: none of expected tool candidates are declared: ${evaluation.expected!.mustUseOneOf!.join(", ")}`);
+      }
+    }
+    for (const tool of evaluation.expected?.mustNotUse ?? []) {
+      details[`must_not_use:${tool}`] = !declaredTools.has(tool);
+      if (!details[`must_not_use:${tool}`]) {
+        failures.push(`${label}: forbidden tool candidate ${tool} is declared by the workflow`);
+      }
+    }
+    if (evaluation.expected?.skillVisible === false) {
+      failures.push(`${label}: promotion evals cannot currently assert skillVisible=false`);
+      details.skillVisible = false;
+    } else if (evaluation.expected?.skillVisible === true) {
+      details.skillVisible = true;
+    }
+    if (evaluation.expected?.degraded !== undefined) {
+      details.degraded = true;
+    }
+    if (evaluation.expected?.mustEndState !== undefined) {
+      details.finalBehavior = true;
+    }
+    const threshold = clampEvalScore(evaluation.passThreshold ?? 1);
+    const score = scoreEvalDetails(details, evaluation.scoring);
+    const passed = score >= threshold;
+    if (!passed) {
+      failures.push(`${label}: score ${score.toFixed(2)} below threshold ${threshold.toFixed(2)}`);
+    }
+    caseResults.push({
+      id: label,
+      score,
+      passed,
+      details,
+      threshold
+    });
+  }
+
+  const score = caseResults.length === 0
+    ? 0
+    : caseResults.reduce((sum, result) => sum + result.score, 0) / caseResults.length;
+  const threshold = caseResults.length === 0
+    ? 1
+    : Math.min(...caseResults.map((result) => result.threshold));
+  return {
+    status: failures.length === 0 ? "passed" : "failed",
+    caseCount: cases.length,
+    score,
+    threshold,
+    cases: caseResults,
+    failures,
+    checkedFiles: loadedCases.checkedFiles
+  };
+}
+
+async function loadSkillEvalCases(skill: LoadedSkill | SkillDefinition): Promise<{ cases: SkillEvalCase[]; checkedFiles: string[] }> {
+  if (!isLoadedSkill(skill)) {
+    return { cases: [], checkedFiles: [] };
+  }
+  const evalRoot = join(dirname(skill.sourcePath), "evals");
+  const entries = await readdir(evalRoot, { withFileTypes: true }).catch(() => []);
+  const cases: SkillEvalCase[] = [];
+  const checkedFiles: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || (!entry.name.endsWith(".jsonl") && !entry.name.endsWith(".json"))) {
+      continue;
+    }
+    const path = join(evalRoot, entry.name);
+    checkedFiles.push(path);
+    const raw = await readFile(path, "utf8");
+    if (entry.name.endsWith(".jsonl")) {
+      for (const line of raw.split(/\r?\n/u)) {
+        const trimmed = line.trim();
+        if (trimmed.length > 0) {
+          cases.push(normalizeEvalCase(JSON.parse(trimmed)));
+        }
+      }
+      continue;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      cases.push(...parsed.map(normalizeEvalCase));
+    } else {
+      cases.push(normalizeEvalCase(parsed));
+    }
+  }
+  return { cases, checkedFiles };
+}
+
+function normalizeEvalCase(value: unknown): SkillEvalCase {
+  if (!isRecord(value)) {
+    throw new Error("Skill eval case must be an object.");
+  }
+  const input = firstNonEmptyString(value.input, value.prompt) ?? "";
+  return {
+    id: firstNonEmptyString(value.id),
+    input,
+    prompt: firstNonEmptyString(value.prompt),
+    availableToolsets: stringArrayOrEmpty(value.availableToolsets ?? value.available_toolsets),
+    passThreshold: typeof value.passThreshold === "number"
+      ? value.passThreshold
+      : typeof value.pass_threshold === "number"
+        ? value.pass_threshold
+        : undefined,
+    scoring: isRecord(value.scoring) ? numericRecord(value.scoring) : undefined,
+    shouldUseToolsets: stringArrayOrEmpty(value.shouldUseToolsets ?? value.should_use_toolsets),
+    shouldNotUseToolsets: stringArrayOrEmpty(value.shouldNotUseToolsets ?? value.should_not_use_toolsets),
+    shouldNotAskUserFirst: value.shouldNotAskUserFirst === true || value.should_not_ask_user_first === true,
+    expectedOutcome: firstNonEmptyString(value.expectedOutcome, value.expected_outcome),
+    expected: isRecord(value.expected)
+      ? {
+          selectedSkill: firstNonEmptyString(value.expected.selectedSkill ?? value.expected.selected_skill),
+          workflowStep: firstNonEmptyString(value.expected.workflowStep ?? value.expected.workflow_step),
+          mustAttempt: stringArrayOrEmpty(value.expected.mustAttempt ?? value.expected.must_attempt),
+          mustUseOneOf: stringArrayOrEmpty(value.expected.mustUseOneOf ?? value.expected.must_use_one_of),
+          mustNotUse: stringArrayOrEmpty(value.expected.mustNotUse ?? value.expected.must_not_use),
+          mustEndState: firstNonEmptyString(value.expected.mustEndState ?? value.expected.must_end_state),
+          skillVisible: typeof value.expected.skillVisible === "boolean" ? value.expected.skillVisible : undefined,
+          degraded: typeof value.expected.degraded === "boolean" ? value.expected.degraded : undefined
+        }
+      : undefined
+  };
+}
+
+function evaluateProposalTrust(
+  proposal: SkillPatchProposal,
+  observations: SkillObservationRecord[],
+  riskLevel: SkillPatchRiskLevel
+): { ok: true } | { ok: false; reason: string } {
+  if (proposal.requiresHumanApproval && proposal.approvedAt === undefined) {
+    return {
+      ok: false,
+      reason: "Skill patch proposal requires explicit approval before promotion."
+    };
+  }
+  if (riskLevel !== "low" && proposal.approvedAt === undefined) {
+    return {
+      ok: false,
+      reason: `Skill patch proposal is ${riskLevel}-risk and requires explicit approval before promotion.`
+    };
+  }
+  if (isUntrustedSource(proposal.sourceTrust) && proposal.approvedAt === undefined) {
+    return {
+      ok: false,
+      reason: "Skill patch proposal is derived from untrusted content and requires review before promotion."
+    };
+  }
+  if (observations.length > 0 && observations.every((observation) => isUntrustedSource(observation.sourceTrust))) {
+    return {
+      ok: false,
+      reason: "Skill patch proposal only cites untrusted observations and requires review before promotion."
+    };
+  }
+  return { ok: true };
+}
+
+function isUntrustedSource(sourceTrust: SkillSourceTrust): boolean {
+  return sourceTrust === "untrusted_web" || sourceTrust === "untrusted_document";
+}
+
+function summarizePatchOperation(patch: SkillPatchOperation): string {
+  if (patch.type === "text_patch") {
+    return patch.replaceAll === true ? "Applied text replacement to all matching occurrences." : "Applied one exact text replacement.";
+  }
+  return `${patch.operation ?? "add"} JSON frontmatter path ${patch.path}.`;
+}
+
+function classifyPatchRisk(patch: SkillPatchOperation): SkillPatchRiskLevel {
+  const serialized = JSON.stringify(patch).toLowerCase();
+  if (/\b(required_credential_files|requiredcredentialfiles|required_environment_variables|requiredenvironmentvariables|permission_expectations|permissionexpectations|terminal\.run|execute_code|browser\.|web\.|external|credential|secret|token|api[_-]?key)\b/u.test(serialized)) {
+    return "high";
+  }
+  if (patch.type === "json_frontmatter_patch" && /\/(workflow|triggerpatterns|trigger_patterns|intentlabels|intent_labels|negativepatterns|negative_patterns|requiredtoolsets|required_toolsets|optionaltoolsets|optional_toolsets)\b/u.test(patch.path.toLowerCase())) {
+    return "medium";
+  }
+  return "low";
+}
+
+async function reviewSkillProposal(
+  options: SkillToolsOptions,
+  proposal: SkillPatchProposal
+): Promise<Record<string, unknown>> {
+  const observations = await options.skillEvolutionStore?.listObservations({
+    skillName: proposal.skillName,
+    ids: proposal.evidence.observations
+  }) ?? [];
+  const riskLevel = classifyPatchRisk(proposal.patch);
+  const skill = options.registry.get(proposal.skillName);
+  const evalGate = skill === undefined ? undefined : await runSkillEvalGate(skill);
+  const trustGate = evaluateProposalTrust(proposal, observations, riskLevel);
+  const recommendedAction = proposal.status !== "proposed"
+    ? "none"
+    : !trustGate.ok
+      ? "review"
+      : evalGate?.status === "failed"
+        ? "reject"
+        : riskLevel === "low"
+          ? "promote"
+          : "approve";
+  return {
+    proposalId: proposal.id,
+    skillName: proposal.skillName,
+    status: proposal.status,
+    sourceTrust: proposal.sourceTrust,
+    reason: proposal.reason,
+    evidenceCount: proposal.evidence.observations.length,
+    riskLevel,
+    affectedFields: affectedFieldsForPatch(proposal.patch),
+    diffSummary: summarizePatchOperation(proposal.patch),
+    evalResult: evalGate === undefined
+      ? undefined
+      : {
+          status: evalGate.status,
+          score: evalGate.score,
+          threshold: evalGate.threshold,
+          failures: evalGate.failures
+        },
+    recommendedAction,
+    blockedReason: trustGate.ok ? undefined : trustGate.reason
+  };
+}
+
+function affectedFieldsForPatch(patch: SkillPatchOperation): string[] {
+  if (patch.type === "text_patch") {
+    return ["body"];
+  }
+  const field = patch.path.split("/").filter((part) => part.length > 0)[0];
+  return field === undefined ? ["frontmatter"] : [field.replace(/~1/gu, "/").replace(/~0/gu, "~")];
+}
+
+async function recordSkillEvalRuns(
+  store: SkillEvolutionStore,
+  skillName: string,
+  result: SkillEvalGateResult
+): Promise<SkillEvalRunRecord[]> {
+  const records: SkillEvalRunRecord[] = [];
+  for (const item of result.cases) {
+    records.push(await store.recordEvalRun({
+      skillName,
+      evalId: item.id,
+      score: item.score,
+      passed: item.passed,
+      details: item.details,
+      threshold: item.threshold
+    }));
+  }
+  return records;
+}
+
+function compareEvalGates(
+  before: SkillEvalGateResult | undefined,
+  after: SkillEvalGateResult
+) {
+  const beforeScore = before?.status === "not-run" ? undefined : before?.score;
+  const afterScore = after.status === "not-run" ? 0 : after.score;
+  const beforeCases = new Map((before?.cases ?? []).map((item) => [item.id, item]));
+  const newlyPassingCases: string[] = [];
+  const newlyFailingCases: string[] = [];
+  for (const item of after.cases) {
+    const previous = beforeCases.get(item.id);
+    if (previous !== undefined && !previous.passed && item.passed) {
+      newlyPassingCases.push(item.id);
+    }
+    if (previous !== undefined && previous.passed && !item.passed) {
+      newlyFailingCases.push(item.id);
+    }
+  }
+  return {
+    beforeScore,
+    afterScore,
+    delta: beforeScore === undefined ? undefined : afterScore - beforeScore,
+    failedCases: after.cases.filter((item) => !item.passed).map((item) => item.id),
+    newlyPassingCases,
+    newlyFailingCases
+  };
+}
+
+function scoreEvalDetails(details: Record<string, boolean>, scoring: Record<string, number> | undefined): number {
+  const entries = Object.entries(details);
+  if (entries.length === 0) {
+    return 1;
+  }
+  if (scoring === undefined || Object.keys(scoring).length === 0) {
+    return entries.filter(([, passed]) => passed).length / entries.length;
+  }
+  let total = 0;
+  let earned = 0;
+  for (const [key, passed] of entries) {
+    const weight = scoring[key] ?? scoring[key.split(":")[0]!] ?? 0;
+    total += weight;
+    if (passed) {
+      earned += weight;
+    }
+  }
+  if (total <= 0) {
+    return entries.filter(([, passed]) => passed).length / entries.length;
+  }
+  return clampEvalScore(earned / total);
+}
+
+function numericRecord(value: Record<string, unknown>): Record<string, number> {
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
+}
+
+function clampEvalScore(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
 }
 
 function personalSkillDirectory(options: SkillToolsOptions, name: string): string {
@@ -705,6 +1718,176 @@ function isSkillSupportTarget(
   value: { ok: true; path: string; relativePath: string } | ToolResult
 ): value is { ok: true; path: string; relativePath: string } {
   return value.ok === true && "path" in value && "relativePath" in value;
+}
+
+function countOccurrences(content: string, needle: string): number {
+  if (needle.length === 0) {
+    return 0;
+  }
+
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const next = content.indexOf(needle, index);
+    if (next === -1) {
+      return count;
+    }
+    count++;
+    index = next + needle.length;
+  }
+}
+
+function applySkillPatch(content: string, patch: SkillPatchOperation): string {
+  if (patch.type === "text_patch") {
+    const occurrences = countOccurrences(content, patch.oldString);
+    if (occurrences === 0) {
+      throw new Error("Proposed text patch target was not found.");
+    }
+    if (occurrences > 1 && patch.replaceAll !== true) {
+      throw new Error("Proposed text patch matched multiple occurrences without replaceAll.");
+    }
+    return patch.replaceAll === true
+      ? content.split(patch.oldString).join(patch.newString)
+      : content.replace(patch.oldString, patch.newString);
+  }
+
+  const parsed = splitSkillFile(content);
+  const frontmatter = parsed.frontmatter.trim();
+  if (!frontmatter.startsWith("{")) {
+    throw new Error("json_frontmatter_patch can only promote into skills with JSON frontmatter.");
+  }
+  const document = JSON.parse(frontmatter) as unknown;
+  if (!isRecord(document)) {
+    throw new Error("Skill frontmatter must be a JSON object.");
+  }
+  applyJsonPointerPatch(document, patch.path, patch.value, patch.operation ?? "add");
+  return `---\n${JSON.stringify(document, null, 2)}\n---\n${parsed.instructions}`;
+}
+
+function splitSkillFile(content: string): { frontmatter: string; instructions: string } {
+  const match = /^---\n(?<frontmatter>[\s\S]*?)\n---\n?(?<instructions>[\s\S]*)$/u.exec(content);
+  if (match?.groups === undefined) {
+    throw new Error("Skill file must start with frontmatter wrapped in --- markers");
+  }
+  return {
+    frontmatter: match.groups.frontmatter,
+    instructions: match.groups.instructions
+  };
+}
+
+function applyJsonPointerPatch(
+  target: Record<string, unknown>,
+  path: string,
+  value: unknown,
+  operation: "add" | "replace"
+): void {
+  const parts = parseJsonPointer(path);
+  if (parts.length === 0) {
+    throw new Error("Patch path cannot target the frontmatter root.");
+  }
+  let cursor: unknown = target;
+  for (const part of parts.slice(0, -1)) {
+    if (Array.isArray(cursor)) {
+      const index = Number(part);
+      cursor = cursor[index];
+      continue;
+    }
+    if (!isRecord(cursor)) {
+      throw new Error(`Patch path cannot descend through ${part}.`);
+    }
+    cursor = cursor[part];
+  }
+  const key = parts[parts.length - 1]!;
+  if (Array.isArray(cursor)) {
+    if (key === "-") {
+      cursor.push(value);
+      return;
+    }
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || index > cursor.length) {
+      throw new Error(`Invalid array patch index: ${key}`);
+    }
+    if (operation === "replace" && index >= cursor.length) {
+      throw new Error(`Cannot replace missing array index: ${key}`);
+    }
+    cursor[index] = value;
+    return;
+  }
+  if (!isRecord(cursor)) {
+    throw new Error("Patch path parent is not an object or array.");
+  }
+  if (operation === "replace" && !(key in cursor)) {
+    throw new Error(`Cannot replace missing object key: ${key}`);
+  }
+  cursor[key] = value;
+}
+
+function parseJsonPointer(path: string): string[] {
+  if (!path.startsWith("/")) {
+    throw new Error("JSON patch path must start with /.");
+  }
+  return path
+    .slice(1)
+    .split("/")
+    .map((part) => part.replace(/~1/gu, "/").replace(/~0/gu, "~"));
+}
+
+async function snapshotPersonalSkillTarget(
+  options: SkillToolsOptions,
+  target: { ok: true; skillDir: string; skillPath: string },
+  name: string
+): Promise<string> {
+  const slug = slugifySkillName(name);
+  const snapshotRoot = join(options.personalSkillsRoot, ".snapshots", slug);
+  const snapshotPath = join(snapshotRoot, timestampForPath());
+  await mkdir(snapshotRoot, { recursive: true });
+  await cp(target.skillDir, snapshotPath, { recursive: true });
+  return snapshotPath;
+}
+
+async function resolveSkillSnapshotPath(
+  options: SkillToolsOptions,
+  name: string,
+  requestedPath: string | undefined
+): Promise<{ ok: true; path: string } | ToolResult> {
+  const snapshotRoot = resolve(options.personalSkillsRoot, ".snapshots", slugifySkillName(name));
+  const snapshotPath = requestedPath === undefined
+    ? await latestSnapshotPath(snapshotRoot)
+    : resolve(requestedPath);
+  if (snapshotPath === undefined) {
+    return errorResult(`No snapshots found for skill ${name}.`);
+  }
+  const canonicalRoot = await realpath(snapshotRoot).catch(() => undefined);
+  const canonicalSnapshot = await realpath(snapshotPath).catch(() => undefined);
+  if (canonicalRoot === undefined || canonicalSnapshot === undefined) {
+    return errorResult(`Skill snapshot not found: ${snapshotPath}`);
+  }
+  const relativeSnapshot = relative(canonicalRoot, canonicalSnapshot);
+  if (relativeSnapshot.startsWith("..") || relativeSnapshot.startsWith("/")) {
+    return errorResult("Skill snapshot path must stay inside the personal skill snapshot directory.");
+  }
+  const skillFile = await stat(join(canonicalSnapshot, "SKILL.md")).catch(() => undefined);
+  if (skillFile === undefined || !skillFile.isFile()) {
+    return errorResult(`Skill snapshot does not contain SKILL.md: ${canonicalSnapshot}`);
+  }
+  return {
+    ok: true,
+    path: canonicalSnapshot
+  };
+}
+
+async function latestSnapshotPath(snapshotRoot: string): Promise<string | undefined> {
+  const entries = await readdir(snapshotRoot, { withFileTypes: true }).catch(() => []);
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const latest = directories.at(-1);
+  return latest === undefined ? undefined : join(snapshotRoot, latest);
+}
+
+function timestampForPath(): string {
+  return new Date().toISOString().replace(/[:.]/gu, "-");
 }
 
 async function readSkillReference(skill: LoadedSkill, path: string): Promise<ToolResult> {
@@ -781,30 +1964,20 @@ function inferSkillResourceKind(path: string): string {
   return "resource";
 }
 
-function renderYamlFrontmatter(definition: SkillDefinition): string {
-  return [
-    `name: ${quoteYaml(definition.name)}`,
-    `description: ${quoteYaml(definition.description)}`,
-    `version: ${quoteYaml(definition.version)}`,
-    definition.category === undefined ? undefined : `category: ${quoteYaml(definition.category)}`,
-    renderYamlArray("whenToUse", definition.whenToUse),
-    renderYamlArray("requiredToolsets", definition.requiredToolsets),
-    "workflow:",
-    ...definition.workflow.flatMap((step) => [
-      `  - id: ${quoteYaml(step.id)}`,
-      `    description: ${quoteYaml(step.description)}`,
-      step.toolsets === undefined ? undefined : `    toolsets: [${step.toolsets.map(quoteYaml).join(", ")}]`
-    ].filter((line) => line !== undefined)),
-    renderYamlArray("permissionExpectations", definition.permissionExpectations),
-    renderYamlArray("examples", definition.examples),
-    "evaluations: []"
-  ].filter((line) => line !== undefined).join("\n") + "\n";
+function renderJsonFrontmatter(definition: SkillDefinition): string {
+  return JSON.stringify(pruneUndefined(definition), null, 2);
 }
 
-function renderYamlArray(key: string, values: readonly string[]): string {
-  return `${key}: [${values.map(quoteYaml).join(", ")}]`;
-}
-
-function quoteYaml(value: string): string {
-  return JSON.stringify(value);
+function pruneUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(pruneUndefined);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, pruneUndefined(entry)])
+    );
+  }
+  return value;
 }

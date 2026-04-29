@@ -63,6 +63,7 @@ import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
 import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
+import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
 import { createSkillTools } from "./skills/skill-tools.js";
@@ -234,6 +235,11 @@ for (const skill of loadedSkills.skills) {
 }
 
 const personalSkillRoot = join(await mkdtemp(join(tmpdir(), "estacoda-v2-personal-skills-")), "skills");
+const skillEvolutionRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-evolution-"));
+const skillEvolutionStore = new SkillEvolutionStore({
+  usagePath: join(skillEvolutionRoot, "skill-usage.json"),
+  evolutionRoot: join(skillEvolutionRoot, "skill-evolution")
+});
 const configToolsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-workspace-"));
 const configToolsHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-home-"));
 for (const tool of builtinTools) {
@@ -241,7 +247,8 @@ for (const tool of builtinTools) {
 }
 for (const tool of createSkillTools({
   registry: skills,
-  personalSkillsRoot: personalSkillRoot
+  personalSkillsRoot: personalSkillRoot,
+  skillEvolutionStore
 })) {
   tools.register(tool);
 }
@@ -628,8 +635,8 @@ const cliImageSetup = await runCliCommand({
     "setup",
     "--provider",
     "byteplus",
-    "--model",
-    "seedream-4-0-250828",
+    "--model-version",
+    "seedream-5",
     "--api-key",
     "TEST_BYTEPLUS_SECRET"
   ],
@@ -655,6 +662,11 @@ const cliImageVerifyReady = await runCliCommand({
       text: async () => JSON.stringify({ ok: true })
     };
   }
+});
+const cliImageModels = await runCliCommand({
+  argv: ["image", "models", "--provider", "byteplus"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
 });
 const cliImageSettings = await runCliCommand({
   argv: ["settings", "image"],
@@ -1491,6 +1503,34 @@ const streamingExecution = await new ProviderExecutor({
     }
   }
 );
+const incompleteStreamingRegistry = new ProviderRegistry();
+incompleteStreamingRegistry.register(fakeProvider({
+  id: "deepseek",
+  models: [inferModelProfile({ provider: "deepseek", model: "deepseek-chat" })],
+  responses: [{
+    ok: true,
+    content: "unused incomplete stream fallback",
+    model: "deepseek-chat",
+    provider: "deepseek"
+  }],
+  streamEvents: [
+    { kind: "start", provider: "deepseek", model: "deepseek-chat" },
+    { kind: "token", provider: "deepseek", model: "deepseek-chat", text: "partial" }
+  ]
+}));
+const incompleteStreamingExecution = await new ProviderExecutor({
+  registry: incompleteStreamingRegistry
+}).complete(
+  {
+    messages: [{ role: "user", content: "stream but never finish" }]
+  },
+  {
+    providerOrder: ["deepseek"]
+  },
+  {
+    stream: true
+  }
+);
 const fragmentedToolCallRegistry = new ProviderRegistry();
 fragmentedToolCallRegistry.register(fakeProvider({
   id: "deepseek",
@@ -2206,10 +2246,10 @@ for (const tool of createImageGenerationTools({
   artifactStore: imageArtifacts,
   imageGen: {
     provider: "byteplus",
-    model: "seedream-4-0-250828",
+    model: "seedream-5-0-260128",
     useGateway: false,
     byteplus: {
-      model: "seedream-4-0-250828",
+      model: "seedream-5-0-260128",
       apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
       baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
     }
@@ -2252,6 +2292,48 @@ const bytePlusImageGenerate = await bytePlusImageExecutor.executeTool({
     prompt: "A cinematic desert observatory at sunrise.",
     aspectRatio: "square",
     seed: 7
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const bytePlusModelClosedRegistry = new ToolRegistry();
+for (const tool of createImageGenerationTools({
+  imageCacheRoot: join(imageWorkspace, ".estacoda", "image-cache"),
+  artifactStore: imageArtifacts,
+  imageGen: {
+    provider: "byteplus",
+    model: "seedream-4-0-250828",
+    useGateway: false,
+    byteplus: {
+      model: "seedream-4-0-250828",
+      apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+      baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+    }
+  },
+  fetch: async () => ({
+    ok: false,
+    status: 404,
+    statusText: "Not Found",
+    arrayBuffer: async () => Buffer.from(JSON.stringify({ error: { code: "ModelNotOpen", message: "model not activated" } })).buffer,
+    text: async () => JSON.stringify({ error: { code: "ModelNotOpen", message: "model not activated" } })
+  }),
+  id: () => "byteplus-model-closed-smoke"
+})) {
+  bytePlusModelClosedRegistry.register(tool);
+}
+const bytePlusModelClosedExecutor = new ToolExecutor({
+  registry: bytePlusModelClosedRegistry,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory
+});
+const bytePlusModelClosedGenerate = await bytePlusModelClosedExecutor.executeTool({
+  tool: "image.generate",
+  input: {
+    prompt: "A closed model check.",
+    aspectRatio: "square"
   },
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -2559,8 +2641,11 @@ assert((missingImageGenerate?.result?.metadata as any)?.requiredSecret === "FAL_
 assert((missingImageGenerate?.result?.metadata as any)?.resumeIntent === "image.generate", "expected setup_needed metadata to preserve resume intent");
 assert(bytePlusImageGenerate?.result?.ok === true, "expected BytePlus image generation to succeed");
 assert(bytePlusImageRequestUrl.endsWith("/images/generations"), "expected BytePlus image generation endpoint");
-assert(bytePlusImageRequestBody.model === "seedream-4-0-250828", "expected BytePlus image generation to pass Seedream model");
-assert(bytePlusImageRequestBody.size === "1024x1024", "expected BytePlus image generation to map square size");
+assert(bytePlusImageRequestBody.model === "seedream-5-0-260128", "expected BytePlus image generation to pass Seedream model");
+assert(bytePlusImageRequestBody.size === "1920x1920", "expected BytePlus image generation to map square size above Seedream minimum");
+assert(bytePlusModelClosedGenerate?.result?.ok === false, "expected closed BytePlus image model to fail");
+assert(String(bytePlusModelClosedGenerate?.result?.content ?? "").includes("not activated"), "expected closed BytePlus model failure to explain activation");
+assert(String(bytePlusModelClosedGenerate?.result?.content ?? "").includes("estacoda image models --provider byteplus"), "expected closed BytePlus model failure to suggest model listing");
 assert(imageArtifacts.list().filter((artifact) => artifact.kind === "image" && artifact.mimeType === "image/png").length >= 2, "expected image generation to record image artifacts");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
@@ -3868,12 +3953,15 @@ assert(cliImageVerifyMissing.output.includes("API key present: no"), "expected m
 assert(cliImageSetup.output.includes("Configured EstaCoda image generation."), "expected image setup output");
 assert(cliImageSetup.output.includes("Secret store:"), "expected image setup with api key to write secret store");
 assert(cliImageConfig.imageGen.provider === "byteplus", "expected image setup to persist BytePlus provider");
-assert(cliImageConfig.imageGen.model === "seedream-4-0-250828", "expected image setup to persist Seedream model");
+assert(cliImageConfig.imageGen.model === "seedream-5-0-260128", "expected image setup to persist Seedream 5 model");
 assert(cliImageConfig.imageGen.byteplus?.apiKeyEnv === "BYTEPLUS_ARK_API_KEY", "expected image setup to persist BytePlus key env");
 assert(cliImageVerifyReady.exitCode === 0, "expected image verify to pass when config and key are ready");
 assert(cliImageVerifyReady.output.includes("Status: ready"), "expected image verify ready status");
 assert(cliImageVerifyReady.output.includes("Provider check: request"), "expected image verify to perform provider capability check");
 assert(cliImageVerifyUrl.endsWith("/models"), "expected BytePlus image verify to use safe models endpoint");
+assert(cliImageModels.output.includes("seedream-5-0-260128"), "expected image models to list Seedream 5");
+assert(cliImageModels.output.includes("seedream-4-5-251128"), "expected image models to list Seedream 4.5");
+assert(cliImageModels.output.includes("seedream-4-0-250828"), "expected image models to list Seedream 4.0");
 assert(cliImageSettings.output.includes("EstaCoda image generation"), "expected settings image output");
 assert(cliImageEnv.includes("BYTEPLUS_ARK_API_KEY=\"TEST_BYTEPLUS_SECRET\""), "expected image setup to store API key in local env file");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
@@ -3935,6 +4023,36 @@ assert(
     context: { trustedWorkspace: true }
   }) === "deny",
   "expected adaptive policy to deny credential-access commands"
+);
+assert(
+  openPolicy.decide({
+    riskClass: "credential-access",
+    description: "dump environment",
+    command: "env",
+    targetSummary: "env",
+    context: { trustedWorkspace: true }
+  }) === "deny",
+  "expected open mode to preserve hard floor for environment dumps"
+);
+assert(
+  openPolicy.decide({
+    riskClass: "destructive-local",
+    description: "run destructive inline python",
+    command: "python -c \"import shutil; shutil.rmtree('/tmp/estacoda-smoke')\"",
+    targetSummary: "python -c shutil.rmtree",
+    context: { trustedWorkspace: true }
+  }) === "deny",
+  "expected open mode to block destructive inline python"
+);
+assert(
+  openPolicy.decide({
+    riskClass: "destructive-local",
+    description: "run destructive inline node",
+    command: "node -e \"require('child_process').execSync('rm -rf /tmp/estacoda-smoke')\"",
+    targetSummary: "node -e child_process",
+    context: { trustedWorkspace: true }
+  }) === "deny",
+  "expected open mode to block destructive inline node"
 );
 assert(
   openPolicy.decide({
@@ -4267,6 +4385,14 @@ const secretReadFloor = await assessSecurityPolicy(assessorPolicy, {
 });
 assert(secretReadFloor.decision === "deny", "expected explicit secret read to hit the hard floor");
 assert(secretReadFloor.reason.includes("secret") || secretReadFloor.reason.includes("credential"), "expected secret-read floor reason");
+const environmentDumpFloor = await assessSecurityPolicy(assessorPolicy, {
+  riskClass: "credential-access",
+  description: "dump environment",
+  command: "printenv OPENAI_API_KEY",
+  targetSummary: "printenv OPENAI_API_KEY",
+  context: { trustedWorkspace: true }
+});
+assert(environmentDumpFloor.decision === "deny", "expected environment dump to hit the hard floor");
 const pipeToShellFloor = await assessSecurityPolicy(assessorPolicy, {
   riskClass: "destructive-local",
   description: "pipe curl to shell",
@@ -4466,6 +4592,11 @@ assert(providerExecutionSecondFallback.attempts.length === 1, "expected one-shot
 assert(streamingExecution.ok, "expected streaming provider execution to succeed");
 assert(streamingExecution.response?.content === "stream success", "expected streaming provider content aggregation");
 assert(streamingProviderEvents.join("") === "stream success", "expected provider streaming token events");
+assert(!incompleteStreamingExecution.ok, "expected incomplete streaming provider execution to fail");
+assert(
+  incompleteStreamingExecution.attempts[0]?.errorClass === "incomplete-stream",
+  "expected incomplete stream to be classified explicitly"
+);
 assert(fragmentedToolCallExecution.ok, "expected fragmented streaming tool-call execution to succeed");
 assert(fragmentedToolCallExecution.toolCalls.length === 1, "expected fragmented tool-call chunks to merge into one call");
 assert(
@@ -4716,19 +4847,18 @@ const skillEditExecution = await toolExecutor.executeTool({
     name: "sample-personal-skill",
     content: [
       "---",
-      "name: sample-personal-skill",
-      "description: Exercise the personal skill creation flow.",
-      "version: 0.2.0",
-      "category: testing",
-      "whenToUse: [\"edited smoke skill\"]",
-      "requiredToolsets: [\"core\"]",
-      "workflow:",
-      "  - id: run",
-      "    description: Edited smoke workflow.",
-      "    toolsets: [\"core\"]",
-      "permissionExpectations: [\"auto-read\"]",
-      "examples: []",
-      "evaluations: []",
+      JSON.stringify({
+        name: "sample-personal-skill",
+        description: "Exercise the personal skill creation flow.",
+        version: "0.2.0",
+        category: "testing",
+        whenToUse: ["edited smoke skill"],
+        requiredToolsets: ["core"],
+        workflow: [{ id: "run", description: "Edited smoke workflow.", toolsets: ["core"] }],
+        permissionExpectations: ["auto-read"],
+        examples: [],
+        evaluations: []
+      }, null, 2),
       "---",
       "Edited skill body for smoke tests."
     ].join("\n")
@@ -4751,19 +4881,18 @@ const deletableSkillCreateExecution = await toolExecutor.executeTool({
     name: "temporary-delete-skill",
     content: [
       "---",
-      "name: temporary-delete-skill",
-      "description: Temporary skill for delete smoke coverage.",
-      "version: 0.1.0",
-      "category: testing",
-      "whenToUse: [\"delete smoke\"]",
-      "requiredToolsets: [\"core\"]",
-      "workflow:",
-      "  - id: run",
-      "    description: Temporary workflow.",
-      "    toolsets: [\"core\"]",
-      "permissionExpectations: [\"auto-read\"]",
-      "examples: []",
-      "evaluations: []",
+      JSON.stringify({
+        name: "temporary-delete-skill",
+        description: "Temporary skill for delete smoke coverage.",
+        version: "0.1.0",
+        category: "testing",
+        whenToUse: ["delete smoke"],
+        requiredToolsets: ["core"],
+        workflow: [{ id: "run", description: "Temporary workflow.", toolsets: ["core"] }],
+        permissionExpectations: ["auto-read"],
+        examples: [],
+        evaluations: []
+      }, null, 2),
       "---",
       "Delete me."
     ].join("\n")
@@ -4970,9 +5099,49 @@ assert(
 );
 assert(skillExportExecution?.result?.ok === true, "expected skill.export to succeed");
 assert(externalSkillPatchExecution?.result?.ok === false, "expected external skill patch to fail");
+const skillPatchSnapshotPath = (skillPatchExecution.result.metadata as { snapshotPath?: string } | undefined)?.snapshotPath;
+assert(skillPatchSnapshotPath !== undefined, "expected skill.patch to record a snapshot");
+assert((await stat(skillPatchSnapshotPath).catch(() => undefined))?.isDirectory() === true, "expected skill.patch snapshot directory");
+const skillDeleteSnapshotPath = (skillDeleteExecution.result.metadata as { snapshotPath?: string } | undefined)?.snapshotPath;
+assert(skillDeleteSnapshotPath !== undefined, "expected skill.delete to record a snapshot");
+assert((await stat(skillDeleteSnapshotPath).catch(() => undefined))?.isDirectory() === true, "expected skill.delete snapshot directory");
+const invalidYamlSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-invalid-yaml-skill-"));
+await mkdir(join(invalidYamlSkillRoot, "bad-workflow"), { recursive: true });
+await writeFile(join(invalidYamlSkillRoot, "bad-workflow", "SKILL.md"), [
+  "---",
+  "name: bad-workflow",
+  "description: Invalid YAML object-array workflow.",
+  "workflow:",
+  "  - id: run",
+  "    description: This object array should be rejected loudly.",
+  "---",
+  "Invalid body."
+].join("\n"), "utf8");
+const invalidYamlLoad = await loadSkillsFromDirectory(invalidYamlSkillRoot);
+assert(invalidYamlLoad.skills.length === 0, "expected invalid YAML object-array skill not to load");
+assert(
+  invalidYamlLoad.errors.some((error) => error.message.includes("YAML object arrays are not supported")),
+  "expected invalid YAML object-array skill to report a clear error"
+);
 const createdSkillSourcePath = join(personalSkillRoot, "sample-personal-skill", "SKILL.md");
 const createdSkillSource = await readFile(createdSkillSourcePath, "utf8");
 assert(createdSkillSource.includes("Edited skill body for smoke tests."), "expected skill.edit to replace SKILL.md content");
+await mkdir(join(personalSkillRoot, "sample-personal-skill", "evals"), { recursive: true });
+await writeFile(join(personalSkillRoot, "sample-personal-skill", "evals", "regression.jsonl"), `${JSON.stringify({
+  id: "sample_core_toolset",
+  input: "Use the sample personal skill in a smoke test.",
+  shouldUseToolsets: ["core"],
+  expected: {
+    selectedSkill: "sample-personal-skill",
+    workflowStep: "run"
+  },
+  scoring: {
+    selectedSkill: 0.5,
+    workflowStep: 0.25,
+    "uses_toolset": 0.25
+  },
+  passThreshold: 0.8
+})}\n`, "utf8");
 const createdSupportPath = join(personalSkillRoot, "sample-personal-skill", "references", "notes.md");
 const removedSupportFile = await stat(createdSupportPath).catch(() => undefined);
 assert(removedSupportFile === undefined, "expected skill.remove_file to delete supporting file");
@@ -4980,6 +5149,224 @@ const deletedSkillDir = join(personalSkillRoot, "temporary-delete-skill");
 const deletedSkill = await stat(deletedSkillDir).catch(() => undefined);
 assert(deletedSkill === undefined, "expected skill.delete to remove skill directory");
 assert(skills.get("temporary-delete-skill") === undefined, "expected deleted skill to be removed from registry");
+const skillRollbackExecution = await toolExecutor.executeTool({
+  tool: "skill.rollback",
+  input: {
+    name: "temporary-delete-skill",
+    snapshot_path: skillDeleteSnapshotPath
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+assert(skillRollbackExecution?.result?.ok === true, "expected skill.rollback to restore a deleted skill");
+assert((await stat(deletedSkillDir).catch(() => undefined))?.isDirectory() === true, "expected rollback to restore skill directory");
+assert(skills.get("temporary-delete-skill") !== undefined, "expected rollback to restore skill registry entry");
+const skillDeleteAfterRollbackExecution = await toolExecutor.executeTool({
+  tool: "skill.delete",
+  input: {
+    name: "temporary-delete-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+assert(skillDeleteAfterRollbackExecution?.result?.ok === true, "expected cleanup delete after rollback to succeed");
+assert(skills.get("temporary-delete-skill") === undefined, "expected cleanup delete after rollback to remove registry entry");
+const skillObservationExecution = await toolExecutor.executeTool({
+  tool: "skill.observe",
+  input: {
+    name: "sample-personal-skill",
+    type: "note",
+    lesson: "Smoke observation proves skill learning overlays do not mutate SKILL.md.",
+    toolsAttempted: ["skill.view"],
+    outcome: "partial",
+    sourceTrust: "runtime_internal"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillProposePatchExecution = await toolExecutor.executeTool({
+  tool: "skill.propose_patch",
+  input: {
+    name: "sample-personal-skill",
+    reason: "Add a promoted smoke example without rewriting the full skill.",
+    confidence: 0.9,
+    observationIds: [(skillObservationExecution?.result?.metadata as { id?: string } | undefined)?.id].filter(Boolean),
+    successes: 1,
+    failures: 0,
+    sourceTrust: "runtime_internal",
+    patch: {
+      type: "json_frontmatter_patch",
+      path: "/examples/-",
+      value: "promoted smoke example"
+    }
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const proposedPatchId = (skillProposePatchExecution?.result?.metadata as { id?: string } | undefined)?.id;
+assert(skillObservationExecution?.result?.ok === true, "expected skill.observe to record an observation");
+assert(skillProposePatchExecution?.result?.ok === true, "expected skill.propose_patch to record a proposal");
+assert(proposedPatchId !== undefined, "expected proposed patch id");
+const skillEvalBeforePromotionExecution = await toolExecutor.executeTool({
+  tool: "skill.eval",
+  input: {
+    name: "sample-personal-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+assert(skillEvalBeforePromotionExecution?.result?.ok === true, "expected skill.eval to pass per-skill eval files");
+assert(
+  JSON.stringify(skillEvalBeforePromotionExecution.result.metadata).includes("\"score\""),
+  "expected skill.eval to include scored eval metadata"
+);
+const skillReviewProposalExecution = await toolExecutor.executeTool({
+  tool: "skill.review_proposal",
+  input: {
+    proposal_id: proposedPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+assert(skillReviewProposalExecution?.result?.ok === true, "expected skill.review_proposal to inspect proposal");
+assert(
+  JSON.stringify(skillReviewProposalExecution.result.metadata).includes("\"riskLevel\":\"low\"") ||
+    JSON.stringify(skillReviewProposalExecution.result.metadata).includes("\"riskLevel\": \"low\""),
+  "expected low-risk review for examples-only patch"
+);
+const skillPromotePatchExecution = await toolExecutor.executeTool({
+  tool: "skill.promote_patch",
+  input: {
+    proposal_id: proposedPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillUntrustedPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.propose_patch",
+  input: {
+    name: "sample-personal-skill",
+    reason: "Attempt to promote a patch sourced only from untrusted web content.",
+    confidence: 0.6,
+    sourceTrust: "untrusted_web",
+    patch: {
+      type: "text_patch",
+      oldString: "promoted smoke example",
+      newString: "untrusted promoted smoke example"
+    }
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const untrustedPatchId = (skillUntrustedPatchExecution?.result?.metadata as { id?: string } | undefined)?.id;
+const skillReviewUntrustedExecution = await toolExecutor.executeTool({
+  tool: "skill.review_proposal",
+  input: {
+    proposal_id: untrustedPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillUntrustedPromoteExecution = await toolExecutor.executeTool({
+  tool: "skill.promote_patch",
+  input: {
+    proposal_id: untrustedPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillMediumRiskPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.propose_patch",
+  input: {
+    name: "sample-personal-skill",
+    reason: "Change workflow order to prove approval-gated medium-risk review path.",
+    confidence: 0.7,
+    sourceTrust: "runtime_internal",
+    patch: {
+      type: "json_frontmatter_patch",
+      operation: "replace",
+      path: "/workflow/0/description",
+      value: "Approved medium-risk smoke workflow."
+    }
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const mediumRiskPatchId = (skillMediumRiskPatchExecution?.result?.metadata as { id?: string } | undefined)?.id;
+const skillMediumRiskPromoteBeforeApprovalExecution = await toolExecutor.executeTool({
+  tool: "skill.promote_patch",
+  input: {
+    proposal_id: mediumRiskPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillApprovePatchExecution = await toolExecutor.executeTool({
+  tool: "skill.approve_patch",
+  input: {
+    proposal_id: mediumRiskPatchId,
+    approvedBy: "smoke"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillRejectPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.reject_patch",
+  input: {
+    proposal_id: untrustedPatchId
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillUsageExecution = await toolExecutor.executeTool({
+  tool: "skill.usage",
+  input: {
+    name: "sample-personal-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const promotedProposalListExecution = await toolExecutor.executeTool({
+  tool: "skill.list_proposals",
+  input: {
+    name: "sample-personal-skill",
+    status: "promoted"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+assert(skillPromotePatchExecution?.result?.ok === true, "expected skill.promote_patch to promote a proposal");
+assert(skillReviewUntrustedExecution?.result?.ok === true, "expected skill.review_proposal to review untrusted proposal");
+assert(skillUntrustedPromoteExecution?.result?.ok === false, "expected untrusted-only skill proposal promotion to be blocked");
+assert(skillMediumRiskPromoteBeforeApprovalExecution?.result?.ok === false, "expected medium-risk skill proposal to require approval");
+assert(skillApprovePatchExecution?.result?.ok === true, "expected skill.approve_patch to approve proposal");
+assert(skillRejectPatchExecution?.result?.ok === true, "expected skill.reject_patch to reject proposal");
+assert(skillUsageExecution?.result?.ok === true, "expected skill.usage to inspect usage");
+assert(
+  JSON.stringify(skillUsageExecution.result.metadata).includes("\"patchCount\""),
+  "expected skill usage metadata to include patch counters"
+);
+assert(
+  promotedProposalListExecution?.result?.content.includes(proposedPatchId) === true,
+  "expected promoted proposal to appear in proposal list"
+);
+assert(
+  JSON.stringify(skillPromotePatchExecution.result.metadata).includes("\"evals\":\"passed\"") ||
+    JSON.stringify(skillPromotePatchExecution.result.metadata).includes("\"evals\": \"passed\""),
+  "expected promotion record to include passed eval gate"
+);
+assert(
+  JSON.stringify(skillPromotePatchExecution.result.metadata).includes("\"diffSummary\""),
+  "expected promotion record to include a diff summary"
+);
+assert(
+  JSON.stringify(skillPromotePatchExecution.result.metadata).includes("\"evalDelta\""),
+  "expected promotion record to include eval delta"
+);
+assert(
+  (await readFile(createdSkillSourcePath, "utf8")).includes("promoted smoke example"),
+  "expected promoted patch to update JSON frontmatter"
+);
 const dynamicMenuRuntime = {
   describe: () => "smoke runtime",
   tools: () => tools.list(),
@@ -5022,44 +5409,49 @@ await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "templates")
 await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "scripts"), { recursive: true });
 await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "assets"), { recursive: true });
 const providerFileProofSkillPath = join(liveSkillProjectSkillsRoot, "provider-file-proof", "SKILL.md");
-const providerFileProofSkillContent = `---
-name: provider-file-proof
-description: Create and verify a proof file through the normal tool loop.
-version: 0.1.0
-category: coding
-references:
-  - references/spec.md
-required_environment_variables:
-  - ESTACODA_SKILL_SMOKE_TOKEN
-required_credential_files:
-  - ~/.estacoda/credentials/provider-file-proof.json
-metadata:
-  hermes:
-    config:
-      proof_style:
-        description: Preferred style for the proof file.
-        default: concise
-      output_name:
-        description: Output filename override.
-        required: true
-required_toolsets:
-  - files
-  - core
-workflow:
-  - id: create-proof
-    description: Create the proof file in the workspace.
-    toolsets:
-      - files
-  - id: verify-proof
-    description: Read the proof file back and confirm the exact contents.
-    toolsets:
-      - files
-permission_expectations:
-  - auto-read
-  - ask-before-write
----
-Use the normal EstaCoda tool loop to create a proof file named runtime-skill-proof.md, then read it back and verify the exact contents before answering.
-`;
+const providerFileProofSkillContent = [
+  "---",
+  JSON.stringify({
+    name: "provider-file-proof",
+    description: "Create and verify a proof file through the normal tool loop.",
+    version: "0.1.0",
+    category: "coding",
+    references: ["references/spec.md"],
+    required_environment_variables: ["ESTACODA_SKILL_SMOKE_TOKEN"],
+    required_credential_files: ["~/.estacoda/credentials/provider-file-proof.json"],
+    metadata: {
+      hermes: {
+        config: {
+          proofStyle: {
+            description: "Preferred style for the proof file.",
+            default: "concise"
+          },
+          outputName: {
+            description: "Output filename override.",
+            required: true
+          }
+        }
+      }
+    },
+    required_toolsets: ["files", "core"],
+    workflow: [
+      {
+        id: "create-proof",
+        description: "Create the proof file in the workspace.",
+        toolsets: ["files"]
+      },
+      {
+        id: "verify-proof",
+        description: "Read the proof file back and confirm the exact contents.",
+        toolsets: ["files"]
+      }
+    ],
+    permission_expectations: ["auto-read", "ask-before-write"]
+  }, null, 2),
+  "---",
+  "Use the normal EstaCoda tool loop to create a proof file named runtime-skill-proof.md, then read it back and verify the exact contents before answering.",
+  ""
+].join("\n");
 await writeFile(
   join(liveSkillProjectSkillsRoot, "provider-file-proof", "references", "spec.md"),
   "Proof spec: create runtime-skill-proof.md and verify the exact sentence after writing.",
@@ -5335,35 +5727,35 @@ const templateSkillRoot = join(templateSkillWorkspace, ".estacoda", "skills", "p
 await mkdir(join(templateSkillRoot, "references"), { recursive: true });
 await mkdir(join(templateSkillRoot, "templates"), { recursive: true });
 await mkdir(join(templateSkillRoot, "scripts"), { recursive: true });
-await writeFile(join(templateSkillRoot, "SKILL.md"), `---
-name: provider-template-proof
-description: Fill a skill template through the normal provider loop.
-version: 0.1.0
-category: coding
-required_environment_variables:
-  - ESTACODA_TEMPLATE_SMOKE_TOKEN
-required_credential_files:
-  - ~/.estacoda/credentials/provider-template-proof.json
-references:
-  - references/context.md
-required_toolsets:
-  - files
-  - core
-workflow:
-  - id: load-template
-    description: Load the template file with skill.view.
-    toolsets:
-      - core
-  - id: write-output
-    description: Fill the template and write the final file.
-    toolsets:
-      - files
-permission_expectations:
-  - auto-read
-  - ask-before-write
----
-Load the template, fill it with the requested audience and proof sentence, then write template-proof.md in the workspace.
-`, "utf8");
+	await writeFile(join(templateSkillRoot, "SKILL.md"), [
+  "---",
+  JSON.stringify({
+    name: "provider-template-proof",
+    description: "Fill a skill template through the normal provider loop.",
+    version: "0.1.0",
+    category: "coding",
+    required_environment_variables: ["ESTACODA_TEMPLATE_SMOKE_TOKEN"],
+    required_credential_files: ["~/.estacoda/credentials/provider-template-proof.json"],
+    references: ["references/context.md"],
+    required_toolsets: ["files", "core"],
+    workflow: [
+      {
+        id: "load-template",
+        description: "Load the template file with skill.view.",
+        toolsets: ["core"]
+      },
+      {
+        id: "write-output",
+        description: "Fill the template and write the final file.",
+        toolsets: ["files"]
+      }
+    ],
+    permission_expectations: ["auto-read", "ask-before-write"]
+  }, null, 2),
+  "---",
+  "Load the template, fill it with the requested audience and proof sentence, then write template-proof.md in the workspace.",
+  ""
+].join("\n"), "utf8");
 await writeFile(
   join(templateSkillRoot, "references", "context.md"),
   "Context note: the template should mention the requested audience and proof sentence.",
@@ -5570,30 +5962,32 @@ assert(
 const scriptSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-script-skill-"));
 const scriptSkillRoot = join(scriptSkillWorkspace, ".estacoda", "skills", "provider-script-proof");
 await mkdir(join(scriptSkillRoot, "scripts"), { recursive: true });
-await writeFile(join(scriptSkillRoot, "SKILL.md"), `---
-name: provider-script-proof
-description: Inspect and run a skill-local script through the normal provider loop.
-version: 0.1.0
-category: coding
-required_toolsets:
-  - files
-  - coding
-  - core
-workflow:
-  - id: inspect-script
-    description: Inspect the local script first.
-    toolsets:
-      - core
-  - id: run-script
-    description: Run the inspected script through terminal.run.
-    toolsets:
-      - coding
-permission_expectations:
-  - auto-read
-  - auto-run
----
-Inspect the skill-local script, run it, and report the generated proof output.
-`, "utf8");
+await writeFile(join(scriptSkillRoot, "SKILL.md"), [
+  "---",
+  JSON.stringify({
+    name: "provider-script-proof",
+    description: "Inspect and run a skill-local script through the normal provider loop.",
+    version: "0.1.0",
+    category: "coding",
+    required_toolsets: ["files", "coding", "core"],
+    workflow: [
+      {
+        id: "inspect-script",
+        description: "Inspect the local script first.",
+        toolsets: ["core"]
+      },
+      {
+        id: "run-script",
+        description: "Run the inspected script through terminal.run.",
+        toolsets: ["coding"]
+      }
+    ],
+    permission_expectations: ["auto-read"]
+  }, null, 2),
+  "---",
+  "Inspect the skill-local script, run it, and report the generated proof output.",
+  ""
+].join("\n"), "utf8");
 await writeFile(
   join(scriptSkillRoot, "scripts", "generate.py"),
   "from pathlib import Path\nPath('script-proof.txt').write_text('script-proof-ok\\n', encoding='utf8')\nprint('script-proof-ok')\n",
@@ -5779,40 +6173,40 @@ await mkdir(join(composedSkillRoot, "scripts"), { recursive: true });
 await writeFile(join(composedCredentialRoot, "provider-composed.json"), JSON.stringify({
   apiKey: "smoke"
 }), "utf8");
-await writeFile(join(composedSkillRoot, "SKILL.md"), `---
-name: provider-composed-proof
-description: Use references, templates, and scripts together through the normal provider loop.
-version: 0.1.0
-category: coding
-references:
-  - references/spec.md
-required_environment_variables:
-  - ESTACODA_COMPOSED_MODE
-required_credential_files:
-  - \${ESTACODA_COMPOSED_CRED_ROOT}/provider-composed.json
-required_toolsets:
-  - files
-  - coding
-  - core
-workflow:
-  - id: inspect-reference
-    description: Load the spec reference.
-    toolsets:
-      - core
-  - id: inspect-template
-    description: Load the output template.
-    toolsets:
-      - core
-  - id: run-render-script
-    description: Run the skill-local renderer.
-    toolsets:
-      - coding
-permission_expectations:
-  - auto-read
-  - auto-run
----
-Load the reference and template, then run the renderer script to produce composed-proof.md in the workspace.
-`, "utf8");
+await writeFile(join(composedSkillRoot, "SKILL.md"), [
+  "---",
+  JSON.stringify({
+    name: "provider-composed-proof",
+    description: "Use references, templates, and scripts together through the normal provider loop.",
+    version: "0.1.0",
+    category: "coding",
+    references: ["references/spec.md"],
+    required_environment_variables: ["ESTACODA_COMPOSED_MODE"],
+    required_credential_files: ["${ESTACODA_COMPOSED_CRED_ROOT}/provider-composed.json"],
+    required_toolsets: ["files", "coding", "core"],
+    workflow: [
+      {
+        id: "inspect-reference",
+        description: "Load the spec reference.",
+        toolsets: ["core"]
+      },
+      {
+        id: "inspect-template",
+        description: "Load the output template.",
+        toolsets: ["core"]
+      },
+      {
+        id: "run-render-script",
+        description: "Run the skill-local renderer.",
+        toolsets: ["coding"]
+      }
+    ],
+    permission_expectations: ["auto-read"]
+  }, null, 2),
+  "---",
+  "Load the reference and template, then run the renderer script to produce composed-proof.md in the workspace.",
+  ""
+].join("\n"), "utf8");
 await writeFile(
   join(composedSkillRoot, "references", "spec.md"),
   "Audience: research operators\nSentence: EstaCoda composes references, templates, and scripts through one provider-driven workflow.\n",
@@ -6599,6 +6993,8 @@ const response = await runtime.handle({
   trustedWorkspace: true
 });
 const runtimePersistedMemory = await readFile(join(contextWorkspace, ".estacoda", "memory", "MEMORY.md"), "utf8");
+const runtimeSkillUsage = await readFile(join(contextWorkspace, ".estacoda", "skill-usage.json"), "utf8");
+const runtimeSkillObservationLog = await readFile(join(contextWorkspace, ".estacoda", "skill-evolution", "observations.jsonl"), "utf8");
 let sessionLoopPromptIndex = 0;
 let sessionLoopClosed = false;
 const sessionLoopOutput: string[] = [];
@@ -7655,14 +8051,15 @@ assert(filteredSkillNames.includes("requires-browser-toolset") === false, "expec
 assert(filteredSkillNames.includes("requires-browser-tool") === false, "expected requires_tools skill to stay hidden without browser.navigate");
 assert(filteredSkillNames.includes("linux-only-skill") === false, "expected incompatible platform skill to stay hidden");
 assert(filteredSkillNames.includes("telegram-media-analysis") === false, "expected telegram skill to stay hidden without channel readiness");
-assert(filteredSkillNames.includes("youtube-knowledge-base") === false, "expected browser/web knowledge-base skill to stay hidden without browser");
-assert(filteredSkillNames.includes("ascii-video") === false, "expected browser/media render skill to stay hidden without browser");
+assert(filteredSkillNames.includes("youtube-knowledge-base"), "expected degraded youtube skill to stay visible without browser");
+assert(filteredSkillNames.includes("ascii-video"), "expected local ascii-video skill to stay visible without browser");
 assert(filteredSkillPrompt.includes("fallback-browser-toolset"), "expected provider prompt skills index to include visible fallback toolset skill");
 assert(filteredSkillPrompt.includes("fallback-browser-tool"), "expected provider prompt skills index to include visible fallback tool skill");
 assert(filteredSkillPrompt.includes("requires-browser-toolset") === false, "expected provider prompt to hide browser-required toolset skill");
 assert(filteredSkillPrompt.includes("requires-browser-tool") === false, "expected provider prompt to hide browser-required tool skill");
 assert(filteredSkillPrompt.includes("linux-only-skill") === false, "expected provider prompt to hide incompatible platform skill");
 assert(filteredSkillPrompt.includes("telegram-media-analysis") === false, "expected provider prompt to hide telegram skill when channel is unavailable");
+assert(filteredSkillPrompt.includes("youtube-knowledge-base"), "expected provider prompt to include degraded youtube skill");
 const availableSkillRuntime = await createRuntime({
   theme: kemetBlueTheme,
   sessionDb,
@@ -7704,6 +8101,8 @@ assert(
 assert(response.skillOutcomes.some((outcome) => outcome.skill === "youtube-knowledge-base"), "expected runtime skill outcome");
 assert(runtimeEvents.some((event) => event.kind === "memory-write" && event.outcome.skill === "youtube-knowledge-base"), "expected runtime memory-write event");
 assert(runtimePersistedMemory.includes("skill:youtube-knowledge-base"), "expected runtime memory outcome to persist to workspace memory");
+assert(runtimeSkillUsage.includes("\"skillName\": \"youtube-knowledge-base\""), "expected runtime skill usage sidecar to track selected skill");
+assert(runtimeSkillObservationLog.includes("\"skillName\":\"youtube-knowledge-base\""), "expected runtime skill observation log to track selected skill");
 
 const runtimeProviderRegistry = new ProviderRegistry();
 let runtimeProviderRequest: ProviderRequest | undefined;
@@ -7916,6 +8315,119 @@ const providerResponse = await providerRuntime.handle({
     providerRuntimeStreamEvents.push(event);
   }
 });
+const imageIntentProviderRegistry = new ProviderRegistry();
+let imageIntentProviderCalls = 0;
+imageIntentProviderRegistry.register({
+  id: "openai",
+  name: "Image intent smoke provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "gpt-4.1-mini",
+      provider: "openai",
+      contextWindowTokens: 1_000_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    imageIntentProviderCalls += 1;
+    yield {
+      kind: "start",
+      provider: "openai",
+      model: request.model
+    };
+    yield {
+      kind: "done",
+      provider: "openai",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "openai"
+      }
+    };
+  },
+  complete: async (request) => {
+    imageIntentProviderCalls += 1;
+    return {
+      ok: true,
+      content: "",
+      model: request.model,
+      provider: "openai"
+    };
+  }
+} satisfies ProviderAdapter);
+process.env.BYTEPLUS_ARK_API_KEY = "byteplus-smoke-key";
+const imageIntentHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-intent-home-"));
+const imageIntentRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "image-intent-runtime-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  homeDir: imageIntentHome,
+  providerRegistry: imageIntentProviderRegistry,
+  enableWebNetwork: true,
+  imageGen: {
+    provider: "byteplus",
+    model: "seedream-5-0-260128",
+    useGateway: false,
+    byteplus: {
+      model: "seedream-5-0-260128",
+      apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+      baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+    }
+  },
+  imageGenerationFetch: async (url, init) => {
+    if (url.endsWith("/images/generations")) {
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: async () => Buffer.from(JSON.stringify({ data: [{ url: "https://images.example/native-image.png" }] })).buffer,
+        text: async () => JSON.stringify({ data: [{ url: "https://images.example/native-image.png" }] })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => Buffer.from("native image png bytes").buffer,
+      text: async () => "native image png bytes"
+    };
+  },
+  model: {
+    id: "gpt-4.1-mini",
+    provider: "openai",
+    contextWindowTokens: 1_000_000,
+    supportsTools: true,
+    supportsVision: true,
+    supportsStructuredOutput: true
+  }
+});
+const imageIntentResponse = await imageIntentRuntime.handle({
+  text: "Generate an image of a blue lotus observatory in the desert at sunrise, cinematic but clean product illustration style.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+assert(
+  imageIntentResponse.toolExecutions.some((execution) => execution.tool.name === "image.generate" && execution.result?.ok === true),
+  "expected media-generation intent to execute image.generate deterministically"
+);
+assert(imageIntentResponse.text.includes("Artifacts:"), "expected deterministic image generation response to include artifact summary");
+assert(
+  imageIntentResponse.toolPlans.some((plan) => plan.tool === "image.generate" && plan.source === "internal" && plan.status === "executed"),
+  "expected deterministic image generation to record an internal tool plan"
+);
+assert(
+  imageIntentResponse.toolExecutions.filter((execution) => execution.tool.name === "image.generate").length === 1,
+  "expected media-generation intent to execute image.generate exactly once"
+);
+assert(imageIntentProviderCalls === 0, "expected deterministic image intent not to call the provider after image.generate");
+delete process.env.BYTEPLUS_ARK_API_KEY;
 const providerRuntimeEvents = await sessionDb.listEvents(providerRuntime.sessionId);
 const providerRuntimeRequestCountBeforeResume = runtimeProviderRequests.length;
 const providerCancelController = new AbortController();

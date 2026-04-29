@@ -55,10 +55,14 @@ Done:
 - external dirs `smoke-tested`
 - skill package indexing `smoke-tested`
 - skill mutation actions `smoke-tested`
+- skill mutation hardening with schema-preserving generated frontmatter, snapshots, rollback, and validation `smoke-tested`
+- skill usage/evolution overlay with usage sidecar, provenance-aware observations/proposed patches, scored per-skill eval fixtures, review/approve/reject UX, rich promotion records with eval deltas, and gated personal-skill promotion `smoke-tested`
 - load-time setup context `smoke-tested`
 
 Next:
 
+- stronger skill eval execution with real task fixtures beyond metadata/workflow scoring
+- portable per-skill sidecars and richer human-facing review UI for blocked untrusted proposals
 - more operational env/credential-backed script conventions
 - Skills Hub/distribution later
 
@@ -352,13 +356,13 @@ What remains:
 State: Hermes-aligned first foundation exists.
 
 - `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
-- BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY` and Seedream defaults `smoke-tested`
+- BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY`, Seedream 5 as the default model, and version aliases for Seedream 5/4.5/4.0 `smoke-tested`
 - `image.generate` accepts a minimal agent-facing schema: prompt, aspect ratio, model override, and seed `smoke-tested`
 - image-generation prompts route to native media tooling rather than requiring a skill `smoke-tested`
-- `estacoda image status/setup` exists, including local secret-store support when a user provides an API key `smoke-tested`
+- `estacoda image status/setup/models` exists, including local secret-store support when a user provides an API key and a model-version picker surface for provider-specific image model IDs `smoke-tested`
 - agent-facing `config.image.status` and `config.image.setup` tools exist so EstaCoda can configure image generation provider/model/key-env references without advertising raw API-key input `smoke-tested`
 - FAL aspect ratios map to model-native `image_size` presets `smoke-tested`
-- BytePlus/Seedream aspect ratios map to concrete image sizes `smoke-tested`
+- BytePlus/Seedream aspect ratios map to concrete image sizes above Seedream 5's minimum pixel requirement `smoke-tested`
 - generated image URLs are downloaded into `.estacoda/image-cache/` and recorded as image artifacts `smoke-tested`
 - Telegram image artifacts upload through `sendPhoto` with artifact-notice fallback `smoke-tested`
 - `estacoda image verify` checks provider config, key-env presence, cache path, Telegram delivery readiness, and a safe provider capability probe `smoke-tested`
@@ -366,10 +370,13 @@ State: Hermes-aligned first foundation exists.
 - image setup now uses the shared capability secret-storage primitive, ready to generalize to voice/search/browser credentials `smoke-tested`
 - CLI runtime intercepts image `setup_needed`, captures the API key with masked input outside the provider loop, stores it in `.estacoda/.env`, verifies setup, and resumes the original `image.generate` call `smoke-tested`
 - OpenAI-style fragmented streaming tool calls preserve their function name across argument-only chunks, so provider-safe `image_generate` maps back to `image.generate` instead of `unknown` `smoke-tested`
+- media-generation intents execute deterministic `image.generate` exactly once and suppress duplicate provider tool selection for the same turn `smoke-tested`
+- BytePlus `ModelNotOpen` failures now explain that model access is version-specific and point users to `estacoda image models --provider byteplus` plus `--model-version` setup aliases `smoke-tested`
 
 What remains:
 
 - live provider proof with real FAL and BytePlus credentials
+- CLI image/audio artifact rendering should use a clean artifact card/path instead of raw Markdown `file://` links
 - Telegram/channel protected credential capture and resume UX
 - richer model picker UX similar to Hermes' `hermes tools`
 - Nous gateway/proxy path

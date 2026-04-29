@@ -45,7 +45,7 @@ export type SecurityAssessment = {
     confidence?: number;
     provider?: string;
     model?: string;
-    status?: "ok" | "timeout" | "malformed" | "unavailable" | "disabled";
+    status?: "ok" | "timeout" | "malformed" | "unavailable" | "disabled" | "hard-block-overrode-assessor";
   };
 };
 

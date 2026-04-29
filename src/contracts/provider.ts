@@ -153,6 +153,7 @@ export type ProviderErrorClass =
   | "network"
   | "server"
   | "timeout"
+  | "incomplete-stream"
   | "model-unavailable"
   | "unsupported"
   | "unknown";

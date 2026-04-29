@@ -79,8 +79,12 @@ Next acceptance checks:
 - Done: provider-backed script workflows execute through `skill.view` -> `terminal.run` / `execute_code` continuations.
 - Done: progressive disclosure is enforced in smoke coverage.
 - Done: skill package contents stay session-stable until refresh/new session.
+- Done: skill hardening now rejects unsupported YAML object-array frontmatter loudly, validates workflow/evaluation objects, renders generated skills with schema-preserving JSON frontmatter, snapshots personal skill mutations, and keeps bundled skill load failures non-fatal.
+- Done: central skill usage/evolution overlay records usage counters, provenance-aware runtime observations, proposed patches, scored eval runs, review/approve/reject decisions, rich promotion logs with eval deltas, eval-gated personal-skill patch promotion, and untrusted/medium-risk promotion blocks without mutating official/external skill source.
 
 Remaining hardening:
+- Add real task fixtures beyond metadata/workflow scoring and richer human-facing review UI for untrusted/ambiguous proposals.
+- Add portable per-skill sidecars once the central overlay settles.
 - Make env/credential-backed script execution conventions more operational in live provider runs.
 - Add Skills Hub / distribution layer later without changing the runtime skill model.
 
@@ -130,8 +134,8 @@ Next acceptance checks:
 - Done: setup/verify/settings copy now shows clearer recommended paths, post-setup commands, and recovery next actions.
 - Done: local model setup is supported through a Hermes-aligned OpenAI-compatible endpoint flow with Ollama defaults, `/models` discovery, no-key local config, and context guidance.
 - Done: voice configuration foundation exists with Hermes-aligned `tts`/`stt` sections, `estacoda voice status/setup`, OpenAI-compatible `voice.speak` audio artifact generation, local custom-command plus OpenAI/Groq-style `voice.transcribe` transcript artifacts, automatic Telegram voice transcript injection, Telegram `sendVoice` for Opus/Ogg voice bubbles, and `sendAudio` fallback.
-- Done: image generation foundation exists with Hermes-aligned FAL defaults, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifacts, Telegram `sendPhoto` delivery, CLI setup/status/verify, local key storage through a shared capability secret primitive, structured `setup_needed` metadata when image credentials are missing, protected CLI credential capture, verification-before-retry, automatic resume of the original image request, and agent-facing image config tools.
-- Remaining: live provider proof and Telegram/channel protected credential capture/resume UX.
+- Done: image generation foundation exists with Hermes-aligned FAL defaults, BytePlus/ModelArk Seedream support with Seedream 5 defaults and version aliases, `image.generate`, image-cache artifacts, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local key storage through a shared capability secret primitive, structured `setup_needed` metadata when image credentials are missing, protected CLI credential capture, verification-before-retry, automatic resume of the original image request, exactly-once deterministic media-generation execution, and agent-facing image config tools.
+- Remaining: live provider proof, CLI artifact-card rendering instead of raw Markdown `file://` links, and Telegram/channel protected credential capture/resume UX.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.
 - Full Arabic interface copy and localized approval cards are implemented.
@@ -154,7 +158,7 @@ Remaining hardening:
 
 Move from strong internal alpha behavior to MVP launch hardening:
 
-1. Refine workflow-learning heuristics and skill patching behavior now that project-fact promotion and `skills.autonomy` exist.
+1. Add real task fixtures and human-facing review UI on top of the new evolution overlay.
 2. Refine MCP trust/visibility controls and real-server validation.
 3. Finish install/package distribution and credential-error recovery polish now that Phase 1 setup exists.
 4. Expand the evaluation substrate into stronger scored comparisons.

@@ -3,12 +3,15 @@
   "name": "youtube-knowledge-base",
   "description": "Extract video content and build a reusable knowledge base from a YouTube URL.",
   "version": "0.1.0",
+  "intentLabels": ["youtube-video"],
+  "triggerPatterns": ["youtube\\.com", "youtu\\.be", "transcript"],
   "whenToUse": [
     "The user sends a YouTube URL and asks to summarize, archive, extract, or build a knowledge base.",
     "The user asks to capture everything discussed in a video.",
     "The user asks for notes, claims, sources, or a durable knowledge file from a video."
   ],
-  "requiredToolsets": ["web", "browser", "files", "research"],
+  "requiredToolsets": ["files", "research"],
+  "optionalToolsets": ["web", "browser"],
   "workflow": [
     {
       "id": "extract-transcript",
@@ -61,4 +64,3 @@ Default behavior:
 - If transcript access is blocked, try browser or alternate frontend routes.
 - Structure the result into durable notes, claims, timestamps if available, open questions, and follow-up tasks.
 - Ask only after safe extraction routes fail or if writing to a specific destination changes user state.
-

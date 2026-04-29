@@ -259,12 +259,13 @@ At a high level:
 - Telegram audio artifact delivery through `sendAudio` with artifact-notice fallback for non-uploadable artifacts
 - Telegram voice transcript injection before the agent turn and Opus/Ogg `sendVoice` voice-bubble delivery
 - FAL-compatible `image.generate` execution with mocked image URL, aspect-ratio mapping, image-cache write, and artifact recording
-- BytePlus/ModelArk Seedream `image.generate` execution with mocked image URL, seed support, image-cache write, and artifact recording
+- BytePlus/ModelArk Seedream `image.generate` execution with mocked image URL, Seedream 5 default routing, provider-minimum-safe size mapping, seed support, image-cache write, and artifact recording
 - missing image-generation credentials returning structured `setup_needed` metadata before any provider request
 - CLI runtime-owned image setup flow with masked credential prompt, local secret storage, no secret leakage to output, verification before retry, and automatic resume of the original `image.generate` call
 - OpenAI-style fragmented streaming tool-call chunks preserving the original `image_generate` name across argument-only chunks
+- deterministic media-generation execution calls `image.generate` exactly once and does not re-enter the provider loop for duplicate image tool selection
 - image prompt intent routing to native media generation without mandatory skill selection
-- image status/setup/verify CLI config persistence, local secret-store write for pasted API keys, missing-key verification failure, and ready-state provider capability probe
+- image status/setup/models/verify CLI config persistence, local secret-store write for pasted API keys, missing-key verification failure, version-alias model selection, and ready-state provider capability probe
 - agent-facing image config status/setup tools
 - Telegram image artifact delivery through `sendPhoto` with artifact-notice fallback
 - setup/verify/settings onboarding copy, recommended paths, and next-action recovery guidance
@@ -272,6 +273,8 @@ At a high level:
 - Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved
 - context expansion
 - skill execution and package behavior
+- skill mutation hardening: unsupported YAML object-array rejection, workflow/evaluation validation, schema-preserving generated frontmatter, mutation snapshots, and snapshot rollback tool registration
+- skill usage/evolution overlay: runtime-selected skill usage sidecar, provenance-aware observation log, proposed patch log, scored `skill.eval`, review/approve/reject tools, untrusted-source promotion blocking, medium-risk approval gating, rich promotion metadata with eval deltas, proposal promotion, and promoted proposal listing
 - session-stable skill visibility
 - approvals and strict target-key matching
 - CLI approval scopes plus persistent workspace approval storage/revocation
@@ -279,7 +282,7 @@ At a high level:
 - session-scoped CLI and gateway `/yolo` toggles for open mode
 - cron create/list/edit/tick flow, schedule parsing, prompt safety blocking, bounded workspace-local script-backed jobs, tick locking, wrapped output, `/cron`, and gateway command exposure
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
-- expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
+- expanded hard-floor coverage for secret reads, environment dumps, destructive inline code, pipe-to-interpreter installs, and force-push patterns
 - CLI `/security` and `/security debug` audit rendering
 - Telegram progress compaction
 - Telegram guided setup, token verification, allow/remove user/chat commands, command sync, and test-message command

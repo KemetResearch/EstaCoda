@@ -83,7 +83,7 @@ Evidence:
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
 - Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
 - Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
-- Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
+- Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support with Seedream 5 as the default plus `image models`/`--model-version` aliases for provider-specific versions, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, exactly-once deterministic media-generation execution, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
 
 ## 3. Current Working Capabilities
 
@@ -98,6 +98,8 @@ Confirmed working in code and smoke:
 - Session-stable skill visibility with `/reset` refresh semantics. `live-proven`
 - External skill directories with local precedence and silent skip for missing roots. `smoke-tested`
 - Skill create/edit/patch/delete/write-file/remove-file operations. `smoke-tested`
+- Skill mutation hardening: schema-preserving generated JSON frontmatter, workflow/evaluation validation, mutation snapshots, rollback tool, and non-fatal bundled skill load warnings. `smoke-tested`
+- Skill usage/evolution overlay: `.estacoda/skill-usage.json`, append-only provenance-aware observations, proposed patches, scored eval records, review/approve/reject tools, rich promotion records with eval deltas, untrusted-source promotion blocking, and schema/frontmatter-gated personal-skill patch promotion. `smoke-tested`
 - Skill package indexing for `references/`, `templates/`, `scripts/`, and compatible `assets/`. `smoke-tested`
 - Skill load-time setup context for env/config/credential-file presence. `smoke-tested`
 - Memory file loading and persistence of skill outcomes. `smoke-tested`
@@ -381,6 +383,8 @@ For Telegram:
 - `doctor --live` can return successful status with empty response text for some providers. This is noted but not fully improved.
 - CLI multiline paste ergonomics are still rough in interactive mode.
 - Some success paths are stronger in smoke than in live multi-provider testing.
+- Memory promotion still needs to move off the pre-routing hot path with cursor/throttle/background behavior.
+- Core tool hardening still needs a focused pass for regex errors, shell portability, timeout kill escalation, symlink cycles, stable tool-call IDs, argument validation, and stored-result truncation.
 
 ## 8. Design Decisions
 
@@ -399,7 +403,7 @@ For Telegram:
   `adaptive` now supports an optional auxiliary assessor after deterministic triage, while the dangerous-command floor remains non-overridable.
   `/yolo` now toggles session-scoped `open` mode in CLI and gateway sessions, while preserving the non-overridable hard floor.
   Channel and CLI approval scopes now both support `once`, `session`, and `always`, while ACP remains narrower because of editor permission-card constraints.
-  The hard floor now explicitly covers broad destructive deletes, disk-destructive commands, system power commands, fork-bomb or kill-all patterns, explicit secret reads, pipe-to-interpreter installs, and git force-pushes.
+  The hard floor now explicitly covers broad destructive deletes, disk-destructive commands, system power commands, fork-bomb or kill-all patterns, explicit secret reads including environment dumps, pipe-to-interpreter installs, destructive inline Python/Node/Bun/Deno code, and git force-pushes.
   CLI operators can inspect the last security decisions with `/security`, or use `/security debug` for target keys, deterministic rules, and assessor status.
 
 - **Local-first skill mutation**
@@ -562,8 +566,8 @@ Best next development target:
 
 1. Broaden live Telegram image verification beyond Kimi. `implemented but not live-proven`
 2. Harden OpenRouter exactness/instruction fidelity after the live provider batch. OpenRouter runtime path is `live-proven`; exactness-sensitive tasks are still partial.
-3. Extend memory promotion beyond user preferences
-   - refine workflow-learning heuristics, patching, and candidate quality now that `skills.autonomy` and project-fact promotion exist `smoke-tested`
+3. Extend skill evolution beyond the minimal overlay
+   - add real task fixtures beyond metadata/workflow scoring, richer human-facing review UI, and eventual per-skill portable sidecars `intended but not implemented`
 4. Expand the evaluation substrate into a scored skill-first benchmark layer. `implemented but not live-proven`
 5. Finish onboarding/distribution polish. `intended but not implemented`
 

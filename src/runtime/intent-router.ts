@@ -150,6 +150,18 @@ function toolsetsFor(labels: IntentLabel[]): ToolsetName[] {
 }
 
 function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[], normalized: string): boolean {
+  if (matchesDeclaredPattern(skill.negativePatterns, normalized)) {
+    return false;
+  }
+
+  if ((skill.intentLabels ?? []).some((label) => labels.includes(label as IntentLabel))) {
+    return true;
+  }
+
+  if (matchesDeclaredPattern(skill.triggerPatterns, normalized)) {
+    return true;
+  }
+
   if (skill.name === "youtube-knowledge-base") {
     return labels.includes("youtube-video");
   }
@@ -163,6 +175,24 @@ function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[], norma
   }
 
   return false;
+}
+
+function matchesDeclaredPattern(patterns: string[] | undefined, normalized: string): boolean {
+  if (patterns === undefined) {
+    return false;
+  }
+
+  return patterns.some((pattern) => {
+    const trimmed = pattern.trim();
+    if (trimmed.length === 0) {
+      return false;
+    }
+    try {
+      return new RegExp(trimmed, "iu").test(normalized);
+    } catch {
+      return normalized.includes(trimmed.toLowerCase());
+    }
+  });
 }
 
 function shouldSuggestSkill(
