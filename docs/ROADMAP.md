@@ -315,7 +315,8 @@ State: configuration plus first TTS/STT execution paths exist.
 - hosted TTS/STT provider key-env slots are represented for OpenAI, ElevenLabs, MiniMax, Mistral, Gemini, xAI, and Groq where applicable `smoke-tested`
 - `voice.speak` generates OpenAI-compatible TTS audio, saves it under the audio cache, and records an audio artifact `smoke-tested`
 - `voice.transcribe` sends OpenAI-compatible hosted STT requests for OpenAI/Groq-style providers and records transcript artifacts `smoke-tested`
-- audio/voice attachments suggest `voice.transcribe` in the assembled prompt `implemented`
+- Telegram audio/voice attachments download into channel media and suggest `voice.transcribe` in the assembled prompt `implemented`
+- Telegram audio artifacts are delivered with `sendAudio` when the generated file is available, with artifact-notice fallback `smoke-tested`
 - TUI voice input is `intended but not implemented`
 - Telegram/channel voice handling is `intended but not implemented`
 
@@ -323,8 +324,8 @@ What remains:
 
 - local STT execution path
 - Mistral-specific STT execution adapter
-- Telegram voice/audio transcription injection
-- Telegram voice-bubble/audio-file delivery for generated speech
+- automatic Telegram voice/audio transcription injection before the agent turn
+- Telegram voice-bubble delivery for generated speech after Opus/OGG conversion
 - per-channel UX
 - security/privacy stance for audio processing
 

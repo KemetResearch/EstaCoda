@@ -9568,11 +9568,17 @@ const telegramRequests: Array<{
   url: string;
   body: Record<string, unknown>;
 }> = [];
+const telegramAudioArtifactDir = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-audio-artifact-"));
+const telegramAudioArtifactPath = join(telegramAudioArtifactDir, "speech.mp3");
+await writeFile(telegramAudioArtifactPath, "fake speech audio");
 const telegramAdapter = new TelegramAdapter({
   botToken: "telegram-token",
   mediaRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-media-")),
   fetch: async (url, init) => {
-    const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+    const rawBody = init?.body as unknown;
+    const body = rawBody instanceof FormData
+      ? Object.fromEntries([...rawBody.entries()].map(([key, value]) => [key, typeof value === "string" ? value : "blob"]))
+      : JSON.parse(String(rawBody ?? "{}")) as Record<string, unknown>;
     telegramRequests.push({ url, body });
 
     if (url.endsWith("/getUpdates")) {
@@ -9707,6 +9713,18 @@ await telegramAdapter.delivery.sendArtifact({
   createdAt: "2026-04-16T00:00:00.000Z",
   summary: "Telegram smoke artifact"
 });
+await telegramAdapter.delivery.sendArtifact({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  id: "telegram-audio-artifact",
+  path: telegramAudioArtifactPath,
+  kind: "audio",
+  bytes: 17,
+  createdAt: "2026-04-16T00:00:00.000Z",
+  mimeType: "audio/mpeg",
+  summary: "Telegram generated speech"
+});
 await telegramAdapter.stop();
 const convertedTelegramMessage = updateToChannelMessage({
   update_id: 43,
@@ -9775,6 +9793,15 @@ assert(
 assert(
   telegramRequests.some((request) => request.url.endsWith("/sendMessage") && String(request.body.text).includes("Artifact ready")),
   "expected Telegram artifact notice"
+);
+assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendAudio") &&
+      request.body.chat_id === "1254738091" &&
+      request.body.audio === "blob" &&
+      String(request.body.caption).includes("Telegram generated speech")
+  ),
+  "expected Telegram audio artifacts to upload as audio"
 );
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");

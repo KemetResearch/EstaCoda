@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
@@ -168,6 +168,12 @@ export class TelegramAdapter implements ChannelAdapter {
     },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
       this.#progressByChat.delete(sessionKey.chatId);
+      if (artifact.kind === "audio") {
+        const delivered = await this.#sendAudioArtifact(sessionKey.chatId, artifact);
+        if (delivered) {
+          return;
+        }
+      }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
     }
   };
@@ -261,7 +267,7 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo"): Promise<void> {
+  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice"): Promise<void> {
     await this.#call("sendChatAction", {
       chat_id: chatId,
       action
@@ -449,6 +455,24 @@ export class TelegramAdapter implements ChannelAdapter {
     return localPath;
   }
 
+  async #sendAudioArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const bytes = await readFile(artifact.path);
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      form.set("audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(artifact.path));
+      const caption = renderAudioArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_voice");
+      await this.#callMultipart<TelegramSentMessage>("sendAudio", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
     const response = await this.#fetch(`https://api.telegram.org/bot${this.#botToken}/${method}`, {
       method: "POST",
@@ -456,6 +480,20 @@ export class TelegramAdapter implements ChannelAdapter {
         "content-type": "application/json"
       },
       body: JSON.stringify(body)
+    });
+    const payload = await response.json() as TelegramApiResponse<T>;
+
+    if (!response.ok || !payload.ok) {
+      throw new Error(`Telegram ${method} failed: ${payload.description ?? response.statusText ?? response.status}`);
+    }
+
+    return payload.result as T;
+  }
+
+  async #callMultipart<T>(method: string, body: FormData): Promise<T> {
+    const response = await this.#fetch(`https://api.telegram.org/bot${this.#botToken}/${method}`, {
+      method: "POST",
+      body: body as unknown as string
     });
     const payload = await response.json() as TelegramApiResponse<T>;
 
@@ -650,12 +688,19 @@ function renderArtifactNotice(artifact: ArtifactRecord): string {
   ].filter((line) => line !== undefined).join("\n");
 }
 
+function renderAudioArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? "Generated audio",
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
 async function fetchJson(url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
 }) {
-  return fetch(url, init);
+  return fetch(url, init as RequestInit);
 }
 
 function sanitizePathPart(value: string): string {
