@@ -10,6 +10,8 @@ import type { ThemeDefinition } from "../contracts/theme.js";
 import { createConfigTools } from "../config/config-tools.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
+import { CronStore } from "../cron/cron-store.js";
+import { createCronTools } from "../cron/cron-tools.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
 import { createDelegationTools } from "../delegation/delegation-tools.js";
 import { createMemoryTool } from "../memory/memory-tool.js";
@@ -99,6 +101,8 @@ export type RuntimeOptions = {
   securityMode?: import("../contracts/security.js").SecurityApprovalMode;
   securityAssessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
   approvalController?: WorkspaceApprovalController;
+  cronStore?: CronStore;
+  disableCronTools?: boolean;
   workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
@@ -155,6 +159,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const personalSkillsRoot = options.personalSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
   const projectSkillsRoot = options.projectSkillsRoot ?? `${workspaceRoot}/.estacoda/skills`;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
+  const cronStore = options.cronStore ?? new CronStore({ homeDir: options.homeDir });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
   const providerModels = await providerRegistry.listModels();
   const auxiliaryProviderRouter = new AuxiliaryProviderRouter({
@@ -296,6 +301,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     projectConfigPath: options.projectConfigPath
   })) {
     toolRegistry.register(tool);
+  }
+  if (options.disableCronTools !== true) {
+    for (const tool of createCronTools({ store: cronStore })) {
+      toolRegistry.register(tool);
+    }
   }
   toolRegistry.register(createMemoryTool(memoryStore));
   const browserAvailable = await browserBackend.isAvailable();
@@ -597,6 +607,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `project context files: ${projectContext.files.length}`,
         `project context bytes: ${renderedProjectContext.length}`,
         `trust store: ${trustStore.path}`,
+        `cron store: ${cronStore.path}`,
         `memory files: ${memorySnapshot.files.size}`,
         `memory usage: ${renderedMemory.usage
           .map((entry) =>

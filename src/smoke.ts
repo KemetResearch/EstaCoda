@@ -21,6 +21,8 @@ import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
 import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig, setupSecurityConfig } from "./config/runtime-config.js";
 import { ContextReferenceExpander } from "./context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
+import { createRuntimeCronRunner, tickCron } from "./cron/cron-runner.js";
+import { CronStore, computeNextRun } from "./cron/cron-store.js";
 import { DelegationManager } from "./delegation/delegation-manager.js";
 import { createDelegationTools } from "./delegation/delegation-tools.js";
 import { createMemoryTool } from "./memory/memory-tool.js";
@@ -3164,6 +3166,73 @@ assert(
   }) === "deny",
   "expected open mode to preserve the unconditional dangerous-command floor"
 );
+assert(
+  computeNextRun("every 2h", new Date("2026-04-16T00:00:00.000Z"))?.toISOString() === "2026-04-16T02:00:00.000Z",
+  "expected cron interval schedule parsing"
+);
+assert(
+  computeNextRun("0 9 * * *", new Date("2026-04-16T08:59:00.000Z"))?.toISOString() === "2026-04-16T09:00:00.000Z",
+  "expected cron expression schedule parsing"
+);
+let cronNow = new Date("2026-04-16T00:00:00.000Z");
+const cronHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cron-home-"));
+const cronStore = new CronStore({
+  homeDir: cronHome,
+  now: () => cronNow,
+  id: sequenceId()
+});
+const cronCreatedJob = await cronStore.create({
+  schedule: "30m",
+  prompt: "Check build status",
+  name: "Build check"
+});
+const cronList = await runCliCommand({
+  argv: ["cron", "list"],
+  workspaceRoot: contextWorkspace,
+  homeDir: cronHome
+});
+const cronJob = (await cronStore.list())[0];
+assert(cronList.output.includes("Build check"), "expected CLI cron list output");
+assert(cronCreatedJob.id === cronJob?.id, "expected cron job to persist");
+assert(cronJob?.nextRunAt === "2026-04-16T00:30:00.000Z", "expected cron job next run");
+cronNow = new Date("2026-04-16T00:31:00.000Z");
+const cronRuns = await tickCron({
+  store: cronStore,
+  now: cronNow,
+  runner: createRuntimeCronRunner({
+    disposeRuntime: false,
+    runtimeFactory: async () => fakeRuntime({
+      sessionId: "cron-smoke-runtime",
+      handle: async (input) => ({
+        label: "EstaCoda",
+        text: `cron handled: ${input.text.includes("Check build status") ? "yes" : "no"}`,
+        matchedSkills: [],
+        intent: {
+          labels: ["general"],
+          confidence: 1,
+          suggestedSkills: [],
+          suggestedToolsets: [],
+          confirmationRequired: false,
+          rationale: "cron smoke"
+        },
+        securityDecision: "allow",
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      })
+    })
+  })
+});
+const cronAfterRun = (await cronStore.list())[0];
+const cronOutputFiles = await readFile(join(cronHome, ".estacoda", "cron", "jobs.json"), "utf8");
+assert(cronRuns.length === 1 && cronRuns[0]?.ok === true, "expected cron tick to run due job");
+assert(cronRuns[0]?.output.includes("Cronjob Response: Build check"), "expected wrapped cron output");
+assert(cronAfterRun?.status === "completed", "expected one-shot cron to complete");
+assert(cronOutputFiles.includes("Build check"), "expected cron jobs to persist");
 const assessorRegistry = new ProviderRegistry();
 assessorRegistry.register(fakeProvider({
   id: "kimi",
@@ -5635,6 +5704,7 @@ await runSessionLoop({
       "/security debug",
       "/yolo",
       "/yolo",
+      "/cron list",
       "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
       "/switch cli-switch-target",
       "/status",
@@ -6098,6 +6168,7 @@ assert(
 assert(renderedSessionLoop.includes("assessor: not used"), "expected debug security audit assessor status");
 assert(renderedSessionLoop.includes("YOLO mode ON"), "expected session /yolo to enable open mode");
 assert(renderedSessionLoop.includes("YOLO mode OFF"), "expected session /yolo to disable open mode");
+assert(renderedSessionLoop.includes("Cron jobs") || renderedSessionLoop.includes("No cron jobs configured."), "expected session /cron output");
 assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
 assert(
@@ -8063,6 +8134,11 @@ const channelCommandsResult = await channelGateway.receive({
   id: "message-commands",
   text: "/commands"
 });
+const channelCronHelpResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-cron-help",
+  text: "/cron"
+});
 const channelSessionsResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-sessions",
@@ -8214,6 +8290,8 @@ assert(channelHelpResult.replyText.includes("/reload-mcp"), "expected channel /h
 assert(channelHelpResult.replyText.includes("/yolo"), "expected channel /help to advertise /yolo");
 assert(channelCommandsResult.replyText.includes("/approve"), "expected channel /commands to list approval command");
 assert(channelCommandsResult.replyText.includes("/yolo"), "expected channel /commands to list yolo command");
+assert(channelCommandsResult.replyText.includes("/cron"), "expected channel /commands to list cron command");
+assert(channelCronHelpResult.replyText.includes("EstaCoda cron"), "expected channel /cron help output");
 assert(channelSessionsResult.replyText.includes("Recent sessions for this chat"), "expected channel /sessions output");
 assert(channelNewResult.sessionId !== channelResult.sessionId, "expected channel /new to rotate session");
 assert(channelSearchResult.replyText.includes(`Search results for "Analyze"`), "expected channel /search output");

@@ -68,6 +68,15 @@ Evidence note:
 - [src/acp/server.ts](/Users/ahnwy/estacoda-v2/src/acp/server.ts)
   ACP stdio JSON-RPC server, in-process ACP session manager, cwd-bound runtime creation, `session/update` streaming, editor-backed file reads via ACP fs requests, and approval bridging for gated shell actions. Basic JetBrains chat + file-read + approval flow is `live-proven`.
 
+### Cron
+
+- [src/cron/cron-store.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-store.ts)
+  Persistent scheduled-task storage at `~/.estacoda/cron/jobs.json`, atomic writes, schedule parsing for relative delays, intervals, cron expressions, and ISO timestamps, plus local output files.
+- [src/cron/cron-tools.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-tools.ts)
+  Hermes-shaped model-facing `cronjob` tool with create/list/update/pause/resume/run/remove actions.
+- [src/cron/cron-runner.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-runner.ts)
+  Scheduler tick runner that executes due jobs and writes wrapped output to `~/.estacoda/cron/output/`.
+
 ### Skills
 
 - [src/skills/skill-loader.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-loader.ts)

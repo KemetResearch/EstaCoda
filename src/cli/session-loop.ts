@@ -4,6 +4,9 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SecurityAssessment } from "../contracts/security.js";
 import type { SessionEvent } from "../contracts/session.js";
+import { runCronCommand } from "../cron/cron-command.js";
+import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { CronStore } from "../cron/cron-store.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
@@ -224,6 +227,31 @@ async function handleSlashCommand(input: {
       input.output.write(result.enabled
         ? "⚡ YOLO mode ON — EstaCoda will auto-approve eligible actions for this session. Hard safety blocks still apply.\n\n"
         : `⚠ YOLO mode OFF — risky actions will use ${result.mode} approval mode.\n\n`);
+      return false;
+    }
+    case "cron": {
+      const store = new CronStore();
+      const result = await runCronCommand({
+        args,
+        store,
+        tick: async () => {
+          const results = await tickCron({
+            store,
+            runner: createRuntimeCronRunner({
+              runtimeFactory: async () => input.runtime,
+              wrapResponse: true,
+              disposeRuntime: false
+            })
+          });
+          return results.length === 0
+            ? "Cron tick complete. No due jobs."
+            : [
+                `Cron tick complete. Ran ${results.length} job(s).`,
+                ...results.map((entry) => `${entry.job.id}: ${entry.ok ? "succeeded" : "failed"}`)
+              ].join("\n");
+        }
+      });
+      input.output.write(`${result.output}\n\n`);
       return false;
     }
     case "revoke": {

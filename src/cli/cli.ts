@@ -20,6 +20,9 @@ import { runInteractiveOnboarding, type Prompt } from "../onboarding/interactive
 import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
+import { runCronCommand } from "../cron/cron-command.js";
+import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { CronStore } from "../cron/cron-store.js";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive,
@@ -62,6 +65,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return browser(options, args);
     case "security":
       return security(options, args);
+    case "cron":
+      return cron(options, args);
     case "mcp":
       return mcp(options, args);
     case "acp":
@@ -484,6 +489,38 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
       `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
       `Config: ${result.path}`
     ].join("\n")
+  };
+}
+
+async function cron(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const store = new CronStore({ homeDir: options.homeDir });
+  const result = await runCronCommand({
+    args,
+    store,
+    tick: options.runtime === undefined
+      ? undefined
+      : async () => {
+        const results = await tickCron({
+          store,
+          runner: createRuntimeCronRunner({
+            runtimeFactory: async () => options.runtime!,
+            wrapResponse: true,
+            disposeRuntime: false
+          })
+        });
+        return results.length === 0
+          ? "Cron tick complete. No due jobs."
+          : [
+              `Cron tick complete. Ran ${results.length} job(s).`,
+              ...results.map((entry) => `${entry.job.id}: ${entry.ok ? "succeeded" : "failed"}`)
+            ].join("\n");
+      }
+  });
+
+  return {
+    handled: true,
+    exitCode: result.ok ? 0 : 1,
+    output: result.output
   };
 }
 
@@ -1083,6 +1120,7 @@ function help(): string {
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
     "  estacoda security View or configure approval mode",
+    "  estacoda cron    Manage scheduled tasks",
     "  estacoda mcp     Configure MCP servers",
     "  estacoda acp     Start the ACP stdio server",
     "  estacoda telegram Configure Telegram channel",

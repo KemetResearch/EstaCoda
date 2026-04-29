@@ -244,6 +244,7 @@ At a high level:
 - CLI approval scopes plus persistent workspace approval storage/revocation
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
 - session-scoped CLI and gateway `/yolo` toggles for open mode
+- cron create/list/tick flow, schedule parsing, wrapped output, `/cron`, and gateway command exposure
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
 - CLI `/security` and `/security debug` audit rendering

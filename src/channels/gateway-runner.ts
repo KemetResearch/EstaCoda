@@ -1,7 +1,10 @@
 import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { consumeTelegramPairingCode, loadRuntimeConfig } from "../config/runtime-config.js";
 import type { ChannelAuthPolicy } from "../contracts/channel.js";
+import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { CronStore } from "../cron/cron-store.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -168,6 +171,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const mediaRoot = diagnostics.mediaRoot;
   const approvalStorePath = diagnostics.approvalStorePath;
   const sessionContextPath = diagnostics.sessionContextPath;
+  const cronStore = new CronStore({ homeDir: options.homeDir });
   await mkdir(dirname(sessionDbPath), { recursive: true });
   const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
   const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
@@ -259,6 +263,46 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     commandsSynced = true;
 
     do {
+      await tickCron({
+        store: cronStore,
+        runner: createRuntimeCronRunner({
+          disposeRuntime: true,
+          runtimeFactory: async (job) => {
+            const latestConfig = await loadRuntimeConfig(options);
+            return createRuntime({
+              theme: kemetBlueTheme,
+              model: latestConfig.model,
+              workspaceRoot: options.workspaceRoot,
+              homeDir: options.homeDir,
+              userConfigPath: options.userConfigPath,
+              projectConfigPath: options.projectConfigPath,
+              sessionId: `cron-${job.id}-${randomUUID()}`,
+              profileId: "default",
+              sessionDb,
+              externalSkillRoots: latestConfig.skills.externalDirs,
+              skillAutonomy: latestConfig.skills.autonomy,
+              skillConfig: latestConfig.skills.config,
+              providerRegistry: latestConfig.providerRegistry,
+              credentialPools: latestConfig.credentialPools,
+              auxiliaryProviders: latestConfig.auxiliaryProviders,
+              mcpServers: latestConfig.mcp.servers,
+              securityMode: latestConfig.security.approvalMode,
+              securityAssessor: {
+                ...latestConfig.security.assessor,
+                providerExecutor: new ProviderExecutor({
+                  registry: latestConfig.providerRegistry,
+                  credentialPools: latestConfig.credentialPools
+                })
+              },
+              browser: latestConfig.browser,
+              telegramReady: latestConfig.channels.telegram.ready,
+              enableWebNetwork: latestConfig.web.enableNetwork,
+              webMaxContentChars: latestConfig.web.maxContentChars,
+              disableCronTools: true
+            });
+          }
+        })
+      });
       processed += await adapter.pollOnce();
       polls += 1;
     } while (options.once !== true && adapter.running);

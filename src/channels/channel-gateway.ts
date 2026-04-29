@@ -6,6 +6,8 @@ import type {
   ChannelSessionKey
 } from "../contracts/channel.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { runCronCommand } from "../cron/cron-command.js";
+import { CronStore } from "../cron/cron-store.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -334,6 +336,7 @@ export class ChannelGateway {
         "/untrust - revoke workspace trust for this chat session",
         "/workspace.trust.status - show current workspace trust state",
         "/yolo - toggle YOLO/open mode for this chat session",
+        "/cron <command> - manage scheduled tasks",
         "/commands - show the Telegram command menu",
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
@@ -382,6 +385,22 @@ export class ChannelGateway {
       return {
         sessionId,
         replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/cron") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const result = await runCronCommand({
+        args: tokenizeCommandArgs(message.text).slice(1),
+        store: new CronStore()
+      });
+      await adapter.delivery?.sendText(message.sessionKey, result.output);
+
+      return {
+        sessionId,
+        replyText: result.output,
         artifactCount: 0,
         progressCount: 0
       };
@@ -1091,6 +1110,11 @@ function yoloSessionKey(stableKey: string, sessionId: string): string {
   return `${stableKey}:${sessionId}`;
 }
 
+function tokenizeCommandArgs(text: string): string[] {
+  const matches = text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu);
+  return [...matches].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
+}
+
 export function authorizeChannelMessage(message: ChannelMessage, policy: ChannelAuthPolicy): {
   allowed: boolean;
   message: string;
@@ -1115,7 +1139,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -1134,6 +1158,7 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/workspace.trust.revoke" ||
     token === "/workspace.trust.status" ||
     token === "/yolo" ||
+    token === "/cron" ||
     token === "/resume" ||
     token === "/stop" ||
     token === "/approve" ||
@@ -1228,6 +1253,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/untrust", description: "Revoke workspace trust" },
     { command: "/workspace.trust.status", description: "Show workspace trust state" },
     { command: "/yolo", description: "Toggle YOLO/open mode for this chat" },
+    { command: "/cron", description: "Manage scheduled tasks" },
     { command: "/resume", description: "Show the latest interrupted turn" },
     { command: "/approve", description: "Approve the pending gated action" },
     { command: "/deny", description: "Deny the pending gated action" },
