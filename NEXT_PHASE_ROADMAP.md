@@ -129,7 +129,7 @@ Next acceptance checks:
 - Done: security-mode and skill-autonomy labels/descriptions localize from `ui.language` while config values remain stable English keys.
 - Done: setup/verify/settings copy now shows clearer recommended paths, post-setup commands, and recovery next actions.
 - Done: local model setup is supported through a Hermes-aligned OpenAI-compatible endpoint flow with Ollama defaults, `/models` discovery, no-key local config, and context guidance.
-- Done: voice configuration foundation exists with Hermes-aligned `tts`/`stt` sections, `estacoda voice status/setup`, OpenAI-compatible `voice.speak` audio artifact generation, OpenAI/Groq-style `voice.transcribe` transcript artifacts, and Telegram `sendAudio` artifact delivery.
+- Done: voice configuration foundation exists with Hermes-aligned `tts`/`stt` sections, `estacoda voice status/setup`, OpenAI-compatible `voice.speak` audio artifact generation, local custom-command plus OpenAI/Groq-style `voice.transcribe` transcript artifacts, automatic Telegram voice transcript injection, Telegram `sendVoice` for Opus/Ogg voice bubbles, and `sendAudio` fallback.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.
 - Full Arabic interface copy and localized approval cards are implemented.

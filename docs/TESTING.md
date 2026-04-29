@@ -255,7 +255,9 @@ At a high level:
 - voice setup/status/settings config for Hermes-aligned TTS/STT defaults and provider key-env persistence
 - OpenAI-compatible `voice.speak` execution with mocked audio response, audio-cache write, and artifact recording
 - OpenAI-compatible `voice.transcribe` execution with mocked transcription response, transcript-cache write, artifact recording, and audio prompt-tool suggestion
+- local STT custom-command transcription output
 - Telegram audio artifact delivery through `sendAudio` with artifact-notice fallback for non-uploadable artifacts
+- Telegram voice transcript injection before the agent turn and Opus/Ogg `sendVoice` voice-bubble delivery
 - setup/verify/settings onboarding copy, recommended paths, and next-action recovery guidance
 - profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
 - Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved

@@ -308,24 +308,25 @@ What remains:
 
 ### 7. Voice and TTS
 
-State: configuration plus first TTS/STT execution paths exist.
+State: Hermes-aligned voice foundation is smoke-tested for Telegram, hosted STT, and OpenAI-compatible TTS.
 
 - Hermes-aligned `tts` and `stt` config sections exist with Edge TTS and local STT defaults `smoke-tested`
 - `estacoda voice status/setup` and `estacoda settings voice` exist `smoke-tested`
 - hosted TTS/STT provider key-env slots are represented for OpenAI, ElevenLabs, MiniMax, Mistral, Gemini, xAI, and Groq where applicable `smoke-tested`
 - `voice.speak` generates OpenAI-compatible TTS audio, saves it under the audio cache, and records an audio artifact `smoke-tested`
 - `voice.transcribe` sends OpenAI-compatible hosted STT requests for OpenAI/Groq-style providers and records transcript artifacts `smoke-tested`
-- Telegram audio/voice attachments download into channel media and suggest `voice.transcribe` in the assembled prompt `implemented`
+- local STT custom-command execution via `stt.local.command` / `HERMES_LOCAL_STT_COMMAND` is enabled `smoke-tested`
+- Telegram audio/voice attachments download into channel media and are automatically transcribed into the gateway message before the agent turn `smoke-tested`
+- audio/voice attachments suggest `voice.transcribe` in the assembled prompt `implemented`
 - Telegram audio artifacts are delivered with `sendAudio` when the generated file is available, with artifact-notice fallback `smoke-tested`
+- Telegram Opus/Ogg audio artifacts are delivered with `sendVoice` voice bubbles `smoke-tested`
 - TUI voice input is `intended but not implemented`
-- Telegram/channel voice handling is `intended but not implemented`
 
 What remains:
 
-- local STT execution path
+- local Whisper/faster-whisper auto-detection beyond custom command
 - Mistral-specific STT execution adapter
-- automatic Telegram voice/audio transcription injection before the agent turn
-- Telegram voice-bubble delivery for generated speech after Opus/OGG conversion
+- ffmpeg conversion from MP3/WAV/PCM into Opus/Ogg for voice bubbles
 - per-channel UX
 - security/privacy stance for audio processing
 

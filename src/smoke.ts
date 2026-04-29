@@ -11,6 +11,7 @@ import { PersistentChannelSessionStore } from "./channels/channel-session-store.
 import { MockChannelAdapter } from "./channels/mock-channel-adapter.js";
 import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-adapter.js";
 import { formatTelegramReply } from "./channels/telegram-format.js";
+import { injectVoiceTranscripts } from "./channels/voice-transcription.js";
 import { createConfigTools } from "./config/config-tools.js";
 import { runCliCommand } from "./cli/cli.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
@@ -70,7 +71,7 @@ import { builtinTools } from "./tools/builtin-tools.js";
 import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
 import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
-import { createVoiceTools } from "./tools/voice-tools.js";
+import { createVoiceTools, transcribeAudioFile } from "./tools/voice-tools.js";
 import { ToolExecutor, type ToolExecutionRecord } from "./tools/tool-executor.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
@@ -1986,6 +1987,55 @@ const voiceTranscribe = await voiceExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const injectedVoiceMessage = await injectVoiceTranscripts({
+  id: "voice-channel-message",
+  channel: "telegram",
+  sessionKey: {
+    platform: "telegram",
+    chatId: "voice-chat"
+  },
+  text: "Please answer this voice note.",
+  sender: {
+    id: "voice-user"
+  },
+  attachments: [{
+    id: "voice-attachment",
+    kind: "voice",
+    status: "ready",
+    localPath: join(voiceWorkspace, "sample.mp3")
+  }],
+  receivedAt: "2026-04-16T00:00:00.000Z"
+}, {
+  stt: {
+    provider: "openai",
+    openai: {
+      model: "whisper-1",
+      apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY"
+    }
+  },
+  fetch: async (url, init) => {
+    voiceTranscribeFetchUrl = url;
+    const body = init?.body;
+    voiceTranscribeModel = body instanceof FormData ? String(body.get("model") ?? "") : "";
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => Buffer.from(JSON.stringify({ text: "auto injected transcript" })).buffer,
+      text: async () => JSON.stringify({ text: "auto injected transcript" })
+    };
+  }
+});
+const localVoiceTranscribe = await transcribeAudioFile({
+  path: join(voiceWorkspace, "sample.mp3"),
+  stt: {
+    provider: "local",
+    local: {
+      model: "base",
+      command: "printf 'local command transcript'"
+    }
+  }
+});
 delete process.env.VOICE_TOOLS_OPENAI_KEY;
 await sessionDb.appendMessage({
   sessionId: directSession.id,
@@ -2226,6 +2276,8 @@ assert(voiceTranscribeFetchUrl.endsWith("/audio/transcriptions"), "expected voic
 assert(voiceTranscribeModel === "whisper-1", "expected voice.transcribe to send configured STT model");
 assert(String(voiceTranscribe.result.content).includes("transcribed smoke audio"), "expected voice.transcribe to include transcript text");
 assert(voiceArtifacts.list().some((artifact) => artifact.kind === "data" && artifact.mimeType === "text/plain"), "expected voice.transcribe to record transcript artifact");
+assert(injectedVoiceMessage.text.includes("auto injected transcript"), "expected channel voice transcription to inject transcript text");
+assert(localVoiceTranscribe.ok === true && localVoiceTranscribe.text === "local command transcript", "expected local STT command to produce transcript text");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
   tools: tools.list(),
@@ -9570,7 +9622,9 @@ const telegramRequests: Array<{
 }> = [];
 const telegramAudioArtifactDir = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-audio-artifact-"));
 const telegramAudioArtifactPath = join(telegramAudioArtifactDir, "speech.mp3");
+const telegramVoiceArtifactPath = join(telegramAudioArtifactDir, "speech.ogg");
 await writeFile(telegramAudioArtifactPath, "fake speech audio");
+await writeFile(telegramVoiceArtifactPath, "fake opus audio");
 const telegramAdapter = new TelegramAdapter({
   botToken: "telegram-token",
   mediaRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-media-")),
@@ -9725,6 +9779,18 @@ await telegramAdapter.delivery.sendArtifact({
   mimeType: "audio/mpeg",
   summary: "Telegram generated speech"
 });
+await telegramAdapter.delivery.sendArtifact({
+  platform: "telegram",
+  chatId: "1254738091"
+}, {
+  id: "telegram-voice-artifact",
+  path: telegramVoiceArtifactPath,
+  kind: "audio",
+  bytes: 15,
+  createdAt: "2026-04-16T00:00:00.000Z",
+  mimeType: "audio/ogg",
+  summary: "Telegram generated voice bubble"
+});
 await telegramAdapter.stop();
 const convertedTelegramMessage = updateToChannelMessage({
   update_id: 43,
@@ -9802,6 +9868,15 @@ assert(
       String(request.body.caption).includes("Telegram generated speech")
   ),
   "expected Telegram audio artifacts to upload as audio"
+);
+assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendVoice") &&
+      request.body.chat_id === "1254738091" &&
+      request.body.voice === "blob" &&
+      String(request.body.caption).includes("Telegram generated voice bubble")
+  ),
+  "expected Telegram Opus/Ogg audio artifacts to upload as voice bubbles"
 );
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");

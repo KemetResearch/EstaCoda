@@ -13,6 +13,7 @@ import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "./channel-gateway.js";
 import { PersistentChannelSessionStore } from "./channel-session-store.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
+import { injectVoiceTranscripts } from "./voice-transcription.js";
 
 export type GatewayRunOptions = {
   workspaceRoot: string;
@@ -206,6 +207,12 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     authPolicy,
     trustedWorkspace: true,
     sessionPolicy,
+    preprocessMessage: async (message) => {
+      const latestConfig = await loadRuntimeConfig(options);
+      return injectVoiceTranscripts(message, {
+        stt: latestConfig.stt
+      });
+    },
     pair: async (message) => {
       const result = await consumeTelegramPairingCode({
         workspaceRoot: options.workspaceRoot,

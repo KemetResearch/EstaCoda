@@ -459,14 +459,15 @@ export class TelegramAdapter implements ChannelAdapter {
     try {
       const bytes = await readFile(artifact.path);
       const form = new FormData();
+      const voiceBubble = isTelegramVoiceBubbleArtifact(artifact);
       form.set("chat_id", chatId);
-      form.set("audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(artifact.path));
+      form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(artifact.path));
       const caption = renderAudioArtifactCaption(artifact);
       if (caption.length > 0) {
         form.set("caption", caption);
       }
       await this.#sendChatAction(chatId, "upload_voice");
-      await this.#callMultipart<TelegramSentMessage>("sendAudio", form);
+      await this.#callMultipart<TelegramSentMessage>(voiceBubble ? "sendVoice" : "sendAudio", form);
       return true;
     } catch {
       return false;
@@ -693,6 +694,12 @@ function renderAudioArtifactCaption(artifact: ArtifactRecord): string {
     artifact.summary ?? "Generated audio",
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
+}
+
+function isTelegramVoiceBubbleArtifact(artifact: ArtifactRecord): boolean {
+  const mime = artifact.mimeType?.toLowerCase();
+  const path = artifact.path.toLowerCase();
+  return mime === "audio/ogg" || path.endsWith(".ogg") || path.endsWith(".opus");
 }
 
 async function fetchJson(url: string, init?: {

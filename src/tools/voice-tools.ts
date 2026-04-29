@@ -1,4 +1,6 @@
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -132,7 +134,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           return path;
         }
 
-        const result = await transcribeAudio({
+        const result = await transcribeAudioFile({
           path: path.path,
           language: input.language,
           prompt: input.prompt,
@@ -273,7 +275,7 @@ async function globalVoiceFetch(url: string, init?: Parameters<VoiceFetchLike>[1
   };
 }
 
-async function transcribeAudio(input: {
+export async function transcribeAudioFile(input: {
   path: string;
   language?: string;
   prompt?: string;
@@ -285,6 +287,10 @@ async function transcribeAudio(input: {
   | { ok: true; text: string; model: string; language?: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
+  if (input.stt.provider === "local") {
+    return transcribeWithLocalCommand(input);
+  }
+
   if (input.stt.provider !== "openai" && input.stt.provider !== "groq") {
     return {
       ok: false,
@@ -357,6 +363,103 @@ async function transcribeAudio(input: {
     model,
     language: input.language
   };
+}
+
+async function transcribeWithLocalCommand(input: {
+  path: string;
+  language?: string;
+  model?: string;
+  stt: LoadedRuntimeConfig["stt"];
+  signal?: AbortSignal;
+}): Promise<
+  | { ok: true; text: string; model: string; language?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  const command = input.stt.local?.command;
+  const model = input.model ?? input.stt.local?.model ?? "base";
+  if (command === undefined || command.trim().length === 0) {
+    return {
+      ok: false,
+      content: [
+        "Local STT command is not configured.",
+        "Set stt.local.command or HERMES_LOCAL_STT_COMMAND with placeholders like {input_path}, {output_dir}, {language}, and {model}."
+      ].join("\n"),
+      metadata: {
+        provider: "local",
+        model
+      }
+    };
+  }
+
+  const outputDir = await mkdtemp(join(tmpdir(), "estacoda-stt-"));
+  const rendered = command
+    .replaceAll("{input_path}", shellQuote(input.path))
+    .replaceAll("{output_dir}", shellQuote(outputDir))
+    .replaceAll("{language}", shellQuote(input.language ?? ""))
+    .replaceAll("{model}", shellQuote(model));
+  const result = await runShellCommand(rendered, input.signal);
+  if (!result.ok) {
+    return {
+      ok: false,
+      content: `Local STT command failed: ${result.content}`,
+      metadata: {
+        provider: "local",
+        model
+      }
+    };
+  }
+
+  const text = result.content.trim();
+  if (text.length === 0) {
+    return {
+      ok: false,
+      content: "Local STT command completed but produced no transcript text.",
+      metadata: {
+        provider: "local",
+        model
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    text,
+    model,
+    language: input.language
+  };
+}
+
+function runShellCommand(command: string, signal?: AbortSignal): Promise<{ ok: true; content: string } | { ok: false; content: string }> {
+  return new Promise((resolveResult) => {
+    const child = spawn(command, {
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      signal
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      resolveResult({ ok: false, content: error.message });
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolveResult({ ok: true, content: stdout });
+        return;
+      }
+      resolveResult({ ok: false, content: stderr.trim() || `exit code ${code ?? "unknown"}` });
+    });
+  });
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 type ResolvedPath =

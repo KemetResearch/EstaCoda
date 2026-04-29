@@ -41,6 +41,7 @@ export type ChannelGatewayOptions = {
   sessionPolicy?: ChannelSessionPolicy;
   securityMode?: SecurityApprovalMode;
   securityAssessor?: SecurityAssessorRuntimeConfig;
+  preprocessMessage?: (message: ChannelMessage) => Promise<ChannelMessage>;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -146,6 +147,7 @@ export class ChannelGateway {
   readonly #sessionPolicy: ChannelSessionPolicy;
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
+  readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -162,6 +164,7 @@ export class ChannelGateway {
     this.#sessionPolicy = options.sessionPolicy ?? {};
     this.#securityMode = options.securityMode ?? "adaptive";
     this.#securityAssessor = options.securityAssessor;
+    this.#preprocessMessage = options.preprocessMessage;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -226,10 +229,12 @@ export class ChannelGateway {
       return commandResult;
     }
 
-    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
-      receivedAt: message.receivedAt
+    const processedMessage = await this.#preprocessMessage?.(message) ?? message;
+
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(processedMessage.sessionKey, {
+      receivedAt: processedMessage.receivedAt
     });
-    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+    const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
     const securityPolicy = this.#securityPolicyFor(
       normalizedSessionKey,
       sessionId,
@@ -242,16 +247,16 @@ export class ChannelGateway {
       securityPolicy
     });
     let progressCount = 0;
-    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
     const controller = new AbortController();
     this.#activeTurns.set(activeTurnKey, controller);
     const trustedWorkspace = typeof this.#trustedWorkspace === "function"
       ? await this.#trustedWorkspace(message)
       : this.#trustedWorkspace;
     const response = await runtime.handle({
-      text: message.text,
-      attachments: message.attachments,
-      channel: message.channel,
+      text: processedMessage.text,
+      attachments: processedMessage.attachments,
+      channel: processedMessage.channel,
       trustedWorkspace,
       signal: controller.signal,
       onEvent: async (event) => {
