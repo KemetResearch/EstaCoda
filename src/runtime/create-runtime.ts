@@ -18,7 +18,7 @@ import { createMemoryTool } from "../memory/memory-tool.js";
 import { renderMemorySnapshot } from "../memory/memory-renderer.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
-import type { AgentProfileMode, AgentResponseLanguage, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
@@ -48,6 +48,7 @@ import { builtinTools } from "../tools/builtin-tools.js";
 import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
 import { createPythonTools } from "../tools/python-tools.js";
 import { createMediaTools } from "../tools/media-tools.js";
+import { createVoiceTools, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { analyzeImageWithVision, createVisionTools } from "../tools/vision-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
@@ -93,6 +94,9 @@ export type RuntimeOptions = {
     launchCommand?: string;
     autoLaunch: boolean;
   };
+  tts?: LoadedRuntimeConfig["tts"];
+  stt?: LoadedRuntimeConfig["stt"];
+  voiceFetch?: VoiceFetchLike;
   ui?: {
     language: UiLanguage;
     flavor: UiFlavor;
@@ -192,6 +196,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     });
   const processManager = new ProcessManager({ workspaceRoot });
   const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
+  const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
   let activeTrustedWorkspace = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
@@ -285,6 +290,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     workspaceRoot,
     artifactStore,
     allowedRoots: [channelMediaRoot]
+  })) {
+    toolRegistry.register(tool);
+  }
+  for (const tool of createVoiceTools({
+    audioCacheRoot,
+    artifactStore,
+    tts: options.tts,
+    stt: options.stt,
+    fetch: options.voiceFetch
   })) {
     toolRegistry.register(tool);
   }

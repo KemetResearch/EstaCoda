@@ -253,6 +253,7 @@ At a high level:
 - browser setup/test aliases and settings browser view
 - local model setup/status/test with Ollama-compatible `/models` discovery, no-key config, auto-select for one visible model, and blocked-endpoint recovery
 - voice setup/status/settings config for Hermes-aligned TTS/STT defaults and provider key-env persistence
+- OpenAI-compatible `voice.speak` execution with mocked audio response, audio-cache write, and artifact recording
 - setup/verify/settings onboarding copy, recommended paths, and next-action recovery guidance
 - profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
 - Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved

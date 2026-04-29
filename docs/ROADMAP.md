@@ -308,17 +308,18 @@ What remains:
 
 ### 7. Voice and TTS
 
-State: configuration foundation exists.
+State: configuration plus first TTS execution path exists.
 
 - Hermes-aligned `tts` and `stt` config sections exist with Edge TTS and local STT defaults `smoke-tested`
 - `estacoda voice status/setup` and `estacoda settings voice` exist `smoke-tested`
 - hosted TTS/STT provider key-env slots are represented for OpenAI, ElevenLabs, MiniMax, Mistral, Gemini, xAI, and Groq where applicable `smoke-tested`
+- `voice.speak` generates OpenAI-compatible TTS audio, saves it under the audio cache, and records an audio artifact `smoke-tested`
+- `voice.transcribe` exists as a clear placeholder until STT execution providers are enabled `smoke-tested`
 - TUI voice input is `intended but not implemented`
 - Telegram/channel voice handling is `intended but not implemented`
 
 What remains:
 
-- TTS synthesis tool and CLI audio-cache artifact output
 - transcription path
 - Telegram voice/audio transcription injection
 - Telegram voice-bubble/audio-file delivery for generated speech

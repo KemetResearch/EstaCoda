@@ -70,6 +70,7 @@ import { builtinTools } from "./tools/builtin-tools.js";
 import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
 import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
+import { createVoiceTools } from "./tools/voice-tools.js";
 import { ToolExecutor, type ToolExecutionRecord } from "./tools/tool-executor.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
@@ -1898,6 +1899,68 @@ const artifactRecord = await mediaExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const voiceWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-"));
+const voiceArtifacts = new ArtifactStore({
+  id: sequenceId(),
+  now: () => new Date("2026-04-16T00:00:00.000Z")
+});
+const voiceRegistry = new ToolRegistry();
+let voiceFetchUrl = "";
+let voiceFetchBody: any;
+process.env.VOICE_TOOLS_OPENAI_KEY = "voice-smoke-key";
+for (const tool of createVoiceTools({
+  audioCacheRoot: join(voiceWorkspace, ".estacoda", "audio-cache"),
+  artifactStore: voiceArtifacts,
+  tts: {
+    provider: "openai",
+    speed: 1,
+    openai: {
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
+      speed: 1
+    }
+  },
+  stt: {
+    provider: "local",
+    local: {
+      model: "base"
+    }
+  },
+  fetch: async (url, init) => {
+    voiceFetchUrl = url;
+    voiceFetchBody = JSON.parse(init?.body ?? "{}");
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => Buffer.from("fake mp3 bytes").buffer,
+      text: async () => "ok"
+    };
+  },
+  id: () => "voice-smoke"
+})) {
+  voiceRegistry.register(tool);
+}
+const voiceExecutor = new ToolExecutor({
+  registry: voiceRegistry,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory
+});
+const voiceSpeak = await voiceExecutor.executeTool({
+  tool: "voice.speak",
+  input: {
+    text: "Hello from EstaCoda voice.",
+    format: "mp3"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+delete process.env.VOICE_TOOLS_OPENAI_KEY;
 await sessionDb.appendMessage({
   sessionId: directSession.id,
   role: "user",
@@ -2127,6 +2190,11 @@ assert(mediaInspect?.result?.ok === true, "expected media inspect to succeed for
 assert(mediaInspect.result.content.includes("Kind: video"), "expected media inspect to infer video kind");
 assert(artifactRecord?.result?.ok === true, "expected artifact record to succeed");
 assert(mediaArtifacts.list().some((artifact) => artifact.path === "assets/sample.mp4" && artifact.kind === "video"), "expected recorded media artifact");
+assert(voiceSpeak?.result?.ok === true, "expected voice.speak to generate audio");
+assert(voiceFetchUrl.endsWith("/audio/speech"), "expected voice.speak to call OpenAI-compatible speech endpoint");
+assert(voiceFetchBody.model === "gpt-4o-mini-tts", "expected voice.speak to send configured TTS model");
+assert(voiceFetchBody.voice === "alloy", "expected voice.speak to send configured TTS voice");
+assert(voiceArtifacts.list().some((artifact) => artifact.kind === "audio" && artifact.mimeType === "audio/mpeg"), "expected voice.speak to record an audio artifact");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
   tools: tools.list(),

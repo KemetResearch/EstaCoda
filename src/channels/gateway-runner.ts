@@ -249,6 +249,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         mcpServers: latestConfig.mcp.servers,
         securityPolicy,
         browser: latestConfig.browser,
+        tts: latestConfig.tts,
+        stt: latestConfig.stt,
         telegramReady: latestConfig.channels.telegram.ready,
         enableWebNetwork: latestConfig.web.enableNetwork,
         webMaxContentChars: latestConfig.web.maxContentChars
@@ -313,6 +315,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
               credentialPools: latestConfig.credentialPools,
               auxiliaryProviders: latestConfig.auxiliaryProviders,
               mcpServers: latestConfig.mcp.servers,
+              tts: latestConfig.tts,
+              stt: latestConfig.stt,
               securityMode: latestConfig.security.approvalMode,
               securityAssessor: {
                 ...latestConfig.security.assessor,
