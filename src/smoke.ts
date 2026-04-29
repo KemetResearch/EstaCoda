@@ -517,6 +517,54 @@ const cliSetup = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
+const cliLocalWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-workspace-"));
+const cliLocalHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-home-"));
+const cliLocalSetup = await runCliCommand({
+  argv: ["local", "setup"],
+  workspaceRoot: cliLocalWorkspace,
+  homeDir: cliLocalHome,
+  providerFetch: async () => fakeFetchResponse(200, {
+    data: [{ id: "qwen2.5-coder:32b" }]
+  })
+});
+const cliLocalConfig = await loadRuntimeConfig({
+  workspaceRoot: cliLocalWorkspace,
+  homeDir: cliLocalHome
+});
+const cliLocalStatus = await runCliCommand({
+  argv: ["local", "status"],
+  workspaceRoot: cliLocalWorkspace,
+  homeDir: cliLocalHome,
+  providerFetch: async () => fakeFetchResponse(200, {
+    data: [{ id: "qwen2.5-coder:32b" }]
+  })
+});
+const cliLocalTest = await runCliCommand({
+  argv: ["local", "test"],
+  workspaceRoot: cliLocalWorkspace,
+  homeDir: cliLocalHome,
+  providerFetch: async () => fakeFetchResponse(200, {
+    data: [{ id: "qwen2.5-coder:32b" }]
+  })
+});
+const cliLocalBlockedWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-blocked-workspace-"));
+const cliLocalBlockedHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-blocked-home-"));
+const cliLocalBlockedSetup = await runCliCommand({
+  argv: ["local", "setup", "--model", "llama3.1:8b"],
+  workspaceRoot: cliLocalBlockedWorkspace,
+  homeDir: cliLocalBlockedHome,
+  providerFetch: async () => fakeFetchResponse(503, {
+    error: "offline"
+  })
+});
+const cliLocalBlockedTest = await runCliCommand({
+  argv: ["local", "test"],
+  workspaceRoot: cliLocalBlockedWorkspace,
+  homeDir: cliLocalBlockedHome,
+  providerFetch: async () => fakeFetchResponse(503, {
+    error: "offline"
+  })
+});
 delete process.env.ESTACODA_SMOKE_MISSING_KEY;
 const cliMissingProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-workspace-"));
 const cliMissingProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-home-"));
@@ -3320,6 +3368,19 @@ assert(cliArabicSkillSettings.output.includes("استباقي"), "expected Arabi
 assert(cliArabicSkillSettings.output.includes("proactive"), "expected Arabic skill settings to retain raw config value");
 assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected CLI setup output");
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
+assert(cliLocalSetup.output.includes("Configured local OpenAI-compatible provider."), "expected local setup output");
+assert(cliLocalSetup.output.includes("endpoint ready; 1 model(s) visible"), "expected local setup model discovery output");
+assert(cliLocalSetup.output.includes("Model: qwen2.5-coder:32b"), "expected local setup to auto-select single discovered model");
+assert(cliLocalConfig.model.provider === "local", "expected local setup to configure local provider");
+assert(cliLocalConfig.model.id === "qwen2.5-coder:32b", "expected local setup to persist discovered model");
+assert(cliLocalStatus.output.includes("EstaCoda local model status"), "expected local status output");
+assert(cliLocalStatus.output.includes("API key: none"), "expected local status to show no API key");
+assert(cliLocalTest.exitCode === 0, "expected local test to pass with discovered models");
+assert(cliLocalTest.output.includes("Status: ready"), "expected local test ready output");
+assert(cliLocalBlockedSetup.exitCode === 0, "expected explicit local setup model to persist even when endpoint is blocked");
+assert(cliLocalBlockedSetup.output.includes("Endpoint check: blocked"), "expected blocked local setup warning");
+assert(cliLocalBlockedTest.exitCode === 1, "expected blocked local test to fail");
+assert(cliLocalBlockedTest.output.includes("Status: local model path is not ready"), "expected blocked local recovery output");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Approval mode: Adaptive (adaptive)"), "expected CLI security status to report adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Assessor: enabled"), "expected CLI security status to report enabled assessor");

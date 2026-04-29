@@ -122,13 +122,13 @@ Done:
 - Phase 2A Telegram guided setup via `estacoda telegram setup` with local secret storage, token verification, allow/remove management, command sync, and test message path `smoke-tested`
 - Phase 2B browser command alignment via `estacoda browser setup`, `estacoda browser test`, and `estacoda settings browser` `smoke-tested`
 - Phase 2C/2D profile/UI foundation via `estacoda profile`, `profile set`, `profile language`, and `settings ui`; config separates UI language, UI flavor, activity labels, agent mode, and response language `smoke-tested`
+- Phase 2E local model setup via `estacoda local setup/status/test`; defaults to Ollama's OpenAI-compatible endpoint, probes `/models`, stores no API key, and surfaces Hermes-style 64K context guidance `smoke-tested`
 - provider config `smoke-tested`
 - doctor checks `live-proven`
 
 Next:
 
 - external-user-quality install flow
-- local model setup polish
 - richer recovery UX for bad credentials/config
 - Phase 2 migration detection/import
 - richer localized approval cards and full Arabic interface copy
@@ -272,13 +272,13 @@ What remains:
 State: architecturally supported, operationally partial.
 
 - provider routing supports non-hosted routes `smoke-tested`
-- local-model UX/polish is still `intended but not implemented`
+- `estacoda local setup/status/test` provides a Hermes-aligned custom endpoint flow for Ollama/local OpenAI-compatible servers `smoke-tested`
+- local setup defaults to `http://localhost:11434/v1`, requires no API key, probes `/models`, and auto-selects the model when exactly one is visible `smoke-tested`
 
 What remains:
 
-- operator-friendly local model setup
 - explicit support matrix for text vs tool calling vs vision
-- onboarding help for Ollama/local routes
+- live operator proof against an actual Ollama/local endpoint in the target environment
 
 ### 5. UI design
 

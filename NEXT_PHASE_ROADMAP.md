@@ -128,7 +128,7 @@ Next acceptance checks:
 - Done: profile/UI settings separate interface language, aesthetic flavor, activity-label locale, behavior mode, and response language.
 - Done: security-mode and skill-autonomy labels/descriptions localize from `ui.language` while config values remain stable English keys.
 - Done: setup/verify/settings copy now shows clearer recommended paths, post-setup commands, and recovery next actions.
-- Local model setup is supported cleanly.
+- Done: local model setup is supported through a Hermes-aligned OpenAI-compatible endpoint flow with Ollama defaults, `/models` discovery, no-key local config, and context guidance.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.
 - Full Arabic interface copy and localized approval cards are implemented.

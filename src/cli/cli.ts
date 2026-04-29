@@ -29,6 +29,7 @@ import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import { runSetupVerification } from "../onboarding/verification.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
+import type { ModelProfile } from "../contracts/provider.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -81,6 +82,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return web(options, args);
     case "browser":
       return browser(options, args);
+    case "local":
+      return local(options, args);
     case "security":
       return security(options, args);
     case "cron":
@@ -395,6 +398,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "",
       "Common changes:",
       "  estacoda setup --advanced --provider <provider> --model <model>",
+      "  estacoda local setup --base-url http://localhost:11434/v1 --model <model>",
       "  estacoda security setup --mode adaptive",
       "  estacoda settings skills --autonomy suggest",
       "  estacoda verify"
@@ -691,6 +695,97 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
       `Config: ${result.path}`
     ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
+async function local(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+
+  if (subcommand !== "setup" && subcommand !== "status" && subcommand !== "test") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda local models",
+        "Hermes-aligned path: local Ollama and custom local servers use an OpenAI-compatible endpoint.",
+        "  estacoda local setup",
+        "  estacoda local setup --base-url http://localhost:11434/v1 --model qwen2.5-coder:32b",
+        "  estacoda local status",
+        "  estacoda local test",
+        "",
+        "Notes:",
+        "  Default Ollama URL: http://localhost:11434/v1",
+        "  API key: not required for local Ollama",
+        "  Recommended context: at least 64K tokens for long agent workflows"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "setup") {
+    const parsed = parseLocalArgs(args.slice(1));
+    const baseUrl = parsed.baseUrl ?? "http://localhost:11434/v1";
+    const discovery = await probeLocalModels(baseUrl, options.providerFetch);
+    const selectedModel = parsed.model ?? (discovery.models.length === 1 ? discovery.models[0] : "ollama/auto");
+    const result = await setupProviderConfig({
+      ...options,
+      input: {
+        provider: "local",
+        model: selectedModel,
+        baseUrl,
+        enableNetwork: true,
+        scope: parsed.scope
+      }
+    });
+    const loaded = await loadRuntimeConfig(options);
+    const selectedProfile = loaded.providerRegistry
+      .listModels()
+      .then((models) => models.find((model) => model.provider === "local" && model.id === selectedModel));
+    const profile = await selectedProfile;
+
+    return {
+      handled: true,
+      exitCode: discovery.ok || parsed.model !== undefined ? 0 : 1,
+      output: [
+        "Configured local OpenAI-compatible provider.",
+        `Base URL: ${baseUrl}`,
+        `Model: ${selectedModel}`,
+        "API key: none",
+        `Config: ${result.path}`,
+        "",
+        renderLocalDiscovery(discovery),
+        renderLocalContextGuidance(profile),
+        discovery.ok
+          ? "Next: run estacoda local test, then estacoda."
+          : "Next: start Ollama or your local OpenAI-compatible server, then run estacoda local test."
+      ].join("\n")
+    };
+  }
+
+  const config = await loadRuntimeConfig(options);
+  const providerConfig = config.config.providers?.local;
+  const baseUrl = providerConfig?.baseUrl ?? "http://localhost:11434/v1";
+  const localModels = await config.providerRegistry.listModels();
+  const selectedProfile = localModels.find((model) => model.provider === "local" && model.id === config.model.id);
+  const discovery = await probeLocalModels(baseUrl, options.providerFetch);
+  const configuredForLocal = config.model.provider === "local";
+
+  return {
+    handled: true,
+    exitCode: subcommand === "test" && (!configuredForLocal || !discovery.ok) ? 1 : 0,
+    output: [
+      subcommand === "test" ? "EstaCoda local model test" : "EstaCoda local model status",
+      `Configured route: ${config.model.provider}/${config.model.id}`,
+      `Local endpoint: ${baseUrl}`,
+      `API key: ${providerConfig?.apiKeyEnv === undefined ? "none" : providerConfig.apiKeyEnv}`,
+      `Configured for local: ${configuredForLocal ? "yes" : "no"}`,
+      renderLocalDiscovery(discovery),
+      renderLocalContextGuidance(selectedProfile),
+      subcommand === "test"
+        ? discovery.ok && configuredForLocal
+          ? "Status: ready"
+          : "Status: local model path is not ready. Run estacoda local setup after starting the server."
+        : "Change with: estacoda local setup --base-url http://localhost:11434/v1 --model <model>"
+    ].join("\n")
   };
 }
 
@@ -1425,6 +1520,135 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
+type LocalSetupArgs = {
+  baseUrl?: string;
+  model?: string;
+  scope?: "user" | "project";
+};
+
+type LocalModelProbe = {
+  ok: boolean;
+  baseUrl: string;
+  models: string[];
+  message: string;
+};
+
+function parseLocalArgs(args: string[]): LocalSetupArgs {
+  const parsed: LocalSetupArgs = {};
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--base-url") {
+      parsed.baseUrl = next;
+      index += 1;
+    } else if (arg === "--model") {
+      parsed.model = next;
+      index += 1;
+    } else if (arg === "--project") {
+      parsed.scope = "project";
+    } else if (arg === "--user") {
+      parsed.scope = "user";
+    }
+  }
+
+  return parsed;
+}
+
+async function probeLocalModels(baseUrl: string, fetchLike?: ProviderFetchLike): Promise<LocalModelProbe> {
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+  const url = `${normalizedBaseUrl}/models`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3_000);
+
+  try {
+    const response = fetchLike === undefined
+      ? await globalThis.fetch(url, {
+          method: "GET",
+          headers: {},
+          signal: controller.signal
+        })
+      : await fetchLike(url, {
+          method: "GET",
+          headers: {},
+          body: "",
+          signal: controller.signal
+        });
+    const json = await response.json();
+    const models = extractLocalModelIds(json);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        baseUrl: normalizedBaseUrl,
+        models,
+        message: response.statusText || `HTTP ${response.status}`
+      };
+    }
+
+    return {
+      ok: true,
+      baseUrl: normalizedBaseUrl,
+      models,
+      message: models.length === 0
+        ? "endpoint responded, but no models were listed"
+        : `endpoint ready; ${models.length} model(s) visible`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      baseUrl: normalizedBaseUrl,
+      models: [],
+      message: error instanceof Error ? error.message : "local endpoint did not respond"
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractLocalModelIds(value: unknown): string[] {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as {
+    data?: Array<{ id?: unknown }>;
+    models?: Array<{ name?: unknown; model?: unknown; id?: unknown }>;
+  };
+
+  if (Array.isArray(record.data)) {
+    return uniqueStrings(record.data.map((entry) => typeof entry.id === "string" ? entry.id : ""));
+  }
+
+  if (Array.isArray(record.models)) {
+    return uniqueStrings(record.models.map((entry) => {
+      if (typeof entry.id === "string") return entry.id;
+      if (typeof entry.model === "string") return entry.model;
+      if (typeof entry.name === "string") return entry.name;
+      return "";
+    }));
+  }
+
+  return [];
+}
+
+function renderLocalDiscovery(discovery: LocalModelProbe): string {
+  return [
+    `Endpoint check: ${discovery.ok ? "ready" : "blocked"} (${discovery.message})`,
+    `Discovered models: ${discovery.models.length === 0 ? "none" : discovery.models.join(", ")}`
+  ].join("\n");
+}
+
+function renderLocalContextGuidance(model: ModelProfile | undefined): string {
+  if (model === undefined) {
+    return "Context guidance: set local models to at least 64K tokens when possible; Hermes recommends this for long agent workflows.";
+  }
+
+  return model.contextWindowTokens >= 64_000
+    ? `Context guidance: ${model.contextWindowTokens} tokens looks suitable for long agent workflows.`
+    : `Context guidance: ${model.contextWindowTokens} tokens is below Hermes' 64K recommendation; increase Ollama/llama.cpp context if possible.`;
+}
+
 function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {
   const parsed: Partial<ProviderSetupInput> = {};
 
@@ -1818,6 +2042,7 @@ function help(): string {
     "  estacoda profile View or set agent profile",
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
+    "  estacoda local   Configure local Ollama/OpenAI-compatible models",
     "  estacoda security View or configure approval mode",
     "  estacoda cron    Manage scheduled tasks",
     "  estacoda mcp     Configure MCP servers",
