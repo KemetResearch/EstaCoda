@@ -26,6 +26,106 @@ export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
 export type ActivityLabelsLocale = "en" | "ar";
 export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
+export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
+export type SttProvider = "local" | "groq" | "openai" | "mistral";
+
+export type TtsConfig = {
+  provider?: TtsProvider;
+  speed?: number;
+  edge?: {
+    voice?: string;
+    speed?: number;
+  };
+  elevenlabs?: {
+    voiceId?: string;
+    voice_id?: string;
+    modelId?: string;
+    model_id?: string;
+  };
+  openai?: {
+    model?: string;
+    voice?: string;
+    baseUrl?: string;
+    base_url?: string;
+    speed?: number;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  minimax?: {
+    model?: string;
+    voiceId?: string;
+    voice_id?: string;
+    speed?: number;
+    vol?: number;
+    pitch?: number;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  mistral?: {
+    model?: string;
+    voiceId?: string;
+    voice_id?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  gemini?: {
+    model?: string;
+    voice?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  xai?: {
+    voiceId?: string;
+    voice_id?: string;
+    language?: string;
+    sampleRate?: number;
+    sample_rate?: number;
+    bitRate?: number;
+    bit_rate?: number;
+    baseUrl?: string;
+    base_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  neutts?: {
+    refAudio?: string;
+    ref_audio?: string;
+    refText?: string;
+    ref_text?: string;
+    model?: string;
+    device?: string;
+  };
+  kittentts?: {
+    model?: string;
+    voice?: string;
+    speed?: number;
+    cleanText?: boolean;
+    clean_text?: boolean;
+  };
+};
+
+export type SttConfig = {
+  provider?: SttProvider;
+  local?: {
+    model?: string;
+    command?: string;
+  };
+  groq?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  openai?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+  mistral?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+  };
+};
 
 export type MCPServerToolsConfig = {
   include?: string[];
@@ -87,6 +187,8 @@ export type EstaCodaConfig = {
     launchCommand?: string;
     autoLaunch?: boolean;
   };
+  tts?: TtsConfig;
+  stt?: SttConfig;
   mcpServers?: Record<string, MCPServerConfig>;
   mcp_servers?: Record<string, MCPServerConfig>;
   skills?: {
@@ -151,6 +253,8 @@ export type LoadedRuntimeConfig = {
     launchCommand?: string;
     autoLaunch: boolean;
   };
+  tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
+  stt: Required<Pick<SttConfig, "provider">> & SttConfig;
   mcp: {
     servers: Record<string, MCPServerConfig>;
   };
@@ -207,6 +311,19 @@ export type BrowserSetupInput = {
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
+  scope?: "user" | "project";
+};
+
+export type VoiceSetupInput = {
+  ttsProvider?: TtsProvider;
+  ttsSpeed?: number;
+  ttsVoice?: string;
+  ttsModel?: string;
+  ttsApiKeyEnv?: string;
+  sttProvider?: SttProvider;
+  sttModel?: string;
+  sttCommand?: string;
+  sttApiKeyEnv?: string;
   scope?: "user" | "project";
 };
 
@@ -324,6 +441,8 @@ export async function loadRuntimeConfig(options: {
       launchCommand: config.browser?.launchCommand,
       autoLaunch: config.browser?.autoLaunch ?? false
     },
+    tts: normalizeTtsConfig(config.tts),
+    stt: normalizeSttConfig(config.stt),
     mcp: {
       servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, options.homeDir)
     },
@@ -379,6 +498,8 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(merged.browser ?? {}),
       ...(config.browser ?? {})
     },
+    tts: mergeTtsConfig(merged.tts, config.tts),
+    stt: mergeSttConfig(merged.stt, config.stt),
     mcpServers: {
       ...(merged.mcpServers ?? {}),
       ...(merged.mcp_servers ?? {}),
@@ -464,6 +585,141 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
       ? value.responseLanguage
       : "match-user"
   };
+}
+
+function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
+  const provider = isTtsProvider(value?.provider) ? value.provider : "edge";
+  return {
+    ...value,
+    provider,
+    speed: boundedNumber(value?.speed, 1, 0.25, 4),
+    edge: {
+      voice: value?.edge?.voice ?? "en-US-AriaNeural",
+      speed: boundedNumber(value?.edge?.speed, value?.speed ?? 1, 0.25, 4)
+    },
+    elevenlabs: {
+      voiceId: value?.elevenlabs?.voiceId ?? value?.elevenlabs?.voice_id ?? "pNInz6obpgDQGcFmaJgB",
+      modelId: value?.elevenlabs?.modelId ?? value?.elevenlabs?.model_id ?? "eleven_multilingual_v2"
+    },
+    openai: {
+      model: value?.openai?.model ?? "gpt-4o-mini-tts",
+      voice: value?.openai?.voice ?? "alloy",
+      baseUrl: value?.openai?.baseUrl ?? value?.openai?.base_url ?? "https://api.openai.com/v1",
+      speed: boundedNumber(value?.openai?.speed, value?.speed ?? 1, 0.25, 4),
+      apiKeyEnv: value?.openai?.apiKeyEnv ?? value?.openai?.api_key_env ?? "VOICE_TOOLS_OPENAI_KEY"
+    },
+    minimax: {
+      model: value?.minimax?.model ?? "speech-2.8-hd",
+      voiceId: value?.minimax?.voiceId ?? value?.minimax?.voice_id ?? "English_Graceful_Lady",
+      speed: boundedNumber(value?.minimax?.speed, 1, 0.5, 2),
+      vol: boundedNumber(value?.minimax?.vol, 1, 0, 10),
+      pitch: boundedNumber(value?.minimax?.pitch, 0, -12, 12),
+      apiKeyEnv: value?.minimax?.apiKeyEnv ?? value?.minimax?.api_key_env ?? "MINIMAX_API_KEY"
+    },
+    mistral: {
+      model: value?.mistral?.model ?? "voxtral-mini-tts-2603",
+      voiceId: value?.mistral?.voiceId ?? value?.mistral?.voice_id ?? "c69964a6-ab8b-4f8a-9465-ec0925096ec8",
+      apiKeyEnv: value?.mistral?.apiKeyEnv ?? value?.mistral?.api_key_env ?? "MISTRAL_API_KEY"
+    },
+    gemini: {
+      model: value?.gemini?.model ?? "gemini-2.5-flash-preview-tts",
+      voice: value?.gemini?.voice ?? "Kore",
+      apiKeyEnv: value?.gemini?.apiKeyEnv ?? value?.gemini?.api_key_env ?? "GEMINI_API_KEY"
+    },
+    xai: {
+      voiceId: value?.xai?.voiceId ?? value?.xai?.voice_id ?? "eve",
+      language: value?.xai?.language ?? "en",
+      sampleRate: value?.xai?.sampleRate ?? value?.xai?.sample_rate ?? 24_000,
+      bitRate: value?.xai?.bitRate ?? value?.xai?.bit_rate ?? 128_000,
+      baseUrl: value?.xai?.baseUrl ?? value?.xai?.base_url ?? "https://api.x.ai/v1",
+      apiKeyEnv: value?.xai?.apiKeyEnv ?? value?.xai?.api_key_env ?? "XAI_API_KEY"
+    },
+    neutts: {
+      refAudio: value?.neutts?.refAudio ?? value?.neutts?.ref_audio ?? "",
+      refText: value?.neutts?.refText ?? value?.neutts?.ref_text ?? "",
+      model: value?.neutts?.model ?? "neuphonic/neutts-air-q4-gguf",
+      device: value?.neutts?.device ?? "cpu"
+    },
+    kittentts: {
+      model: value?.kittentts?.model ?? "KittenML/kitten-tts-nano-0.8-int8",
+      voice: value?.kittentts?.voice ?? "Jasper",
+      speed: boundedNumber(value?.kittentts?.speed, 1, 0.5, 2),
+      cleanText: value?.kittentts?.cleanText ?? value?.kittentts?.clean_text ?? true
+    }
+  };
+}
+
+function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
+  const provider = isSttProvider(value?.provider) ? value.provider : "local";
+  return {
+    ...value,
+    provider,
+    local: {
+      model: value?.local?.model ?? "base",
+      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND
+    },
+    groq: {
+      model: value?.groq?.model ?? "whisper-large-v3",
+      apiKeyEnv: value?.groq?.apiKeyEnv ?? value?.groq?.api_key_env ?? "GROQ_API_KEY"
+    },
+    openai: {
+      model: value?.openai?.model ?? "whisper-1",
+      apiKeyEnv: value?.openai?.apiKeyEnv ?? value?.openai?.api_key_env ?? "VOICE_TOOLS_OPENAI_KEY"
+    },
+    mistral: {
+      model: value?.mistral?.model ?? "voxtral-mini-latest",
+      apiKeyEnv: value?.mistral?.apiKeyEnv ?? value?.mistral?.api_key_env ?? "MISTRAL_API_KEY"
+    }
+  };
+}
+
+function mergeTtsConfig(left: TtsConfig | undefined, right: TtsConfig | undefined): TtsConfig {
+  return {
+    ...(left ?? {}),
+    ...(right ?? {}),
+    edge: { ...(left?.edge ?? {}), ...(right?.edge ?? {}) },
+    elevenlabs: { ...(left?.elevenlabs ?? {}), ...(right?.elevenlabs ?? {}) },
+    openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) },
+    minimax: { ...(left?.minimax ?? {}), ...(right?.minimax ?? {}) },
+    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) },
+    gemini: { ...(left?.gemini ?? {}), ...(right?.gemini ?? {}) },
+    xai: { ...(left?.xai ?? {}), ...(right?.xai ?? {}) },
+    neutts: { ...(left?.neutts ?? {}), ...(right?.neutts ?? {}) },
+    kittentts: { ...(left?.kittentts ?? {}), ...(right?.kittentts ?? {}) }
+  };
+}
+
+function mergeSttConfig(left: SttConfig | undefined, right: SttConfig | undefined): SttConfig {
+  return {
+    ...(left ?? {}),
+    ...(right ?? {}),
+    local: { ...(left?.local ?? {}), ...(right?.local ?? {}) },
+    groq: { ...(left?.groq ?? {}), ...(right?.groq ?? {}) },
+    openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) },
+    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) }
+  };
+}
+
+function isTtsProvider(value: unknown): value is TtsProvider {
+  return value === "edge" ||
+    value === "elevenlabs" ||
+    value === "openai" ||
+    value === "minimax" ||
+    value === "mistral" ||
+    value === "gemini" ||
+    value === "xai" ||
+    value === "neutts" ||
+    value === "kittentts";
+}
+
+function isSttProvider(value: unknown): value is SttProvider {
+  return value === "local" || value === "groq" || value === "openai" || value === "mistral";
+}
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
 }
 
 function normalizeMcpServers(
@@ -693,6 +949,53 @@ export async function setupBrowserConfig(options: {
       cdpUrl: options.input.cdpUrl,
       launchCommand: options.input.launchCommand,
       autoLaunch: options.input.autoLaunch ?? false
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupVoiceConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: VoiceSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const previousTts = normalizeTtsConfig(existing.config.tts);
+  const previousStt = normalizeSttConfig(existing.config.stt);
+  const ttsProvider = options.input.ttsProvider ?? previousTts.provider;
+  const sttProvider = options.input.sttProvider ?? previousStt.provider;
+  const config = mergeConfig(existing.config, {
+    tts: {
+      provider: ttsProvider,
+      speed: options.input.ttsSpeed ?? previousTts.speed,
+      [ttsProvider]: {
+        model: options.input.ttsModel,
+        voice: options.input.ttsVoice,
+        voiceId: options.input.ttsVoice,
+        apiKeyEnv: options.input.ttsApiKeyEnv
+      }
+    },
+    stt: {
+      provider: sttProvider,
+      [sttProvider]: {
+        model: options.input.sttModel,
+        command: options.input.sttCommand,
+        apiKeyEnv: options.input.sttApiKeyEnv
+      }
     }
   });
 

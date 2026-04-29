@@ -11,6 +11,7 @@ import {
   setupSkillConfig,
   setupTelegramConfig,
   setupUiConfig,
+  setupVoiceConfig,
   setupWebConfig,
   type AgentProfileMode,
   type AgentResponseLanguage,
@@ -20,8 +21,10 @@ import {
   type ProviderSetupInput,
   type SecuritySetupInput,
   type TelegramSetupInput,
+  type TtsProvider,
   type UiFlavor,
   type UiLanguage,
+  type VoiceSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
@@ -84,6 +87,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return browser(options, args);
     case "local":
       return local(options, args);
+    case "voice":
+      return voice(options, args);
     case "security":
       return security(options, args);
     case "cron":
@@ -317,6 +322,14 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
+  if (category === "voice") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderVoiceStatus(config)
+    };
+  }
+
   if (category === "telegram") {
     return {
       handled: true,
@@ -382,6 +395,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       `Profile: ${config.profile.mode} (${config.profile.responseLanguage})`,
       `UI: ${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`,
       `Skill autonomy: ${config.skills.autonomy}`,
+      `Voice: TTS ${config.tts.provider}, STT ${config.stt.provider}`,
       `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config.browser.backend}`,
       `MCP servers: ${Object.keys(config.mcp.servers).length}`,
@@ -394,11 +408,13 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "  estacoda settings ui",
       "  estacoda settings skills",
       "  estacoda settings browser",
+      "  estacoda settings voice",
       "  estacoda settings telegram",
       "",
       "Common changes:",
       "  estacoda setup --advanced --provider <provider> --model <model>",
       "  estacoda local setup --base-url http://localhost:11434/v1 --model <model>",
+      "  estacoda voice setup --tts-provider edge --stt-provider local",
       "  estacoda security setup --mode adaptive",
       "  estacoda settings skills --autonomy suggest",
       "  estacoda verify"
@@ -787,6 +803,170 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
         : "Change with: estacoda local setup --base-url http://localhost:11434/v1 --model <model>"
     ].join("\n")
   };
+}
+
+async function voice(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+
+  if (subcommand !== "status" && subcommand !== "setup") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda voice",
+        "Hermes-aligned voice stack: TTS output plus STT transcription.",
+        "  estacoda voice status",
+        "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
+        "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
+        "  estacoda voice setup --stt-provider local --stt-model base",
+        "",
+        "Defaults:",
+        "  TTS: edge, no API key",
+        "  STT: local Whisper, model base",
+        "  CLI audio target: ~/.estacoda/audio-cache/ once synthesis tools are enabled"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "setup") {
+    const parsed = parseVoiceArgs(args.slice(1));
+    const result = await setupVoiceConfig({
+      ...options,
+      input: parsed
+    });
+    const loaded = await loadRuntimeConfig(options);
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Configured EstaCoda voice.",
+        renderVoiceStatus(loaded),
+        `Config: ${result.path}`,
+        "Next: TTS/STT providers will use this config when voice tools are enabled."
+      ].join("\n")
+    };
+  }
+
+  const config = await loadRuntimeConfig(options);
+  return {
+    handled: true,
+    exitCode: 0,
+    output: renderVoiceStatus(config)
+  };
+}
+
+function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  const ttsKey = ttsApiKeyEnv(config.tts.provider, config);
+  const sttKey = sttApiKeyEnv(config.stt.provider, config);
+
+  return [
+    "EstaCoda voice",
+    `TTS provider: ${config.tts.provider}`,
+    `TTS model: ${ttsModel(config.tts.provider, config)}`,
+    `TTS voice: ${ttsVoice(config.tts.provider, config)}`,
+    `TTS speed: ${config.tts.speed}`,
+    `TTS API key: ${ttsKey === undefined ? "none" : ttsKey}`,
+    `STT provider: ${config.stt.provider}`,
+    `STT model: ${sttModel(config.stt.provider, config)}`,
+    `STT command: ${config.stt.local?.command ?? "auto"}`,
+    `STT API key: ${sttKey === undefined ? "none" : sttKey}`,
+    "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
+    "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral"
+  ].join("\n");
+}
+
+function ttsModel(provider: TtsProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  switch (provider) {
+    case "edge":
+      return "edge-tts";
+    case "elevenlabs":
+      return config.tts.elevenlabs?.modelId ?? "eleven_multilingual_v2";
+    case "openai":
+      return config.tts.openai?.model ?? "gpt-4o-mini-tts";
+    case "minimax":
+      return config.tts.minimax?.model ?? "speech-2.8-hd";
+    case "mistral":
+      return config.tts.mistral?.model ?? "voxtral-mini-tts-2603";
+    case "gemini":
+      return config.tts.gemini?.model ?? "gemini-2.5-flash-preview-tts";
+    case "xai":
+      return "xai-tts";
+    case "neutts":
+      return config.tts.neutts?.model ?? "neuphonic/neutts-air-q4-gguf";
+    case "kittentts":
+      return config.tts.kittentts?.model ?? "KittenML/kitten-tts-nano-0.8-int8";
+  }
+}
+
+function ttsVoice(provider: TtsProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  switch (provider) {
+    case "edge":
+      return config.tts.edge?.voice ?? "en-US-AriaNeural";
+    case "elevenlabs":
+      return config.tts.elevenlabs?.voiceId ?? "pNInz6obpgDQGcFmaJgB";
+    case "openai":
+      return config.tts.openai?.voice ?? "alloy";
+    case "minimax":
+      return config.tts.minimax?.voiceId ?? "English_Graceful_Lady";
+    case "mistral":
+      return config.tts.mistral?.voiceId ?? "c69964a6-ab8b-4f8a-9465-ec0925096ec8";
+    case "gemini":
+      return config.tts.gemini?.voice ?? "Kore";
+    case "xai":
+      return config.tts.xai?.voiceId ?? "eve";
+    case "neutts":
+      return config.tts.neutts?.refAudio === undefined || config.tts.neutts.refAudio.length === 0 ? "reference-audio-unset" : "reference-audio";
+    case "kittentts":
+      return config.tts.kittentts?.voice ?? "Jasper";
+  }
+}
+
+function ttsApiKeyEnv(provider: TtsProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string | undefined {
+  switch (provider) {
+    case "edge":
+    case "neutts":
+    case "kittentts":
+      return undefined;
+    case "elevenlabs":
+      return "ELEVENLABS_API_KEY";
+    case "openai":
+      return config.tts.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+    case "minimax":
+      return config.tts.minimax?.apiKeyEnv ?? "MINIMAX_API_KEY";
+    case "mistral":
+      return config.tts.mistral?.apiKeyEnv ?? "MISTRAL_API_KEY";
+    case "gemini":
+      return config.tts.gemini?.apiKeyEnv ?? "GEMINI_API_KEY";
+    case "xai":
+      return config.tts.xai?.apiKeyEnv ?? "XAI_API_KEY";
+  }
+}
+
+function sttModel(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]["provider"], config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  switch (provider) {
+    case "local":
+      return config.stt.local?.model ?? "base";
+    case "groq":
+      return config.stt.groq?.model ?? "whisper-large-v3";
+    case "openai":
+      return config.stt.openai?.model ?? "whisper-1";
+    case "mistral":
+      return config.stt.mistral?.model ?? "voxtral-mini-latest";
+  }
+}
+
+function sttApiKeyEnv(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]["provider"], config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string | undefined {
+  switch (provider) {
+    case "local":
+      return undefined;
+    case "groq":
+      return config.stt.groq?.apiKeyEnv ?? "GROQ_API_KEY";
+    case "openai":
+      return config.stt.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+    case "mistral":
+      return config.stt.mistral?.apiKeyEnv ?? "MISTRAL_API_KEY";
+  }
 }
 
 async function web(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -1520,6 +1700,78 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
+function parseVoiceArgs(args: string[]): VoiceSetupInput {
+  const parsed: VoiceSetupInput = {};
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--tts-provider") {
+      parsed.ttsProvider = parseTtsProvider(next);
+      index += 1;
+    } else if (arg === "--tts-speed") {
+      parsed.ttsSpeed = next === undefined ? undefined : Number(next);
+      index += 1;
+    } else if (arg === "--tts-voice") {
+      parsed.ttsVoice = next;
+      index += 1;
+    } else if (arg === "--tts-model") {
+      parsed.ttsModel = next;
+      index += 1;
+    } else if (arg === "--tts-api-key-env") {
+      parsed.ttsApiKeyEnv = next;
+      index += 1;
+    } else if (arg === "--stt-provider") {
+      parsed.sttProvider = parseSttProvider(next);
+      index += 1;
+    } else if (arg === "--stt-model") {
+      parsed.sttModel = next;
+      index += 1;
+    } else if (arg === "--stt-command") {
+      parsed.sttCommand = next;
+      index += 1;
+    } else if (arg === "--stt-api-key-env") {
+      parsed.sttApiKeyEnv = next;
+      index += 1;
+    } else if (arg === "--project") {
+      parsed.scope = "project";
+    } else if (arg === "--user") {
+      parsed.scope = "user";
+    }
+  }
+
+  if (parsed.ttsSpeed !== undefined && !Number.isFinite(parsed.ttsSpeed)) {
+    throw new Error("Expected --tts-speed to be a number");
+  }
+
+  return parsed;
+}
+
+function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvider"] {
+  if (
+    value === "edge" ||
+    value === "elevenlabs" ||
+    value === "openai" ||
+    value === "minimax" ||
+    value === "mistral" ||
+    value === "gemini" ||
+    value === "xai" ||
+    value === "neutts" ||
+    value === "kittentts"
+  ) {
+    return value;
+  }
+  throw new Error("Expected --tts-provider edge, elevenlabs, openai, minimax, mistral, gemini, xai, neutts, or kittentts");
+}
+
+function parseSttProvider(value: string | undefined): VoiceSetupInput["sttProvider"] {
+  if (value === "local" || value === "groq" || value === "openai" || value === "mistral") {
+    return value;
+  }
+  throw new Error("Expected --stt-provider local, groq, openai, or mistral");
+}
+
 type LocalSetupArgs = {
   baseUrl?: string;
   model?: string;
@@ -2043,6 +2295,7 @@ function help(): string {
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
     "  estacoda local   Configure local Ollama/OpenAI-compatible models",
+    "  estacoda voice   Configure TTS/STT voice tools",
     "  estacoda security View or configure approval mode",
     "  estacoda cron    Manage scheduled tasks",
     "  estacoda mcp     Configure MCP servers",

@@ -82,6 +82,7 @@ Evidence:
 - Security-mode and skill-autonomy settings now render localized English/Arabic labels from `ui.language` while preserving English config values. `smoke-tested`
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
 - Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
+- Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; actual synthesis/transcription tools remain next. `smoke-tested`
 
 ## 3. Current Working Capabilities
 

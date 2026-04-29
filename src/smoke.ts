@@ -565,6 +565,40 @@ const cliLocalBlockedTest = await runCliCommand({
     error: "offline"
   })
 });
+const cliVoiceStatusDefault = await runCliCommand({
+  argv: ["voice", "status"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliVoiceSetup = await runCliCommand({
+  argv: [
+    "voice",
+    "setup",
+    "--tts-provider",
+    "openai",
+    "--tts-model",
+    "gpt-4o-mini-tts",
+    "--tts-voice",
+    "alloy",
+    "--tts-api-key-env",
+    "VOICE_TOOLS_OPENAI_KEY",
+    "--stt-provider",
+    "local",
+    "--stt-model",
+    "base"
+  ],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliVoiceConfig = await loadRuntimeConfig({
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliVoiceSettings = await runCliCommand({
+  argv: ["settings", "voice"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
 delete process.env.ESTACODA_SMOKE_MISSING_KEY;
 const cliMissingProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-workspace-"));
 const cliMissingProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-home-"));
@@ -3381,6 +3415,16 @@ assert(cliLocalBlockedSetup.exitCode === 0, "expected explicit local setup model
 assert(cliLocalBlockedSetup.output.includes("Endpoint check: blocked"), "expected blocked local setup warning");
 assert(cliLocalBlockedTest.exitCode === 1, "expected blocked local test to fail");
 assert(cliLocalBlockedTest.output.includes("Status: local model path is not ready"), "expected blocked local recovery output");
+assert(cliVoiceStatusDefault.output.includes("TTS provider: edge"), "expected default voice status to use Edge TTS");
+assert(cliVoiceStatusDefault.output.includes("STT provider: local"), "expected default voice status to use local STT");
+assert(cliVoiceSetup.output.includes("Configured EstaCoda voice."), "expected voice setup output");
+assert(cliVoiceSetup.output.includes("TTS provider: openai"), "expected voice setup to report OpenAI TTS");
+assert(cliVoiceConfig.tts.provider === "openai", "expected voice setup to persist TTS provider");
+assert(cliVoiceConfig.tts.openai?.voice === "alloy", "expected voice setup to persist TTS voice");
+assert(cliVoiceConfig.tts.openai?.apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY", "expected voice setup to persist TTS key env");
+assert(cliVoiceConfig.stt.provider === "local", "expected voice setup to persist STT provider");
+assert(cliVoiceConfig.stt.local?.model === "base", "expected voice setup to persist local STT model");
+assert(cliVoiceSettings.output.includes("EstaCoda voice"), "expected settings voice output");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Approval mode: Adaptive (adaptive)"), "expected CLI security status to report adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Assessor: enabled"), "expected CLI security status to report enabled assessor");

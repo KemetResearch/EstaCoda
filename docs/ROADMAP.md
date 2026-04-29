@@ -306,16 +306,22 @@ What remains:
 - reward/selection logic
 - agent-improvement loop that is actually operational
 
-### 7. Voice to text
+### 7. Voice and TTS
 
-State: not built.
+State: configuration foundation exists.
 
+- Hermes-aligned `tts` and `stt` config sections exist with Edge TTS and local STT defaults `smoke-tested`
+- `estacoda voice status/setup` and `estacoda settings voice` exist `smoke-tested`
+- hosted TTS/STT provider key-env slots are represented for OpenAI, ElevenLabs, MiniMax, Mistral, Gemini, xAI, and Groq where applicable `smoke-tested`
 - TUI voice input is `intended but not implemented`
 - Telegram/channel voice handling is `intended but not implemented`
 
 What remains:
 
+- TTS synthesis tool and CLI audio-cache artifact output
 - transcription path
+- Telegram voice/audio transcription injection
+- Telegram voice-bubble/audio-file delivery for generated speech
 - per-channel UX
 - security/privacy stance for audio processing
 
