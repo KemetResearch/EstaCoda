@@ -608,6 +608,20 @@ const cliImageStatusDefault = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
+delete process.env.ESTACODA_SMOKE_MISSING_IMAGE_KEY;
+const cliImageMissingSetup = await runCliCommand({
+  argv: ["image", "setup", "--provider", "fal", "--api-key-env", "ESTACODA_SMOKE_MISSING_IMAGE_KEY"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliImageVerifyMissing = await runCliCommand({
+  argv: ["image", "verify"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome,
+  imageGenerationFetch: async () => {
+    throw new Error("image verify should not call provider when key is missing");
+  }
+});
 const cliImageSetup = await runCliCommand({
   argv: [
     "image",
@@ -625,6 +639,22 @@ const cliImageSetup = await runCliCommand({
 const cliImageConfig = await loadRuntimeConfig({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
+});
+let cliImageVerifyUrl = "";
+const cliImageVerifyReady = await runCliCommand({
+  argv: ["image", "verify"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome,
+  imageGenerationFetch: async (url, init) => {
+    cliImageVerifyUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      statusText: `${init?.method ?? "GET"} OK`,
+      arrayBuffer: async () => Buffer.from(JSON.stringify({ ok: true })).buffer,
+      text: async () => JSON.stringify({ ok: true })
+    };
+  }
 });
 const cliImageSettings = await runCliCommand({
   argv: ["settings", "image"],
@@ -2083,6 +2113,43 @@ const falImageGenerate = await imageExecutor.executeTool({
   sessionId: directSession.id
 });
 delete process.env.FAL_KEY;
+const missingImageRegistry = new ToolRegistry();
+for (const tool of createImageGenerationTools({
+  imageCacheRoot: join(imageWorkspace, ".estacoda", "image-cache"),
+  artifactStore: imageArtifacts,
+  imageGen: {
+    provider: "fal",
+    model: "fal-ai/flux-2/klein/9b",
+    useGateway: false,
+    fal: {
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_MISSING_KEY",
+      baseUrl: "https://fal.run"
+    }
+  },
+  fetch: async () => {
+    throw new Error("image.generate should return setup_needed before network when key is missing");
+  },
+  id: () => "missing-image-smoke"
+})) {
+  missingImageRegistry.register(tool);
+}
+const missingImageExecutor = new ToolExecutor({
+  registry: missingImageRegistry,
+  securityPolicy: {
+    decide: () => "allow"
+  },
+  sessionDb,
+  trajectoryRecorder: trajectory
+});
+const missingImageGenerate = await missingImageExecutor.executeTool({
+  tool: "image.generate",
+  input: {
+    prompt: "A blue lotus sigil."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const bytePlusImageRegistry = new ToolRegistry();
 let bytePlusImageRequestUrl = "";
 let bytePlusImageRequestBody: any;
@@ -2438,6 +2505,11 @@ assert(falImageGenerate?.result?.ok === true, "expected FAL image generation to 
 assert(falImageRequestUrl.endsWith("/fal-ai/flux-2/klein/9b"), "expected FAL image generation to call configured model endpoint");
 assert(falImageRequestBody.image_size === "landscape_16_9", "expected FAL image generation to map landscape aspect ratio");
 assert(falImageRequestBody.seed === 42, "expected FAL image generation to pass seed");
+assert(missingImageGenerate?.result?.ok === false, "expected missing image key to fail before network");
+assert((missingImageGenerate?.result?.metadata as any)?.kind === "setup_needed", "expected missing image key to return setup_needed metadata");
+assert((missingImageGenerate?.result?.metadata as any)?.capability === "image_generation", "expected setup_needed metadata to name image generation capability");
+assert((missingImageGenerate?.result?.metadata as any)?.requiredSecret === "FAL_MISSING_KEY", "expected setup_needed metadata to name required secret env");
+assert((missingImageGenerate?.result?.metadata as any)?.resumeIntent === "image.generate", "expected setup_needed metadata to preserve resume intent");
 assert(bytePlusImageGenerate?.result?.ok === true, "expected BytePlus image generation to succeed");
 assert(bytePlusImageRequestUrl.endsWith("/images/generations"), "expected BytePlus image generation endpoint");
 assert(bytePlusImageRequestBody.model === "seedream-4-0-250828", "expected BytePlus image generation to pass Seedream model");
@@ -3742,11 +3814,19 @@ assert(cliVoiceConfig.stt.provider === "local", "expected voice setup to persist
 assert(cliVoiceConfig.stt.local?.model === "base", "expected voice setup to persist local STT model");
 assert(cliVoiceSettings.output.includes("EstaCoda voice"), "expected settings voice output");
 assert(cliImageStatusDefault.output.includes("Provider: fal"), "expected default image status to use FAL");
+assert(cliImageMissingSetup.output.includes("ESTACODA_SMOKE_MISSING_IMAGE_KEY"), "expected image missing-key setup to persist custom env");
+assert(cliImageVerifyMissing.exitCode === 1, "expected image verify to fail when API key is missing");
+assert(cliImageVerifyMissing.output.includes("Status: setup needed"), "expected missing image verify setup-needed status");
+assert(cliImageVerifyMissing.output.includes("API key present: no"), "expected missing image verify to report absent key");
 assert(cliImageSetup.output.includes("Configured EstaCoda image generation."), "expected image setup output");
 assert(cliImageSetup.output.includes("Secret store:"), "expected image setup with api key to write secret store");
 assert(cliImageConfig.imageGen.provider === "byteplus", "expected image setup to persist BytePlus provider");
 assert(cliImageConfig.imageGen.model === "seedream-4-0-250828", "expected image setup to persist Seedream model");
 assert(cliImageConfig.imageGen.byteplus?.apiKeyEnv === "BYTEPLUS_ARK_API_KEY", "expected image setup to persist BytePlus key env");
+assert(cliImageVerifyReady.exitCode === 0, "expected image verify to pass when config and key are ready");
+assert(cliImageVerifyReady.output.includes("Status: ready"), "expected image verify ready status");
+assert(cliImageVerifyReady.output.includes("Provider check: request"), "expected image verify to perform provider capability check");
+assert(cliImageVerifyUrl.endsWith("/models"), "expected BytePlus image verify to use safe models endpoint");
 assert(cliImageSettings.output.includes("EstaCoda image generation"), "expected settings image output");
 assert(cliImageEnv.includes("BYTEPLUS_ARK_API_KEY=\"TEST_BYTEPLUS_SECRET\""), "expected image setup to store API key in local env file");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");

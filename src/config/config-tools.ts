@@ -17,6 +17,7 @@ import {
   type WebSetupInput
 } from "./runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
+import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
@@ -489,7 +490,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           provider: { type: "string", enum: ["fal", "byteplus"] },
           model: { type: "string" },
           apiKeyEnv: { type: "string" },
-          apiKey: { type: "string" },
           baseUrl: { type: "string" },
           useGateway: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] }
@@ -501,6 +501,21 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       maxResultSizeChars: 5000,
       isAvailable: () => true,
       run: async (input: ImageGenerationSetupInput) => {
+        let secretPath: string | undefined;
+        if (input.apiKey !== undefined && input.apiKey.trim().length > 0) {
+          const provider = input.provider ?? "fal";
+          const envName = input.apiKeyEnv ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY");
+          secretPath = (await storeCapabilitySecret({
+            homeDir: options.homeDir,
+            envName,
+            secret: input.apiKey
+          })).secretPath;
+          input = {
+            ...input,
+            apiKeyEnv: envName,
+            apiKey: undefined
+          };
+        }
         const result = await setupImageGenerationConfig({
           ...options,
           input
@@ -513,13 +528,15 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Provider: ${loaded.imageGen.provider}`,
             `Model: ${loaded.imageGen.model}`,
             `Wrote ${result.path}.`,
+            secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
             result.envExport === undefined
               ? "API key source: environment variable."
               : `Add this to your shell config:\n${result.envExport}`
-          ].join("\n"),
+          ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
             imageGen: loaded.imageGen,
+            secretPath,
             envExport: result.envExport
           }
         };

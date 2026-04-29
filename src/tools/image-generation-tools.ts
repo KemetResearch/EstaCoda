@@ -2,6 +2,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { RegisteredTool } from "../contracts/tool.js";
 
@@ -165,7 +166,11 @@ async function submitFalRequest(
   const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "FAL_KEY";
   const apiKey = process.env[apiKeyEnv];
   if (apiKey === undefined || apiKey.length === 0) {
-    return { ok: false, content: `Missing image generation API key. Export ${apiKeyEnv}.`, metadata: { provider: "fal", apiKeyEnv } };
+    return imageSetupNeeded({
+      provider: "fal",
+      model,
+      requiredSecret: apiKeyEnv
+    });
   }
 
   const baseUrl = (input.imageGen.fal?.baseUrl ?? input.imageGen.baseUrl ?? "https://fal.run").replace(/\/$/, "");
@@ -200,7 +205,11 @@ async function submitBytePlusRequest(
   const apiKeyEnv = input.imageGen.byteplus?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY";
   const apiKey = process.env[apiKeyEnv];
   if (apiKey === undefined || apiKey.length === 0) {
-    return { ok: false, content: `Missing BytePlus image generation API key. Export ${apiKeyEnv}.`, metadata: { provider: "byteplus", apiKeyEnv } };
+    return imageSetupNeeded({
+      provider: "byteplus",
+      model,
+      requiredSecret: apiKeyEnv
+    });
   }
 
   const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? "https://ark.ap-southeast.bytepluses.com/api/v3").replace(/\/$/, "");
@@ -325,5 +334,31 @@ function defaultImageGen(): LoadedRuntimeConfig["imageGen"] {
       apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
       baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
     }
+  };
+}
+
+function imageSetupNeeded(input: {
+  provider: "fal" | "byteplus";
+  model: string;
+  requiredSecret: string;
+}): { ok: false; content: string; metadata: Record<string, unknown> } {
+  return {
+    ok: false,
+    content: [
+      "Image generation is not configured yet.",
+      `Missing required secret: ${input.requiredSecret}.`,
+      "Use a protected credential prompt or run estacoda image setup, then retry the original image request."
+    ].join("\n"),
+    metadata: setupNeeded({
+      kind: "setup_needed",
+      capability: "image_generation",
+      providerOptions: ["fal", "byteplus"],
+      requiredSecret: input.requiredSecret,
+      resumeIntent: "image.generate",
+      suggestedCommand: `estacoda image setup --provider ${input.provider} --model ${input.model} --api-key-env ${input.requiredSecret}`,
+      suggestedTool: "config.image.setup",
+      provider: input.provider,
+      model: input.model
+    })
   };
 }

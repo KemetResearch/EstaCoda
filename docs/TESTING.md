@@ -260,8 +260,9 @@ At a high level:
 - Telegram voice transcript injection before the agent turn and Opus/Ogg `sendVoice` voice-bubble delivery
 - FAL-compatible `image.generate` execution with mocked image URL, aspect-ratio mapping, image-cache write, and artifact recording
 - BytePlus/ModelArk Seedream `image.generate` execution with mocked image URL, seed support, image-cache write, and artifact recording
+- missing image-generation credentials returning structured `setup_needed` metadata before any provider request
 - image prompt intent routing to native media generation without mandatory skill selection
-- image status/setup CLI config persistence plus local secret-store write for pasted API keys
+- image status/setup/verify CLI config persistence, local secret-store write for pasted API keys, missing-key verification failure, and ready-state provider capability probe
 - agent-facing image config status/setup tools
 - Telegram image artifact delivery through `sendPhoto` with artifact-notice fallback
 - setup/verify/settings onboarding copy, recommended paths, and next-action recovery guidance

@@ -35,6 +35,8 @@ import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import { runSetupVerification } from "../onboarding/verification.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
+import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
+import { verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
@@ -51,6 +53,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { writeEnvSecret } from "../config/env-secret-store.js";
+import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -75,6 +78,7 @@ export type CliOptions = {
   prompt?: Prompt;
   telegramFetch?: TelegramFetch;
   providerFetch?: ProviderFetchLike;
+  imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
 };
 
@@ -874,7 +878,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
 async function image(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "setup") {
+  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "verify") {
     return {
       handled: true,
       exitCode: 0,
@@ -882,6 +886,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "EstaCoda image generation",
         "Hermes-aligned text-to-image stack. In normal use, describe the image and EstaCoda will call image.generate automatically.",
         "  estacoda image status",
+        "  estacoda image verify",
         "  estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY",
         "  estacoda image setup --provider byteplus --model seedream-4-0-250828 --api-key-env BYTEPLUS_ARK_API_KEY",
         "  estacoda image setup --provider fal --api-key <key>",
@@ -894,16 +899,32 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
     };
   }
 
+  if (subcommand === "verify") {
+    const config = await loadRuntimeConfig(options);
+    const verification = await verifyImageGeneration({
+      config,
+      homeDir: options.homeDir,
+      workspaceRoot: options.workspaceRoot,
+      fetch: options.imageGenerationFetch,
+      checkProvider: !hasFlag(args, "--skip-provider-check")
+    });
+    return {
+      handled: true,
+      exitCode: verification.ok ? 0 : 1,
+      output: renderImageVerification(verification)
+    };
+  }
+
   if (subcommand === "setup") {
     const parsed = parseImageArgs(args.slice(1));
     let secretPath: string | undefined;
     if (parsed.apiKey !== undefined && parsed.apiKey.trim().length > 0) {
       const envName = parsed.apiKeyEnv ?? defaultImageApiKeyEnv(parsed.provider ?? "fal");
-      secretPath = (await writeEnvSecret({
+      secretPath = (await storeCapabilitySecret({
         homeDir: options.homeDir,
-        key: envName,
-        value: parsed.apiKey
-      })).path;
+        envName,
+        secret: parsed.apiKey
+      })).secretPath;
       parsed.apiKeyEnv = envName;
       delete parsed.apiKey;
     }
@@ -933,6 +954,24 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
     exitCode: 0,
     output: renderImageStatus(config)
   };
+}
+
+function renderImageVerification(verification: ImageGenerationVerification): string {
+  return [
+    "EstaCoda image verification",
+    `Status: ${verification.ok ? "ready" : "setup needed"}`,
+    `Provider: ${verification.provider}`,
+    `Model: ${verification.model}`,
+    `API key env: ${verification.apiKeyEnv}`,
+    `API key present: ${verification.apiKeyPresent ? "yes" : "no"}`,
+    `Provider check: ${verification.check}`,
+    `Message: ${verification.message}`,
+    `Cache: ${verification.cachePath}`,
+    `Telegram delivery: ${verification.telegramDelivery === "ready" ? "ready (sendPhoto)" : "not configured"}`,
+    verification.ok
+      ? "Next: ask EstaCoda to generate an image."
+      : `Next: run estacoda image setup --provider ${verification.provider} --model ${verification.model} --api-key-env ${verification.apiKeyEnv}`
+  ].join("\n");
 }
 
 function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {

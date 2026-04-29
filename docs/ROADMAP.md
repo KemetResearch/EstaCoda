@@ -356,14 +356,19 @@ State: Hermes-aligned first foundation exists.
 - `image.generate` accepts a minimal agent-facing schema: prompt, aspect ratio, model override, and seed `smoke-tested`
 - image-generation prompts route to native media tooling rather than requiring a skill `smoke-tested`
 - `estacoda image status/setup` exists, including local secret-store support when a user provides an API key `smoke-tested`
-- agent-facing `config.image.status` and `config.image.setup` tools exist so EstaCoda can configure image generation from user-provided credentials `smoke-tested`
+- agent-facing `config.image.status` and `config.image.setup` tools exist so EstaCoda can configure image generation provider/model/key-env references without advertising raw API-key input `smoke-tested`
 - FAL aspect ratios map to model-native `image_size` presets `smoke-tested`
 - BytePlus/Seedream aspect ratios map to concrete image sizes `smoke-tested`
 - generated image URLs are downloaded into `.estacoda/image-cache/` and recorded as image artifacts `smoke-tested`
 - Telegram image artifacts upload through `sendPhoto` with artifact-notice fallback `smoke-tested`
+- `estacoda image verify` checks provider config, key-env presence, cache path, Telegram delivery readiness, and a safe provider capability probe `smoke-tested`
+- missing image credentials return structured `setup_needed` metadata with provider options, required secret env, suggested command/tool, and `resumeIntent: image.generate` `smoke-tested`
+- image setup now uses the shared capability secret-storage primitive, ready to generalize to voice/search/browser credentials `smoke-tested`
 
 What remains:
 
+- protected credential capture so a pasted key bypasses model context
+- automatic retry/resume of the original image request after setup verification succeeds
 - live provider proof with real FAL and BytePlus credentials
 - richer model picker UX similar to Hermes' `hermes tools`
 - Nous gateway/proxy path
