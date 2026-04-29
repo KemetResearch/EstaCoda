@@ -107,6 +107,7 @@ Evidence level:
 - setup verification and settings overview: `smoke-tested`
 - Phase 2A Telegram guided setup and management commands: `smoke-tested`
 - Phase 2B browser setup/test command alignment: `smoke-tested`
+- Phase 2C/2D profile and UI language/flavor foundation: `smoke-tested`
 - CLI file edit/read/verify flow: `live-proven`
 - broader CLI ergonomics: partial and still needs judgment during live runs
 
@@ -250,6 +251,7 @@ At a high level:
 - provider tool-call extraction
 - browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, screenshot vision, dialog response, and mock click/image-list automation tools
 - browser setup/test aliases and settings browser view
+- profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
 - context expansion
 - skill execution and package behavior
 - session-stable skill visibility

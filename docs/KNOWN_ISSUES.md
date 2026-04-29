@@ -28,7 +28,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - On non-vision providers, Telegram image analysis currently degrades to metadata-only behavior rather than semantic image understanding. `live-proven`
 - Native-vision routing is now preferred for simple image/OCR prompts on vision-capable main routes, but broader multi-provider live proof is still missing. `smoke-tested`
 - Telegram final formatting is improved but still not full Hermes parity. formatting improvements `smoke-tested`; full parity `intended but not implemented`
-- Channel verbosity/profile control is not implemented yet. `intended but not implemented`
+- Profile/UI control now exists at the global config level, but channel-specific overrides and richer localized approval cards are still missing. `smoke-tested` / `intended but not implemented`
 - Gateway status reports readiness, not real background-process liveness. `live-proven`
 - Telegram gateway session context is now persisted and policy-driven, and basic session-admin UX now exists (`/sessions`, `/search`, `/switch`), but the full Hermes session-management surface is still missing. persistence/policy/admin basics `smoke-tested`; full parity `intended but not implemented`
 - CLI now resumes the active workspace session across launches, but still lacks richer lineage/history management beyond `/sessions`, `/search`, and `/switch`. resume `smoke-tested`; richer admin surface `intended but not implemented`
@@ -59,5 +59,5 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Packaging/distribution path is not decided.
 - Hermes/OpenClaw migration path is not designed.
 - Voice input/transcription is not implemented.
-- User-facing profiles/modes are not implemented.
+- User-facing profiles/modes now exist as a first global config slice; profile effects beyond prompt guidance remain incomplete.
 - Update/install lifecycle for end users is not finalized.

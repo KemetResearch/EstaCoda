@@ -121,6 +121,7 @@ Done:
 - `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`
 - Phase 2A Telegram guided setup via `estacoda telegram setup` with local secret storage, token verification, allow/remove management, command sync, and test message path `smoke-tested`
 - Phase 2B browser command alignment via `estacoda browser setup`, `estacoda browser test`, and `estacoda settings browser` `smoke-tested`
+- Phase 2C/2D profile/UI foundation via `estacoda profile`, `profile set`, `profile language`, and `settings ui`; config separates UI language, UI flavor, activity labels, agent mode, and response language `smoke-tested`
 - provider config `smoke-tested`
 - doctor checks `live-proven`
 
@@ -129,7 +130,8 @@ Next:
 - external-user-quality install flow
 - local model setup polish
 - richer recovery UX for bad credentials/config
-- Phase 2 profiles, Arabic UI flavor, and migration detection/import
+- Phase 2 migration detection/import
+- richer localized approval cards and full Arabic interface copy
 - packaging/distribution decision
 
 ### 6. Internal alpha operations
@@ -319,16 +321,19 @@ What remains:
 
 ### 8. Profiles and modes
 
-State: partial concept only.
+State: profile/UI foundation exists.
 
-- some adjacent behavior exists, like bilingual activity labels and approval/trust modes
-- real user-facing profiles/modes are `intended but not implemented`
+- config separates `ui.language`, `ui.flavor`, `ui.activityLabels`, `profile.mode`, and `profile.responseLanguage` `smoke-tested`
+- `estacoda profile`, `profile set`, and `profile language` exist `smoke-tested`
+- `estacoda settings ui` exists `smoke-tested`
+- prompt assembly receives profile and response-language guidance `smoke-tested`
+- Telegram activity labels now follow configured UI activity-label locale on the gateway path `smoke-tested`
 
 What remains:
 
-- verbosity profiles
+- profile effects beyond prompt guidance
 - channel-specific mode settings
-- user/profile persistence model
+- richer Arabic interface copy and localized approval cards
 
 ### 9. Update story
 

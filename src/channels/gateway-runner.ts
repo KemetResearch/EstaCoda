@@ -188,6 +188,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     pollTimeoutSeconds: telegram.pollTimeoutSeconds,
     maxAttachmentBytes: telegram.maxAttachmentBytes,
     mediaRoot,
+    activityLabelsLocale: config.ui.activityLabels,
     fetch: options.telegramFetch
   });
   const gateway = new ChannelGateway({
@@ -240,6 +241,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         externalSkillRoots: latestConfig.skills.externalDirs,
         skillAutonomy: latestConfig.skills.autonomy,
         skillConfig: latestConfig.skills.config,
+        ui: latestConfig.ui,
+        agentProfile: latestConfig.profile,
         providerRegistry: latestConfig.providerRegistry,
         credentialPools: latestConfig.credentialPools,
         auxiliaryProviders: latestConfig.auxiliaryProviders,
@@ -304,6 +307,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
               externalSkillRoots: latestConfig.skills.externalDirs,
               skillAutonomy: latestConfig.skills.autonomy,
               skillConfig: latestConfig.skills.config,
+              ui: latestConfig.ui,
+              agentProfile: latestConfig.profile,
               providerRegistry: latestConfig.providerRegistry,
               credentialPools: latestConfig.credentialPools,
               auxiliaryProviders: latestConfig.auxiliaryProviders,

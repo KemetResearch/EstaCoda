@@ -22,6 +22,7 @@ import type {
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
@@ -93,6 +94,15 @@ export type AgentLoopOptions = {
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
   skillLearningManager?: SkillLearningManager;
+  ui?: {
+    language: UiLanguage;
+    flavor: UiFlavor;
+    activityLabels: "en" | "ar";
+  };
+  agentProfile?: {
+    mode: AgentProfileMode;
+    responseLanguage: AgentResponseLanguage;
+  };
   maxProviderIterations?: number;
   budgets?: Partial<AgentLoopBudgets>;
 };
@@ -149,6 +159,8 @@ export class AgentLoop {
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;
+  readonly #ui: AgentLoopOptions["ui"];
+  readonly #agentProfile: AgentLoopOptions["agentProfile"];
   readonly #budgets: AgentLoopBudgets;
 
   constructor(options: AgentLoopOptions) {
@@ -175,6 +187,8 @@ export class AgentLoop {
     this.#skillsIndex = options.skillsIndex ?? [];
     this.#skillConfig = options.skillConfig ?? {};
     this.#skillLearningManager = options.skillLearningManager;
+    this.#ui = options.ui;
+    this.#agentProfile = options.agentProfile;
     this.#budgets = {
       maxProviderIterations: options.budgets?.maxProviderIterations ?? options.maxProviderIterations ?? 4,
       maxProviderToolCalls: options.budgets?.maxProviderToolCalls ?? 12,
@@ -1447,7 +1461,9 @@ export class AgentLoop {
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,
-      attachments: input.attachments
+      attachments: input.attachments,
+      ui: this.#ui,
+      agentProfile: this.#agentProfile
     });
     await this.#recordPromptAssembly(prompt.budget);
 

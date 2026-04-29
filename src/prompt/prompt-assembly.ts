@@ -16,6 +16,7 @@ import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } f
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { PromptCache } from "./prompt-cache.js";
+import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 
 export type ProviderPromptAssembly = {
   messages: ProviderMessage[];
@@ -57,6 +58,15 @@ export type ProviderPromptInput = {
   projectContext: ProjectContextSnapshot | undefined;
   memoryContext: MemoryProviderContext | undefined;
   providerTools?: OpenAICompatibleToolSchema[];
+  ui?: {
+    language: UiLanguage;
+    flavor: UiFlavor;
+    activityLabels: "en" | "ar";
+  };
+  agentProfile?: {
+    mode: AgentProfileMode;
+    responseLanguage: AgentResponseLanguage;
+  };
   fallbackText: string;
 };
 
@@ -217,6 +227,13 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       protectedLayer: true,
       priority: 0,
       content: identity
+    }),
+    layer({
+      name: "profile",
+      cacheable: true,
+      protectedLayer: true,
+      priority: 1,
+      content: renderProfileGuidance(input)
     }),
     layer({
       name: "frozen-memory",
@@ -829,6 +846,52 @@ function stringifyProviderMessageContent(content: ProviderMessage["content"]): s
 
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
+}
+
+function renderProfileGuidance(input: ProviderPromptInput): string {
+  const ui = input.ui ?? { language: "en", flavor: "standard", activityLabels: "en" };
+  const profile = input.agentProfile ?? { mode: "builder", responseLanguage: "match-user" };
+
+  return [
+    "Interface and profile settings:",
+    `- UI language: ${ui.language}`,
+    `- UI flavor: ${ui.flavor}`,
+    `- Activity labels: ${ui.activityLabels}`,
+    `- Agent profile: ${profile.mode}`,
+    `- Response language: ${profile.responseLanguage}`,
+    "",
+    profileGuidance(profile.mode),
+    responseLanguageGuidance(profile.responseLanguage),
+    ui.flavor === "standard"
+      ? "Use neutral English-facing status/personality. Do not add Arabic/Kemet-flavored phrasing unless the user asks."
+      : "Arabic/Kemet flavor is allowed in lightweight interface/status texture, but do not force Arabic responses unless response language requires it."
+  ].join("\n");
+}
+
+function profileGuidance(mode: AgentProfileMode): string {
+  switch (mode) {
+    case "focused":
+      return "Profile guidance: be concise, direct, and minimize status chatter.";
+    case "operator":
+      return "Profile guidance: be operational, show clear execution status, and keep next actions easy to follow.";
+    case "research":
+      return "Profile guidance: be more analytical, careful with sources and assumptions, and structure findings clearly.";
+    case "builder":
+    default:
+      return "Profile guidance: explain implementation choices and tradeoffs while keeping momentum.";
+  }
+}
+
+function responseLanguageGuidance(language: AgentResponseLanguage): string {
+  switch (language) {
+    case "en":
+      return "Answer in English unless the user explicitly requests another language.";
+    case "ar":
+      return "Answer in Arabic unless the user explicitly requests another language.";
+    case "match-user":
+    default:
+      return "Match the user's message language when practical; for bilingual messages, choose the clearest language for the task.";
+  }
 }
 
 function renderArtifactSummary(artifacts: ArtifactRecord[]): string {

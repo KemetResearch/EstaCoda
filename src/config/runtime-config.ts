@@ -21,6 +21,11 @@ import { normalizeSecurityApprovalMode } from "../security/security-policy-facto
 import type { SecurityApprovalMode, SecurityAssessorConfig } from "../contracts/security.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
+export type UiLanguage = "en" | "ar";
+export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
+export type ActivityLabelsLocale = "en" | "ar";
+export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
+export type AgentResponseLanguage = "en" | "ar" | "match-user";
 
 export type MCPServerToolsConfig = {
   include?: string[];
@@ -89,6 +94,15 @@ export type EstaCodaConfig = {
     autonomy?: SkillAutonomy;
     config?: Record<string, Record<string, unknown>>;
   };
+  ui?: {
+    language?: UiLanguage;
+    flavor?: UiFlavor;
+    activityLabels?: ActivityLabelsLocale;
+  };
+  profile?: {
+    mode?: AgentProfileMode;
+    responseLanguage?: AgentResponseLanguage;
+  };
   security?: {
     approvalMode?: SecurityApprovalMode | "manual" | "smart" | "off";
     assessor?: SecurityAssessorConfig;
@@ -144,6 +158,15 @@ export type LoadedRuntimeConfig = {
     externalDirs: string[];
     autonomy: SkillAutonomy;
     config: Record<string, Record<string, unknown>>;
+  };
+  ui: {
+    language: UiLanguage;
+    flavor: UiFlavor;
+    activityLabels: ActivityLabelsLocale;
+  };
+  profile: {
+    mode: AgentProfileMode;
+    responseLanguage: AgentResponseLanguage;
   };
   security: {
     approvalMode: SecurityApprovalMode;
@@ -243,6 +266,19 @@ export type SkillSetupInput = {
   scope?: "user" | "project";
 };
 
+export type UiSetupInput = {
+  language?: UiLanguage;
+  flavor?: UiFlavor;
+  activityLabels?: ActivityLabelsLocale;
+  scope?: "user" | "project";
+};
+
+export type ProfileSetupInput = {
+  mode?: AgentProfileMode;
+  responseLanguage?: AgentResponseLanguage;
+  scope?: "user" | "project";
+};
+
 export async function loadRuntimeConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -296,6 +332,8 @@ export async function loadRuntimeConfig(options: {
       autonomy: config.skills?.autonomy ?? "suggest",
       config: normalizeSkillConfig(config.skills?.config)
     },
+    ui: normalizeUiConfig(config.ui),
+    profile: normalizeProfileConfig(config.profile),
     security: {
       approvalMode: normalizeSecurityApprovalMode(config.security?.approvalMode ?? config.security?.approvals?.mode),
       assessor: {
@@ -356,6 +394,14 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
         ...(config.skills?.config ?? {})
       }
     },
+    ui: {
+      ...(merged.ui ?? {}),
+      ...(config.ui ?? {})
+    },
+    profile: {
+      ...(merged.profile ?? {}),
+      ...(config.profile ?? {})
+    },
     security: {
       ...(merged.security ?? {}),
       approvalMode: config.security?.approvalMode ?? merged.security?.approvalMode,
@@ -391,6 +437,33 @@ function normalizeSkillConfig(value: unknown): Record<string, Record<string, unk
     }
   }
   return normalized;
+}
+
+function normalizeUiConfig(value: EstaCodaConfig["ui"]): LoadedRuntimeConfig["ui"] {
+  const language = value?.language === "ar" ? "ar" : "en";
+  const flavor = value?.flavor === "standard" || value?.flavor === "arabic-light" || value?.flavor === "kemet-full"
+    ? value.flavor
+    : language === "ar" ? "arabic-light" : "standard";
+  const activityLabels = value?.activityLabels === "ar" || value?.activityLabels === "en"
+    ? value.activityLabels
+    : language;
+
+  return {
+    language,
+    flavor,
+    activityLabels
+  };
+}
+
+function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntimeConfig["profile"] {
+  return {
+    mode: value?.mode === "focused" || value?.mode === "operator" || value?.mode === "builder" || value?.mode === "research"
+      ? value.mode
+      : "builder",
+    responseLanguage: value?.responseLanguage === "en" || value?.responseLanguage === "ar" || value?.responseLanguage === "match-user"
+      ? value.responseLanguage
+      : "match-user"
+  };
 }
 
 function normalizeMcpServers(
@@ -743,6 +816,66 @@ export async function setupSkillConfig(options: {
   const config = mergeConfig(existing.config, {
     skills: {
       autonomy: options.input.autonomy ?? "suggest"
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupUiConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: UiSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const previous = normalizeUiConfig(existing.config.ui);
+  const nextLanguage = options.input.language ?? previous.language;
+  const config = mergeConfig(existing.config, {
+    ui: {
+      language: nextLanguage,
+      flavor: options.input.flavor ?? (nextLanguage === "ar" ? "arabic-light" : previous.flavor),
+      activityLabels: options.input.activityLabels ?? (nextLanguage === "ar" ? "ar" : previous.activityLabels)
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupProfileConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: ProfileSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const previous = normalizeProfileConfig(existing.config.profile);
+  const config = mergeConfig(existing.config, {
+    profile: {
+      mode: options.input.mode ?? previous.mode,
+      responseLanguage: options.input.responseLanguage ?? previous.responseLanguage
     }
   });
 

@@ -18,7 +18,7 @@ import { createMemoryTool } from "../memory/memory-tool.js";
 import { renderMemorySnapshot } from "../memory/memory-renderer.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
-import type { MCPServerConfig } from "../config/runtime-config.js";
+import type { AgentProfileMode, AgentResponseLanguage, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
@@ -92,6 +92,15 @@ export type RuntimeOptions = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
+  };
+  ui?: {
+    language: UiLanguage;
+    flavor: UiFlavor;
+    activityLabels: "en" | "ar";
+  };
+  agentProfile?: {
+    mode: AgentProfileMode;
+    responseLanguage: AgentResponseLanguage;
   };
   telegramReady?: boolean;
   currentPlatform?: string;
@@ -494,7 +503,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     skillsIndex: sessionSkillCatalog,
     skillConfig: options.skillConfig,
-    skillLearningManager
+    skillLearningManager,
+    ui: options.ui,
+    agentProfile: options.agentProfile
   });
 
   return {
@@ -613,6 +624,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `mcp servers: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         `skills: ${sessionSkillCatalog.length}`,
         `skill autonomy: ${options.skillAutonomy ?? "suggest"}`,
+        `profile: ${options.agentProfile?.mode ?? "builder"} (${options.agentProfile?.responseLanguage ?? "match-user"})`,
+        `ui: ${options.ui?.language ?? "en"} / ${options.ui?.flavor ?? "standard"} / labels:${options.ui?.activityLabels ?? "en"}`,
         `project context files: ${projectContext.files.length}`,
         `project context bytes: ${renderedProjectContext.length}`,
         `trust store: ${trustStore.path}`,

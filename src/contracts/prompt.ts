@@ -1,5 +1,6 @@
 export type PromptLayerName =
   | "identity"
+  | "profile"
   | "frozen-memory"
   | "skills-index"
   | "project-context"

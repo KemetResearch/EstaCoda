@@ -483,6 +483,30 @@ const cliSkillSettings = await runCliCommand({
   workspaceRoot: cliInteractiveWorkspace,
   homeDir: cliInteractiveHome
 });
+const cliProfileSet = await runCliCommand({
+  argv: ["profile", "set", "operator"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliProfileLanguage = await runCliCommand({
+  argv: ["profile", "language", "match-user"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliProfileStatus = await runCliCommand({
+  argv: ["profile"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliUiSettings = await runCliCommand({
+  argv: ["settings", "ui", "--language", "ar", "--flavor", "arabic-light", "--activity-labels", "ar"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliProfileConfig = await loadRuntimeConfig({
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
 const cliSetup = await runCliCommand({
   argv: ["setup", "--provider", "deepseek", "--model", "deepseek-chat", "--api-key-env", "DEEPSEEK_API_KEY"],
   workspaceRoot: cliWorkspace,
@@ -3245,6 +3269,16 @@ assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret m
 assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
 assert(cliSettings.output.includes("EstaCoda settings"), "expected CLI settings output");
 assert(cliSkillSettings.output.includes("Skill autonomy: proactive."), "expected CLI skill autonomy settings output");
+assert(cliProfileSet.output.includes("Profile: operator."), "expected CLI profile set output");
+assert(cliProfileLanguage.output.includes("Response language: match-user."), "expected CLI profile language output");
+assert(cliProfileStatus.output.includes("Mode: operator"), "expected CLI profile status output");
+assert(cliProfileStatus.output.includes("مركّز"), "expected CLI profile status to include Arabic presentation labels");
+assert(cliUiSettings.output.includes("UI language: ar."), "expected CLI UI settings language output");
+assert(cliProfileConfig.profile.mode === "operator", "expected profile mode to persist");
+assert(cliProfileConfig.profile.responseLanguage === "match-user", "expected response language to persist");
+assert(cliProfileConfig.ui.language === "ar", "expected UI language to persist");
+assert(cliProfileConfig.ui.flavor === "arabic-light", "expected UI flavor to persist");
+assert(cliProfileConfig.ui.activityLabels === "ar", "expected UI activity labels to persist");
 assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected CLI setup output");
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
@@ -10024,8 +10058,25 @@ const nativeVisionPrompt = assembleProviderPrompt({
   projectContext: undefined,
   memoryContext: undefined,
   providerTools: [],
+  ui: {
+    language: "ar",
+    flavor: "arabic-light",
+    activityLabels: "ar"
+  },
+  agentProfile: {
+    mode: "research",
+    responseLanguage: "match-user"
+  },
   fallbackText: "fallback"
 });
+assert(
+  nativeVisionPrompt.messages.some((message) =>
+    flattenProviderMessageContent(message.content).includes("Agent profile: research") &&
+    flattenProviderMessageContent(message.content).includes("Response language: match-user") &&
+    flattenProviderMessageContent(message.content).includes("UI language: ar")
+  ),
+  "expected provider prompt to include profile and UI guidance"
+);
 assert(
   nativeVisionPrompt.messages.some((message) =>
     message.role === "user" &&

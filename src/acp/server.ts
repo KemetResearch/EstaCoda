@@ -765,6 +765,8 @@ export class AcpServer {
       externalSkillRoots: config.skills.externalDirs,
       skillAutonomy: config.skills.autonomy,
       skillConfig: config.skills.config,
+      ui: config.ui,
+      agentProfile: config.profile,
       providerRegistry: config.providerRegistry,
       credentialPools: config.credentialPools,
       auxiliaryProviders: config.auxiliaryProviders,

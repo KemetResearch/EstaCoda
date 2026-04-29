@@ -6,15 +6,22 @@ import {
   setupMcpConfig,
   setupBrowserConfig,
   setupProviderConfig,
+  setupProfileConfig,
   setupSecurityConfig,
   setupSkillConfig,
   setupTelegramConfig,
+  setupUiConfig,
   setupWebConfig,
+  type AgentProfileMode,
+  type AgentResponseLanguage,
   type BrowserSetupInput,
+  type ActivityLabelsLocale,
   type MCPSetupInput,
   type ProviderSetupInput,
   type SecuritySetupInput,
   type TelegramSetupInput,
+  type UiFlavor,
+  type UiLanguage,
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
@@ -89,6 +96,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return verify(options);
     case "settings":
       return settings(options, args);
+    case "profile":
+      return profile(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -188,6 +197,46 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
   const config = await loadRuntimeConfig(options);
   const category = args[0];
 
+  if (category === "profile" && (args.includes("--mode") || args.includes("--response-language"))) {
+    const result = await setupProfileConfig({
+      ...options,
+      input: {
+        mode: parseProfileMode(valueAfter(args, "--mode"), true),
+        responseLanguage: parseResponseLanguage(valueAfter(args, "--response-language"), true)
+      }
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Profile: ${result.config.profile?.mode ?? config.profile.mode}.`,
+        `Response language: ${result.config.profile?.responseLanguage ?? config.profile.responseLanguage}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (category === "ui" && (args.includes("--language") || args.includes("--flavor") || args.includes("--activity-labels"))) {
+    const result = await setupUiConfig({
+      ...options,
+      input: {
+        language: parseUiLanguage(valueAfter(args, "--language"), true),
+        flavor: parseUiFlavor(valueAfter(args, "--flavor"), true),
+        activityLabels: parseActivityLabels(valueAfter(args, "--activity-labels"), true)
+      }
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `UI language: ${result.config.ui?.language ?? config.ui.language}.`,
+        `UI flavor: ${result.config.ui?.flavor ?? config.ui.flavor}.`,
+        `Activity labels: ${result.config.ui?.activityLabels ?? config.ui.activityLabels}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
   if (category === "skills" && args.includes("--autonomy")) {
     const parsed = parseSkillAutonomyArg(valueAfter(args, "--autonomy"));
     const result = await setupSkillConfig({
@@ -273,6 +322,28 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
+  if (category === "profile") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderProfileStatus(config.profile.mode, config.profile.responseLanguage)
+    };
+  }
+
+  if (category === "ui") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: ui",
+        `Language: ${config.ui.language}`,
+        `Flavor: ${config.ui.flavor}`,
+        `Activity labels: ${config.ui.activityLabels}`,
+        "Change with: estacoda settings ui --language ar --flavor arabic-light --activity-labels ar"
+      ].join("\n")
+    };
+  }
+
   return {
     handled: true,
     exitCode: 0,
@@ -280,6 +351,8 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "EstaCoda settings",
       `Provider: ${config.model.provider}/${config.model.id}`,
       `Security: ${config.security.approvalMode}`,
+      `Profile: ${config.profile.mode} (${config.profile.responseLanguage})`,
+      `UI: ${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`,
       `Skill autonomy: ${config.skills.autonomy}`,
       `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config.browser.backend}`,
@@ -289,6 +362,8 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "Categories:",
       "  estacoda settings provider",
       "  estacoda settings security",
+      "  estacoda settings profile",
+      "  estacoda settings ui",
       "  estacoda settings skills",
       "  estacoda settings browser",
       "  estacoda settings telegram",
@@ -299,6 +374,58 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
 
 function formatProviderModel(provider: string, model: string): string {
   return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
+}
+
+async function profile(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand, value] = args;
+
+  if (subcommand === "set") {
+    const mode = parseProfileMode(value, false);
+    const result = await setupProfileConfig({
+      ...options,
+      input: { mode }
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Profile: ${result.config.profile?.mode ?? mode}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "language") {
+    const responseLanguage = parseResponseLanguage(value, false);
+    const result = await setupProfileConfig({
+      ...options,
+      input: { responseLanguage }
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Response language: ${result.config.profile?.responseLanguage ?? responseLanguage}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  const config = await loadRuntimeConfig(options);
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      renderProfileStatus(config.profile.mode, config.profile.responseLanguage),
+      "",
+      "Commands:",
+      "  estacoda profile set focused",
+      "  estacoda profile set operator",
+      "  estacoda profile set builder",
+      "  estacoda profile set research",
+      "  estacoda profile language match-user"
+    ].join("\n")
+  };
 }
 
 async function model(options: CliOptions): Promise<CliCommandResult> {
@@ -1513,6 +1640,83 @@ function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {
   throw new Error("Expected --autonomy none, suggest, proactive, or autonomous");
 }
 
+function parseProfileMode(value: string | undefined, optional: true): AgentProfileMode | undefined;
+function parseProfileMode(value: string | undefined, optional?: false): AgentProfileMode;
+function parseProfileMode(value: string | undefined, optional = false): AgentProfileMode | undefined {
+  if (value === "focused" || value === "operator" || value === "builder" || value === "research") {
+    return value;
+  }
+  if (optional && value === undefined) {
+    return undefined;
+  }
+  throw new Error("Expected profile focused, operator, builder, or research");
+}
+
+function parseResponseLanguage(value: string | undefined, optional: true): AgentResponseLanguage | undefined;
+function parseResponseLanguage(value: string | undefined, optional?: false): AgentResponseLanguage;
+function parseResponseLanguage(value: string | undefined, optional = false): AgentResponseLanguage | undefined {
+  if (value === "en" || value === "ar" || value === "match-user") {
+    return value;
+  }
+  if (optional && value === undefined) {
+    return undefined;
+  }
+  throw new Error("Expected response language en, ar, or match-user");
+}
+
+function parseUiLanguage(value: string | undefined, optional: true): UiLanguage | undefined;
+function parseUiLanguage(value: string | undefined, optional?: false): UiLanguage;
+function parseUiLanguage(value: string | undefined, optional = false): UiLanguage | undefined {
+  if (value === "en" || value === "ar") {
+    return value;
+  }
+  if (optional && value === undefined) {
+    return undefined;
+  }
+  throw new Error("Expected UI language en or ar");
+}
+
+function parseUiFlavor(value: string | undefined, optional: true): UiFlavor | undefined;
+function parseUiFlavor(value: string | undefined, optional?: false): UiFlavor;
+function parseUiFlavor(value: string | undefined, optional = false): UiFlavor | undefined {
+  if (value === "standard" || value === "arabic-light" || value === "kemet-full") {
+    return value;
+  }
+  if (optional && value === undefined) {
+    return undefined;
+  }
+  throw new Error("Expected UI flavor standard, arabic-light, or kemet-full");
+}
+
+function parseActivityLabels(value: string | undefined, optional: true): ActivityLabelsLocale | undefined;
+function parseActivityLabels(value: string | undefined, optional?: false): ActivityLabelsLocale;
+function parseActivityLabels(value: string | undefined, optional = false): ActivityLabelsLocale | undefined {
+  if (value === "en" || value === "ar") {
+    return value;
+  }
+  if (optional && value === undefined) {
+    return undefined;
+  }
+  throw new Error("Expected activity labels en or ar");
+}
+
+function renderProfileStatus(mode: AgentProfileMode, responseLanguage: AgentResponseLanguage): string {
+  return [
+    "EstaCoda profile",
+    `Mode: ${mode}`,
+    `Response language: ${responseLanguage}`,
+    "",
+    "Profiles:",
+    "  focused  - Concise, direct, minimal status chatter.",
+    "  operator - Clear execution status for daily operations.",
+    "  builder  - Explains implementation choices and tradeoffs.",
+    "  research - Deeper analysis for planning and investigation.",
+    "",
+    "Arabic labels:",
+    "  مركّز / مشغّل / بنّاء / باحث"
+  ].join("\n");
+}
+
 function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
   const parsed: SecuritySetupInput = {};
 
@@ -1568,6 +1772,7 @@ function help(): string {
     "  estacoda setup --advanced --provider deepseek --model deepseek-chat",
     "  estacoda verify  Check setup readiness",
     "  estacoda settings View setup categories",
+    "  estacoda profile View or set agent profile",
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
     "  estacoda security View or configure approval mode",

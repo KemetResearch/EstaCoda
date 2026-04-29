@@ -66,6 +66,8 @@ async function buildRuntime(input: {
     externalSkillRoots: latestConfig.skills.externalDirs,
     skillAutonomy: latestConfig.skills.autonomy,
     skillConfig: latestConfig.skills.config,
+    ui: latestConfig.ui,
+    agentProfile: latestConfig.profile,
     providerRegistry: latestConfig.providerRegistry,
     credentialPools: latestConfig.credentialPools,
     auxiliaryProviders: latestConfig.auxiliaryProviders,
