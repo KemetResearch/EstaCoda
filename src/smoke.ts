@@ -1907,10 +1907,13 @@ const voiceArtifacts = new ArtifactStore({
 const voiceRegistry = new ToolRegistry();
 let voiceFetchUrl = "";
 let voiceFetchBody: any;
+let voiceTranscribeFetchUrl = "";
+let voiceTranscribeModel = "";
 process.env.VOICE_TOOLS_OPENAI_KEY = "voice-smoke-key";
 for (const tool of createVoiceTools({
   audioCacheRoot: join(voiceWorkspace, ".estacoda", "audio-cache"),
   artifactStore: voiceArtifacts,
+  workspaceRoot: voiceWorkspace,
   tts: {
     provider: "openai",
     speed: 1,
@@ -1923,14 +1926,27 @@ for (const tool of createVoiceTools({
     }
   },
   stt: {
-    provider: "local",
-    local: {
-      model: "base"
+    provider: "openai",
+    openai: {
+      model: "whisper-1",
+      apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY"
     }
   },
   fetch: async (url, init) => {
+    if (url.endsWith("/audio/transcriptions")) {
+      voiceTranscribeFetchUrl = url;
+      const body = init?.body;
+      voiceTranscribeModel = body instanceof FormData ? String(body.get("model") ?? "") : "";
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: async () => Buffer.from(JSON.stringify({ text: "transcribed smoke audio" })).buffer,
+        text: async () => JSON.stringify({ text: "transcribed smoke audio" })
+      };
+    }
     voiceFetchUrl = url;
-    voiceFetchBody = JSON.parse(init?.body ?? "{}");
+    voiceFetchBody = JSON.parse(String(init?.body ?? "{}"));
     return {
       ok: true,
       status: 200,
@@ -1943,6 +1959,7 @@ for (const tool of createVoiceTools({
 })) {
   voiceRegistry.register(tool);
 }
+await writeFile(join(voiceWorkspace, "sample.mp3"), "fake audio bytes");
 const voiceExecutor = new ToolExecutor({
   registry: voiceRegistry,
   securityPolicy: {
@@ -1956,6 +1973,15 @@ const voiceSpeak = await voiceExecutor.executeTool({
   input: {
     text: "Hello from EstaCoda voice.",
     format: "mp3"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const voiceTranscribe = await voiceExecutor.executeTool({
+  tool: "voice.transcribe",
+  input: {
+    path: "sample.mp3",
+    language: "en"
   },
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -2195,6 +2221,11 @@ assert(voiceFetchUrl.endsWith("/audio/speech"), "expected voice.speak to call Op
 assert(voiceFetchBody.model === "gpt-4o-mini-tts", "expected voice.speak to send configured TTS model");
 assert(voiceFetchBody.voice === "alloy", "expected voice.speak to send configured TTS voice");
 assert(voiceArtifacts.list().some((artifact) => artifact.kind === "audio" && artifact.mimeType === "audio/mpeg"), "expected voice.speak to record an audio artifact");
+assert(voiceTranscribe?.result?.ok === true, "expected voice.transcribe to transcribe audio");
+assert(voiceTranscribeFetchUrl.endsWith("/audio/transcriptions"), "expected voice.transcribe to call OpenAI-compatible transcription endpoint");
+assert(voiceTranscribeModel === "whisper-1", "expected voice.transcribe to send configured STT model");
+assert(String(voiceTranscribe.result.content).includes("transcribed smoke audio"), "expected voice.transcribe to include transcript text");
+assert(voiceArtifacts.list().some((artifact) => artifact.kind === "data" && artifact.mimeType === "text/plain"), "expected voice.transcribe to record transcript artifact");
 let activityNow = 1_000;
 const activityRenderer = new ToolActivityRenderer({
   tools: tools.list(),

@@ -1,5 +1,5 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -8,7 +8,7 @@ import type { RegisteredTool } from "../contracts/tool.js";
 export type VoiceFetchLike = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: unknown;
   signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
@@ -21,6 +21,8 @@ export type VoiceFetchLike = (url: string, init?: {
 export type VoiceToolOptions = {
   audioCacheRoot: string;
   artifactStore: ArtifactStore;
+  workspaceRoot?: string;
+  allowedRoots?: string[];
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
@@ -30,6 +32,8 @@ export type VoiceToolOptions = {
 export function createVoiceTools(options: VoiceToolOptions): readonly RegisteredTool[] {
   const tts = options.tts ?? defaultTts();
   const stt = options.stt ?? defaultStt();
+  const roots = [options.workspaceRoot, options.audioCacheRoot, ...(options.allowedRoots ?? [])]
+    .filter((root): root is string => root !== undefined && root.length > 0);
 
   return [
     {
@@ -106,24 +110,74 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
     },
     {
       name: "voice.transcribe",
-      description: "Transcribe an audio file using the configured STT provider. Placeholder until STT execution providers are enabled.",
+      description: "Transcribe an audio file using the configured STT provider and record the transcript as an artifact.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
-          language: { type: "string" }
+          language: { type: "string" },
+          prompt: { type: "string" },
+          model: { type: "string" }
         },
         required: ["path"]
       },
       riskClass: stt.provider === "local" ? "read-only-local" : "external-side-effect",
       toolsets: ["media", "research"],
       progressLabel: "transcribing audio",
-      maxResultSizeChars: 3000,
+      maxResultSizeChars: 8000,
       isAvailable: () => true,
-      run: async () => ({
-        ok: false,
-        content: `STT execution is not enabled yet. Configured provider: ${stt.provider}.`
-      })
+      run: async (input: { path?: string; language?: string; prompt?: string; model?: string }, context) => {
+        const path = await resolveAllowedPath(roots, input.path);
+        if (!path.ok) {
+          return path;
+        }
+
+        const result = await transcribeAudio({
+          path: path.path,
+          language: input.language,
+          prompt: input.prompt,
+          model: input.model,
+          stt,
+          fetch: options.fetch,
+          signal: context?.signal
+        });
+        if (!result.ok) {
+          return result;
+        }
+
+        const transcriptDir = join(options.audioCacheRoot, "transcripts");
+        await mkdir(transcriptDir, { recursive: true });
+        const fileName = `${safeId(options.id?.() ?? randomUUID())}.txt`;
+        const transcriptPath = join(transcriptDir, fileName);
+        await writeFile(transcriptPath, result.text);
+        const transcriptStat = await stat(transcriptPath);
+        const artifact = options.artifactStore.record({
+          path: transcriptPath,
+          kind: "data",
+          bytes: transcriptStat.size,
+          mimeType: "text/plain",
+          summary: `Transcript generated from ${basename(path.path)}.`,
+          metadata: {
+            provider: stt.provider,
+            model: result.model,
+            language: result.language,
+            source: path.path
+          }
+        });
+
+        return {
+          ok: true,
+          content: [
+            `Transcript: ${result.text}`,
+            `Provider: ${stt.provider}`,
+            `Model: ${result.model}`,
+            result.language === undefined ? undefined : `Language: ${result.language}`,
+            `Transcript artifact: ${artifact.id}`,
+            `Transcript path: ${transcriptPath}`
+          ].filter((line) => line !== undefined).join("\n"),
+          metadata: artifact
+        };
+      }
     }
   ];
 }
@@ -209,7 +263,7 @@ async function synthesizeSpeech(input: {
 }
 
 async function globalVoiceFetch(url: string, init?: Parameters<VoiceFetchLike>[1]): ReturnType<VoiceFetchLike> {
-  const response = await fetch(url, init);
+  const response = await fetch(url, init as RequestInit);
   return {
     ok: response.ok,
     status: response.status,
@@ -217,6 +271,138 @@ async function globalVoiceFetch(url: string, init?: Parameters<VoiceFetchLike>[1
     arrayBuffer: async () => await response.arrayBuffer(),
     text: async () => await response.text()
   };
+}
+
+async function transcribeAudio(input: {
+  path: string;
+  language?: string;
+  prompt?: string;
+  model?: string;
+  stt: LoadedRuntimeConfig["stt"];
+  fetch?: VoiceFetchLike;
+  signal?: AbortSignal;
+}): Promise<
+  | { ok: true; text: string; model: string; language?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  if (input.stt.provider !== "openai" && input.stt.provider !== "groq") {
+    return {
+      ok: false,
+      content: [
+        `STT execution for ${input.stt.provider} is not enabled yet.`,
+        "This pass supports OpenAI-compatible hosted transcription providers: openai and groq.",
+        "Configured providers are visible through estacoda voice status."
+      ].join("\n"),
+      metadata: {
+        provider: input.stt.provider
+      }
+    };
+  }
+
+  const provider = input.stt.provider;
+  const config = provider === "openai" ? input.stt.openai : input.stt.groq;
+  const apiKeyEnv = config?.apiKeyEnv ?? (provider === "openai" ? "VOICE_TOOLS_OPENAI_KEY" : "GROQ_API_KEY");
+  const apiKey = process.env[apiKeyEnv] ?? (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+  if (apiKey === undefined || apiKey.length === 0) {
+    return {
+      ok: false,
+      content: `Missing STT API key. Export ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
+      metadata: {
+        provider,
+        apiKeyEnv
+      }
+    };
+  }
+
+  const bytes = await readFile(input.path);
+  const form = new FormData();
+  form.set("file", new Blob([bytes]), basename(input.path));
+  const model = input.model ?? config?.model ?? (provider === "openai" ? "whisper-1" : "whisper-large-v3");
+  form.set("model", model);
+  form.set("response_format", "json");
+  if (input.language !== undefined && input.language.length > 0) {
+    form.set("language", input.language);
+  }
+  if (input.prompt !== undefined && input.prompt.length > 0) {
+    form.set("prompt", input.prompt);
+  }
+
+  const baseUrl = provider === "openai" ? "https://api.openai.com/v1" : "https://api.groq.com/openai/v1";
+  const response = await (input.fetch ?? globalVoiceFetch)(`${baseUrl}/audio/transcriptions`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`
+    },
+    body: form,
+    signal: input.signal
+  });
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      content: `STT request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+      metadata: {
+        provider,
+        model
+      }
+    };
+  }
+
+  const raw = await response.text();
+  const parsed = tryJson(raw);
+  const text = typeof parsed?.text === "string" ? parsed.text : raw;
+  return {
+    ok: true,
+    text,
+    model,
+    language: input.language
+  };
+}
+
+type ResolvedPath =
+  | { ok: true; content: ""; path: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> };
+
+async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
+  if (typeof path !== "string" || path.length === 0) {
+    return errorResult("path must be a non-empty string");
+  }
+
+  let lastError = "path is outside the trusted workspace";
+  for (const root of roots.length === 0 ? [process.cwd()] : roots) {
+    try {
+      const canonicalRoot = await realpath(resolve(root));
+      const absolute = resolve(canonicalRoot, path);
+      const canonicalPath = await realpath(absolute);
+      const rel = relative(canonicalRoot, canonicalPath);
+      if (rel === "" || (!rel.startsWith("..") && rel !== ".." && !rel.startsWith(`..${"/"}`))) {
+        return { ok: true, content: "", path: canonicalPath };
+      }
+      lastError = `path is outside allowed root ${canonicalRoot}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return errorResult(lastError);
+}
+
+function errorResult(message: string): { ok: false; content: string; metadata: { reason: string } } {
+  return {
+    ok: false,
+    content: message,
+    metadata: {
+      reason: message
+    }
+  };
+}
+
+function tryJson(value: string): any {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeAudioFormat(value: string | undefined): "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" {

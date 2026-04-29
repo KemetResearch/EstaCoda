@@ -823,7 +823,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Defaults:",
         "  TTS: edge, no API key",
         "  STT: local Whisper, model base",
-        "  CLI audio target: ~/.estacoda/audio-cache/ once synthesis tools are enabled"
+        "  CLI audio target: ~/.estacoda/audio-cache/ for generated speech and transcripts"
       ].join("\n")
     };
   }
@@ -843,7 +843,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Configured EstaCoda voice.",
         renderVoiceStatus(loaded),
         `Config: ${result.path}`,
-        "Next: TTS/STT providers will use this config when voice tools are enabled."
+        "Next: voice.speak and voice.transcribe will use this config in runtime sessions."
       ].join("\n")
     };
   }

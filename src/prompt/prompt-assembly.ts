@@ -402,7 +402,7 @@ function suggestedToolsForAttachment(attachment: ChannelAttachment): string[] {
   }
 
   if (attachment.kind === "audio" || attachment.kind === "voice") {
-    return ["media.inspect"];
+    return ["voice.transcribe", "media.inspect"];
   }
 
   return ["document.probe"];

@@ -296,6 +296,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createVoiceTools({
     audioCacheRoot,
     artifactStore,
+    workspaceRoot,
+    allowedRoots: [channelMediaRoot],
     tts: options.tts,
     stt: options.stt,
     fetch: options.voiceFetch
