@@ -95,6 +95,7 @@ Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session
 Next acceptance checks:
 - Done: repeated user preferences are promoted into `USER.md` with contradiction handling, strengthening, forgetting, and inspection.
 - Done: repeated project facts/conventions are promoted into `MEMORY.md`.
+- Done: repeated preference/project-fact promotion runs after the final response path and uses bounded session search instead of pre-routing full session/message scans.
 - Done: repeated bounded local workflows can become candidates or project skills depending on `skills.autonomy`.
 - Session summaries preserve active task state.
 - Long sessions preserve recent tool-call/result pairs during compression.

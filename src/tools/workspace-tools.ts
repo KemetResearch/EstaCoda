@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { platform } from "node:os";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessCommandSafety } from "../security/command-safety.js";
@@ -216,16 +217,22 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return start;
         }
 
-        const matcher = input.regex === true
-          ? new RegExp(input.query, "i")
-          : undefined;
+        let matcher: RegExp | undefined;
+        if (input.regex === true) {
+          try {
+            matcher = new RegExp(input.query, "i");
+          } catch (error) {
+            return errorResult(`invalid regex: ${error instanceof Error ? error.message : "failed to compile query"}`);
+          }
+        }
         const results: string[] = [];
 
         await searchDirectory(canonicalRoot, start.path, {
           matcher,
           query: input.query,
           results,
-          maxSearchResults
+          maxSearchResults,
+          visitedDirectories: new Set()
         });
 
         return {
@@ -379,15 +386,17 @@ async function searchDirectory(
     matcher: RegExp | undefined;
     results: string[];
     maxSearchResults: number;
+    visitedDirectories: Set<string>;
   }
 ): Promise<void> {
   if (options.results.length >= options.maxSearchResults) {
     return;
   }
 
-  const targetStat = await stat(path);
+  const canonicalPath = await realpath(path).catch(() => path);
+  const targetStat = await stat(canonicalPath);
   if (targetStat.isFile()) {
-    await searchFile(root, path, options);
+    await searchFile(root, canonicalPath, options);
     return;
   }
 
@@ -395,7 +404,12 @@ async function searchDirectory(
     return;
   }
 
-  const entries = await readdir(path, { withFileTypes: true });
+  if (options.visitedDirectories.has(canonicalPath)) {
+    return;
+  }
+  options.visitedDirectories.add(canonicalPath);
+
+  const entries = await readdir(canonicalPath, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (options.results.length >= options.maxSearchResults) {
       return;
@@ -405,7 +419,7 @@ async function searchDirectory(
       continue;
     }
 
-    await searchDirectory(root, join(path, entry.name), options);
+    await searchDirectory(root, join(canonicalPath, entry.name), options);
   }
 }
 
@@ -447,7 +461,8 @@ async function searchFile(
 
 async function runCommand(root: string, command: string, timeoutMs: number): Promise<ToolResult> {
   return new Promise((resolveResult) => {
-    const child = spawn("/bin/zsh", ["-lc", command], {
+    const shell = resolveShell();
+    const child = spawn(shell.command, [...shell.args, command], {
       cwd: root,
       env: {
         ...process.env,
@@ -457,14 +472,27 @@ async function runCommand(root: string, command: string, timeoutMs: number): Pro
     });
     const chunks: Buffer[] = [];
     const errorChunks: Buffer[] = [];
+    let timedOut = false;
+    let closed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
+      timedOut = true;
       child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (!closed) {
+          child.kill("SIGKILL");
+        }
+      }, 1_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => errorChunks.push(chunk));
     child.on("close", (code, signal) => {
+      closed = true;
       clearTimeout(timeout);
+      if (killTimer !== undefined) {
+        clearTimeout(killTimer);
+      }
       const stdout = Buffer.concat(chunks).toString("utf8");
       const stderr = Buffer.concat(errorChunks).toString("utf8");
       const content = [
@@ -481,11 +509,34 @@ async function runCommand(root: string, command: string, timeoutMs: number): Pro
           command,
           code,
           signal,
-          timeoutMs
+          timeoutMs,
+          timedOut
         }
       });
     });
   });
+}
+
+function resolveShell(): { command: string; args: string[] } {
+  const shell = process.env.SHELL;
+  if (typeof shell === "string" && shell.trim().length > 0) {
+    return {
+      command: shell,
+      args: ["-lc"]
+    };
+  }
+
+  if (platform() === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c"]
+    };
+  }
+
+  return {
+    command: "/bin/sh",
+    args: ["-lc"]
+  };
 }
 
 function applyLineRange(content: string, lineStart?: number, lineEnd?: number): string {

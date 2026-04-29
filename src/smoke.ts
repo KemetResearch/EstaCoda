@@ -30,7 +30,12 @@ import { createMemoryTool } from "./memory/memory-tool.js";
 import { renderMemorySnapshot } from "./memory/memory-renderer.js";
 import { MemoryStore } from "./memory/memory-store.js";
 import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
-import { __detectForgetPreferenceForTest, __detectProjectFactForTest, __detectUserPreferenceForTest } from "./memory/memory-promotion.js";
+import {
+  __detectForgetPreferenceForTest,
+  __detectProjectFactForTest,
+  __detectUserPreferenceForTest,
+  resolveUserPreferencePromotion
+} from "./memory/memory-promotion.js";
 import { __resolveNpxCachedBinaryForTest } from "./mcp/mcp-client.js";
 import { loadMcpServers } from "./mcp/mcp-tools.js";
 import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
@@ -52,6 +57,7 @@ import { ProviderExecutor } from "./providers/provider-executor.js";
 import { normalizeProviderMessagesStrict } from "./providers/provider-message-normalizer.js";
 import { ProviderRegistry } from "./providers/provider-registry.js";
 import { buildFallbackChain, routeProvider } from "./providers/provider-router.js";
+import { packSessionHistory } from "./prompt/history-packer.js";
 import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
 import { IntentRouter } from "./runtime/intent-router.js";
@@ -75,6 +81,7 @@ import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
 import { createVoiceTools, transcribeAudioFile } from "./tools/voice-tools.js";
 import { ToolExecutor, type ToolExecutionRecord } from "./tools/tool-executor.js";
+import { ToolCallPlanner } from "./tools/tool-call-planner.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
 import { createWebTools } from "./tools/web-tools.js";
@@ -387,6 +394,70 @@ await splitMemoryProvider.recordSkillOutcome({
 });
 const splitUserMemory = await readFile(join(splitUserRoot, "USER.md"), "utf8");
 const splitProjectMemory = await readFile(join(splitProjectRoot, "MEMORY.md"), "utf8");
+const cursorPromotionStore = new MemoryStore();
+const cursorPromotionProvider = new LocalMemoryProvider({
+  store: cursorPromotionStore
+});
+let cursorPromotionSearches = 0;
+const cursorPromotionResult = await resolveUserPreferencePromotion({
+  profileId: "memory-hot-path",
+  currentUserText: "I prefer concise Telegram replies",
+  memoryProvider: cursorPromotionProvider,
+  sessionDb: {
+    createSession: async () => {
+      throw new Error("not used");
+    },
+    getSession: async () => undefined,
+    listSessions: async () => {
+      throw new Error("memory promotion should not list all sessions");
+    },
+    appendMessage: async () => {
+      throw new Error("not used");
+    },
+    appendEvent: async () => undefined,
+    listMessages: async () => {
+      throw new Error("memory promotion should not list all messages");
+    },
+    listEvents: async () => [],
+    search: async () => {
+      cursorPromotionSearches += 1;
+      return [
+        {
+          session: {
+            id: "memory-hot-path-1",
+            profileId: "memory-hot-path",
+            createdAt: "2026-04-16T00:00:00.000Z",
+            updatedAt: "2026-04-16T00:00:00.000Z"
+          },
+          message: {
+            id: "memory-hot-path-message-1",
+            sessionId: "memory-hot-path-1",
+            role: "user",
+            content: "I prefer concise Telegram replies",
+            createdAt: "2026-04-16T00:00:00.000Z"
+          },
+          score: 1
+        },
+        {
+          session: {
+            id: "memory-hot-path-2",
+            profileId: "memory-hot-path",
+            createdAt: "2026-04-16T00:01:00.000Z",
+            updatedAt: "2026-04-16T00:01:00.000Z"
+          },
+          message: {
+            id: "memory-hot-path-message-2",
+            sessionId: "memory-hot-path-2",
+            role: "user",
+            content: "I prefer concise Telegram replies",
+            createdAt: "2026-04-16T00:01:00.000Z"
+          },
+          score: 1
+        }
+      ];
+    }
+  }
+});
 const configWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-workspace-"));
 await mkdir(join(configWorkspace, ".estacoda"));
 const configHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-home-"));
@@ -6591,6 +6662,8 @@ assert(memory.read("USER.md").includes("Prefer concise replies."), "expected loc
 assert(memory.read("MEMORY.md").includes("skill:smoke-skill"), "expected local memory provider skill outcome persistence");
 assert(splitUserMemory.includes("Prefer concise Telegram replies."), "expected USER.md to save to the user memory root");
 assert(splitProjectMemory.includes("skill:split-memory-skill"), "expected MEMORY.md to save to the project memory root");
+assert(cursorPromotionSearches === 1, "expected memory promotion to use bounded session search instead of full scans");
+assert(cursorPromotionResult?.kind === "conclusion", "expected search-backed promotion to preserve repeated preference behavior");
 assert(__detectUserPreferenceForTest("I prefer concise Telegram replies") === "Prefer concise replies.", "expected preference detector to canonicalize direct preference wording");
 assert(__detectUserPreferenceForTest("Please use Kimi by default") === "Use Kimi by default.", "expected preference detector to canonicalize default-use wording");
 assert(__detectUserPreferenceForTest("Actually give me detailed replies") === "Prefer detailed replies.", "expected preference detector to canonicalize contradiction wording");
@@ -6631,13 +6704,65 @@ assertThrows(
     }),
   "expected memory injection rejection"
 );
+const packedHistoryRegression = packSessionHistory([
+  {
+    id: "older-user",
+    sessionId: "history-smoke",
+    role: "user",
+    content: "older user request about a previous task",
+    createdAt: "2026-04-16T00:00:00.000Z"
+  },
+  {
+    id: "older-agent",
+    sessionId: "history-smoke",
+    role: "agent",
+    content: "older agent response",
+    createdAt: "2026-04-16T00:01:00.000Z"
+  },
+  {
+    id: "recent-agent-tool-parent",
+    sessionId: "history-smoke",
+    role: "agent",
+    content: "I am reading package.json now.",
+    createdAt: "2026-04-16T00:02:00.000Z"
+  },
+  {
+    id: "recent-tool",
+    sessionId: "history-smoke",
+    role: "tool",
+    content: "package.json scripts include typecheck and smoke.",
+    createdAt: "2026-04-16T00:03:00.000Z"
+  },
+  {
+    id: "latest-user",
+    sessionId: "history-smoke",
+    role: "user",
+    content: "latest user request must survive packing",
+    createdAt: "2026-04-16T00:04:00.000Z"
+  }
+], {
+  maxProtectedMessages: 2,
+  maxEstimatedTokens: 2_000
+});
+assert(
+  packedHistoryRegression.messages.some((message) => message.role === "user" && message.content.includes("latest user request")),
+  "expected latest user request to survive history packing"
+);
+assert(
+  packedHistoryRegression.messages.some((message) => message.role === "assistant" && message.content.includes("reading package.json")) &&
+    packedHistoryRegression.messages.some((message) => message.role === "tool" && message.content.includes("package.json scripts")),
+  "expected recent tool result to keep adjacent assistant context"
+);
+assert(packedHistoryRegression.summary?.includes("older user request") === true, "expected older user context to compress into summary");
 
 const workspaceToolsDir = await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-tools-"));
 const canonicalWorkspaceToolsDir = await realpath(workspaceToolsDir).catch(() => workspaceToolsDir);
 await mkdir(join(workspaceToolsDir, "src"));
 await writeFile(join(workspaceToolsDir, "src", "tooling.ts"), "export const toolName = 'EstaCoda';\n", "utf8");
 await symlink(join(workspaceToolsDir, "src", "tooling.ts"), join(workspaceToolsDir, "src", "tooling-link.ts"));
+await symlink(workspaceToolsDir, join(workspaceToolsDir, "src", "loop"));
 await writeFile(join(workspaceToolsDir, ".env"), "SECRET=value", "utf8");
+await writeFile(join(workspaceToolsDir, "src", "large.txt"), "x".repeat(20_000), "utf8");
 const workspaceTools = new ToolRegistry();
 for (const tool of createWorkspaceTools({ workspaceRoot: workspaceToolsDir })) {
   workspaceTools.register(tool);
@@ -6663,6 +6788,40 @@ const workspaceFileSearch = await workspaceToolExecutor.executeTool({
   tool: "file.search",
   input: {
     query: "toolName"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileSearchInvalidRegex = await workspaceToolExecutor.executeTool({
+  tool: "file.search",
+  input: {
+    query: "[",
+    regex: true
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileSearchSymlinkCycle = await workspaceToolExecutor.executeTool({
+  tool: "file.search",
+  input: {
+    query: "toolName",
+    path: "src"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceFileReadInvalidInput = await workspaceToolExecutor.executeTool({
+  tool: "file.read",
+  input: {
+    path: 42
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const workspaceLargeFileRead = await workspaceToolExecutor.executeTool({
+  tool: "file.read",
+  input: {
+    path: "src/large.txt"
   },
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -6746,6 +6905,15 @@ assert(
   workspaceFileSearch.result.content.includes("src/tooling.ts:1"),
   "expected file.search match"
 );
+assert(workspaceFileSearchInvalidRegex?.result?.ok === false, "expected invalid file.search regex to return a tool error");
+assert(
+  workspaceFileSearchInvalidRegex?.result?.content.includes("invalid regex"),
+  "expected invalid regex error details"
+);
+assert(workspaceFileSearchSymlinkCycle?.result?.ok === true, "expected file.search to survive symlink cycles");
+assert(workspaceFileReadInvalidInput?.result?.ok === false, "expected schema validation to reject malformed tool input");
+assert(workspaceFileReadInvalidInput?.result?.content.includes("Invalid tool input"), "expected malformed input rejection message");
+assert(workspaceLargeFileRead?.result?.ok === true, "expected large file read to succeed before storage truncation");
 assert(workspaceFileWrite?.result?.ok === true, "expected file.write to succeed");
 assert(workspaceFileReplace?.result?.ok === true, "expected file.replace to succeed");
 assert(workspaceFileWriteSamePath?.result?.ok === true, "expected file.write rewrite to succeed");
@@ -6769,6 +6937,22 @@ assert(
     workspaceFileWrite?.targetKey !== workspaceFileRead?.targetKey,
   "expected different file operations on the same path to keep distinct target keys"
 );
+const workspaceToolMessages = await sessionDb.listMessages(directSession.id);
+const storedLargeToolMessage = [...workspaceToolMessages].reverse().find((message) =>
+  message.role === "tool" && message.metadata?.tool === "file.read" && message.content.includes("large.txt")
+);
+assert(storedLargeToolMessage !== undefined, "expected large file tool result to be stored");
+assert((storedLargeToolMessage?.content.length ?? 0) < (workspaceLargeFileRead?.result?.content.length ?? 0), "expected stored tool result to be truncated");
+const stablePlanner = new ToolCallPlanner({ registry: workspaceTools });
+const stableToolPlanA = stablePlanner.planFromProviderDelta({
+  name: "file_read",
+  argumentsText: "{\"path\":\"src/tooling.ts\"}"
+});
+const stableToolPlanB = stablePlanner.planFromProviderDelta({
+  name: "file_read",
+  argumentsText: "{\"path\":\"src/tooling.ts\"}"
+});
+assert(stableToolPlanA.id === stableToolPlanB.id, "expected provider tool-call ids to be stable without Date.now");
 
 const trustedPolicyExecutor = new ToolExecutor({
   registry: workspaceTools,
@@ -8137,6 +8321,7 @@ runtimeProviderRegistry.register({
         id: "provider-second-tool-call-smoke",
         name: "workflow_plan",
         argumentsText: JSON.stringify({
+          skill: "youtube-knowledge-base",
           intent: ["provider-plan-followup"],
           stepDescription: "Execute second provider planned workflow"
         })
@@ -8203,6 +8388,7 @@ runtimeProviderRegistry.register({
       id: "provider-tool-call-smoke",
       name: "workflow_plan",
       argumentsText: JSON.stringify({
+        skill: "youtube-knowledge-base",
         intent: ["provider-plan"],
         stepDescription: "Execute provider planned workflow"
       })

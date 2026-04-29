@@ -2,6 +2,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import { resolve } from "node:path";
+import { platform } from "node:os";
 
 export type ManagedProcessStatus = "running" | "exited" | "stopped" | "failed";
 
@@ -67,7 +68,8 @@ export class ProcessManager {
     this.#processes.set(id, record);
 
     try {
-      const child = spawn("/bin/zsh", ["-lc", command], {
+      const shell = resolveShell();
+      const child = spawn(shell.command, [...shell.args, command], {
         cwd,
         env: {
           ...process.env,
@@ -176,6 +178,28 @@ export class ProcessManager {
       totalChars -= removed?.text.length ?? 0;
     }
   }
+}
+
+function resolveShell(): { command: string; args: string[] } {
+  const shell = process.env.SHELL;
+  if (typeof shell === "string" && shell.trim().length > 0) {
+    return {
+      command: shell,
+      args: ["-lc"]
+    };
+  }
+
+  if (platform() === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c"]
+    };
+  }
+
+  return {
+    command: "/bin/sh",
+    args: ["-lc"]
+  };
 }
 
 function toRecord(process: InternalManagedProcess): ManagedProcessRecord {

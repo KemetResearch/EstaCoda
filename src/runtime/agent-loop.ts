@@ -250,8 +250,6 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
-    await this.#promoteRepeatedPreferences(effectiveText);
-
     this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
       channel: input.channel,
@@ -691,6 +689,8 @@ export class AgentLoop {
       kind: "agent-final",
       text: response.text
     });
+
+    await this.#promoteRepeatedPreferences(effectiveText);
 
     return response;
   }

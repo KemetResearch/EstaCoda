@@ -39,21 +39,20 @@ export async function resolveUserPreferencePromotion(options: {
     return undefined;
   }
 
-  const sessions = await options.sessionDb.listSessions(options.profileId);
   const matchingSessionIds = new Set<string>();
+  const matches = await options.sessionDb.search(currentPreference.content, {
+    profileId: options.profileId,
+    limit: 50
+  });
 
-  for (const session of sessions) {
-    const messages = await options.sessionDb.listMessages(session.id);
+  for (const match of matches) {
+    if (match.message.role !== "user") {
+      continue;
+    }
 
-    for (const message of messages) {
-      if (message.role !== "user") {
-        continue;
-      }
-
-      const candidate = detectUserPreference(message.content);
-      if (candidate?.key === currentPreference.key) {
-        matchingSessionIds.add(session.id);
-      }
+    const candidate = detectUserPreference(match.message.content);
+    if (candidate?.key === currentPreference.key) {
+      matchingSessionIds.add(match.session.id);
     }
   }
 
@@ -90,21 +89,20 @@ export async function resolveProjectFactPromotion(options: {
     return undefined;
   }
 
-  const sessions = await options.sessionDb.listSessions(options.profileId);
   const matchingSessionIds = new Set<string>();
+  const matches = await options.sessionDb.search(currentFact.content, {
+    profileId: options.profileId,
+    limit: 50
+  });
 
-  for (const session of sessions) {
-    const messages = await options.sessionDb.listMessages(session.id);
+  for (const match of matches) {
+    if (match.message.role !== "user") {
+      continue;
+    }
 
-    for (const message of messages) {
-      if (message.role !== "user") {
-        continue;
-      }
-
-      const candidate = detectProjectFact(message.content);
-      if (candidate?.key === currentFact.key) {
-        matchingSessionIds.add(session.id);
-      }
+    const candidate = detectProjectFact(match.message.content);
+    if (candidate?.key === currentFact.key) {
+      matchingSessionIds.add(match.session.id);
     }
   }
 

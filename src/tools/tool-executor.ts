@@ -7,6 +7,8 @@ import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
+const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
+
 export type ToolExecutionRequest = {
   toolset: ToolsetName;
   input: Record<string, unknown>;
@@ -83,6 +85,27 @@ export class ToolExecutor {
     }
 
     const riskClass = classifyEffectiveRisk(tool, request.input);
+    const validationError = validateToolInput(tool, request.input);
+    if (validationError !== undefined) {
+      const result: ToolResult = {
+        ok: false,
+        content: `Invalid tool input: ${validationError}`
+      };
+      await this.#sessionDb.appendEvent(request.sessionId, {
+        kind: "tool-result",
+        tool: tool.name,
+        result: truncateToolResultForStorage(result)
+      });
+
+      return {
+        tool: toDefinition(tool),
+        input: request.input,
+        decision: "deny",
+        riskClass,
+        result
+      };
+    }
+
     const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = summarizeSecurityTarget(tool.name, request.input);
     const securityRequest = {
@@ -162,18 +185,20 @@ export class ToolExecutor {
           signal: request.signal
         });
 
+    const storedResult = truncateToolResultForStorage(result);
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-result",
       tool: tool.name,
-      result
+      result: storedResult
     });
     await this.#sessionDb.appendMessage({
       sessionId: request.sessionId,
       role: "tool",
-      content: result.content,
+      content: storedResult.content,
       metadata: {
         tool: tool.name,
-        ok: result.ok
+        ok: result.ok,
+        truncated: storedResult.metadata?.truncatedForStorage
       }
     });
     this.#trajectoryRecorder.record("tool-result", {
@@ -266,6 +291,80 @@ function classifyEffectiveRisk(tool: ToolDefinition, input: Record<string, unkno
   }
 
   return tool.riskClass;
+}
+
+function validateToolInput(tool: ToolDefinition, input: Record<string, unknown>): string | undefined {
+  const schema = tool.inputSchema;
+  if (!isObjectRecord(schema)) {
+    return undefined;
+  }
+
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  for (const key of required) {
+    if (!(key in input)) {
+      return `missing required field '${key}'`;
+    }
+  }
+
+  const properties = isObjectRecord(schema.properties) ? schema.properties : {};
+  for (const [key, value] of Object.entries(input)) {
+    const property = properties[key];
+    if (!isObjectRecord(property) || !("type" in property)) {
+      continue;
+    }
+
+    const expected = property.type;
+    if (typeof expected !== "string") {
+      continue;
+    }
+
+    if (!matchesJsonSchemaPrimitive(value, expected)) {
+      return `field '${key}' must be ${expected}`;
+    }
+  }
+
+  return undefined;
+}
+
+function matchesJsonSchemaPrimitive(value: unknown, expected: string): boolean {
+  switch (expected) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "object":
+      return isObjectRecord(value);
+    case "array":
+      return Array.isArray(value);
+    default:
+      return true;
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function truncateToolResultForStorage(result: ToolResult): ToolResult {
+  if (result.content.length <= MAX_STORED_TOOL_RESULT_CHARS) {
+    return result;
+  }
+
+  return {
+    ...result,
+    content: `${result.content.slice(0, MAX_STORED_TOOL_RESULT_CHARS)}\n[truncated ${result.content.length - MAX_STORED_TOOL_RESULT_CHARS} chars before session storage]`,
+    metadata: {
+      ...result.metadata,
+      truncatedForStorage: true,
+      originalChars: result.content.length
+    }
+  };
 }
 
 function toDefinition(tool: ToolDefinition): ToolDefinition {

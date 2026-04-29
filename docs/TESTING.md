@@ -272,6 +272,7 @@ At a high level:
 - profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
 - Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved
 - context expansion
+- prompt/history packing regressions for latest user request preservation, adjacent tool context, and older-turn summarization
 - skill execution and package behavior
 - skill mutation hardening: unsupported YAML object-array rejection, workflow/evaluation validation, schema-preserving generated frontmatter, mutation snapshots, and snapshot rollback tool registration
 - skill usage/evolution overlay: runtime-selected skill usage sidecar, provenance-aware observation log, proposed patch log, scored `skill.eval`, review/approve/reject tools, untrusted-source promotion blocking, medium-risk approval gating, rich promotion metadata with eval deltas, proposal promotion, and promoted proposal listing
@@ -280,6 +281,8 @@ At a high level:
 - CLI approval scopes plus persistent workspace approval storage/revocation
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
 - session-scoped CLI and gateway `/yolo` toggles for open mode
+- memory promotion using bounded session search instead of full session/message scans before routing
+- core tool hardening for invalid search regexes, symlink-cycle-safe recursive search, shell fallback, SIGTERM-to-SIGKILL timeout handling, stable tool-call IDs, schema validation, and stored-result truncation
 - cron create/list/edit/tick flow, schedule parsing, prompt safety blocking, bounded workspace-local script-backed jobs, tick locking, wrapped output, `/cron`, and gateway command exposure
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - expanded hard-floor coverage for secret reads, environment dumps, destructive inline code, pipe-to-interpreter installs, and force-push patterns

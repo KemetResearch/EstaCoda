@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ProviderToolCallDelta, ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
@@ -14,7 +15,7 @@ export class ToolCallPlanner {
   }
 
   planFromProviderDelta(delta: ProviderToolCallDelta): ToolCallPlan {
-    const id = delta.id ?? `tool-call-${Date.now()}`;
+    const id = delta.id ?? stableToolCallId(delta);
     const tool = this.#resolveToolName(normalizeToolName(delta.name));
 
     if (tool === undefined) {
@@ -72,6 +73,18 @@ export class ToolCallPlanner {
 
     return this.#aliases.get(name) ?? name;
   }
+}
+
+function stableToolCallId(delta: ProviderToolCallDelta): string {
+  const hash = createHash("sha256")
+    .update(String(delta.index ?? ""))
+    .update("\0")
+    .update(delta.name ?? "")
+    .update("\0")
+    .update(delta.argumentsText ?? "")
+    .digest("hex")
+    .slice(0, 16);
+  return `tool-call-${hash}`;
 }
 
 function normalizeToolName(name: string | undefined): string | undefined {

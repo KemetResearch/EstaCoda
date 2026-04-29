@@ -37,6 +37,7 @@ Done:
 - recoverable tool-call failures `smoke-tested`
 - trusted workspace flow `live-proven`
 - visible tool activity `live-proven`
+- core tool hardening for invalid search regexes, shell portability, terminal timeout kill escalation, symlink-cycle-safe search, stable provider tool-call IDs, input-schema validation, and stored-result truncation `smoke-tested`
 
 Next:
 
@@ -80,10 +81,10 @@ Done:
 - history packing `smoke-tested`
 - prompt cache `smoke-tested`
 - skill outcome persistence `smoke-tested`
+- repeated preference/project-fact promotion now runs after the response path and uses bounded session search instead of full session/message scans `smoke-tested`
 
 Next:
 
-- repeated workflow promotion
 - better session-summary preservation
 - compression protection around recent tool pairs
 - richer session-admin UX: lineage / history / resume controls beyond the current `/sessions`, `/search`, and `/switch`

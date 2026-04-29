@@ -103,6 +103,8 @@ Confirmed working in code and smoke:
 - Skill package indexing for `references/`, `templates/`, `scripts/`, and compatible `assets/`. `smoke-tested`
 - Skill load-time setup context for env/config/credential-file presence. `smoke-tested`
 - Memory file loading and persistence of skill outcomes. `smoke-tested`
+- Repeated preference/project-fact promotion now runs after final response emission and uses bounded session search instead of scanning every session/message before routing. `smoke-tested`
+- Core tool hardening now covers invalid `file.search` regexes, symlink-cycle-safe recursive search, portable shell fallback, SIGTERM then SIGKILL timeout behavior, stable provider tool-call IDs, basic schema validation before execution, and stored-result truncation. `smoke-tested`
 - Telegram gateway startup/status diagnostics. `live-proven`
 - Telegram approvals with persistent approval storage, `/approvals`, `/revoke`, inline buttons, and target-key matching. `smoke-tested`
 - Telegram progress compaction into one evolving status message. `smoke-tested`
@@ -374,7 +376,7 @@ For Telegram:
 
 - Telegram image vision path is live-proven with Kimi, but not yet broadly live-proven across providers after the native-main-route wiring.
 - Live provider support is strongest for OpenAI-compatible providers; catalog-only providers are discovery-only.
-- Memory promotion is not implemented in the real product sense yet. Skill outcomes persist, but repeated preferences/workflows are not automatically promoted intelligently.
+- Memory promotion is off the pre-routing full-scan path, but a future idle/background queue could make promotion fully non-blocking after response delivery.
 - Telegram final reply formatting is much better than before, but still not full Hermes parity.
 - Channel verbosity/profile controls are not implemented yet.
 - CLI now resumes the active workspace session across launches through a persisted CLI session pointer. `smoke-tested`
@@ -383,8 +385,7 @@ For Telegram:
 - `doctor --live` can return successful status with empty response text for some providers. This is noted but not fully improved.
 - CLI multiline paste ergonomics are still rough in interactive mode.
 - Some success paths are stronger in smoke than in live multi-provider testing.
-- Memory promotion still needs to move off the pre-routing hot path with cursor/throttle/background behavior.
-- Core tool hardening still needs a focused pass for regex errors, shell portability, timeout kill escalation, symlink cycles, stable tool-call IDs, argument validation, and stored-result truncation.
+- Prompt/history packing has baseline regression coverage for latest-user survival, recent tool context, and older-turn summarization; deeper output-reserve and frozen-memory compression tests are still useful.
 
 ## 8. Design Decisions
 
