@@ -2,6 +2,8 @@ import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { SecurityAssessment } from "../contracts/security.js";
+import type { SessionEvent } from "../contracts/session.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
@@ -208,6 +210,11 @@ async function handleSlashCommand(input: {
     case "approvals":
       input.output.write(`${await renderApprovalStatus(input.runtime)}\n\n`);
       return false;
+    case "security":
+      input.output.write(`${await renderSecurityAudit(input.runtime, {
+        debug: args.includes("debug") || args.includes("--debug")
+      })}\n\n`);
+      return false;
     case "revoke": {
       const approvalId = args[0];
       if (approvalId === undefined || approvalId.length === 0) {
@@ -294,6 +301,82 @@ function renderSessionHelp(): string {
     "EstaCoda session commands",
     ...SESSION_COMMANDS.map((command) => `/${command.name.padEnd(8)}${command.description}`)
   ].join("\n");
+}
+
+async function renderSecurityAudit(runtime: Runtime, options: { debug: boolean }): Promise<string> {
+  const events = await runtime.sessionDb.listEvents(runtime.sessionId);
+  const securityEvents = events
+    .filter((event): event is Extract<SessionEvent, { kind: "security-assessed" }> => event.kind === "security-assessed")
+    .slice(-8)
+    .reverse();
+
+  if (securityEvents.length === 0) {
+    return [
+      "Security audit",
+      "No tool security decisions have been recorded for this session yet."
+    ].join("\n");
+  }
+
+  return [
+    "Security audit",
+    ...securityEvents.map((event, index) =>
+      options.debug
+        ? renderSecurityEventDebug(index + 1, event)
+        : renderSecurityEventCompact(index + 1, event)
+    )
+  ].join("\n");
+}
+
+function renderSecurityEventCompact(
+  index: number,
+  event: Extract<SessionEvent, { kind: "security-assessed" }>
+): string {
+  return [
+    `${index}. ${event.tool} -> ${event.assessment.decision}`,
+    `   risk=${event.riskClass} rule=${event.assessment.deterministicRule ?? "policy"}`,
+    event.targetSummary === undefined ? undefined : `   target=${truncateSingleLine(event.targetSummary, 96)}`,
+    `   reason=${truncateSingleLine(event.assessment.reason, 120)}`
+  ].filter((line): line is string => typeof line === "string").join("\n");
+}
+
+function renderSecurityEventDebug(
+  index: number,
+  event: Extract<SessionEvent, { kind: "security-assessed" }>
+): string {
+  const assessment = event.assessment;
+  return [
+    `${index}. ${event.tool}`,
+    `   final decision: ${assessment.decision}`,
+    `   mode: ${assessment.mode}`,
+    `   risk: ${assessment.risk}`,
+    `   risk class: ${event.riskClass}`,
+    `   deterministic rule: ${assessment.deterministicRule ?? "none"}`,
+    event.targetKey === undefined ? undefined : `   target key: ${truncateSingleLine(event.targetKey, 140)}`,
+    event.targetSummary === undefined ? undefined : `   target: ${truncateSingleLine(event.targetSummary, 140)}`,
+    `   reason: ${assessment.reason}`,
+    `   assessor: ${renderAssessorDebug(assessment)}`
+  ].filter((line): line is string => typeof line === "string").join("\n");
+}
+
+function renderAssessorDebug(assessment: SecurityAssessment): string {
+  const assessor = assessment.assessor;
+  if (assessor === undefined) {
+    return "not used";
+  }
+
+  if (assessor.used !== true) {
+    return `not used (${assessor.status ?? "disabled"})`;
+  }
+
+  return [
+    `used status=${assessor.status ?? "unknown"}`,
+    assessor.provider === undefined ? undefined : `provider=${assessor.provider}`,
+    assessor.model === undefined ? undefined : `model=${assessor.model}`,
+    assessor.decision === undefined ? undefined : `decision=${assessor.decision}`,
+    assessor.risk === undefined ? undefined : `risk=${assessor.risk}`,
+    assessor.confidence === undefined ? undefined : `confidence=${assessor.confidence}`,
+    assessor.reason === undefined ? undefined : `reason=${truncateSingleLine(assessor.reason, 80)}`
+  ].filter((part): part is string => typeof part === "string").join(" ");
 }
 
 async function maybeHandleApprovalGate(input: {

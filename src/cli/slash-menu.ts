@@ -20,6 +20,7 @@ export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "resume", description: "Show the latest interrupted-turn resume note" },
   { name: "approvals", description: "Show current one-time, session, and persistent approvals" },
   { name: "revoke", description: "Revoke a persistent approval by id" },
+  { name: "security", description: "Inspect recent security decisions", aliases: ["security debug"] },
   { name: "trust", description: "Trust this workspace for proactive local work", aliases: ["workspace.trust.grant"] },
   { name: "untrust", description: "Revoke workspace trust", aliases: ["workspace.trust.revoke"] },
   { name: "workspace.trust.status", description: "Show whether the current workspace is trusted" },

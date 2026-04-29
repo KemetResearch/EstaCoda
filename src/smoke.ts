@@ -5571,6 +5571,24 @@ await sessionDb.appendMessage({
   content: "needle session content",
   channel: "cli"
 });
+await sessionDb.appendEvent(runtime.sessionId, {
+  kind: "security-assessed",
+  tool: "terminal.run",
+  riskClass: "destructive-local",
+  targetKey: "terminal.run:cmd=rm -rf /",
+  targetSummary: "rm -rf /",
+  assessment: {
+    decision: "deny",
+    mode: "adaptive",
+    reason: "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.",
+    risk: "high",
+    deterministicRule: "destructive-delete-root-or-broad-path",
+    assessor: {
+      used: false,
+      status: "disabled"
+    }
+  }
+});
 await runSessionLoop({
   runtime,
   switchRuntime: async (sessionId) => createRuntime({
@@ -5613,6 +5631,8 @@ await runSessionLoop({
       "/search needle",
       "/untrust",
       "/resume",
+      "/security",
+      "/security debug",
       "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
       "/switch cli-switch-target",
       "/status",
@@ -6067,6 +6087,13 @@ assert(renderedSessionLoop.includes("Search results for \"needle\""), "expected 
 assert(renderedSessionLoop.includes("Switched this session to an existing session."), "expected /switch output");
 assert(renderedSessionLoop.includes("cli-switch-target"), "expected switched CLI session id to appear");
 assert(renderedSessionLoop.includes("Workspace trust revoked"), "expected session /untrust output");
+assert(renderedSessionLoop.includes("Security audit"), "expected session /security output");
+assert(renderedSessionLoop.includes("terminal.run -> deny"), "expected compact security audit decision");
+assert(
+  renderedSessionLoop.includes("deterministic rule: destructive-delete-root-or-broad-path"),
+  "expected debug security audit rule"
+);
+assert(renderedSessionLoop.includes("assessor: not used"), "expected debug security audit assessor status");
 assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
 assert(

@@ -359,6 +359,7 @@ Important traits:
 - CLI approvals now use the same `once`, `session`, and `always` scope model through runtime-backed grants and a workspace approval store
 - the unconditional hard floor now covers broad/root-like recursive deletes, destructive disk operations, shutdown/reboot commands, fork-bomb or kill-all patterns, explicit secret reads, pipe-to-interpreter installs, and git force-pushes
 - adaptive assessment now defaults to an auxiliary `approval` route when an assessor is enabled without an explicit provider/model override
+- interactive CLI sessions expose `/security` and `/security debug` so operators can inspect recent decisions, target keys, deterministic rule hits, and assessor status without digging through raw session events
 
 ## Persistence Model
 

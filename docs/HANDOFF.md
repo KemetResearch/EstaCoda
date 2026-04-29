@@ -388,6 +388,7 @@ For Telegram:
   `adaptive` now supports an optional auxiliary assessor after deterministic triage, while the dangerous-command floor remains non-overridable.
   Channel and CLI approval scopes now both support `once`, `session`, and `always`, while ACP remains narrower because of editor permission-card constraints.
   The hard floor now explicitly covers broad destructive deletes, disk-destructive commands, system power commands, fork-bomb or kill-all patterns, explicit secret reads, pipe-to-interpreter installs, and git force-pushes.
+  CLI operators can inspect the last security decisions with `/security`, or use `/security debug` for target keys, deterministic rules, and assessor status.
 
 - **Local-first skill mutation**
   External skill roots are read-only. Agent-authored or edited skills write into the local personal skill home.

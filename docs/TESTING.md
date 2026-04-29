@@ -242,6 +242,7 @@ At a high level:
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
+- CLI `/security` and `/security debug` audit rendering
 - Telegram progress compaction
 - Telegram approvals and callbacks
 - Telegram attachment flows
