@@ -446,7 +446,7 @@ const cliSetupPrompt = await runCliCommand({
 const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-workspace-"));
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
-const cliInteractiveAnswers = ["", "2", "", "interactive-secret", ""];
+const cliInteractiveAnswers = ["", "", "", "2", "", "", "interactive-secret", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -462,6 +462,24 @@ const cliInteractiveSetup = await runCliCommand({
   )
 });
 const cliInteractiveConfig = await loadRuntimeConfig({
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliInteractiveEnvPath = join(cliInteractiveHome, ".estacoda", ".env");
+const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
+const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
+const cliVerify = await runCliCommand({
+  argv: ["verify"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliSettings = await runCliCommand({
+  argv: ["settings"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
+const cliSkillSettings = await runCliCommand({
+  argv: ["settings", "skills", "--autonomy", "proactive"],
   workspaceRoot: cliInteractiveWorkspace,
   homeDir: cliInteractiveHome
 });
@@ -3134,10 +3152,18 @@ assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP ser
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
 assert(cliInteractiveSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive CLI setup output");
-assert(cliInteractiveSetup.output.includes("export KIMI_API_KEY='interactive-secret'"), "expected interactive shell export");
+assert(cliInteractiveSetup.output.includes("Secret store:"), "expected interactive setup secret store output");
 assert(cliInteractiveSetup.output.includes("Setup check"), "expected interactive setup diagnostics");
-assert(cliInteractivePrompts.length === 5, "expected interactive setup prompts");
+assert(cliInteractiveSetup.output.includes("EstaCoda verify"), "expected interactive setup verification output");
+assert(cliInteractivePrompts.length === 10, "expected interactive setup prompts");
 assert(cliInteractiveConfig.model.provider === "kimi", "expected interactive setup to save provider");
+assert(cliInteractiveConfig.security.approvalMode === "adaptive", "expected interactive setup to save default security mode");
+assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive setup to save default skill autonomy");
+assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"interactive-secret\""), "expected interactive setup to write local env secret");
+assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret mode 0600");
+assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
+assert(cliSettings.output.includes("EstaCoda settings"), "expected CLI settings output");
+assert(cliSkillSettings.output.includes("Skill autonomy: proactive."), "expected CLI skill autonomy settings output");
 assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected CLI setup output");
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");

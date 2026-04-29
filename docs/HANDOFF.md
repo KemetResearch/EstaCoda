@@ -76,6 +76,7 @@ Evidence:
 - evaluation substrate: `implemented but not live-proven`
 - MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
 - ACP foundation: JetBrains chat, file reads, shell execution, and approval prompts are `live-proven`
+- Phase 1 onboarding wizard: `estacoda setup`, secret store, workspace trust, security mode, skill autonomy, `estacoda verify`, and `estacoda settings` are `smoke-tested`
 
 ## 3. Current Working Capabilities
 
@@ -143,7 +144,7 @@ Working but not yet fully proven live in operator testing:
 ### Main systems
 
 - `src/index.ts`
-  Startup entrypoint. Loads config, optionally runs onboarding, builds runtime, dispatches CLI commands, interactive session loop, or one-shot prompt.
+  Startup entrypoint. Loads config, asks whether to run setup on first launch, builds runtime, dispatches CLI commands, interactive session loop, or one-shot prompt.
 
 - `src/runtime/create-runtime.ts`
   Runtime composition root. Builds the tool registry, skill registry, memory store, provider registry/executor, browser backend, session DB, and `AgentLoop`.
@@ -175,6 +176,7 @@ Working but not yet fully proven live in operator testing:
 ### High-level runtime flow
 
 1. Load merged config from user and project config files.
+   User-level `~/.estacoda/.env` is loaded first as a local secret store without overriding already-exported environment variables.
 2. Build runtime:
    - load model/provider registry
    - load memory files

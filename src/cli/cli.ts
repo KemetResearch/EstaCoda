@@ -7,6 +7,7 @@ import {
   setupBrowserConfig,
   setupProviderConfig,
   setupSecurityConfig,
+  setupSkillConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
@@ -16,8 +17,9 @@ import {
   type TelegramSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
-import { runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
+import { canRunInteractive, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
+import { runSetupVerification } from "../onboarding/verification.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { runCronCommand } from "../cron/cron-command.js";
@@ -33,6 +35,7 @@ import { getTelegramGatewayDiagnostics, runTelegramGateway } from "../channels/g
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
+import type { SkillAutonomy } from "../skills/skill-learning.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -81,6 +84,10 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return tools(options);
     case "doctor":
       return doctor(options, args);
+    case "verify":
+      return verify(options);
+    case "settings":
+      return settings(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -101,7 +108,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
 async function setup(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const parsed = parseSetupArgs(args);
 
-  if (hasFlag(args, "--interactive", "-i")) {
+  if (hasFlag(args, "--interactive", "-i") || (args.length === 0 && (options.prompt !== undefined || canRunInteractive()))) {
     const result = await runInteractiveOnboarding({
       ...options,
       prompt: options.prompt
@@ -114,16 +121,21 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
     };
   }
 
+  const advanced = hasFlag(args, "--advanced");
   if (parsed.provider === undefined || parsed.model === undefined) {
     const onboarding = await getOnboardingStatus(options);
     return {
       handled: true,
       exitCode: 0,
       output: [
-        "EstaCoda setup",
+        advanced ? "EstaCoda advanced setup" : "EstaCoda setup",
         onboarding.reason,
         "",
         "Run:",
+        "  estacoda setup",
+        "  estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
+        "",
+        "Advanced provider setup:",
         "  estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
         "",
         "Provider options:",
@@ -155,6 +167,101 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
       renderProviderDiagnostic(diagnostic),
       diagnostic.status === "ready" ? "Ready: start EstaCoda and send your first prompt." : "Next: fix the warnings above, then run estacoda doctor."
     ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
+async function verify(options: CliOptions): Promise<CliCommandResult> {
+  const result = await runSetupVerification({
+    ...options,
+    runtime: options.runtime
+  });
+
+  return {
+    handled: true,
+    exitCode: result.ok ? 0 : 1,
+    output: result.output
+  };
+}
+
+async function settings(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const config = await loadRuntimeConfig(options);
+  const category = args[0];
+
+  if (category === "skills" && args.includes("--autonomy")) {
+    const parsed = parseSkillAutonomyArg(valueAfter(args, "--autonomy"));
+    const result = await setupSkillConfig({
+      ...options,
+      input: { autonomy: parsed }
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Skill autonomy: ${result.config.skills?.autonomy ?? parsed}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (category === "skills") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: skills",
+        `Autonomy: ${config.skills.autonomy}`,
+        `External dirs: ${config.skills.externalDirs.join(", ") || "none"}`,
+        "Change with: estacoda settings skills --autonomy suggest"
+      ].join("\n")
+    };
+  }
+
+  if (category === "security") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: security",
+        `Approval mode: ${config.security.approvalMode}`,
+        `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
+        "Change with: estacoda security setup --mode adaptive"
+      ].join("\n")
+    };
+  }
+
+  if (category === "provider") {
+    const diagnostic = await diagnoseProviderConfig(config);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: provider",
+        `Model: ${config.model.provider}/${config.model.id}`,
+        renderProviderDiagnostic(diagnostic),
+        "Change with: estacoda setup --advanced --provider <provider> --model <model>"
+      ].join("\n")
+    };
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      "EstaCoda settings",
+      `Provider: ${config.model.provider}/${config.model.id}`,
+      `Security: ${config.security.approvalMode}`,
+      `Skill autonomy: ${config.skills.autonomy}`,
+      `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
+      `Browser backend: ${config.browser.backend}`,
+      `MCP servers: ${Object.keys(config.mcp.servers).length}`,
+      `Config sources: ${config.sources.join(", ") || "none"}`,
+      "",
+      "Categories:",
+      "  estacoda settings provider",
+      "  estacoda settings security",
+      "  estacoda settings skills",
+      "  estacoda settings skills --autonomy suggest"
+    ].join("\n")
   };
 }
 
@@ -1065,6 +1172,18 @@ function hasFlag(args: string[], ...flags: string[]): boolean {
   return args.some((arg) => flags.includes(arg));
 }
 
+function valueAfter(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index < 0 ? undefined : args[index + 1];
+}
+
+function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {
+  if (value === "none" || value === "suggest" || value === "proactive" || value === "autonomous") {
+    return value;
+  }
+  throw new Error("Expected --autonomy none, suggest, proactive, or autonomous");
+}
+
 function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
   const parsed: SecuritySetupInput = {};
 
@@ -1116,8 +1235,10 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
 function help(): string {
   return [
     "EstaCoda commands",
-    "  estacoda setup   Configure provider/model credentials",
-    "  estacoda setup --interactive",
+    "  estacoda setup   Run the guided setup wizard",
+    "  estacoda setup --advanced --provider deepseek --model deepseek-chat",
+    "  estacoda verify  Check setup readiness",
+    "  estacoda settings View setup categories",
     "  estacoda web     Configure web extraction",
     "  estacoda browser Configure browser backend",
     "  estacoda security View or configure approval mode",

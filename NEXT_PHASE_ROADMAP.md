@@ -119,10 +119,10 @@ Remaining hardening:
 
 ### 5. Installer And Onboarding
 
-Status: setup CLI, interactive onboarding, provider config, onboarding tools, first-run path, and doctor checks exist.
+Status: Phase 1 onboarding now exists: canonical `estacoda setup`, advanced flag setup, first-launch confirmation, provider config, local `~/.estacoda/.env` secret storage, workspace trust, security mode, skill autonomy, `estacoda verify`, `estacoda settings`, onboarding tools, and doctor checks.
 
 Next acceptance checks:
-- A fresh user can install, configure a model, trust a workspace, and complete a first prompt.
+- Done: a fresh user can configure a model, store a hosted key reference safely, trust a workspace, and run verification.
 - Local model setup is supported cleanly.
 - Config errors produce actionable fixes.
 - Packaging path is defined for binary/npm/homebrew-style distribution.
@@ -146,7 +146,7 @@ Move from strong internal alpha behavior to MVP launch hardening:
 
 1. Refine workflow-learning heuristics and skill patching behavior now that project-fact promotion and `skills.autonomy` exist.
 2. Refine MCP trust/visibility controls and real-server validation.
-3. Finish first-run install/onboarding polish and define the external distribution path.
+3. Finish install/package distribution and credential-error recovery polish now that Phase 1 setup exists.
 4. Expand the evaluation substrate into stronger scored comparisons.
 5. Revisit ACP/editor embedding only after the MCP client and memory/session work are in better shape.
 

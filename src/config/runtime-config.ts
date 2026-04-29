@@ -10,6 +10,7 @@ import type {
   ProviderId
 } from "../contracts/provider.js";
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
+import { loadDotEnvSecrets } from "./env-secret-store.js";
 import { inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -237,6 +238,11 @@ export type SecuritySetupInput = {
   scope?: "user" | "project";
 };
 
+export type SkillSetupInput = {
+  autonomy?: SkillAutonomy;
+  scope?: "user" | "project";
+};
+
 export async function loadRuntimeConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -244,6 +250,7 @@ export async function loadRuntimeConfig(options: {
   projectConfigPath?: string;
   providerFetch?: ProviderFetchLike;
 }): Promise<LoadedRuntimeConfig> {
+  await loadDotEnvSecrets({ homeDir: options.homeDir });
   const sources = [
     options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
     options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
@@ -709,6 +716,33 @@ export async function setupSecurityConfig(options: {
     security: {
       approvalMode: normalizeSecurityApprovalMode(options.input.mode),
       assessor: assessorPatch
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function setupSkillConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: SkillSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const config = mergeConfig(existing.config, {
+    skills: {
+      autonomy: options.input.autonomy ?? "suggest"
     }
   });
 

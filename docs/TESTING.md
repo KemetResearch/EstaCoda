@@ -79,6 +79,9 @@ Current evidence level:
 
 ```bash
 cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run dev -- setup
+/Users/ahnwy/.bun/bin/bun run dev -- verify
+/Users/ahnwy/.bun/bin/bun run dev -- settings
 /Users/ahnwy/.bun/bin/bun run dev -- doctor --live
 /Users/ahnwy/.bun/bin/bun run dev
 ```
@@ -95,6 +98,9 @@ Inside the interactive session, useful checks:
 
 Evidence level:
 
+- Phase 1 setup wizard: `smoke-tested`
+- local `~/.estacoda/.env` secret store with `0600`: `smoke-tested`
+- setup verification and settings overview: `smoke-tested`
 - CLI file edit/read/verify flow: `live-proven`
 - broader CLI ergonomics: partial and still needs judgment during live runs
 

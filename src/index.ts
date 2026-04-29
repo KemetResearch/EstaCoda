@@ -3,7 +3,7 @@ import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-co
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
-import { canRunInteractive, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
+import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop } from "./cli/session-loop.js";
@@ -25,6 +25,13 @@ if (argv.length === 0 && canRunInteractive()) {
   });
 
   if (onboarding.needed) {
+    const prompt = createReadlinePrompt();
+    const answer = await prompt("No EstaCoda setup found.\nRun setup now? [Y/n]: ");
+    prompt.close?.();
+    if (answer.trim().length > 0 && !["y", "yes"].includes(answer.trim().toLowerCase())) {
+      console.log("Setup skipped. Run `estacoda setup` when you are ready.");
+      process.exit(0);
+    }
     const result = await runInteractiveOnboarding({
       workspaceRoot,
       theme: kemetBlueTheme,

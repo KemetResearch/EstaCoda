@@ -108,12 +108,17 @@ Next:
 
 ### 5. Onboarding and packaging
 
-State: partial.
+State: Phase 1 setup wizard is now smoke-tested; packaging remains partial.
 
 Done:
 
-- setup CLI `smoke-tested`
-- onboarding path `smoke-tested`
+- canonical `estacoda setup` guided wizard `smoke-tested`
+- advanced flag setup via `estacoda setup --advanced ...` `smoke-tested`
+- first-launch prompt asks `Run setup now? [Y/n]` instead of silently entering setup `implemented`
+- local secret store at `~/.estacoda/.env` with `0600` permissions and config env-var references `smoke-tested`
+- setup prompts for workspace trust, provider/model, credential storage, security mode, and skill autonomy `smoke-tested`
+- `estacoda verify` readiness check `smoke-tested`
+- `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`
 - provider config `smoke-tested`
 - doctor checks `live-proven`
 
@@ -121,6 +126,7 @@ Next:
 
 - external-user-quality install flow
 - local model setup polish
+- richer recovery UX for bad credentials/config
 - packaging/distribution decision
 
 ### 6. Internal alpha operations
@@ -202,18 +208,20 @@ The following product areas came up explicitly and should be treated as tracked 
 
 ### 1. Onboarding experience
 
-State: partially built.
+State: Phase 1 guided setup is built.
 
-- interactive onboarding exists `smoke-tested`
+- canonical `estacoda setup` wizard exists `smoke-tested`
+- secret persistence to `~/.estacoda/.env` exists `smoke-tested`
+- readiness verification via `estacoda verify` exists `smoke-tested`
+- lightweight settings category view exists `smoke-tested`
 - provider setup/config exists `smoke-tested`
 - doctor/health checks exist `live-proven`
-- external-user-quality onboarding is still `intended but not implemented`
 
 What remains:
 
-- cleaner first-run path for non-builders
 - better recovery from bad credentials/config
 - clearer provider selection UX, especially around vision and local models
+- packaging/install polish for non-builders
 
 ### 2. Migration from Hermes / OpenClaw
 
