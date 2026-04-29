@@ -10,6 +10,7 @@ import type { SecurityApprovalMode } from "../contracts/security.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { renderSecurityModeOption, renderSkillAutonomyOption, type Locale } from "../ui/settings-labels.js";
 import { completeOnboarding, defaultOnboardingSteps, getOnboardingStatus, type OnboardingOptions } from "./onboarding-flow.js";
 import { runSetupVerification } from "./verification.js";
 
@@ -29,6 +30,8 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
   continueToSession?: boolean;
 }): Promise<InteractiveOnboardingResult> {
   const status = await getOnboardingStatus(options);
+  const loadedConfig = await loadRuntimeConfig(options);
+  const locale: Locale = loadedConfig.ui.language === "ar" ? "ar" : "en";
   const theme = options.theme ?? kemetBlueTheme;
 
   if (!status.needed) {
@@ -74,8 +77,8 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const apiKey = selected.provider === "local" || secretMode !== "local-env"
       ? undefined
       : await prompt("Paste API key to store in ~/.estacoda/.env: ", { secret: true });
-    const securityMode = parseSecurityMode(await prompt(renderSecurityModePrompt()));
-    const skillAutonomy = parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt()));
+    const securityMode = parseSecurityMode(await prompt(renderSecurityModePrompt(locale)));
+    const skillAutonomy = parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt(locale)));
     const reviewLines = renderReview({
       provider: selected.provider,
       model: selected.model,
@@ -257,24 +260,45 @@ function renderSecretModePrompt(): string {
   ].join("\n");
 }
 
-function renderSecurityModePrompt(): string {
+function renderSecurityModePrompt(locale: Locale): string {
+  if (locale === "ar") {
+    return [
+      "اختر وضع الأمان:",
+      renderSecurityModeOption(1, "strict", locale),
+      renderSecurityModeOption(2, "adaptive", locale),
+      renderSecurityModeOption(3, "open", locale),
+      "اختر وضع الأمان [2]: "
+    ].join("\n");
+  }
+
   return [
-    "Security mode",
-    "1. Adaptive - allow clear safe actions, ask on ambiguity (recommended)",
-    "2. Strict - ask before risky actions",
-    "3. Open - minimize prompts; hard safety floor remains",
-    "Choose security mode [1]: "
+    "Choose security mode:",
+    renderSecurityModeOption(1, "strict", locale),
+    renderSecurityModeOption(2, "adaptive", locale),
+    renderSecurityModeOption(3, "open", locale),
+    "Choose security mode [2]: "
   ].join("\n");
 }
 
-function renderSkillAutonomyPrompt(): string {
+function renderSkillAutonomyPrompt(locale: Locale): string {
+  if (locale === "ar") {
+    return [
+      "اختر مستوى تعلّم المهارات:",
+      renderSkillAutonomyOption(1, "none", locale),
+      renderSkillAutonomyOption(2, "suggest", locale),
+      renderSkillAutonomyOption(3, "proactive", locale),
+      renderSkillAutonomyOption(4, "autonomous", locale),
+      "اختر مستوى تعلّم المهارات [2]: "
+    ].join("\n");
+  }
+
   return [
-    "Skill learning",
-    "1. Suggest only (recommended)",
-    "2. Off",
-    "3. Auto-create after repeated safe success",
-    "4. Auto-create after first safe success",
-    "Choose skill autonomy [1]: "
+    "Choose skill autonomy:",
+    renderSkillAutonomyOption(1, "none", locale),
+    renderSkillAutonomyOption(2, "suggest", locale),
+    renderSkillAutonomyOption(3, "proactive", locale),
+    renderSkillAutonomyOption(4, "autonomous", locale),
+    "Choose skill autonomy [2]: "
   ].join("\n");
 }
 
@@ -291,12 +315,14 @@ function parseSecretMode(value: string): "local-env" | "existing-env" | "skip" {
 
 function parseSecurityMode(value: string): SecurityApprovalMode {
   switch (value.trim().toLowerCase()) {
-    case "2":
+    case "1":
     case "strict":
       return "strict";
     case "3":
     case "open":
       return "open";
+    case "2":
+    case "adaptive":
     default:
       return "adaptive";
   }
@@ -304,7 +330,7 @@ function parseSecurityMode(value: string): SecurityApprovalMode {
 
 function parseSkillAutonomy(value: string): SkillAutonomy {
   switch (value.trim().toLowerCase()) {
-    case "2":
+    case "1":
     case "none":
       return "none";
     case "3":
@@ -313,6 +339,8 @@ function parseSkillAutonomy(value: string): SkillAutonomy {
     case "4":
     case "autonomous":
       return "autonomous";
+    case "2":
+    case "suggest":
     default:
       return "suggest";
   }

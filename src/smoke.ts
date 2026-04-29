@@ -507,6 +507,11 @@ const cliProfileConfig = await loadRuntimeConfig({
   workspaceRoot: cliInteractiveWorkspace,
   homeDir: cliInteractiveHome
 });
+const cliArabicSkillSettings = await runCliCommand({
+  argv: ["settings", "skills"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliInteractiveHome
+});
 const cliSetup = await runCliCommand({
   argv: ["setup", "--provider", "deepseek", "--model", "deepseek-chat", "--api-key-env", "DEEPSEEK_API_KEY"],
   workspaceRoot: cliWorkspace,
@@ -679,6 +684,32 @@ const cliSecurityStatusAfter = await runCliCommand({
 const loadedSecurityConfig = await loadRuntimeConfig({
   workspaceRoot: securityConfigWorkspace,
   homeDir: cliHome
+});
+const arabicSecurityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-arabic-security-workspace-"));
+const arabicSecurityHome = await mkdtemp(join(tmpdir(), "estacoda-v2-arabic-security-home-"));
+await runCliCommand({
+  argv: ["settings", "ui", "--language", "ar", "--flavor", "arabic-light", "--activity-labels", "ar"],
+  workspaceRoot: arabicSecurityWorkspace,
+  homeDir: arabicSecurityHome
+});
+const cliArabicSecurityHelp = await runCliCommand({
+  argv: ["security"],
+  workspaceRoot: arabicSecurityWorkspace,
+  homeDir: arabicSecurityHome
+});
+const cliArabicSecuritySetup = await runCliCommand({
+  argv: ["security", "setup", "--mode", "strict"],
+  workspaceRoot: arabicSecurityWorkspace,
+  homeDir: arabicSecurityHome
+});
+const cliArabicSecurityStatus = await runCliCommand({
+  argv: ["security", "status"],
+  workspaceRoot: arabicSecurityWorkspace,
+  homeDir: arabicSecurityHome
+});
+const loadedArabicSecurityConfig = await loadRuntimeConfig({
+  workspaceRoot: arabicSecurityWorkspace,
+  homeDir: arabicSecurityHome
 });
 const strictPolicy = createSecurityPolicyForMode("strict");
 const adaptivePolicy = createSecurityPolicyForMode("adaptive");
@@ -3279,23 +3310,30 @@ assert(cliProfileConfig.profile.responseLanguage === "match-user", "expected res
 assert(cliProfileConfig.ui.language === "ar", "expected UI language to persist");
 assert(cliProfileConfig.ui.flavor === "arabic-light", "expected UI flavor to persist");
 assert(cliProfileConfig.ui.activityLabels === "ar", "expected UI activity labels to persist");
+assert(cliArabicSkillSettings.output.includes("استباقي"), "expected Arabic UI to localize skill autonomy label");
+assert(cliArabicSkillSettings.output.includes("proactive"), "expected Arabic skill settings to retain raw config value");
 assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected CLI setup output");
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
-assert(cliSecurityStatusBefore.output.includes("Approval mode: adaptive"), "expected CLI security status to report adaptive mode");
+assert(cliSecurityStatusBefore.output.includes("Approval mode: Adaptive (adaptive)"), "expected CLI security status to report adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Assessor: enabled"), "expected CLI security status to report enabled assessor");
 assert(cliSecurityStatusBefore.output.includes("Assessor provider: kimi"), "expected CLI security status to report assessor provider");
 assert(cliSecurityStatusBefore.output.includes("Assessor model: kimi-k2.5"), "expected CLI security status to report assessor model");
 assert(cliSecurityStatusBefore.output.includes("Assessor timeout ms: 4500"), "expected CLI security status to report assessor timeout");
-assert(cliSecuritySetup.output.includes("Approval mode: open."), "expected CLI security setup output");
+assert(cliSecuritySetup.output.includes("Approval mode: Open (open)."), "expected CLI security setup output");
 assert(cliSecuritySetup.output.includes("Assessor: enabled."), "expected CLI security setup to preserve assessor state");
-assert(cliSecurityStatusAfter.output.includes("Approval mode: open"), "expected CLI security status to report updated open mode");
+assert(cliSecurityStatusAfter.output.includes("Approval mode: Open (open)"), "expected CLI security status to report updated open mode");
 assert(cliSecurityStatusAfter.output.includes("Assessor: enabled"), "expected CLI security status to keep assessor enabled");
 assert(loadedSecurityConfig.security.approvalMode === "open", "expected runtime config to load updated approval mode");
 assert(loadedSecurityConfig.security.assessor.enabled === true, "expected runtime config to preserve assessor enabled state");
 assert(loadedSecurityConfig.security.assessor.provider === "kimi", "expected runtime config to preserve assessor provider");
 assert(loadedSecurityConfig.security.assessor.model === "kimi-k2.5", "expected runtime config to preserve assessor model");
 assert(loadedSecurityConfig.security.assessor.timeoutMs === 4500, "expected runtime config to preserve assessor timeout");
+assert(cliArabicSecurityHelp.output.includes("صارم"), "expected Arabic security help label");
+assert(cliArabicSecurityHelp.output.includes("متوازن"), "expected Arabic security help adaptive label");
+assert(cliArabicSecuritySetup.output.includes("Approval mode: صارم (strict)."), "expected Arabic security setup label with raw value");
+assert(cliArabicSecurityStatus.output.includes("يطلب الموافقة"), "expected Arabic security description");
+assert(loadedArabicSecurityConfig.security.approvalMode === "strict", "expected Arabic security config to persist English value");
 assert(
   strictPolicy.decide({
     riskClass: "destructive-local",

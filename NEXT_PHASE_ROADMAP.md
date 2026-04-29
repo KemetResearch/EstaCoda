@@ -126,6 +126,7 @@ Next acceptance checks:
 - Done: Telegram has a guided setup branch with token storage, token verification, allowlist management, command sync, and test-message path.
 - Done: browser setup/test aliases exist for the local-CDP browser foundation.
 - Done: profile/UI settings separate interface language, aesthetic flavor, activity-label locale, behavior mode, and response language.
+- Done: security-mode and skill-autonomy labels/descriptions localize from `ui.language` while config values remain stable English keys.
 - Local model setup is supported cleanly.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.

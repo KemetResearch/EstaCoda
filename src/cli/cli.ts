@@ -44,6 +44,13 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { writeEnvSecret } from "../config/env-secret-store.js";
+import {
+  formatSecurityMode,
+  formatSkillAutonomy,
+  renderSecurityModeOption,
+  renderSkillAutonomyOption,
+  type Locale
+} from "../ui/settings-labels.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -254,12 +261,15 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
   }
 
   if (category === "skills") {
+    const locale = localeForConfig(config);
+    const current = formatSkillAutonomy(config.skills.autonomy, locale);
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda settings: skills",
-        `Autonomy: ${config.skills.autonomy}`,
+        `Autonomy: ${current.label} (${current.value})`,
+        `Description: ${current.description}`,
         `External dirs: ${config.skills.externalDirs.join(", ") || "none"}`,
         "Change with: estacoda settings skills --autonomy suggest"
       ].join("\n")
@@ -267,12 +277,15 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
   }
 
   if (category === "security") {
+    const locale = localeForConfig(config);
+    const current = formatSecurityMode(config.security.approvalMode, locale);
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda settings: security",
-        `Approval mode: ${config.security.approvalMode}`,
+        `Approval mode: ${current.label} (${current.value})`,
+        `Description: ${current.description}`,
         `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
         "Change with: estacoda security setup --mode adaptive"
       ].join("\n")
@@ -717,15 +730,19 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
   const [subcommand, ...rest] = args;
 
   if (subcommand !== "status" && subcommand !== "setup") {
+    const config = await loadRuntimeConfig(options);
+    const locale = localeForConfig(config);
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda security",
         "  estacoda security status",
-        "  estacoda security setup --mode strict",
+        "Modes:",
+        renderSecurityModeOption(1, "strict", locale),
+        renderSecurityModeOption(2, "adaptive", locale),
+        renderSecurityModeOption(3, "open", locale),
         "  estacoda security setup --mode adaptive",
-        "  estacoda security setup --mode open",
         "  estacoda security setup --assessor-enabled --assessor-provider kimi --assessor-model kimi-k2.5"
       ].join("\n")
     };
@@ -733,12 +750,14 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
 
   if (subcommand === "status") {
     const config = await loadRuntimeConfig(options);
+    const mode = formatSecurityMode(config.security.approvalMode, localeForConfig(config));
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda security",
-        `Approval mode: ${config.security.approvalMode}`,
+        `Approval mode: ${mode.label} (${mode.value})`,
+        `Description: ${mode.description}`,
         `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
         config.security.assessor.provider === undefined ? undefined : `Assessor provider: ${config.security.assessor.provider}`,
         config.security.assessor.model === undefined ? undefined : `Assessor model: ${config.security.assessor.model}`,
@@ -753,12 +772,15 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
     ...options,
     input: parsed
   });
+  const loaded = await loadRuntimeConfig(options);
+  const mode = formatSecurityMode(loaded.security.approvalMode, localeForConfig(loaded));
 
   return {
     handled: true,
     exitCode: 0,
     output: [
-      `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
+      `Approval mode: ${mode.label} (${mode.value}).`,
+      `Description: ${mode.description}`,
       `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
       `Config: ${result.path}`
     ].join("\n")
@@ -1638,6 +1660,10 @@ function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {
     return value;
   }
   throw new Error("Expected --autonomy none, suggest, proactive, or autonomous");
+}
+
+function localeForConfig(config: { ui: { language: string } }): Locale {
+  return config.ui.language === "ar" ? "ar" : "en";
 }
 
 function parseProfileMode(value: string | undefined, optional: true): AgentProfileMode | undefined;

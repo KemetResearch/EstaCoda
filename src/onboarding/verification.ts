@@ -4,6 +4,7 @@ import { defaultEnvPath } from "../config/env-secret-store.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { OnboardingOptions } from "./onboarding-flow.js";
 
@@ -17,6 +18,9 @@ export async function runSetupVerification(options: OnboardingOptions & {
   trustStorePath?: string;
 }): Promise<SetupVerificationResult> {
   const config = await loadRuntimeConfig(options);
+  const locale = config.ui.language === "ar" ? "ar" : "en";
+  const security = formatSecurityMode(config.security.approvalMode, locale);
+  const autonomy = formatSkillAutonomy(config.skills.autonomy, locale);
   const provider = await diagnoseProviderConfig(config);
   const trustStore = new WorkspaceTrustStore({
     path: options.trustStorePath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "trust.json")
@@ -80,8 +84,8 @@ export async function runSetupVerification(options: OnboardingOptions & {
       `State directory: ${stateWritable ? "writable" : "blocked"}`,
       `Secret store: ${envMode}`,
       `Workspace trust: ${workspaceTrusted ? "trusted" : "not trusted"}`,
-      `Security mode: ${config.security.approvalMode}`,
-      `Skill autonomy: ${config.skills.autonomy}`,
+      `Security mode: ${security.label} (${security.value})`,
+      `Skill autonomy: ${autonomy.label} (${autonomy.value})`,
       `Read-only tool check: ${toolStatus}`,
       `Config sources: ${config.sources.join(", ") || "none"}`,
       "",

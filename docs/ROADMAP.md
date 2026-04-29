@@ -328,12 +328,13 @@ State: profile/UI foundation exists.
 - `estacoda settings ui` exists `smoke-tested`
 - prompt assembly receives profile and response-language guidance `smoke-tested`
 - Telegram activity labels now follow configured UI activity-label locale on the gateway path `smoke-tested`
+- security-mode and skill-autonomy labels/descriptions localize from `ui.language`; config values remain English (`strict`, `adaptive`, `open`, `none`, `suggest`, `proactive`, `autonomous`) `smoke-tested`
 
 What remains:
 
 - profile effects beyond prompt guidance
 - channel-specific mode settings
-- richer Arabic interface copy and localized approval cards
+- richer Arabic interface copy and localized approval cards beyond the security/skill settings
 
 ### 9. Update story
 

@@ -252,6 +252,7 @@ At a high level:
 - browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, screenshot vision, dialog response, and mock click/image-list automation tools
 - browser setup/test aliases and settings browser view
 - profile/UI config persistence, profile commands, Arabic presentation labels, and prompt guidance
+- Arabic security-mode and skill-autonomy labels/descriptions, with English config values preserved
 - context expansion
 - skill execution and package behavior
 - session-stable skill visibility
