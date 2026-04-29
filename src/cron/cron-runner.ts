@@ -1,3 +1,5 @@
+import { mkdir, open, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { CronJob } from "./cron-store.js";
@@ -18,20 +20,23 @@ export async function tickCron(input: {
   store: CronStore;
   runner: CronRunner;
   now?: Date;
+  lockPath?: string;
 }): Promise<CronRunResult[]> {
-  const due = await input.store.due(input.now);
-  const results: CronRunResult[] = [];
+  return withCronTickLock(input.lockPath ?? defaultLockPath(input.store), async () => {
+    const due = await input.store.due(input.now);
+    const results: CronRunResult[] = [];
 
-  for (const job of due) {
-    const result = await input.runner.runJob(job);
-    await input.store.markRunResult(job.id, {
-      ok: result.ok,
-      output: result.output
-    });
-    results.push(result);
-  }
+    for (const job of due) {
+      const result = await input.runner.runJob(job);
+      await input.store.markRunResult(job.id, {
+        ok: result.ok,
+        output: result.output
+      });
+      results.push(result);
+    }
 
-  return results;
+    return results;
+  });
 }
 
 export function createRuntimeCronRunner(input: {
@@ -105,4 +110,34 @@ export function originFromSessionKey(sessionKey: ChannelSessionKey, channel: str
     userId: sessionKey.userId,
     threadId: sessionKey.threadId
   };
+}
+
+async function withCronTickLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  await mkdirSafe(dirname(path));
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(path, "wx");
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (code === "EEXIST") {
+      return [] as unknown as T;
+    }
+    throw error;
+  }
+
+  try {
+    await handle.writeFile(new Date().toISOString(), "utf8");
+    return await fn();
+  } finally {
+    await handle.close();
+    await rm(path, { force: true });
+  }
+}
+
+async function mkdirSafe(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+}
+
+function defaultLockPath(store: CronStore): string {
+  return join(dirname(store.path), ".tick.lock");
 }

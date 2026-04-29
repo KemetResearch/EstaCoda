@@ -266,6 +266,27 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
       await tickCron({
         store: cronStore,
         runner: createRuntimeCronRunner({
+          deliver: async (job, content) => {
+            if (job.delivery === "origin" && job.origin?.channel === "telegram" && job.origin.chatId !== undefined) {
+              await adapter.delivery.sendText({
+                platform: "telegram",
+                chatId: job.origin.chatId,
+                userId: job.origin.userId,
+                threadId: job.origin.threadId
+              }, content);
+              return true;
+            }
+
+            if (job.delivery.startsWith("telegram:")) {
+              await adapter.delivery.sendText({
+                platform: "telegram",
+                chatId: job.delivery.slice("telegram:".length)
+              }, content);
+              return true;
+            }
+
+            return false;
+          },
           disposeRuntime: true,
           runtimeFactory: async (job) => {
             const latestConfig = await loadRuntimeConfig(options);

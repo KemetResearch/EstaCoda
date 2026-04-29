@@ -7,6 +7,7 @@ import type {
 } from "../contracts/channel.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
+import { originFromSessionKey } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
@@ -394,7 +395,9 @@ export class ChannelGateway {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const result = await runCronCommand({
         args: tokenizeCommandArgs(message.text).slice(1),
-        store: new CronStore()
+        store: new CronStore(),
+        origin: originFromSessionKey(message.sessionKey, message.channel),
+        defaultDelivery: "origin"
       });
       await adapter.delivery?.sendText(message.sessionKey, result.output);
 

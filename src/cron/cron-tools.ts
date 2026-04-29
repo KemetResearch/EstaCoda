@@ -10,6 +10,9 @@ type CronjobToolInput = {
   name?: string;
   skill?: string;
   skills?: string[];
+  add_skill?: string;
+  remove_skill?: string;
+  clear_skills?: boolean;
   delivery?: string;
   repeat?: number;
 };
@@ -28,6 +31,9 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         name: { type: "string" },
         skill: { type: "string" },
         skills: { type: "array", items: { type: "string" } },
+        add_skill: { type: "string" },
+        remove_skill: { type: "string" },
+        clear_skills: { type: "boolean" },
         delivery: { type: "string" },
         repeat: { type: "number" }
       },
@@ -66,11 +72,15 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
       }
 
       if (action === "update") {
+        const existing = await options.store.get(id);
+        if (existing === undefined) {
+          return { ok: false, content: `Cron job not found: ${id}` };
+        }
         const job = await options.store.update(id, {
           prompt: input.prompt,
           schedule: input.schedule,
           name: input.name,
-          skills: input.skills ?? (input.skill === undefined ? undefined : [input.skill]),
+          skills: resolveUpdatedSkills(existing.skills, input),
           delivery: input.delivery,
           repeat: input.repeat
         });
@@ -112,6 +122,15 @@ export function renderCronJobs(jobs: Awaited<ReturnType<CronStore["list"]>>): st
 
 function normalizeSkills(input: CronjobToolInput): string[] {
   return input.skills ?? (input.skill === undefined ? [] : [input.skill]);
+}
+
+function resolveUpdatedSkills(current: string[], input: CronjobToolInput): string[] | undefined {
+  if (input.clear_skills === true) return [];
+  if (input.skills !== undefined) return input.skills;
+  if (input.skill !== undefined) return [input.skill];
+  if (input.add_skill !== undefined) return current.includes(input.add_skill) ? current : [...current, input.add_skill];
+  if (input.remove_skill !== undefined) return current.filter((skill) => skill !== input.remove_skill);
+  return undefined;
 }
 
 function renderMaybeJob(prefix: string, job: Awaited<ReturnType<CronStore["get"]>>, id: string) {

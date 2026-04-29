@@ -71,11 +71,11 @@ Evidence note:
 ### Cron
 
 - [src/cron/cron-store.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-store.ts)
-  Persistent scheduled-task storage at `~/.estacoda/cron/jobs.json`, atomic writes, schedule parsing for relative delays, intervals, cron expressions, and ISO timestamps, plus local output files.
+  Persistent scheduled-task storage at `~/.estacoda/cron/jobs.json`, atomic writes, schedule parsing for relative delays, intervals, cron expressions, and ISO timestamps, prompt safety scanning, plus local output files.
 - [src/cron/cron-tools.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-tools.ts)
-  Hermes-shaped model-facing `cronjob` tool with create/list/update/pause/resume/run/remove actions.
+  Hermes-shaped model-facing `cronjob` tool with create/list/update/pause/resume/run/remove actions and skill-list edits.
 - [src/cron/cron-runner.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-runner.ts)
-  Scheduler tick runner that executes due jobs and writes wrapped output to `~/.estacoda/cron/output/`.
+  Scheduler tick runner that executes due jobs, enforces `.tick.lock`, handles `[SILENT]`, delivers origin/Telegram outputs when configured, and writes wrapped output to `~/.estacoda/cron/output/`.
 
 ### Skills
 

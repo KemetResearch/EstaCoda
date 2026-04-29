@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { assertCronPromptSafe } from "./cron-safety.js";
 
 export type CronJobStatus = "active" | "paused" | "completed";
 export type CronDelivery = "local" | "origin" | string;
@@ -72,6 +73,7 @@ export class CronStore {
     repeat?: number;
     origin?: CronJob["origin"];
   }): Promise<CronJob> {
+    assertCronPromptSafe(input.prompt);
     const now = this.#now().toISOString();
     const parsed = parseCronSchedule(input.schedule, this.#now());
     const job: CronJob = {
@@ -95,6 +97,9 @@ export class CronStore {
   }
 
   async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+    if (patch.prompt !== undefined) {
+      assertCronPromptSafe(patch.prompt);
+    }
     let updated: CronJob | undefined;
     await this.#mutate((jobs) => jobs.map((job) => {
       if (job.id !== id) return job;
