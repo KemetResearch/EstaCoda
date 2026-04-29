@@ -77,6 +77,7 @@ Evidence:
 - MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
 - ACP foundation: JetBrains chat, file reads, shell execution, and approval prompts are `live-proven`
 - Phase 1 onboarding wizard: `estacoda setup`, secret store, workspace trust, security mode, skill autonomy, `estacoda verify`, and `estacoda settings` are `smoke-tested`
+- Phase 2A/2B onboarding branches have started: `estacoda telegram setup` plus Telegram management/test commands, and `estacoda browser setup/test` are `smoke-tested`
 
 ## 3. Current Working Capabilities
 

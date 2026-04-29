@@ -17,7 +17,7 @@ import {
   type TelegramSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
-import { canRunInteractive, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
+import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import { runSetupVerification } from "../onboarding/verification.js";
 import type { ToolDefinition } from "../contracts/tool.js";
@@ -36,6 +36,7 @@ import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
+import { writeEnvSecret } from "../config/env-secret-store.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -229,6 +230,35 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
+  if (category === "browser") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: browser",
+        `Backend: ${config.browser.backend}`,
+        config.browser.cdpUrl === undefined ? undefined : `CDP URL: ${config.browser.cdpUrl}`,
+        `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
+        "Change with: estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222"
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  }
+
+  if (category === "telegram") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda settings: telegram",
+        `Status: ${config.channels.telegram.ready ? "ready" : config.channels.telegram.enabled ? "configured, missing credentials" : "disabled"}`,
+        config.channels.telegram.botTokenEnv === undefined ? undefined : `Bot token env: ${config.channels.telegram.botTokenEnv}`,
+        `Allowed users: ${(config.channels.telegram.allowedUserIds ?? []).join(", ") || "none"}`,
+        `Allowed chats: ${(config.channels.telegram.allowedChatIds ?? []).join(", ") || "none"}`,
+        "Change with: estacoda telegram setup"
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  }
+
   if (category === "provider") {
     const diagnostic = await diagnoseProviderConfig(config);
     return {
@@ -260,6 +290,8 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "  estacoda settings provider",
       "  estacoda settings security",
       "  estacoda settings skills",
+      "  estacoda settings browser",
+      "  estacoda settings telegram",
       "  estacoda settings skills --autonomy suggest"
     ].join("\n")
   };
@@ -449,30 +481,37 @@ function renderLiveToolDiagnostic(diagnostic: LiveToolDiagnostic): string {
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "configure" && subcommand !== "disable") {
+  if (subcommand !== "status" && subcommand !== "configure" && subcommand !== "setup" && subcommand !== "disable" && subcommand !== "test") {
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda browser backend",
         "  estacoda browser status",
-        "  estacoda browser configure --backend local-cdp --cdp-url http://127.0.0.1:9222",
+        "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222",
+        "  estacoda browser test",
         "  estacoda browser disable"
       ].join("\n")
     };
   }
 
-  if (subcommand === "status") {
+  if (subcommand === "status" || subcommand === "test") {
     const config = await loadRuntimeConfig(options);
     return {
       handled: true,
-      exitCode: 0,
+      exitCode: subcommand === "test" && config.browser.backend === "unconfigured" ? 1 : 0,
       output: [
+        subcommand === "test" ? "EstaCoda browser test" : undefined,
         `Browser backend: ${config.browser.backend}`,
         config.browser.cdpUrl === undefined ? undefined : `CDP URL: ${config.browser.cdpUrl}`,
         config.browser.launchCommand === undefined ? undefined : `Launch command: ${config.browser.launchCommand}`,
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
-        `Config sources: ${config.sources.join(", ") || "none"}`
+        `Config sources: ${config.sources.join(", ") || "none"}`,
+        subcommand === "test"
+          ? config.browser.backend === "unconfigured"
+            ? "Status: browser is not configured. Run estacoda browser setup."
+            : "Status: configured. Live navigation is verified through browser tools during runtime."
+          : undefined
       ].filter((line) => line !== undefined).join("\n")
     };
   }
@@ -633,18 +672,35 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
 }
 
 async function telegram(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand] = args;
+  const [subcommand, ...rest] = args;
 
-  if (subcommand !== "status" && subcommand !== "configure" && subcommand !== "disable" && subcommand !== "pair") {
+  if (
+    subcommand !== "status" &&
+    subcommand !== "setup" &&
+    subcommand !== "configure" &&
+    subcommand !== "disable" &&
+    subcommand !== "pair" &&
+    subcommand !== "allow-user" &&
+    subcommand !== "remove-user" &&
+    subcommand !== "allow-chat" &&
+    subcommand !== "remove-chat" &&
+    subcommand !== "set-default-chat" &&
+    subcommand !== "sync-commands" &&
+    subcommand !== "test"
+  ) {
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda Telegram channel",
         "  estacoda telegram status",
-        "  estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_BOT_TOKEN",
-        "  estacoda telegram configure --bot-token <token> --default-chat-id <chat>",
+        "  estacoda telegram setup",
+        "  estacoda telegram allow-user <id>",
+        "  estacoda telegram allow-chat <id>",
+        "  estacoda telegram set-default-chat <id>",
         "  estacoda telegram pair",
+        "  estacoda telegram sync-commands",
+        "  estacoda telegram test --chat-id <chat>",
         "  estacoda telegram disable"
       ].join("\n")
     };
@@ -672,7 +728,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
   }
 
   if (subcommand === "pair") {
-    const parsed = parseTelegramPairArgs(args.slice(1));
+    const parsed = parseTelegramPairArgs(rest);
     const result = await createTelegramPairingCode({
       ...options,
       input: parsed
@@ -693,13 +749,26 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
+  if (subcommand === "setup") {
+    return telegramSetup(options);
+  }
+
+  if (subcommand === "allow-user" || subcommand === "remove-user" || subcommand === "allow-chat" || subcommand === "remove-chat" || subcommand === "set-default-chat") {
+    return telegramManage(options, subcommand, rest);
+  }
+
+  if (subcommand === "sync-commands") {
+    return telegramSyncCommands(options);
+  }
+
+  if (subcommand === "test") {
+    return telegramTest(options, rest);
+  }
+
   const parsed = subcommand === "disable"
     ? { enabled: false } satisfies TelegramSetupInput
-    : parseTelegramArgs(args.slice(1));
-  const result = await setupTelegramConfig({
-    ...options,
-    input: parsed
-  });
+    : parseTelegramArgs(rest);
+  const result = await setupTelegramConfig({ ...options, input: parsed });
 
   return {
     handled: true,
@@ -712,6 +781,199 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
       result.envExport === undefined ? undefined : `Shell export:\n${result.envExport}`,
       parsed.enabled === false ? undefined : "Next: run estacoda telegram status, then start the gateway when channel runtime is enabled."
     ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
+async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
+  const prompt = options.prompt ?? createReadlinePrompt();
+  const closePrompt = options.prompt === undefined;
+
+  try {
+    await prompt([
+      "Telegram guided setup",
+      "Telegram bots must be explicitly allowed before they can control EstaCoda.",
+      "Create a bot with @BotFather, then paste the token here.",
+      ""
+    ].join("\n"));
+    const tokenMode = await prompt("Store bot token in ~/.estacoda/.env? [Y/n]: ");
+    const saveToken = parseYesNo(tokenMode, true);
+    const token = saveToken
+      ? await prompt("Paste Telegram bot token: ", { secret: true })
+      : "";
+    const tokenEnvRaw = await prompt("Bot token environment variable [ESTACODA_TELEGRAM_BOT_TOKEN]: ");
+    const tokenEnv = tokenEnvRaw.trim().length === 0 ? "ESTACODA_TELEGRAM_BOT_TOKEN" : tokenEnvRaw.trim();
+    const allowUser = await prompt("Allowed Telegram user ID (optional): ");
+    const allowChat = await prompt("Allowed group/chat ID (optional): ");
+    const defaultChat = await prompt("Default chat ID for tests/notifications (optional): ");
+    const pollTimeoutRaw = await prompt("Poll timeout seconds [25]: ");
+    const pollTimeoutSeconds = Number.parseInt(pollTimeoutRaw.trim(), 10);
+    let secretPath: string | undefined;
+
+    if (saveToken && token.trim().length > 0) {
+      secretPath = (await writeEnvSecret({
+        homeDir: options.homeDir,
+        key: tokenEnv,
+        value: token.trim()
+      })).path;
+      process.env[tokenEnv] = token.trim();
+    }
+
+    const result = await setupTelegramConfig({
+      ...options,
+      input: {
+        enabled: true,
+        botTokenEnv: tokenEnv,
+        allowedUserIds: allowUser.trim().length === 0 ? undefined : [allowUser.trim()],
+        allowedChatIds: allowChat.trim().length === 0 ? undefined : [allowChat.trim()],
+        defaultChatId: defaultChat.trim().length === 0 ? undefined : defaultChat.trim(),
+        pollTimeoutSeconds: Number.isFinite(pollTimeoutSeconds) ? pollTimeoutSeconds : undefined
+      }
+    });
+    const verify = await telegramVerifyToken({
+      token: process.env[tokenEnv],
+      fetch: options.telegramFetch
+    });
+
+    return {
+      handled: true,
+      exitCode: verify.ok || process.env[tokenEnv] === undefined ? 0 : 1,
+      output: [
+        "Telegram setup complete.",
+        `Config: ${result.path}`,
+        `Bot token env: ${tokenEnv}`,
+        secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
+        result.config.channels?.telegram?.defaultChatId === undefined ? undefined : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
+        `Allowed users: ${(result.config.channels?.telegram?.allowedUserIds ?? []).join(", ") || "none"}`,
+        `Allowed chats: ${(result.config.channels?.telegram?.allowedChatIds ?? []).join(", ") || "none"}`,
+        `Token check: ${verify.message}`,
+        "",
+        "Next:",
+        "  estacoda telegram status",
+        "  estacoda telegram sync-commands",
+        "  estacoda gateway start --telegram"
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  } finally {
+    if (closePrompt) {
+      prompt.close?.();
+    }
+  }
+}
+
+async function telegramManage(options: CliOptions, subcommand: string, args: string[]): Promise<CliCommandResult> {
+  const value = args[0];
+  if (value === undefined || value.trim().length === 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Usage: estacoda telegram ${subcommand} <id>`
+    };
+  }
+
+  const config = await loadRuntimeConfig(options);
+  const telegram = config.channels.telegram;
+  const users = telegram.allowedUserIds ?? [];
+  const chats = telegram.allowedChatIds ?? [];
+  const input: TelegramSetupInput = {
+    enabled: telegram.enabled ?? true,
+    botTokenEnv: telegram.botTokenEnv,
+    defaultChatId: subcommand === "set-default-chat" ? value : telegram.defaultChatId,
+    allowedUserIds: subcommand === "allow-user"
+      ? uniqueStrings([...users, value])
+      : subcommand === "remove-user"
+        ? users.filter((entry) => entry !== value)
+        : users,
+    allowedChatIds: subcommand === "allow-chat"
+      ? uniqueStrings([...chats, value])
+      : subcommand === "remove-chat"
+        ? chats.filter((entry) => entry !== value)
+        : chats,
+    pollTimeoutSeconds: telegram.pollTimeoutSeconds
+  };
+  const result = await setupTelegramConfig({ ...options, input });
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      "Telegram channel updated.",
+      `Config: ${result.path}`,
+      `Default chat: ${result.config.channels?.telegram?.defaultChatId ?? "none"}`,
+      `Allowed users: ${(result.config.channels?.telegram?.allowedUserIds ?? []).join(", ") || "none"}`,
+      `Allowed chats: ${(result.config.channels?.telegram?.allowedChatIds ?? []).join(", ") || "none"}`
+    ].join("\n")
+  };
+}
+
+async function telegramSyncCommands(options: CliOptions): Promise<CliCommandResult> {
+  const config = await loadRuntimeConfig(options);
+  const envName = config.channels.telegram.botTokenEnv;
+  const token = envName === undefined ? undefined : process.env[envName];
+  if (token === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Telegram token missing. Configure with: estacoda telegram setup`
+    };
+  }
+
+  const result = await callTelegramApi({
+    token,
+    method: "setMyCommands",
+    fetch: options.telegramFetch,
+    body: {
+      commands: [
+        { command: "start", description: "Start EstaCoda" },
+        { command: "help", description: "Show available commands" },
+        { command: "status", description: "Show gateway status" },
+        { command: "reset", description: "Reset this chat session" }
+      ]
+    }
+  });
+
+  return {
+    handled: true,
+    exitCode: result.ok ? 0 : 1,
+    output: result.ok ? "Telegram commands synced." : `Telegram command sync failed: ${result.message}`
+  };
+}
+
+async function telegramTest(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const config = await loadRuntimeConfig(options);
+  const envName = config.channels.telegram.botTokenEnv;
+  const token = envName === undefined ? undefined : process.env[envName];
+  const chatId = valueAfter(args, "--chat-id") ?? config.channels.telegram.defaultChatId;
+
+  if (token === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Telegram token missing. Configure with: estacoda telegram setup"
+    };
+  }
+  if (chatId === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Telegram test needs a chat. Use --chat-id <id> or estacoda telegram set-default-chat <id>."
+    };
+  }
+
+  const result = await callTelegramApi({
+    token,
+    method: "sendMessage",
+    fetch: options.telegramFetch,
+    body: {
+      chat_id: chatId,
+      text: "EstaCoda Telegram test message.",
+      disable_web_page_preview: true
+    }
+  });
+
+  return {
+    handled: true,
+    exitCode: result.ok ? 0 : 1,
+    output: result.ok ? `Telegram test message sent to ${chatId}.` : `Telegram test failed: ${result.message}`
   };
 }
 
@@ -928,6 +1190,73 @@ async function acp(options: CliOptions, args: string[]): Promise<CliCommandResul
     exitCode: 1,
     output: "Usage: estacoda acp [serve|manifest]"
   };
+}
+
+async function telegramVerifyToken(input: {
+  token: string | undefined;
+  fetch?: TelegramFetch;
+}): Promise<{ ok: boolean; message: string }> {
+  if (input.token === undefined || input.token.length === 0) {
+    return {
+      ok: false,
+      message: "skipped; token not available in this shell"
+    };
+  }
+
+  const result = await callTelegramApi({
+    token: input.token,
+    method: "getMe",
+    fetch: input.fetch,
+    body: {}
+  });
+
+  return {
+    ok: result.ok,
+    message: result.ok ? "ready" : result.message
+  };
+}
+
+async function callTelegramApi(input: {
+  token: string;
+  method: string;
+  body: Record<string, unknown>;
+  fetch?: TelegramFetch;
+}): Promise<{ ok: boolean; message: string }> {
+  const fetcher = input.fetch ?? fetch;
+  try {
+    const response = await fetcher(`https://api.telegram.org/bot${input.token}/${input.method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input.body)
+    });
+    const json = await response.json() as { ok?: boolean; description?: string };
+
+    if (response.ok && json.ok === true) {
+      return { ok: true, message: "ready" };
+    }
+
+    return {
+      ok: false,
+      message: json.description ?? response.statusText ?? `HTTP ${response.status}`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "unknown Telegram API error"
+    };
+  }
+}
+
+function parseYesNo(value: string, defaultValue: boolean): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return defaultValue;
+  }
+  return normalized === "y" || normalized === "yes";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {

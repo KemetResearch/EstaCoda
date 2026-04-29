@@ -82,6 +82,10 @@ cd /Users/ahnwy/estacoda-v2
 /Users/ahnwy/.bun/bin/bun run dev -- setup
 /Users/ahnwy/.bun/bin/bun run dev -- verify
 /Users/ahnwy/.bun/bin/bun run dev -- settings
+/Users/ahnwy/.bun/bin/bun run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
+/Users/ahnwy/.bun/bin/bun run dev -- browser test
+/Users/ahnwy/.bun/bin/bun run dev -- telegram setup
+/Users/ahnwy/.bun/bin/bun run dev -- telegram sync-commands
 /Users/ahnwy/.bun/bin/bun run dev -- doctor --live
 /Users/ahnwy/.bun/bin/bun run dev
 ```
@@ -101,6 +105,8 @@ Evidence level:
 - Phase 1 setup wizard: `smoke-tested`
 - local `~/.estacoda/.env` secret store with `0600`: `smoke-tested`
 - setup verification and settings overview: `smoke-tested`
+- Phase 2A Telegram guided setup and management commands: `smoke-tested`
+- Phase 2B browser setup/test command alignment: `smoke-tested`
 - CLI file edit/read/verify flow: `live-proven`
 - broader CLI ergonomics: partial and still needs judgment during live runs
 
@@ -243,6 +249,7 @@ At a high level:
 - tool-call recovery and continuation logic
 - provider tool-call extraction
 - browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, screenshot vision, dialog response, and mock click/image-list automation tools
+- browser setup/test aliases and settings browser view
 - context expansion
 - skill execution and package behavior
 - session-stable skill visibility
@@ -255,6 +262,7 @@ At a high level:
 - expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
 - CLI `/security` and `/security debug` audit rendering
 - Telegram progress compaction
+- Telegram guided setup, token verification, allow/remove user/chat commands, command sync, and test-message command
 - Telegram approvals and callbacks
 - Telegram attachment flows
 - Telegram formatter behavior

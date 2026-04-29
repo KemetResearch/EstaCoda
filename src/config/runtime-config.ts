@@ -784,16 +784,28 @@ export async function setupTelegramConfig(options: {
   const envExport = options.input.botToken === undefined
     ? undefined
     : `export ${envName}=${shellQuote(options.input.botToken)}`;
+  const telegramPatch: TelegramChannelConfig = {
+    ...(existing.config.channels?.telegram ?? {}),
+    enabled: options.input.enabled ?? true,
+    botTokenEnv: envName
+  };
+
+  if (options.input.defaultChatId !== undefined) {
+    telegramPatch.defaultChatId = options.input.defaultChatId;
+  }
+  if (options.input.allowedUserIds !== undefined) {
+    telegramPatch.allowedUserIds = options.input.allowedUserIds;
+  }
+  if (options.input.allowedChatIds !== undefined) {
+    telegramPatch.allowedChatIds = options.input.allowedChatIds;
+  }
+  if (options.input.pollTimeoutSeconds !== undefined) {
+    telegramPatch.pollTimeoutSeconds = options.input.pollTimeoutSeconds;
+  }
+
   const config = mergeConfig(existing.config, {
     channels: {
-      telegram: {
-        enabled: options.input.enabled ?? true,
-        botTokenEnv: envName,
-        defaultChatId: options.input.defaultChatId,
-        allowedUserIds: options.input.allowedUserIds,
-        allowedChatIds: options.input.allowedChatIds,
-        pollTimeoutSeconds: options.input.pollTimeoutSeconds
-      }
+      telegram: telegramPatch
     }
   });
 

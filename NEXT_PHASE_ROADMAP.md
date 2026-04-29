@@ -119,12 +119,15 @@ Remaining hardening:
 
 ### 5. Installer And Onboarding
 
-Status: Phase 1 onboarding now exists: canonical `estacoda setup`, advanced flag setup, first-launch confirmation, provider config, local `~/.estacoda/.env` secret storage, workspace trust, security mode, skill autonomy, `estacoda verify`, `estacoda settings`, onboarding tools, and doctor checks.
+Status: Phase 1 onboarding now exists: canonical `estacoda setup`, advanced flag setup, first-launch confirmation, provider config, local `~/.estacoda/.env` secret storage, workspace trust, security mode, skill autonomy, `estacoda verify`, `estacoda settings`, onboarding tools, and doctor checks. Phase 2A/2B have started with guided Telegram setup/management and browser setup/test command alignment.
 
 Next acceptance checks:
 - Done: a fresh user can configure a model, store a hosted key reference safely, trust a workspace, and run verification.
+- Done: Telegram has a guided setup branch with token storage, token verification, allowlist management, command sync, and test-message path.
+- Done: browser setup/test aliases exist for the local-CDP browser foundation.
 - Local model setup is supported cleanly.
 - Config errors produce actionable fixes.
+- Profiles, Arabic UI flavor, and migration detection/import are implemented.
 - Packaging path is defined for binary/npm/homebrew-style distribution.
 
 ### 6. Internal Alpha Operations

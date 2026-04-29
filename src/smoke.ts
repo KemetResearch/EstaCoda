@@ -677,8 +677,18 @@ const cliBrowserConfigure = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
+const cliBrowserSetupAlias = await runCliCommand({
+  argv: ["browser", "setup", "--backend", "local-cdp", "--cdp-url", "http://127.0.0.1:9333"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
 const cliBrowserStatus = await runCliCommand({
   argv: ["browser", "status"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliBrowserTest = await runCliCommand({
+  argv: ["browser", "test"],
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
@@ -699,6 +709,77 @@ const cliTelegramStatusReady = await runCliCommand({
   homeDir: cliHome
 });
 delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
+const telegramSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-workspace-"));
+const telegramSetupHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-home-"));
+const telegramSetupPrompts: string[] = [];
+const telegramSetupAnswers = ["", "", "TEST_TELEGRAM_SETUP_TOKEN", "", "4242", "-1004242", "-1004242", ""];
+const telegramSetupRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+const cliTelegramSetup = await runCliCommand({
+  argv: ["telegram", "setup"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome,
+  prompt: Object.assign(
+    async (question: string) => {
+      telegramSetupPrompts.push(question);
+      return telegramSetupAnswers.shift() ?? "";
+    },
+    { close: () => undefined }
+  ),
+  telegramFetch: async (url, init) => {
+    telegramSetupRequests.push({
+      url,
+      body: JSON.parse(init?.body ?? "{}") as Record<string, unknown>
+    });
+    return fakeTelegramResponse({ id: 123, username: "estacoda_test_bot" });
+  }
+});
+const telegramSetupEnvPath = join(telegramSetupHome, ".estacoda", ".env");
+const telegramSetupEnv = await readFile(telegramSetupEnvPath, "utf8");
+const telegramSetupEnvMode = (await stat(telegramSetupEnvPath)).mode & 0o777;
+const cliTelegramAllowUser = await runCliCommand({
+  argv: ["telegram", "allow-user", "9999"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome
+});
+const cliTelegramRemoveUser = await runCliCommand({
+  argv: ["telegram", "remove-user", "4242"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome
+});
+const cliTelegramAllowChat = await runCliCommand({
+  argv: ["telegram", "allow-chat", "-1009999"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome
+});
+const cliTelegramSetDefaultChat = await runCliCommand({
+  argv: ["telegram", "set-default-chat", "-1009999"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome
+});
+const cliTelegramSyncCommands = await runCliCommand({
+  argv: ["telegram", "sync-commands"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome,
+  telegramFetch: async (url, init) => {
+    telegramSetupRequests.push({
+      url,
+      body: JSON.parse(init?.body ?? "{}") as Record<string, unknown>
+    });
+    return fakeTelegramResponse(true);
+  }
+});
+const cliTelegramTest = await runCliCommand({
+  argv: ["telegram", "test"],
+  workspaceRoot: telegramSetupWorkspace,
+  homeDir: telegramSetupHome,
+  telegramFetch: async (url, init) => {
+    telegramSetupRequests.push({
+      url,
+      body: JSON.parse(init?.body ?? "{}") as Record<string, unknown>
+    });
+    return fakeTelegramResponse({ message_id: 501 });
+  }
+});
 const gatewayWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-workspace-"));
 const gatewayHome = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-home-"));
 const gatewaySetup = await runCliCommand({
@@ -3572,14 +3653,31 @@ assert(cliWebEnable.output.includes("Web extraction enabled"), "expected CLI web
 assert(cliWebStatus.output.includes("Web extraction: enabled"), "expected CLI web status output");
 assert(cliWebStatus.output.includes("Max content chars: 12000"), "expected CLI web max content output");
 assert(cliBrowserConfigure.output.includes("Browser backend: local-cdp"), "expected CLI browser configure output");
+assert(cliBrowserSetupAlias.output.includes("Browser backend: local-cdp"), "expected CLI browser setup alias output");
 assert(cliBrowserStatus.output.includes("Browser backend: local-cdp"), "expected CLI browser status output");
-assert(cliBrowserStatus.output.includes("CDP URL: http://127.0.0.1:9222"), "expected CLI browser CDP URL");
+assert(cliBrowserStatus.output.includes("CDP URL: http://127.0.0.1:9333"), "expected CLI browser CDP URL from setup alias");
+assert(cliBrowserTest.output.includes("EstaCoda browser test"), "expected CLI browser test output");
+assert(cliBrowserTest.output.includes("Status: configured"), "expected CLI browser test configured status");
 assert(cliTelegramConfigure.output.includes("Telegram channel configured"), "expected CLI Telegram configure output");
 assert(cliTelegramConfigure.output.includes("Shell export:"), "expected CLI Telegram shell export output");
 assert(cliTelegramStatusMissing.exitCode === 1, "expected Telegram status to fail with missing token");
 assert(cliTelegramStatusMissing.output.includes("Missing: ESTACODA_TELEGRAM_BOT_TOKEN"), "expected Telegram missing token output");
 assert(cliTelegramStatusReady.exitCode === 0, "expected Telegram status to pass with token");
 assert(cliTelegramStatusReady.output.includes("Status: ready"), "expected Telegram ready status output");
+assert(cliTelegramSetup.output.includes("Telegram setup complete."), "expected Telegram guided setup output");
+assert(cliTelegramSetup.output.includes("Token check: ready"), "expected Telegram setup token verification");
+assert(telegramSetupPrompts.length === 8, "expected Telegram setup prompts");
+assert(telegramSetupEnv.includes("ESTACODA_TELEGRAM_BOT_TOKEN=\"TEST_TELEGRAM_SETUP_TOKEN\""), "expected Telegram setup to store token");
+assert(telegramSetupEnvMode === 0o600, "expected Telegram setup secret mode 0600");
+assert(telegramSetupRequests.some((request) => request.url.endsWith("/getMe")), "expected Telegram setup to verify token");
+assert(cliTelegramAllowUser.output.includes("9999"), "expected Telegram allow-user output");
+assert(cliTelegramRemoveUser.output.includes("Allowed users: 9999"), "expected Telegram remove-user to remove original user");
+assert(cliTelegramAllowChat.output.includes("-1009999"), "expected Telegram allow-chat output");
+assert(cliTelegramSetDefaultChat.output.includes("Default chat: -1009999"), "expected Telegram default chat update");
+assert(cliTelegramSyncCommands.output.includes("Telegram commands synced"), "expected Telegram command sync output");
+assert(telegramSetupRequests.some((request) => request.url.endsWith("/setMyCommands")), "expected Telegram command sync request");
+assert(cliTelegramTest.output.includes("Telegram test message sent"), "expected Telegram test output");
+assert(telegramSetupRequests.some((request) => request.url.endsWith("/sendMessage")), "expected Telegram test send message request");
 assert(gatewaySetup.output.includes("Telegram channel configured"), "expected gateway Telegram setup output");
 assert(gatewayMediaSetup.output.includes("Telegram channel configured"), "expected gateway media Telegram setup output");
 assert(pairingSetup.output.includes("Telegram channel configured"), "expected pairing Telegram setup output");

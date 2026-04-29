@@ -108,7 +108,7 @@ Next:
 
 ### 5. Onboarding and packaging
 
-State: Phase 1 setup wizard is now smoke-tested; packaging remains partial.
+State: Phase 1 setup wizard is smoke-tested and Phase 2 onboarding branches have started; packaging remains partial.
 
 Done:
 
@@ -119,6 +119,8 @@ Done:
 - setup prompts for workspace trust, provider/model, credential storage, security mode, and skill autonomy `smoke-tested`
 - `estacoda verify` readiness check `smoke-tested`
 - `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`
+- Phase 2A Telegram guided setup via `estacoda telegram setup` with local secret storage, token verification, allow/remove management, command sync, and test message path `smoke-tested`
+- Phase 2B browser command alignment via `estacoda browser setup`, `estacoda browser test`, and `estacoda settings browser` `smoke-tested`
 - provider config `smoke-tested`
 - doctor checks `live-proven`
 
@@ -127,6 +129,7 @@ Next:
 - external-user-quality install flow
 - local model setup polish
 - richer recovery UX for bad credentials/config
+- Phase 2 profiles, Arabic UI flavor, and migration detection/import
 - packaging/distribution decision
 
 ### 6. Internal alpha operations
@@ -253,6 +256,7 @@ State: partially built.
 - `/yolo` session-scoped open-mode toggles now exist in CLI and gateway `smoke-tested`
 - cron foundation now exists: `cronjob`, `estacoda cron`, `/cron`, persistent jobs, prompt scanning, bounded workspace-local script-backed jobs, tick locking, local output, origin/Telegram delivery hooks, and gateway ticks `smoke-tested`
 - browser automation now has a Hermes-shaped local-CDP core: navigate, snapshot refs, click/type/scroll/press/back, image listing, console capture, raw CDP, screenshots, screenshot vision, dialog response, `/browser`, and config/status `smoke-tested`
+- Telegram guided setup/management command surface now exists: `telegram setup`, `allow-user`, `remove-user`, `allow-chat`, `remove-chat`, `set-default-chat`, `sync-commands`, and `test` `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:
