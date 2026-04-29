@@ -6265,6 +6265,13 @@ const riskySkillFile = await readFile(join(skillLearningProjectRoot, "post-relea
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   workspaceRoot: contextWorkspace,
+  visionAnalyzer: async (input) => ({
+    ok: true,
+    content: `browser vision ok: ${input.path.includes(".estacoda/browser/screenshots/") ? "screenshot" : "missing"}`,
+    metadata: {
+      path: input.path
+    }
+  }),
   browserBackend: createLocalCdpBrowserBackend({
     cdpUrl: "http://127.0.0.1:9222",
     fetch: async (url, init) => ({
@@ -6361,6 +6368,22 @@ const cdpBrowserScreenshot = await cdpToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const cdpBrowserVision = await cdpToolExecutor.executeTool({
+  tool: "browser.vision",
+  input: {
+    prompt: "Describe the browser screenshot."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const cdpBrowserDialog = await cdpToolExecutor.executeTool({
+  tool: "browser.dialog",
+  input: {
+    action: "accept"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 
 assert(
   response.matchedSkills.includes("youtube-knowledge-base"),
@@ -6394,6 +6417,9 @@ assert(cdpBrowserRaw?.result?.ok === true, "expected CDP browser.cdp to succeed"
 assert(cdpBrowserRaw.result.content.includes("CDP Smoke Page"), "expected CDP raw output");
 assert(cdpBrowserScreenshot?.result?.ok === true, "expected CDP browser.screenshot to succeed");
 assert(cdpBrowserScreenshot.result.content.includes(".estacoda/browser/screenshots/"), "expected browser screenshot path");
+assert(cdpBrowserVision?.result?.ok === true, "expected CDP browser.vision to succeed");
+assert(cdpBrowserVision.result.content.includes("browser vision ok: screenshot"), "expected browser vision analysis");
+assert(cdpBrowserDialog?.result?.ok === true, "expected CDP browser.dialog to succeed");
 assert(response.securityDecision === "allow", "expected runtime to auto-allow safe initial workflow");
 assert(
   response.toolExecutions.some((execution) => execution.tool.name === "workflow.plan" && execution.result?.ok),

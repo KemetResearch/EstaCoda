@@ -44,6 +44,8 @@ export type BrowserActionInput = {
   clear?: boolean;
   method?: string;
   params?: Record<string, unknown>;
+  action?: "accept" | "dismiss";
+  promptText?: string;
   signal?: AbortSignal;
 };
 
@@ -96,4 +98,5 @@ export type BrowserBackend = {
   console?(input?: BrowserActionInput): Promise<BrowserConsoleEntry[]>;
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
+  dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
 };

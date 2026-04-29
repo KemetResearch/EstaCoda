@@ -10,6 +10,11 @@ export type WebToolOptions = {
   enableNetwork?: boolean;
   maxContentChars?: number;
   workspaceRoot?: string;
+  visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
+    ok: boolean;
+    content: string;
+    metadata?: Record<string, unknown>;
+  }>;
 };
 
 export type FetchLike = (url: string, init?: {
@@ -317,22 +322,87 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             metadata: { backend: browserBackend.kind }
           };
         }
-        const root = options.workspaceRoot ?? process.cwd();
-        const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, Buffer.from(screenshot.base64, "base64"));
-        const file = await stat(path);
+        const saved = await saveBrowserScreenshot(options.workspaceRoot, screenshot.base64);
         return {
           ok: true,
           content: [
-            `Screenshot: ${path}`,
+            `Screenshot: ${saved.path}`,
             `MIME: ${screenshot.mimeType}`,
-            `Bytes: ${file.size}`
+            `Bytes: ${saved.bytes}`
           ].join("\n"),
-          metadata: { backend: browserBackend.kind, path, mimeType: screenshot.mimeType, bytes: file.size }
+          metadata: { backend: browserBackend.kind, path: saved.path, mimeType: screenshot.mimeType, bytes: saved.bytes }
         };
       }
     },
+    {
+      name: "browser.vision",
+      description: "Capture a browser screenshot and analyze it with the configured vision route.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          prompt: { type: "string" }
+        }
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research", "media"],
+      progressLabel: "analyzing browser screenshot",
+      maxResultSizeChars: 8_000,
+      isAvailable: () => browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput & { prompt?: string }, context) => {
+        if (browserBackend.screenshot === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.vision");
+        }
+        if (options.visionAnalyzer === undefined) {
+          return {
+            ok: false,
+            content: "browser.vision requires a configured vision analyzer route.",
+            metadata: { backend: browserBackend.kind, reason: "vision-unavailable" }
+          };
+        }
+        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        if ("error" in screenshot) {
+          return {
+            ok: false,
+            content: screenshot.error instanceof Error ? screenshot.error.message : "Browser screenshot failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        const saved = await saveBrowserScreenshot(options.workspaceRoot, screenshot.base64);
+        const analysis = await options.visionAnalyzer({
+          path: saved.path,
+          prompt: input.prompt
+        }, context?.signal);
+        return {
+          ...analysis,
+          content: [
+            `Browser screenshot: ${saved.path}`,
+            analysis.content
+          ].join("\n\n"),
+          metadata: {
+            ...(analysis.metadata ?? {}),
+            backend: browserBackend.kind,
+            screenshotPath: saved.path,
+            screenshotBytes: saved.bytes
+          }
+        };
+      }
+    },
+    createBrowserActionTool({
+      name: "browser.dialog",
+      description: "Accept or dismiss a native JavaScript dialog in the active local-CDP browser session.",
+      progressLabel: "responding to browser dialog",
+      browserBackend,
+      method: "dialog",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          action: { type: "string", enum: ["accept", "dismiss"] },
+          promptText: { type: "string" }
+        }
+      }
+    }),
     {
       name: "browser.navigate",
       description: "Navigate a browser backend to a URL and return a first snapshot when a backend is configured.",
@@ -467,7 +537,7 @@ function createBrowserActionTool(input: {
   description: string;
   progressLabel: string;
   browserBackend: BrowserBackend;
-  method: "click" | "type" | "scroll" | "press" | "back";
+  method: "click" | "type" | "scroll" | "press" | "back" | "dialog";
   inputSchema: RegisteredTool["inputSchema"];
 }): RegisteredTool {
   return {
@@ -499,6 +569,15 @@ function createBrowserActionTool(input: {
       };
     }
   };
+}
+
+async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: string): Promise<{ path: string; bytes: number }> {
+  const root = workspaceRoot ?? process.cwd();
+  const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, Buffer.from(base64, "base64"));
+  const file = await stat(path);
+  return { path, bytes: file.size };
 }
 
 function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {

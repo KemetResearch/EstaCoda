@@ -24,7 +24,6 @@ type ResolvedPath =
 export function createVisionTools(options: VisionToolOptions): readonly RegisteredTool[] {
   const workspaceRoot = resolve(options.workspaceRoot);
   const allowedRoots = dedupeRoots([workspaceRoot, ...(options.allowedRoots ?? [])]);
-  const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
 
   return [
     {
@@ -43,135 +42,144 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
       isAvailable: async () => (await resolveUsableVisionRoute(options.providerRegistry, options.routePreferences)) !== undefined,
-      run: async (input: { path?: string; prompt?: string }, context) => {
-        const resolved = await resolveAllowedPath(allowedRoots, input.path);
-        if (!resolved.ok) {
-          return resolved;
-        }
-
-        const fileStat = await stat(resolved.path);
-        if (fileStat.size > maxImageBytes) {
-          return {
-            ok: false,
-            content: `This image is too large for the current vision workflow. The limit is ${formatBytes(maxImageBytes)}.`,
-            metadata: {
-              bytes: fileStat.size,
-              limitBytes: maxImageBytes
-            }
-          };
-        }
-
-        const mimeType = inferImageMimeType(resolved.path);
-        if (mimeType === undefined) {
-          return {
-            ok: false,
-            content: "This file does not look like a supported image for vision analysis.",
-            metadata: {
-              path: resolved.path
-            }
-          };
-        }
-
-        const route = await resolveUsableVisionRoute(options.providerRegistry, options.routePreferences);
-        if (route === undefined) {
-          return {
-            ok: false,
-            content: "No vision-capable provider route is configured and available in this runtime yet."
-          };
-        }
-
-        const imageBytes = await readFile(resolved.path);
-        const dataUrl = `data:${mimeType};base64,${imageBytes.toString("base64")}`;
-        const displayRoot = resolved.root ?? workspaceRoot;
-        const relativePath = makeRelativePath(displayRoot, resolved.path);
-        const attempts: string[] = [];
-        const models = [route.primary, ...route.fallbacks];
-
-        for (const model of models) {
-          const provider = options.providerRegistry.get(model.provider);
-          if (provider?.endpoint === undefined) {
-            continue;
-          }
-
-          const credential = options.credentialPools?.resolve(model.provider);
-          const response = await provider.complete({
-            model: model.id,
-            maxTokens: 500,
-            messages: [
-              {
-                role: "system",
-                content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
-              },
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: input.prompt?.trim().length
-                      ? input.prompt.trim()
-                      : "Describe this image so EstaCoda can help the user."
-                  },
-                  {
-                    type: "image_url",
-                    image_url: {
-                      url: dataUrl
-                    }
-                  }
-                ]
-              }
-            ] as any
-          } as any, {
-            credential: credential === undefined
-              ? undefined
-              : {
-                  id: credential.id,
-                  value: credential.value
-                },
-            signal: context?.signal
-          });
-
-          attempts.push(`${model.provider}/${model.id}:${response.ok ? "ok" : response.errorClass ?? "error"}`);
-
-          if (response.ok) {
-            if (credential !== undefined) {
-              options.credentialPools?.reportSuccess(model.provider, credential.id);
-            }
-
-            return {
-              ok: true,
-              content: [
-                `Vision analysis: ${relativePath}`,
-                response.content.trim()
-              ].filter((line) => line.length > 0).join("\n\n"),
-              metadata: {
-                path: relativePath,
-                bytes: fileStat.size,
-                mimeType,
-                provider: model.provider,
-                model: model.id,
-                attempts
-              }
-            };
-          }
-
-          if (credential !== undefined) {
-            options.credentialPools?.reportFailure(model.provider, credential.id, response.errorClass ?? "unknown");
-          }
-        }
-
-        return {
-          ok: false,
-          content: `Vision analysis is unavailable right now. Attempts: ${attempts.join(", ") || "none"}`,
-          metadata: {
-            path: relativePath,
-            bytes: fileStat.size,
-            mimeType,
-            attempts
-          }
-        };
-      }
+      run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(options, input, context?.signal)
     }
   ];
+}
+
+export async function analyzeImageWithVision(
+  options: VisionToolOptions,
+  input: { path?: string; prompt?: string },
+  signal?: AbortSignal
+): Promise<ToolResult> {
+  const workspaceRoot = resolve(options.workspaceRoot);
+  const allowedRoots = dedupeRoots([workspaceRoot, ...(options.allowedRoots ?? [])]);
+  const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+  const resolved = await resolveAllowedPath(allowedRoots, input.path);
+  if (!resolved.ok) {
+    return resolved;
+  }
+
+  const fileStat = await stat(resolved.path);
+  if (fileStat.size > maxImageBytes) {
+    return {
+      ok: false,
+      content: `This image is too large for the current vision workflow. The limit is ${formatBytes(maxImageBytes)}.`,
+      metadata: {
+        bytes: fileStat.size,
+        limitBytes: maxImageBytes
+      }
+    };
+  }
+
+  const mimeType = inferImageMimeType(resolved.path);
+  if (mimeType === undefined) {
+    return {
+      ok: false,
+      content: "This file does not look like a supported image for vision analysis.",
+      metadata: {
+        path: resolved.path
+      }
+    };
+  }
+
+  const route = await resolveUsableVisionRoute(options.providerRegistry, options.routePreferences);
+  if (route === undefined) {
+    return {
+      ok: false,
+      content: "No vision-capable provider route is configured and available in this runtime yet."
+    };
+  }
+
+  const imageBytes = await readFile(resolved.path);
+  const dataUrl = `data:${mimeType};base64,${imageBytes.toString("base64")}`;
+  const displayRoot = resolved.root ?? workspaceRoot;
+  const relativePath = makeRelativePath(displayRoot, resolved.path);
+  const attempts: string[] = [];
+  const models = [route.primary, ...route.fallbacks];
+
+  for (const model of models) {
+    const provider = options.providerRegistry.get(model.provider);
+    if (provider?.endpoint === undefined) {
+      continue;
+    }
+
+    const credential = options.credentialPools?.resolve(model.provider);
+    const response = await provider.complete({
+      model: model.id,
+      maxTokens: 500,
+      messages: [
+        {
+          role: "system",
+          content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: input.prompt?.trim().length
+                ? input.prompt.trim()
+                : "Describe this image so EstaCoda can help the user."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: dataUrl
+              }
+            }
+          ]
+        }
+      ] as any
+    } as any, {
+      credential: credential === undefined
+        ? undefined
+        : {
+            id: credential.id,
+            value: credential.value
+          },
+      signal
+    });
+
+    attempts.push(`${model.provider}/${model.id}:${response.ok ? "ok" : response.errorClass ?? "error"}`);
+
+    if (response.ok) {
+      if (credential !== undefined) {
+        options.credentialPools?.reportSuccess(model.provider, credential.id);
+      }
+
+      return {
+        ok: true,
+        content: [
+          `Vision analysis: ${relativePath}`,
+          response.content.trim()
+        ].filter((line) => line.length > 0).join("\n\n"),
+        metadata: {
+          path: relativePath,
+          bytes: fileStat.size,
+          mimeType,
+          provider: model.provider,
+          model: model.id,
+          attempts
+        }
+      };
+    }
+
+    if (credential !== undefined) {
+      options.credentialPools?.reportFailure(model.provider, credential.id, response.errorClass ?? "unknown");
+    }
+  }
+
+  return {
+    ok: false,
+    content: `Vision analysis is unavailable right now. Attempts: ${attempts.join(", ") || "none"}`,
+    metadata: {
+      path: relativePath,
+      bytes: fileStat.size,
+      mimeType,
+      attempts
+    }
+  };
 }
 
 async function resolveUsableVisionRoute(

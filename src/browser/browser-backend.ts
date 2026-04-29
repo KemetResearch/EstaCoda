@@ -64,7 +64,8 @@ export function createMockBrowserBackend(input: {
     screenshot: async () => ({
       mimeType: "image/png",
       base64: "iVBORw0KGgo="
-    })
+    }),
+    dialog: async () => snapshot()
   };
 }
 
@@ -260,6 +261,19 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           mimeType: "image/png",
           base64: result.data
         } satisfies BrowserScreenshotResult;
+      }
+    }),
+    dialog: (input = {}) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client, sessionId) => {
+        await client.send("Page.handleJavaScriptDialog", {
+          accept: input.action !== "dismiss",
+          promptText: input.promptText ?? ""
+        });
+        return evaluateCdpSnapshot(client, sessionId);
       }
     })
   };
