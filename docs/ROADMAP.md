@@ -354,6 +354,9 @@ State: Hermes-aligned first foundation exists.
 - `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
 - BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY` and Seedream defaults `smoke-tested`
 - `image.generate` accepts a minimal agent-facing schema: prompt, aspect ratio, model override, and seed `smoke-tested`
+- image-generation prompts route to native media tooling rather than requiring a skill `smoke-tested`
+- `estacoda image status/setup` exists, including local secret-store support when a user provides an API key `smoke-tested`
+- agent-facing `config.image.status` and `config.image.setup` tools exist so EstaCoda can configure image generation from user-provided credentials `smoke-tested`
 - FAL aspect ratios map to model-native `image_size` presets `smoke-tested`
 - BytePlus/Seedream aspect ratios map to concrete image sizes `smoke-tested`
 - generated image URLs are downloaded into `.estacoda/image-cache/` and recorded as image artifacts `smoke-tested`
@@ -362,7 +365,7 @@ State: Hermes-aligned first foundation exists.
 What remains:
 
 - live provider proof with real FAL and BytePlus credentials
-- model picker/setup UX similar to Hermes' `hermes tools`
+- richer model picker UX similar to Hermes' `hermes tools`
 - Nous gateway/proxy path
 - FAL Clarity upscaler policy
 - richer per-model capability filtering beyond the first FAL/Seedream payload mapping

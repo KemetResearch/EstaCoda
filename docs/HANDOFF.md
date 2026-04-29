@@ -83,7 +83,7 @@ Evidence:
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
 - Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
 - Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
-- Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifact recording, and Telegram `sendPhoto` delivery. `smoke-tested`
+- Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status, local API-key secret storage, and agent-facing image config tools. `smoke-tested`
 
 ## 3. Current Working Capabilities
 

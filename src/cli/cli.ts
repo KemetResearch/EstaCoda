@@ -5,6 +5,7 @@ import {
   loadRuntimeConfig,
   setupMcpConfig,
   setupBrowserConfig,
+  setupImageGenerationConfig,
   setupProviderConfig,
   setupProfileConfig,
   setupSecurityConfig,
@@ -16,6 +17,8 @@ import {
   type AgentProfileMode,
   type AgentResponseLanguage,
   type BrowserSetupInput,
+  type ImageGenerationSetupInput,
+  type ImageGenerationProvider,
   type ActivityLabelsLocale,
   type MCPSetupInput,
   type ProviderSetupInput,
@@ -89,6 +92,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return local(options, args);
     case "voice":
       return voice(options, args);
+    case "image":
+      return image(options, args);
     case "security":
       return security(options, args);
     case "cron":
@@ -330,6 +335,14 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
+  if (category === "image") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderImageStatus(config)
+    };
+  }
+
   if (category === "telegram") {
     return {
       handled: true,
@@ -409,12 +422,14 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "  estacoda settings skills",
       "  estacoda settings browser",
       "  estacoda settings voice",
+      "  estacoda settings image",
       "  estacoda settings telegram",
       "",
       "Common changes:",
       "  estacoda setup --advanced --provider <provider> --model <model>",
       "  estacoda local setup --base-url http://localhost:11434/v1 --model <model>",
       "  estacoda voice setup --tts-provider edge --stt-provider local",
+      "  estacoda image setup --provider fal --api-key-env FAL_KEY",
       "  estacoda security setup --mode adaptive",
       "  estacoda settings skills --autonomy suggest",
       "  estacoda verify"
@@ -854,6 +869,90 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
     exitCode: 0,
     output: renderVoiceStatus(config)
   };
+}
+
+async function image(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+
+  if (subcommand !== "status" && subcommand !== "setup") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda image generation",
+        "Hermes-aligned text-to-image stack. In normal use, describe the image and EstaCoda will call image.generate automatically.",
+        "  estacoda image status",
+        "  estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY",
+        "  estacoda image setup --provider byteplus --model seedream-4-0-250828 --api-key-env BYTEPLUS_ARK_API_KEY",
+        "  estacoda image setup --provider fal --api-key <key>",
+        "",
+        "Defaults:",
+        "  Provider: fal",
+        "  Model: fal-ai/flux-2/klein/9b",
+        "  Cache: ~/.estacoda/image-cache/"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "setup") {
+    const parsed = parseImageArgs(args.slice(1));
+    let secretPath: string | undefined;
+    if (parsed.apiKey !== undefined && parsed.apiKey.trim().length > 0) {
+      const envName = parsed.apiKeyEnv ?? defaultImageApiKeyEnv(parsed.provider ?? "fal");
+      secretPath = (await writeEnvSecret({
+        homeDir: options.homeDir,
+        key: envName,
+        value: parsed.apiKey
+      })).path;
+      parsed.apiKeyEnv = envName;
+      delete parsed.apiKey;
+    }
+
+    const result = await setupImageGenerationConfig({
+      ...options,
+      input: parsed
+    });
+    const loaded = await loadRuntimeConfig(options);
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Configured EstaCoda image generation.",
+        renderImageStatus(loaded),
+        `Config: ${result.path}`,
+        secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
+        "Next: ask EstaCoda to generate an image; the agent will use image.generate and return the artifact."
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  }
+
+  const config = await loadRuntimeConfig(options);
+  return {
+    handled: true,
+    exitCode: 0,
+    output: renderImageStatus(config)
+  };
+}
+
+function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  const key = imageApiKeyEnv(config.imageGen.provider, config);
+  return [
+    "EstaCoda image generation",
+    `Provider: ${config.imageGen.provider}`,
+    `Model: ${config.imageGen.model}`,
+    `Gateway: ${config.imageGen.useGateway ? "yes" : "no"}`,
+    `API key: ${key}`,
+    `Cache: ~/.estacoda/image-cache/`,
+    "Agent tool: image.generate",
+    "Telegram delivery: generated images upload as photos when available."
+  ].join("\n");
+}
+
+function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  return provider === "byteplus"
+    ? config.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
+    : config.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
 }
 
 function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
@@ -1746,6 +1845,53 @@ function parseVoiceArgs(args: string[]): VoiceSetupInput {
   }
 
   return parsed;
+}
+
+function parseImageArgs(args: string[]): ImageGenerationSetupInput {
+  const parsed: ImageGenerationSetupInput = {};
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--provider") {
+      parsed.provider = parseImageProvider(next);
+      index += 1;
+    } else if (arg === "--model") {
+      parsed.model = next;
+      index += 1;
+    } else if (arg === "--api-key-env") {
+      parsed.apiKeyEnv = next;
+      index += 1;
+    } else if (arg === "--api-key") {
+      parsed.apiKey = next;
+      index += 1;
+    } else if (arg === "--base-url") {
+      parsed.baseUrl = next;
+      index += 1;
+    } else if (arg === "--gateway") {
+      parsed.useGateway = true;
+    } else if (arg === "--direct") {
+      parsed.useGateway = false;
+    } else if (arg === "--project") {
+      parsed.scope = "project";
+    } else if (arg === "--user") {
+      parsed.scope = "user";
+    }
+  }
+
+  return parsed;
+}
+
+function parseImageProvider(value: string | undefined): ImageGenerationProvider {
+  if (value === "fal" || value === "byteplus") {
+    return value;
+  }
+  throw new Error("Expected --provider fal or byteplus");
+}
+
+function defaultImageApiKeyEnv(provider: ImageGenerationProvider): string {
+  return provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY";
 }
 
 function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvider"] {

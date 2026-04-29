@@ -45,10 +45,10 @@ export class IntentRouter {
       ? []
       : this.#skillRegistry
         .matchPrompt(prompt)
-        .filter((skill) => skillMatchesIntent(skill, labels));
+        .filter((skill) => skillMatchesIntent(skill, labels, normalized));
     const intentMatchedSkills = this.#skillRegistry
       .list()
-      .filter((skill) => skillMatchesIntent(skill, labels));
+      .filter((skill) => skillMatchesIntent(skill, labels, normalized));
     const suggestedSkills = dedupeSkills([...intentMatchedSkills, ...promptMatchedSkills])
       .filter((skill) => shouldSuggestSkill(skill, normalized, options.attachments, this.#model));
 
@@ -74,7 +74,7 @@ function detectLabels(normalized: string, attachments: ChannelAttachment[] | und
     labels.push("knowledge-base");
   }
 
-  if (hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo"])) {
+  if (hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo", "generate an image", "create an image", "make an image"])) {
     labels.push("media-generation");
   }
 
@@ -149,7 +149,7 @@ function toolsetsFor(labels: IntentLabel[]): ToolsetName[] {
   return dedupe(toolsets);
 }
 
-function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[]): boolean {
+function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[], normalized: string): boolean {
   if (skill.name === "youtube-knowledge-base") {
     return labels.includes("youtube-video");
   }
@@ -159,7 +159,7 @@ function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[]): bool
   }
 
   if (skill.name === "ascii-video") {
-    return labels.includes("media-generation");
+    return labels.includes("media-generation") && hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo"]);
   }
 
   return false;

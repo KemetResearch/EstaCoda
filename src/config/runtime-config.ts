@@ -356,6 +356,16 @@ export type VoiceSetupInput = {
   scope?: "user" | "project";
 };
 
+export type ImageGenerationSetupInput = {
+  provider?: ImageGenerationProvider;
+  model?: string;
+  apiKeyEnv?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  useGateway?: boolean;
+  scope?: "user" | "project";
+};
+
 export type MCPSetupInput = {
   name: string;
   enabled?: boolean;
@@ -528,6 +538,7 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(merged.browser ?? {}),
       ...(config.browser ?? {})
     },
+    imageGen: mergeImageGenerationConfig(merged.imageGen ?? merged.image_gen, config.imageGen ?? config.image_gen),
     tts: mergeTtsConfig(merged.tts, config.tts),
     stt: mergeSttConfig(merged.stt, config.stt),
     mcpServers: {
@@ -702,6 +713,15 @@ function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): Load
       apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? "BYTEPLUS_ARK_API_KEY",
       baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? "https://ark.ap-southeast.bytepluses.com/api/v3"
     }
+  };
+}
+
+function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: EstaCodaConfig["imageGen"]): EstaCodaConfig["imageGen"] {
+  return {
+    ...(left ?? {}),
+    ...(right ?? {}),
+    fal: { ...(left?.fal ?? {}), ...(right?.fal ?? {}) },
+    byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) }
   };
 }
 
@@ -1060,6 +1080,51 @@ export async function setupVoiceConfig(options: {
   return {
     path: targetPath,
     config
+  };
+}
+
+export async function setupImageGenerationConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: ImageGenerationSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+  envExport?: string;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const previous = normalizeImageGenerationConfig(existing.config.imageGen ?? existing.config.image_gen);
+  const provider = options.input.provider ?? previous.provider;
+  const apiKeyEnv = options.input.apiKeyEnv ?? previous[provider]?.apiKeyEnv ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY");
+  const envExport = options.input.apiKey === undefined ? undefined : `export ${apiKeyEnv}=${shellQuote(options.input.apiKey)}`;
+  const model = options.input.model ?? previous[provider]?.model ?? previous.model;
+  const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
+  const config = mergeConfig(existing.config, {
+    imageGen: {
+      provider,
+      model,
+      useGateway: options.input.useGateway ?? previous.useGateway,
+      apiKeyEnv,
+      baseUrl,
+      [provider]: {
+        model,
+        apiKeyEnv,
+        baseUrl
+      }
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config,
+    envExport
   };
 }
 

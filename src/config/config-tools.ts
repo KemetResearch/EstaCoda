@@ -3,11 +3,13 @@ import {
   loadRuntimeConfig,
   setupMcpConfig,
   setupBrowserConfig,
+  setupImageGenerationConfig,
   setupProviderConfig,
   setupSecurityConfig,
   setupTelegramConfig,
   setupWebConfig,
   type BrowserSetupInput,
+  type ImageGenerationSetupInput,
   type MCPSetupInput,
   type ProviderSetupInput,
   type SecuritySetupInput,
@@ -394,6 +396,40 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       }
     },
     {
+      name: "config.image.status",
+      description: "Show configured EstaCoda image generation provider, model, cache, and key environment.",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "media"],
+      progressLabel: "checking image config",
+      maxResultSizeChars: 3000,
+      isAvailable: () => true,
+      run: async () => {
+        const loaded = await loadRuntimeConfig(options);
+        const key = loaded.imageGen.provider === "byteplus"
+          ? loaded.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
+          : loaded.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
+        return {
+          ok: true,
+          content: [
+            "EstaCoda image generation",
+            `Provider: ${loaded.imageGen.provider}`,
+            `Model: ${loaded.imageGen.model}`,
+            `Gateway: ${loaded.imageGen.useGateway ? "yes" : "no"}`,
+            `API key env: ${key}`,
+            "Cache: ~/.estacoda/image-cache/"
+          ].join("\n"),
+          metadata: {
+            imageGen: loaded.imageGen,
+            apiKeyEnv: key
+          }
+        };
+      }
+    },
+    {
       name: "config.provider.setup",
       description: "Configure EstaCoda's model provider, API key environment variable, credential pool, and endpoint.",
       inputSchema: {
@@ -440,6 +476,51 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             model: input.model,
             envExport: result.envExport,
             providerDiagnostic: diagnostic
+          }
+        };
+      }
+    },
+    {
+      name: "config.image.setup",
+      description: "Configure image generation provider/model and API key environment for EstaCoda runtime discovery.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          provider: { type: "string", enum: ["fal", "byteplus"] },
+          model: { type: "string" },
+          apiKeyEnv: { type: "string" },
+          apiKey: { type: "string" },
+          baseUrl: { type: "string" },
+          useGateway: { type: "boolean" },
+          scope: { type: "string", enum: ["user", "project"] }
+        }
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core", "media"],
+      progressLabel: "configuring image generation",
+      maxResultSizeChars: 5000,
+      isAvailable: () => true,
+      run: async (input: ImageGenerationSetupInput) => {
+        const result = await setupImageGenerationConfig({
+          ...options,
+          input
+        });
+        const loaded = await loadRuntimeConfig(options);
+        return {
+          ok: true,
+          content: [
+            "Configured EstaCoda image generation.",
+            `Provider: ${loaded.imageGen.provider}`,
+            `Model: ${loaded.imageGen.model}`,
+            `Wrote ${result.path}.`,
+            result.envExport === undefined
+              ? "API key source: environment variable."
+              : `Add this to your shell config:\n${result.envExport}`
+          ].join("\n"),
+          metadata: {
+            path: result.path,
+            imageGen: loaded.imageGen,
+            envExport: result.envExport
           }
         };
       }

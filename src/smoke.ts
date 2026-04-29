@@ -335,6 +335,7 @@ const nativeVisionTelegramRoute = visionAwareIntentRouter.route("Please inspect 
 });
 const asciiVideoRoute = intentRouter.route("Create a 10 second ASCII logo animation.");
 const genericKnowledgeRoute = intentRouter.route("Build a knowledge base from this folder.");
+const imageGenerationRoute = intentRouter.route("Create an image of a blue lotus sigil.");
 const availableTools = await tools.listAvailable();
 const compressed = trajectory.compress();
 const renderedMemory = renderMemorySnapshot(memory.snapshot());
@@ -602,6 +603,35 @@ const cliVoiceSettings = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
+const cliImageStatusDefault = await runCliCommand({
+  argv: ["image", "status"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliImageSetup = await runCliCommand({
+  argv: [
+    "image",
+    "setup",
+    "--provider",
+    "byteplus",
+    "--model",
+    "seedream-4-0-250828",
+    "--api-key",
+    "TEST_BYTEPLUS_SECRET"
+  ],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliImageConfig = await loadRuntimeConfig({
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliImageSettings = await runCliCommand({
+  argv: ["settings", "image"],
+  workspaceRoot: cliWorkspace,
+  homeDir: cliHome
+});
+const cliImageEnv = await readFile(join(cliHome, ".estacoda", ".env"), "utf8");
 delete process.env.ESTACODA_SMOKE_MISSING_KEY;
 const cliMissingProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-workspace-"));
 const cliMissingProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-home-"));
@@ -3711,6 +3741,14 @@ assert(cliVoiceConfig.tts.openai?.apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY", "expec
 assert(cliVoiceConfig.stt.provider === "local", "expected voice setup to persist STT provider");
 assert(cliVoiceConfig.stt.local?.model === "base", "expected voice setup to persist local STT model");
 assert(cliVoiceSettings.output.includes("EstaCoda voice"), "expected settings voice output");
+assert(cliImageStatusDefault.output.includes("Provider: fal"), "expected default image status to use FAL");
+assert(cliImageSetup.output.includes("Configured EstaCoda image generation."), "expected image setup output");
+assert(cliImageSetup.output.includes("Secret store:"), "expected image setup with api key to write secret store");
+assert(cliImageConfig.imageGen.provider === "byteplus", "expected image setup to persist BytePlus provider");
+assert(cliImageConfig.imageGen.model === "seedream-4-0-250828", "expected image setup to persist Seedream model");
+assert(cliImageConfig.imageGen.byteplus?.apiKeyEnv === "BYTEPLUS_ARK_API_KEY", "expected image setup to persist BytePlus key env");
+assert(cliImageSettings.output.includes("EstaCoda image generation"), "expected settings image output");
+assert(cliImageEnv.includes("BYTEPLUS_ARK_API_KEY=\"TEST_BYTEPLUS_SECRET\""), "expected image setup to store API key in local env file");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Approval mode: Adaptive (adaptive)"), "expected CLI security status to report adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Assessor: enabled"), "expected CLI security status to report enabled assessor");
@@ -6003,6 +6041,11 @@ assert(
 assert(
   asciiVideoRoute.suggestedSkills.some((skill) => skill.name === "ascii-video"),
   "expected ASCII animation prompt to route to ascii-video skill"
+);
+assert(imageGenerationRoute.labels.includes("media-generation"), "expected image generation prompt to route as media-generation intent");
+assert(
+  imageGenerationRoute.suggestedSkills.length === 0,
+  "expected image generation prompt to use native image.generate rather than requiring a skill"
 );
 assert(
   !genericKnowledgeRoute.suggestedSkills.some((skill) => skill.name === "youtube-knowledge-base"),

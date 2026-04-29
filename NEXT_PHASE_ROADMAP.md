@@ -130,7 +130,7 @@ Next acceptance checks:
 - Done: setup/verify/settings copy now shows clearer recommended paths, post-setup commands, and recovery next actions.
 - Done: local model setup is supported through a Hermes-aligned OpenAI-compatible endpoint flow with Ollama defaults, `/models` discovery, no-key local config, and context guidance.
 - Done: voice configuration foundation exists with Hermes-aligned `tts`/`stt` sections, `estacoda voice status/setup`, OpenAI-compatible `voice.speak` audio artifact generation, local custom-command plus OpenAI/Groq-style `voice.transcribe` transcript artifacts, automatic Telegram voice transcript injection, Telegram `sendVoice` for Opus/Ogg voice bubbles, and `sendAudio` fallback.
-- Done: image generation foundation exists with Hermes-aligned FAL defaults, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifacts, and Telegram `sendPhoto` delivery.
+- Done: image generation foundation exists with Hermes-aligned FAL defaults, BytePlus/ModelArk Seedream support, `image.generate`, image-cache artifacts, Telegram `sendPhoto` delivery, CLI setup/status, local key storage, and agent-facing image config tools.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.
 - Full Arabic interface copy and localized approval cards are implemented.
