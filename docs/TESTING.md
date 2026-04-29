@@ -46,6 +46,8 @@ Inside the session:
 - `/reload-mcp`
 - `/workspace.trust.status`
 - `/workspace.trust.grant`
+- `/yolo`
+- `/yolo`
 - `/tools`
 - `/skills`
 - `Use the MCP filesystem tools to list the root of the current project and then read package.json.`
@@ -86,6 +88,7 @@ Inside the interactive session, useful checks:
 - `/trust`
 - file write/read prompt
 - `/reset`
+- `/yolo`
 - `/skills`
 - `/tools`
 - `/exit`
@@ -240,6 +243,7 @@ At a high level:
 - approvals and strict target-key matching
 - CLI approval scopes plus persistent workspace approval storage/revocation
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
+- session-scoped CLI and gateway `/yolo` toggles for open mode
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
 - CLI `/security` and `/security debug` audit rendering

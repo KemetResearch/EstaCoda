@@ -28,7 +28,7 @@ import { createOpenAICompatibleProvider } from "../providers/openai-compatible-p
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { routeProvider } from "../providers/provider-router.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
-import type { SecurityPolicy, SecurityRequest } from "../contracts/security.js";
+import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { CredentialPoolRegistry } from "../providers/credential-pool.js";
@@ -133,6 +133,8 @@ export type Runtime = {
     persistent: PersistedWorkspaceApprovalGrant[];
   }>;
   revokeApproval?(id: string): Promise<boolean>;
+  securityMode?(): SecurityApprovalMode;
+  toggleYoloMode?(): { enabled: boolean; mode: SecurityApprovalMode };
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
@@ -367,6 +369,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
+  const configuredSecurityMode = options.securityMode ?? "adaptive";
+  let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;
   const effectiveSecurityAssessor = options.securityAssessor === undefined
     ? undefined
     : {
@@ -374,7 +378,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       provider: options.securityAssessor.provider ?? approvalAuxiliaryRoute?.route?.primary.provider,
       model: options.securityAssessor.model ?? approvalAuxiliaryRoute?.route?.primary.id
     };
-  const baseSecurityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive", {
+  const baseSecurityPolicyForActiveMode = () => options.securityPolicy ?? createSecurityPolicyForMode(activeSecurityMode, {
     assessor: effectiveSecurityAssessor === undefined
       ? undefined
       : {
@@ -383,21 +387,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionId
       }
   });
-  const securityPolicy = options.approvalController === undefined
-    ? baseSecurityPolicy
-    : {
-      decide(request: SecurityRequest) {
-        return baseSecurityPolicy.decide(request);
-      },
-      async assess(request: SecurityRequest) {
-        return await options.approvalController!.assess(baseSecurityPolicy, request, {
+  const securityPolicy: SecurityPolicy = {
+    decide(request: SecurityRequest) {
+      return baseSecurityPolicyForActiveMode().decide(request);
+    },
+    async assess(request: SecurityRequest) {
+      const basePolicy = baseSecurityPolicyForActiveMode();
+
+      if (options.approvalController === undefined) {
+        return await basePolicy.assess?.(request) ?? {
+          decision: basePolicy.decide(request),
+          mode: activeSecurityMode,
+          reason: "Decided by the active security policy.",
+          risk: "medium"
+        };
+      }
+
+      return await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
           profileId,
           sessionId,
-          mode: options.securityMode ?? "adaptive"
+          mode: activeSecurityMode
         });
-      }
-    };
+    }
+  };
   const toolExecutor = new ToolExecutor({
     registry: toolRegistry,
     securityPolicy,
@@ -535,6 +548,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         profileId
       }) ?? false;
     },
+    securityMode() {
+      return activeSecurityMode;
+    },
+    toggleYoloMode() {
+      const enabled = activeSecurityMode !== "open";
+      activeSecurityMode = enabled
+        ? "open"
+        : configuredSecurityMode === "open" ? "adaptive" : configuredSecurityMode;
+
+      return {
+        enabled,
+        mode: activeSecurityMode
+      };
+    },
     async trustWorkspace() {
       await trustStore.grant(workspaceRoot, {
         profileId,
@@ -562,6 +589,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `provider route: ${providerRoute === undefined ? "unavailable" : `${providerRoute.primary.provider}/${providerRoute.primary.id}`}`,
         `provider fallbacks: ${providerRoute === undefined ? 0 : providerRoute.fallbacks.length}`,
         `auxiliary routes: ${auxiliaryRoutes.length === 0 ? "unavailable" : summarizeAuxiliaryRoutes(auxiliaryRoutes)}`,
+        `security mode: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         `tools: ${toolRegistry.list().length}`,
         `mcp servers: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         `skills: ${sessionSkillCatalog.length}`,

@@ -242,6 +242,7 @@ State: partially built.
 - hard safety floor now covers broader destructive, secret-read, pipe-to-interpreter, and force-push cases `smoke-tested`
 - adaptive assessor now defaults to a dedicated `approval` auxiliary route when enabled without an explicit provider/model override `smoke-tested`
 - CLI security audit/debug views now exist for recent decisions `smoke-tested`
+- `/yolo` session-scoped open-mode toggles now exist in CLI and gateway `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

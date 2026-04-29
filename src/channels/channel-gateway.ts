@@ -146,6 +146,7 @@ export class ChannelGateway {
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
+  readonly #yoloSessions = new Map<string, boolean>();
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -332,6 +333,7 @@ export class ChannelGateway {
         "/trust - trust this workspace for local read/write work",
         "/untrust - revoke workspace trust for this chat session",
         "/workspace.trust.status - show current workspace trust state",
+        "/yolo - toggle YOLO/open mode for this chat session",
         "/commands - show the Telegram command menu",
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
@@ -356,8 +358,25 @@ export class ChannelGateway {
         "EstaCoda channel status",
         `Channel: ${message.channel}`,
         `Chat: ${message.sessionKey.chatId}`,
-        `Session: ${sessionId}`
+        `Session: ${sessionId}`,
+        `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
       ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+
+      return {
+        sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/yolo") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const enabled = this.#toggleYolo(message.sessionKey, sessionId);
+      const text = enabled
+        ? "⚡ YOLO mode ON — EstaCoda will auto-approve eligible actions for this chat session. Hard safety blocks still apply."
+        : `⚠ YOLO mode OFF — risky actions will use ${this.#securityMode} approval mode.`;
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
@@ -950,7 +969,7 @@ export class ChannelGateway {
     persistentApprovals: PersistedApprovalGrant[]
   ): SecurityPolicy {
     const key = stableSessionKey(sessionKey, this.#sessionPolicy);
-    const securityMode = this.#securityMode;
+    const securityMode = this.#yoloSessions.get(yoloSessionKey(key, sessionId)) === true ? "open" : this.#securityMode;
     const securityAssessor = this.#securityAssessor;
     const approvalGrants = this.#approvalGrants;
 
@@ -1049,6 +1068,27 @@ export class ChannelGateway {
 
     return fallback;
   }
+
+  #isYoloEnabled(sessionKey: ChannelSessionKey, sessionId: string): boolean {
+    return this.#yoloSessions.get(yoloSessionKey(stableSessionKey(sessionKey, this.#sessionPolicy), sessionId)) === true;
+  }
+
+  #toggleYolo(sessionKey: ChannelSessionKey, sessionId: string): boolean {
+    const key = yoloSessionKey(stableSessionKey(sessionKey, this.#sessionPolicy), sessionId);
+    const enabled = this.#yoloSessions.get(key) !== true;
+
+    if (enabled) {
+      this.#yoloSessions.set(key, true);
+    } else {
+      this.#yoloSessions.delete(key);
+    }
+
+    return enabled;
+  }
+}
+
+function yoloSessionKey(stableKey: string, sessionId: string): string {
+  return `${stableKey}:${sessionId}`;
 }
 
 export function authorizeChannelMessage(message: ChannelMessage, policy: ChannelAuthPolicy): {
@@ -1075,7 +1115,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -1093,6 +1133,7 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/workspace.trust.grant" ||
     token === "/workspace.trust.revoke" ||
     token === "/workspace.trust.status" ||
+    token === "/yolo" ||
     token === "/resume" ||
     token === "/stop" ||
     token === "/approve" ||
@@ -1186,6 +1227,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/trust", description: "Trust this workspace" },
     { command: "/untrust", description: "Revoke workspace trust" },
     { command: "/workspace.trust.status", description: "Show workspace trust state" },
+    { command: "/yolo", description: "Toggle YOLO/open mode for this chat" },
     { command: "/resume", description: "Show the latest interrupted turn" },
     { command: "/approve", description: "Approve the pending gated action" },
     { command: "/deny", description: "Deny the pending gated action" },

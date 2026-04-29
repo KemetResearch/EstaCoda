@@ -28,6 +28,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - CLI approvals now support `once`, `session`, and `always`, with persistent workspace approval revocation and the same target-key matching model used by channel approvals.
 - The hard floor now covers broader destructive commands, explicit secret reads, pipe-to-interpreter installs, and force-push patterns, and adaptive assessment now has a dedicated `approval` auxiliary route.
 - CLI sessions now include `/security` and `/security debug` for recent decision auditability.
+- `/yolo` now works in CLI and gateway sessions as a session-scoped open-mode toggle with the hard floor still enforced.
 - An internal alpha harness and runbook now exist for repeatable operator testing across CLI, Telegram, providers, approvals, and reset/rollback flow.
 
 ## Phase Goals

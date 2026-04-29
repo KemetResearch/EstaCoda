@@ -5633,6 +5633,8 @@ await runSessionLoop({
       "/resume",
       "/security",
       "/security debug",
+      "/yolo",
+      "/yolo",
       "Build a knowledge base from https://www.youtube.com/watch?v=sessionloop",
       "/switch cli-switch-target",
       "/status",
@@ -6094,6 +6096,8 @@ assert(
   "expected debug security audit rule"
 );
 assert(renderedSessionLoop.includes("assessor: not used"), "expected debug security audit assessor status");
+assert(renderedSessionLoop.includes("YOLO mode ON"), "expected session /yolo to enable open mode");
+assert(renderedSessionLoop.includes("YOLO mode OFF"), "expected session /yolo to disable open mode");
 assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
 assert(
@@ -7877,6 +7881,17 @@ assert(
 );
 const approvalsAfterRevoke = await approvalRuntime.inspectApprovals?.();
 assert(approvalsAfterRevoke?.persistent.length === 0, "expected revoked workspace approval to disappear");
+const yoloRuntimeEnabled = approvalRuntime.toggleYoloMode?.();
+const yoloAllowedTerminalRun = await approvalRuntime.executeTool?.({
+  tool: "terminal.run",
+  toolInput: {
+    command: "touch yolo-open-mode.txt"
+  }
+});
+const yoloRuntimeDisabled = approvalRuntime.toggleYoloMode?.();
+assert(yoloRuntimeEnabled?.enabled === true && yoloRuntimeEnabled.mode === "open", "expected runtime /yolo toggle to enable open mode");
+assert(yoloAllowedTerminalRun?.decision === "allow", "expected runtime /yolo open mode to allow eligible command");
+assert(yoloRuntimeDisabled?.enabled === false && yoloRuntimeDisabled.mode === "strict", "expected runtime /yolo toggle to restore configured mode");
 
 const mockChannel = new MockChannelAdapter({ kind: "telegram" });
 const channelSessionStore = new InMemoryChannelSessionStore();
@@ -8023,6 +8038,16 @@ const channelStatusResult = await channelGateway.receive({
   id: "message-status",
   text: "/status"
 });
+const channelYoloOnResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-yolo-on",
+  text: "/yolo"
+});
+const channelStatusYoloResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-status-yolo",
+  text: "/status"
+});
 const channelResumeResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-resume",
@@ -8062,6 +8087,11 @@ const channelAfterNewResult = await channelGateway.receive({
   ...channelMessage,
   id: "message-after-new",
   text: "Fresh session message"
+});
+const channelStatusAfterNewResult = await channelGateway.receive({
+  ...channelMessage,
+  id: "message-status-after-new",
+  text: "/status"
 });
 const channelSwitchResult = await channelGateway.receive({
   ...channelMessage,
@@ -8176,10 +8206,14 @@ await channelGateway.stop();
 
 assert(channelResult.sessionId === channelRepeatResult.sessionId, "expected channel session mapping to be stable per chat");
 assert(channelStatusResult.replyText.includes(channelResult.sessionId), "expected channel /status to report session");
+assert(channelYoloOnResult.replyText.includes("YOLO mode ON"), "expected channel /yolo to enable open mode");
+assert(channelStatusYoloResult.replyText.includes("YOLO mode: on"), "expected channel /status to report yolo on");
 assert(channelResumeResult.replyText.includes("channel interrupted task"), "expected channel /resume to report latest resume note");
 assert(channelHelpResult.replyText.includes("/new"), "expected channel /help commands");
 assert(channelHelpResult.replyText.includes("/reload-mcp"), "expected channel /help to advertise /reload-mcp");
+assert(channelHelpResult.replyText.includes("/yolo"), "expected channel /help to advertise /yolo");
 assert(channelCommandsResult.replyText.includes("/approve"), "expected channel /commands to list approval command");
+assert(channelCommandsResult.replyText.includes("/yolo"), "expected channel /commands to list yolo command");
 assert(channelSessionsResult.replyText.includes("Recent sessions for this chat"), "expected channel /sessions output");
 assert(channelNewResult.sessionId !== channelResult.sessionId, "expected channel /new to rotate session");
 assert(channelSearchResult.replyText.includes(`Search results for "Analyze"`), "expected channel /search output");
@@ -8187,6 +8221,7 @@ assert(channelReloadMcpResult.replyText.includes("Reloaded MCP configuration."),
 assert(channelSwitchResult.replyText.includes("Switched this chat to an existing session"), "expected channel /switch output");
 assert(channelAfterSwitchResult.sessionId === channelResult.sessionId, "expected channel /switch to restore the selected session");
 assert(channelAfterNewResult.sessionId === channelNewResult.sessionId, "expected messages after /new to use fresh session");
+assert(channelStatusAfterNewResult.replyText.includes("YOLO mode: off"), "expected channel /new to start with yolo off");
 assert(channelCancelSignal?.aborted === true, "expected channel /stop to abort active turn");
 assert(channelCancelResult.replyText.includes("Cancelled"), "expected channel /stop to cancel active turn first");
 assert(activeChannelTurnResult.replyText.includes("Cancelled by channel"), "expected active channel turn to observe cancellation");
@@ -8377,6 +8412,16 @@ const approvalAfterRevoke = await approvalGateway.receive({
   id: "message-approval-after-revoke",
   text: "Run it again after revoke"
 });
+const approvalYoloOn = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-yolo-on",
+  text: "/yolo"
+});
+const approvalYoloFollowUp = await approvalGateway.receive({
+  ...channelMessage,
+  id: "message-approval-yolo-follow-up",
+  text: "Run it again in yolo"
+});
 const approvalReset = await approvalGateway.receive({
   ...channelMessage,
   id: "message-approval-reset",
@@ -8413,6 +8458,8 @@ assert(persistentApprovals.length === 1, "expected persistent approval to be sto
 assert(persistentApprovals[0]?.targetKey === destructiveTargetKey, "expected persistent approval target key");
 assert(approvalRevoke.replyText.includes("Revoked persistent approval"), "expected /revoke confirmation");
 assert(approvalAfterRevoke.replyText.includes("needs approval"), "expected revoked approval to stop allowing rerun");
+assert(approvalYoloOn.replyText.includes("YOLO mode ON"), "expected channel approval /yolo to enable open mode");
+assert(approvalYoloFollowUp.replyText.includes("Dangerous command completed"), "expected channel /yolo to allow eligible rerun");
 assert(approvalReset.replyText.includes("Started a fresh EstaCoda session"), "expected approval session reset");
 assert(
   approvalAfterReset.replyText.includes("needs approval"),

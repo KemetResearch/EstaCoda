@@ -348,6 +348,7 @@ Important traits:
 - approval modes are `strict`, `adaptive`, and `open`
 - `adaptive` is the default and now uses deterministic triage first, then an optional auxiliary security assessor for ambiguous cases
 - `open` still preserves a hard dangerous-command floor
+- `/yolo` is a session-scoped CLI and gateway toggle for `open` mode, aligned with Hermes operator ergonomics, but it cannot bypass the hard floor
 - assessor failures, malformed output, or timeouts fall back to `ask`
 - tool risk classes drive gating
 - structured `targetKey` values are the approval boundary

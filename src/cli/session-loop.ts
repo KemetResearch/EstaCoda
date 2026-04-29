@@ -215,6 +215,17 @@ async function handleSlashCommand(input: {
         debug: args.includes("debug") || args.includes("--debug")
       })}\n\n`);
       return false;
+    case "yolo": {
+      if (input.runtime.toggleYoloMode === undefined) {
+        input.output.write("This session cannot toggle YOLO mode here.\n\n");
+        return false;
+      }
+      const result = input.runtime.toggleYoloMode();
+      input.output.write(result.enabled
+        ? "⚡ YOLO mode ON — EstaCoda will auto-approve eligible actions for this session. Hard safety blocks still apply.\n\n"
+        : `⚠ YOLO mode OFF — risky actions will use ${result.mode} approval mode.\n\n`);
+      return false;
+    }
     case "revoke": {
       const approvalId = args[0];
       if (approvalId === undefined || approvalId.length === 0) {
