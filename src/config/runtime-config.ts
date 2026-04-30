@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { BrowserBackendKind } from "../contracts/browser.js";
 import type {
@@ -12,6 +13,7 @@ import type {
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { loadDotEnvSecrets, writeEnvSecret } from "./env-secret-store.js";
 import { inferModelProfile } from "../providers/model-catalog.js";
+import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
@@ -48,6 +50,8 @@ export type TtsConfig = {
     voice_id?: string;
     modelId?: string;
     model_id?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
   };
   openai?: {
     model?: string;
@@ -455,8 +459,8 @@ export async function loadRuntimeConfig(options: {
 }): Promise<LoadedRuntimeConfig> {
   await loadDotEnvSecrets({ homeDir: options.homeDir });
   const sources = [
-    options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"),
-    options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json")
+    options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
+    options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
   ];
   const loaded = await Promise.all(sources.map((path) => readConfig(path)));
   const config = mergeConfig(...loaded.map((entry) => entry.config));
@@ -693,7 +697,8 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
     },
     elevenlabs: {
       voiceId: value?.elevenlabs?.voiceId ?? value?.elevenlabs?.voice_id ?? "pNInz6obpgDQGcFmaJgB",
-      modelId: value?.elevenlabs?.modelId ?? value?.elevenlabs?.model_id ?? "eleven_multilingual_v2"
+      modelId: value?.elevenlabs?.modelId ?? value?.elevenlabs?.model_id ?? "eleven_multilingual_v2",
+      apiKeyEnv: value?.elevenlabs?.apiKeyEnv ?? value?.elevenlabs?.api_key_env ?? "ELEVENLABS_API_KEY"
     },
     openai: {
       model: value?.openai?.model ?? "gpt-4o-mini-tts",
@@ -746,13 +751,18 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
 function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
   const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
   const model = value?.model ?? value?.[provider]?.model ?? defaultImageModel(provider);
+  const baseUrl = value?.baseUrl
+    ?? value?.base_url
+    ?? value?.[provider]?.baseUrl
+    ?? value?.[provider]?.base_url
+    ?? defaultImageBaseUrl(provider);
   return {
     ...value,
     provider,
     model,
     useGateway: value?.useGateway ?? value?.use_gateway ?? false,
     apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? defaultImageApiKeyEnv(provider),
-    baseUrl: value?.baseUrl ?? value?.base_url,
+    baseUrl,
     fal: {
       model: value?.fal?.model ?? (provider === "fal" ? model : defaultImageModel("fal")),
       apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? defaultImageApiKeyEnv("fal"),
@@ -936,7 +946,8 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
     const providerId = provider as ProviderId;
     const models = providerConfig.models ?? [];
 
-    if ((providerConfig.kind ?? "openai-compatible") === "openai-compatible") {
+    const kind = providerConfig.kind ?? "openai-compatible";
+    if (kind === "openai-compatible") {
       registry.register(createOpenAICompatibleProvider({
         id: providerId,
         endpoint: {
@@ -950,7 +961,18 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
         enableNetwork: providerConfig.enableNetwork ?? false,
         fetch: options.fetch
       }));
+      continue;
     }
+
+    if (kind === "catalog") {
+      registry.register(createCatalogProvider({
+        id: providerId,
+        models: models.map((model) => inferModelProfile({ provider: providerId, model }))
+      }));
+      continue;
+    }
+
+    throw new Error(`Unsupported provider kind ${String(kind)} for ${provider}`);
   }
 
   return registry;
@@ -1330,16 +1352,21 @@ export async function setupSecurityConfig(options: {
     options.input.assessorModel !== undefined ||
     options.input.assessorTimeoutMs !== undefined
     ? {
-      enabled: options.input.assessorEnabled,
-      provider: options.input.assessorProvider,
-      model: options.input.assessorModel,
-      timeoutMs: options.input.assessorTimeoutMs
+      ...(options.input.assessorEnabled === undefined ? {} : { enabled: options.input.assessorEnabled }),
+      ...(options.input.assessorProvider === undefined ? {} : { provider: options.input.assessorProvider }),
+      ...(options.input.assessorModel === undefined ? {} : { model: options.input.assessorModel }),
+      ...(options.input.assessorTimeoutMs === undefined ? {} : { timeoutMs: options.input.assessorTimeoutMs })
     }
     : undefined;
+  const securityPatch: EstaCodaConfig["security"] = {
+    assessor: assessorPatch
+  };
+  if (options.input.mode !== undefined) {
+    securityPatch.approvalMode = normalizeSecurityApprovalMode(options.input.mode);
+  }
   const config = mergeConfig(existing.config, {
     security: {
-      approvalMode: normalizeSecurityApprovalMode(options.input.mode),
-      assessor: assessorPatch
+      ...securityPatch
     }
   });
 
@@ -1395,11 +1422,20 @@ export async function setupUiConfig(options: {
   const existing = await readConfig(targetPath);
   const previous = normalizeUiConfig(existing.config.ui);
   const nextLanguage = options.input.language ?? previous.language;
+  const languageChangedTo = options.input.language;
   const config = mergeConfig(existing.config, {
     ui: {
       language: nextLanguage,
-      flavor: options.input.flavor ?? (nextLanguage === "ar" ? "arabic-light" : previous.flavor),
-      activityLabels: options.input.activityLabels ?? (nextLanguage === "ar" ? "ar" : previous.activityLabels)
+      flavor: options.input.flavor ?? (
+        languageChangedTo === "ar" ? "arabic-light" :
+        languageChangedTo === "en" ? "standard" :
+        previous.flavor
+      ),
+      activityLabels: options.input.activityLabels ?? (
+        languageChangedTo === "ar" ? "ar" :
+        languageChangedTo === "en" ? "en" :
+        previous.activityLabels
+      )
     }
   });
 
@@ -1528,9 +1564,7 @@ export async function createTelegramPairingCode(options: {
   expiresAt: string;
 }> {
   const input = options.input ?? {};
-  const targetPath = input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
   const now = options.now?.() ?? new Date();
   const ttlMinutes = input.ttlMinutes ?? 10;
@@ -1929,9 +1963,7 @@ function expandConfiguredPath(path: string, homeDir?: string): string {
 }
 
 function randomPairingCode(): string {
-  const value = Math.floor(Math.random() * 1_000_000);
-
-  return value.toString().padStart(6, "0");
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
 }
 
 function normalizePairingCode(code: string): string {

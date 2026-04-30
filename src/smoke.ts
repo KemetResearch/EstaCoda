@@ -20,7 +20,18 @@ import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
 import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
 import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
-import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig, setupSecurityConfig } from "./config/runtime-config.js";
+import {
+  createTelegramPairingCode,
+  consumeTelegramPairingCode,
+  loadRuntimeConfig,
+  mergeConfig,
+  setupImageGenerationConfig,
+  setupMcpConfig,
+  setupProviderConfig,
+  setupSecurityConfig,
+  setupUiConfig,
+  setupVoiceConfig
+} from "./config/runtime-config.js";
 import { ContextReferenceExpander } from "./context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
 import { createRuntimeCronRunner, tickCron } from "./cron/cron-runner.js";
@@ -572,6 +583,149 @@ const loadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot: configWorkspace,
   homeDir: configHome
 });
+const catalogProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-catalog-provider-workspace-"));
+const catalogProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-catalog-provider-home-"));
+await mkdir(join(catalogProviderHome, ".estacoda"));
+await writeFile(
+  join(catalogProviderHome, ".estacoda", "config.json"),
+  JSON.stringify({
+    providers: {
+      anthropic: {
+        kind: "catalog",
+        models: ["claude-sonnet-4.5"]
+      }
+    }
+  }),
+  "utf8"
+);
+const catalogProviderConfig = await loadRuntimeConfig({
+  workspaceRoot: catalogProviderWorkspace,
+  homeDir: catalogProviderHome
+});
+const imageBaseUrlWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-workspace-"));
+const imageBaseUrlHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-home-"));
+await mkdir(join(imageBaseUrlHome, ".estacoda"));
+await writeFile(
+  join(imageBaseUrlHome, ".estacoda", "config.json"),
+  JSON.stringify({
+    imageGen: {
+      provider: "byteplus",
+      byteplus: {
+        baseUrl: "https://byteplus.example/api/v3"
+      }
+    }
+  }),
+  "utf8"
+);
+const imageBaseUrlConfig = await loadRuntimeConfig({
+  workspaceRoot: imageBaseUrlWorkspace,
+  homeDir: imageBaseUrlHome
+});
+const defaultImageBaseUrlConfig = await loadRuntimeConfig({
+  workspaceRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-default-image-workspace-")),
+  homeDir: await mkdtemp(join(tmpdir(), "estacoda-v2-default-image-home-"))
+});
+const voiceConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-config-home-"));
+const voiceConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-config-workspace-"));
+await setupVoiceConfig({
+  workspaceRoot: voiceConfigWorkspace,
+  homeDir: voiceConfigHome,
+  input: {
+    ttsProvider: "elevenlabs",
+    ttsApiKeyEnv: "CUSTOM_ELEVENLABS_KEY",
+    scope: "user"
+  }
+});
+const loadedVoiceConfig = await loadRuntimeConfig({
+  workspaceRoot: voiceConfigWorkspace,
+  homeDir: voiceConfigHome
+});
+const uiConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-ui-config-home-"));
+const uiConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-ui-config-workspace-"));
+await setupUiConfig({
+  workspaceRoot: uiConfigWorkspace,
+  homeDir: uiConfigHome,
+  input: {
+    language: "ar",
+    scope: "user"
+  }
+});
+await setupUiConfig({
+  workspaceRoot: uiConfigWorkspace,
+  homeDir: uiConfigHome,
+  input: {
+    language: "en",
+    scope: "user"
+  }
+});
+const loadedEnglishUiConfig = await loadRuntimeConfig({
+  workspaceRoot: uiConfigWorkspace,
+  homeDir: uiConfigHome
+});
+await setupUiConfig({
+  workspaceRoot: uiConfigWorkspace,
+  homeDir: uiConfigHome,
+  input: {
+    language: "en",
+    flavor: "arabic-light",
+    activityLabels: "ar",
+    scope: "user"
+  }
+});
+const loadedExplicitUiConfig = await loadRuntimeConfig({
+  workspaceRoot: uiConfigWorkspace,
+  homeDir: uiConfigHome
+});
+const pairingScopeHome = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-scope-home-"));
+const pairingScopeWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-scope-workspace-"));
+await mkdir(join(pairingScopeWorkspace, ".estacoda"));
+const pairingScopeUserPath = join(pairingScopeHome, ".estacoda", "config.json");
+const pairingScopeProjectPath = join(pairingScopeWorkspace, ".estacoda", "config.json");
+const originalMathRandom = Math.random;
+let cryptoPairingCode: Awaited<ReturnType<typeof createTelegramPairingCode>>;
+try {
+  Math.random = () => {
+    throw new Error("Math.random must not be used for pairing codes");
+  };
+  cryptoPairingCode = await createTelegramPairingCode({
+    workspaceRoot: pairingScopeWorkspace,
+    homeDir: pairingScopeHome,
+    projectConfigPath: pairingScopeProjectPath,
+    userConfigPath: pairingScopeUserPath,
+    input: {
+      scope: "project"
+    }
+  });
+} finally {
+  Math.random = originalMathRandom;
+}
+if (cryptoPairingCode === undefined) {
+  throw new Error("expected crypto pairing code to be created");
+}
+const consumedCryptoPairingCode = await consumeTelegramPairingCode({
+  workspaceRoot: pairingScopeWorkspace,
+  homeDir: pairingScopeHome,
+  projectConfigPath: pairingScopeProjectPath,
+  userConfigPath: pairingScopeUserPath,
+  code: cryptoPairingCode.code,
+  userId: "111",
+  chatId: "222"
+});
+const explicitImageSetupHome = await mkdtemp(join(tmpdir(), "estacoda-v2-explicit-image-home-"));
+const explicitImageSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-explicit-image-workspace-"));
+await setupImageGenerationConfig({
+  workspaceRoot: explicitImageSetupWorkspace,
+  homeDir: explicitImageSetupHome,
+  input: {
+    provider: "byteplus",
+    baseUrl: "https://top-level-image.example/api/v3",
+    scope: "user"
+  }
+});
+const explicitImageSetupConfig = await loadRuntimeConfig({
+  workspaceRoot: explicitImageSetupWorkspace,
+  homeDir: explicitImageSetupHome
+});
 const cliWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-workspace-"));
 const cliHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-home-"));
 const firstRunProjectConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-first-run-project-config-"));
@@ -1096,6 +1250,14 @@ const cliSecurityStatusAfter = await runCliCommand({
   argv: ["security", "status"],
   workspaceRoot: securityConfigWorkspace,
   homeDir: cliHome
+});
+const securityNoModeSetup = await setupSecurityConfig({
+  workspaceRoot: securityConfigWorkspace,
+  homeDir: cliHome,
+  input: {
+    assessorTimeoutMs: 4_700,
+    scope: "project"
+  }
 });
 const loadedSecurityConfig = await loadRuntimeConfig({
   workspaceRoot: securityConfigWorkspace,
@@ -2986,12 +3148,30 @@ assert(deepMergedConfig.mcpServers?.filesystem?.timeoutMs === 30_000, "expected 
 assert(deepMergedConfig.mcpServers?.filesystem?.tools?.include?.[0] === "read_file", "expected MCP nested tools include to survive partial override");
 assert(deepMergedConfig.mcpServers?.filesystem?.tools?.prompts === true, "expected MCP nested tools prompt override");
 assert(loadedRuntimeConfig.sources.length === 2, "expected user and project config sources");
-assert(loadedRuntimeConfig.model.provider === "deepseek", "expected personal model route to override project default");
+assert(loadedRuntimeConfig.model.provider === "kimi", "expected project model route to override user default");
 assert((await loadedRuntimeConfig.providerRegistry.listModels()).length === 2, "expected configured provider models");
 assert(
   loadedRuntimeConfig.credentialPools.snapshots().some((snapshot) => snapshot.provider === "deepseek"),
   "expected configured credential pool"
 );
+assert(
+  (await catalogProviderConfig.providerRegistry.listModels()).some((model) => model.provider === "anthropic" && model.id === "claude-sonnet-4.5"),
+  "expected catalog provider config to register discovery models"
+);
+assert(imageBaseUrlConfig.imageGen.baseUrl === "https://byteplus.example/api/v3", "expected image config to expose provider-specific base URL as effective base URL");
+assert(defaultImageBaseUrlConfig.imageGen.baseUrl === "https://fal.run", "expected image config to expose provider default base URL");
+assert(explicitImageSetupConfig.imageGen.baseUrl === "https://top-level-image.example/api/v3", "expected explicit top-level image base URL to win");
+assert(loadedVoiceConfig.tts.elevenlabs?.apiKeyEnv === "CUSTOM_ELEVENLABS_KEY", "expected ElevenLabs custom API key env to survive normalize and reload");
+assert(loadedEnglishUiConfig.ui.language === "en", "expected UI language to switch to English");
+assert(loadedEnglishUiConfig.ui.flavor === "standard", "expected switching UI language to English to reset Arabic flavor");
+assert(loadedEnglishUiConfig.ui.activityLabels === "en", "expected switching UI language to English to reset Arabic activity labels");
+assert(loadedExplicitUiConfig.ui.flavor === "arabic-light", "expected explicit UI flavor to win");
+assert(loadedExplicitUiConfig.ui.activityLabels === "ar", "expected explicit activity labels to win");
+assert(/^\d{6}$/u.test(cryptoPairingCode.code), "expected crypto pairing code to be six digits");
+assert(cryptoPairingCode.path === pairingScopeUserPath, "expected Telegram pairing code creation to use user config path");
+assert(consumedCryptoPairingCode.paired === true, "expected user-scoped Telegram pairing code to be consumed");
+assert(consumedCryptoPairingCode.path === pairingScopeUserPath, "expected Telegram pairing consumption to use user config path");
+assert((await readFile(pairingScopeProjectPath, "utf8").catch(() => "")) === "", "expected Telegram pairing to avoid project config state");
 assert(
   loadedRuntimeConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi",
   "expected configured auxiliary provider override"
@@ -4222,7 +4402,7 @@ assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret m
 assert(cliMissingWorkspaceSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive setup to finish with a missing chosen workspace");
 assert(cliMissingWorkspaceStats.isDirectory(), "expected interactive setup to create the chosen missing workspace");
 assert(cliProjectOverrideSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected project override setup output");
-assert(cliProjectOverrideConfig.model.provider === "kimi", "expected onboarding to override blocking project provider route");
+assert(cliProjectOverrideConfig.model.provider === "openai", "expected project config to keep precedence over user onboarding config");
 assert(cliProjectOverridePromptSecrets.some(Boolean), "expected project override setup API key prompt to be masked");
 assert(cliArabicInteractiveSetup.output.includes("اكتمل الإعداد."), "expected Arabic onboarding final output");
 assert(cliArabicInteractiveConfig.ui.language === "ar", "expected Arabic onboarding to persist Arabic UI language");
@@ -4307,11 +4487,12 @@ assert(cliSecuritySetup.output.includes("Approval mode: Open (open)."), "expecte
 assert(cliSecuritySetup.output.includes("Assessor: enabled."), "expected CLI security setup to preserve assessor state");
 assert(cliSecurityStatusAfter.output.includes("Approval mode: Open (open)"), "expected CLI security status to report updated open mode");
 assert(cliSecurityStatusAfter.output.includes("Assessor: enabled"), "expected CLI security status to keep assessor enabled");
+assert(securityNoModeSetup.config.security?.approvalMode === "open", "expected security setup without mode to preserve approval mode");
 assert(loadedSecurityConfig.security.approvalMode === "open", "expected runtime config to load updated approval mode");
 assert(loadedSecurityConfig.security.assessor.enabled === true, "expected runtime config to preserve assessor enabled state");
 assert(loadedSecurityConfig.security.assessor.provider === "kimi", "expected runtime config to preserve assessor provider");
 assert(loadedSecurityConfig.security.assessor.model === "kimi-k2.5", "expected runtime config to preserve assessor model");
-assert(loadedSecurityConfig.security.assessor.timeoutMs === 4500, "expected runtime config to preserve assessor timeout");
+assert(loadedSecurityConfig.security.assessor.timeoutMs === 4700, "expected runtime config to merge assessor updates without resetting mode");
 assert(cliArabicSecurityHelp.output.includes("صارم"), "expected Arabic security help label");
 assert(cliArabicSecurityHelp.output.includes("متوازن"), "expected Arabic security help adaptive label");
 assert(cliArabicSecuritySetup.output.includes("Approval mode: صارم (strict)."), "expected Arabic security setup label with raw value");
