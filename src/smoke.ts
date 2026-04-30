@@ -2982,6 +2982,14 @@ const configStatusExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const securityConfigExecution = await toolExecutor.executeTool({
+  tool: "config.security.setup",
+  input: {
+    mode: "adaptive"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const webConfigExecution = await toolExecutor.executeTool({
   tool: "config.web.setup",
   input: {
@@ -3013,6 +3021,23 @@ const telegramConfigExecution = await toolExecutor.executeTool({
 });
 const telegramStatusExecution = await toolExecutor.executeTool({
   tool: "config.telegram.status",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const imageConfigExecution = await toolExecutor.executeTool({
+  tool: "config.image.setup",
+  input: {
+    provider: "byteplus",
+    model: "seedream-5-0-260128",
+    apiKey: "image-secret",
+    scope: "user"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const imageStatusExecution = await toolExecutor.executeTool({
+  tool: "config.image.status",
   input: {},
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -5202,6 +5227,11 @@ assert(rateLimitedResponse.errorClass === "rate-limit", "expected rate-limit cla
 assert(providerAbortSignalSeen, "expected provider fetch to receive aborted signal");
 assert(cancelledProviderResponse.errorClass === "timeout", "expected cancelled provider response to classify as timeout");
 assert(classifyHttpError(401) === "auth", "expected auth HTTP classification");
+const providerSetupSchema = tools.get("config.provider.setup")?.inputSchema as { properties?: Record<string, { type?: string }> } | undefined;
+const imageSetupSchema = tools.get("config.image.setup")?.inputSchema as { properties?: Record<string, { type?: string }> } | undefined;
+assert(providerSetupSchema?.properties?.primary?.type === "boolean", "expected config.provider.setup to expose primary");
+assert(providerSetupSchema?.properties?.backupForMain?.type === "boolean", "expected config.provider.setup to expose backupForMain");
+assert(imageSetupSchema?.properties?.apiKey?.type === "string", "expected config.image.setup to expose apiKey");
 assert(
   parseOpenAICompatibleResponse({
     provider: "deepseek",
@@ -5217,6 +5247,8 @@ assert(
   configSetupExecution.result.content.includes("Configured deepseek/deepseek-chat"),
   "expected config setup output"
 );
+assert(configSetupExecution.result.content.includes("Requested: deepseek/deepseek-chat"), "expected config setup requested route output");
+assert(configSetupExecution.result.content.includes("Effective: deepseek/deepseek-chat"), "expected config setup effective route output");
 assert(configStatusExecution?.result?.ok === true, "expected config.provider.status to succeed");
 assert(
   configStatusExecution.result.content.includes("deepseek/deepseek-chat"),
@@ -5226,14 +5258,27 @@ assert(
   configStatusExecution.result.content.includes("Provider health:"),
   "expected config status provider health output"
 );
+assert(securityConfigExecution?.result?.ok === true, "expected config.security.setup to succeed");
+assert(securityConfigExecution.result.content.includes("Requested approval mode: adaptive"), "expected security config requested mode output");
+assert(securityConfigExecution.result.content.includes("Effective approval mode: adaptive"), "expected security config effective mode output");
 assert(webConfigExecution?.result?.ok === true, "expected config.web.setup to succeed");
 assert(webConfigExecution.result.content.includes("Web extraction enabled"), "expected web config output");
 assert(browserConfigExecution?.result?.ok === true, "expected config.browser.setup to succeed");
 assert(browserConfigExecution.result.content.includes("Browser backend: local-cdp"), "expected browser config output");
 assert(telegramConfigExecution?.result?.ok === true, "expected config.telegram.setup to succeed");
 assert(telegramConfigExecution.result.content.includes("Telegram channel configured"), "expected Telegram config output");
+assert(telegramConfigExecution.result.content.includes("Effective status:"), "expected Telegram setup effective status output");
+assert(telegramConfigExecution.result.content.includes("Effective bot token env: ESTACODA_TELEGRAM_BOT_TOKEN"), "expected Telegram setup effective token env output");
 assert(telegramStatusExecution?.result?.ok === true, "expected config.telegram.status to succeed");
 assert(telegramStatusExecution.result.content.includes("Telegram channel"), "expected Telegram status output");
+assert(imageConfigExecution?.result?.ok === true, "expected config.image.setup to succeed");
+assert(imageConfigExecution.result.content.includes("Configured EstaCoda image generation."), "expected image setup output");
+assert(imageConfigExecution.result.content.includes("Effective provider: byteplus"), "expected image setup effective provider output");
+assert(imageConfigExecution.result.content.includes("Effective API key env: BYTEPLUS_ARK_API_KEY"), "expected image setup effective key env output");
+assert(imageConfigExecution.result.content.includes("Secret store:"), "expected image setup to delegate secret persistence");
+assert(imageStatusExecution?.result?.ok === true, "expected config.image.status to succeed");
+assert(imageStatusExecution.result.content.includes("API key env: BYTEPLUS_ARK_API_KEY"), "expected image status effective API key env output");
+assert(imageStatusExecution.result.content.includes("Base URL:"), "expected image status base URL output");
 assert(
   onboardingStatusAfterConfig?.result?.content.includes("Onboarding needed: no") === true,
   "expected onboarding to detect configured provider"
@@ -7148,7 +7193,10 @@ assert(
   "expected memory usage with Hermes-aligned budget"
 );
 assert(compressed.preservedEventIds.length === 1, "expected compressed trajectory to preserve user input");
-assert(directSearch.length === 1, "expected direct session search result");
+assert(
+  directSearch.some((result) => result.message.content.includes("YouTube knowledge-base workflow")),
+  "expected direct session search result"
+);
 assert(
   (await sessionDb.listEvents(directSession.id)).some((event) => event.kind === "skill-selected"),
   "expected direct session event"

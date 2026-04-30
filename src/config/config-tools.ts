@@ -17,8 +17,6 @@ import {
   type WebSetupInput
 } from "./runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
-import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
-import { defaultImageApiKeyEnv } from "../contracts/image-generation.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
@@ -123,17 +121,20 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ...options,
           input
         });
+        const loaded = await loadRuntimeConfig(options);
 
         return {
           ok: true,
           content: [
-            `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
-            `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
+            `Requested approval mode: ${input.mode ?? "unchanged"}.`,
+            `Effective approval mode: ${loaded.security.approvalMode}.`,
+            `Effective assessor: ${loaded.security.assessor.enabled ? "enabled" : "disabled"}.`,
             `Wrote ${result.path}.`
           ].join("\n"),
           metadata: {
             path: result.path,
-            security: result.config.security
+            requested: input,
+            security: loaded.security
           }
         };
       }
@@ -355,22 +356,26 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ...options,
           input
         });
+        const loaded = await loadRuntimeConfig(options);
+        const telegram = loaded.channels.telegram;
 
         return {
           ok: true,
           content: [
             `Telegram channel ${input.enabled === false ? "disabled" : "configured"}.`,
+            `Effective status: ${telegram.ready ? "ready" : telegram.enabled ? "configured, missing credentials" : "disabled"}.`,
+            `Effective bot token env: ${telegram.botTokenEnv ?? "not set"}.`,
             `Wrote ${result.path}.`,
-            `Bot token env: ${result.config.channels?.telegram?.botTokenEnv ?? "not set"}`,
             result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
-            result.config.channels?.telegram?.defaultChatId === undefined
+            telegram.defaultChatId === undefined
               ? undefined
-              : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
-            result.secretPath === undefined ? "API key source: environment variable." : undefined
+              : `Default chat: ${telegram.defaultChatId}`,
+            result.secretPath === undefined ? "Bot token source: environment variable." : undefined
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            telegram: result.config.channels?.telegram,
+            requested: input,
+            telegram,
             secretPath: result.secretPath
           }
         };
@@ -424,9 +429,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       isAvailable: () => true,
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
-        const key = loaded.imageGen.provider === "byteplus"
-          ? loaded.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
-          : loaded.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
+        const key = loaded.imageGen.apiKeyEnv;
         return {
           ok: true,
           content: [
@@ -435,6 +438,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Model: ${loaded.imageGen.model}`,
             `Gateway: ${loaded.imageGen.useGateway ? "yes" : "no"}`,
             `API key env: ${key}`,
+            `Base URL: ${loaded.imageGen.baseUrl}`,
             "Cache: ~/.estacoda/image-cache/"
           ].join("\n"),
           metadata: {
@@ -457,7 +461,9 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKey: { type: "string" },
           enableNetwork: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] },
-          credentialPoolStrategy: { type: "string" }
+          credentialPoolStrategy: { type: "string" },
+          primary: { type: "boolean" },
+          backupForMain: { type: "boolean" }
         },
         required: ["provider", "model"]
       },
@@ -478,6 +484,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ok: true,
           content: [
             `Configured ${input.provider}/${input.model}.`,
+            `Requested: ${input.provider}/${input.model}`,
+            `Effective: ${loaded.model.provider}/${loaded.model.id}`,
             `Wrote ${result.path}.`,
             result.secretPath === undefined ? "API key source: environment variable." : `Secret store: ${result.secretPath}`,
             "",
@@ -485,8 +493,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            provider: input.provider,
-            model: input.model,
+            requested: input,
+            effective: loaded.model,
             secretPath: result.secretPath,
             providerDiagnostic: diagnostic
           }
@@ -503,6 +511,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           model: { type: "string" },
           modelVersion: { type: "string", description: "Friendly model alias such as seedream-5, seedream-4.5, or seedream-4." },
           apiKeyEnv: { type: "string" },
+          apiKey: { type: "string" },
           baseUrl: { type: "string" },
           useGateway: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] }
@@ -514,21 +523,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       maxResultSizeChars: 5000,
       isAvailable: () => true,
       run: async (input: ImageGenerationSetupInput) => {
-        let secretPath: string | undefined;
-        if (input.apiKey !== undefined && input.apiKey.trim().length > 0) {
-          const provider = input.provider ?? "fal";
-          const envName = input.apiKeyEnv ?? defaultImageApiKeyEnv(provider);
-          secretPath = (await storeCapabilitySecret({
-            homeDir: options.homeDir,
-            envName,
-            secret: input.apiKey
-          })).secretPath;
-          input = {
-            ...input,
-            apiKeyEnv: envName,
-            apiKey: undefined
-          };
-        }
         const result = await setupImageGenerationConfig({
           ...options,
           input
@@ -538,16 +532,20 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ok: true,
           content: [
             "Configured EstaCoda image generation.",
-            `Provider: ${loaded.imageGen.provider}`,
-            `Model: ${loaded.imageGen.model}`,
+            `Requested provider: ${input.provider ?? "unchanged"}`,
+            `Effective provider: ${loaded.imageGen.provider}`,
+            `Effective model: ${loaded.imageGen.model}`,
+            `Effective API key env: ${loaded.imageGen.apiKeyEnv}`,
+            `Effective base URL: ${loaded.imageGen.baseUrl}`,
             `Wrote ${result.path}.`,
-            secretPath === undefined && result.secretPath === undefined ? undefined : `Secret store: ${secretPath ?? result.secretPath}`,
-            secretPath === undefined && result.secretPath === undefined ? "API key source: environment variable." : undefined
+            result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
+            result.secretPath === undefined ? "API key source: environment variable." : undefined
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
+            requested: input,
             imageGen: loaded.imageGen,
-            secretPath: secretPath ?? result.secretPath
+            secretPath: result.secretPath
           }
         };
       }
