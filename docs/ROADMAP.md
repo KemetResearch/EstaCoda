@@ -4,7 +4,7 @@ This is the agent-facing roadmap snapshot. It mirrors the intent of [NEXT_PHASE_
 
 ## Current Stage
 
-EstaCoda v2 is in **strong internal alpha / pre-MVP hardening**.
+EstaCoda v2 is an **MVP candidate for private/internal alpha**.
 
 It is already useful for:
 
@@ -14,6 +14,8 @@ It is already useful for:
 - Telegram document analysis `live-proven`
 - Telegram image understanding with Kimi `live-proven`
 - repeatable internal alpha runs `live-proven`
+- first-run onboarding through a working agent session `live-proven`
+- Telegram image generation delivery `live-proven`
 
 Current hosted-provider matrix:
 
@@ -23,7 +25,7 @@ Current hosted-provider matrix:
 - OpenRouter: runtime path works, exactness still partial `live-proven`
 - local/Ollama: not accepted in this environment `live-proven`
 
-It is not yet “ship broadly without caveats.”
+It is not yet a broad public release. The next product work is packaging, release hardening, and polish rather than proving the basic agent/runtime/onboarding path.
 
 ## Milestone Status
 
@@ -113,17 +115,20 @@ Next:
 
 ### 5. Onboarding and packaging
 
-State: Phase 1 setup wizard is smoke-tested and Phase 2 onboarding branches have started; packaging remains partial.
+State: onboarding MVP is live-proven for the CLI path; packaging remains partial.
 
 Done:
 
 - canonical `estacoda setup` guided wizard `smoke-tested`
+- first-run interactive onboarding from fresh `HOME` through a working agent session `live-proven`
+- interface language/style selection for English and Arabic onboarding `live-proven`
+- two-step primary provider/model selection plus optional backup model selection `live-proven`
 - advanced flag setup via `estacoda setup --advanced ...` `smoke-tested`
 - first-launch prompt asks `Run setup now? [Y/n]` instead of silently entering setup `implemented`
 - local secret store at `~/.estacoda/.env` with `0600` permissions and config env-var references `smoke-tested`
 - user/project config overlays deep-merge provider, credential-pool, auxiliary-provider, and MCP server entries so project overrides do not erase user credentials/models `smoke-tested`
-- setup prompts for workspace trust, provider/model, credential storage, security mode, and skill autonomy `smoke-tested`
-- `estacoda verify` readiness check `smoke-tested`
+- setup prompts for workspace trust, provider/model, local credential capture, security mode, workflow learning, optional capabilities, and compact readiness verification `smoke-tested`
+- `estacoda verify` readiness check and first-run setup check `smoke-tested`
 - `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`
 - Phase 2A Telegram guided setup via `estacoda telegram setup` with local secret storage, token verification, allow/remove management, command sync, and test message path `smoke-tested`
 - Phase 2B browser command alignment via `estacoda browser setup`, `estacoda browser test`, and `estacoda settings browser` `smoke-tested`
@@ -136,8 +141,9 @@ Next:
 
 - external-user-quality install flow
 - richer recovery UX for bad credentials/config
+- runtime CLI copy/UI polish beyond onboarding
+- richer localized approval cards and full runtime Arabic interface copy
 - Phase 2 migration detection/import
-- richer localized approval cards and full Arabic interface copy
 - packaging/distribution decision
 
 ### 6. Internal alpha operations
@@ -207,11 +213,11 @@ Next:
 
 The best next milestone is:
 
-1. **workflow-learning refinement**
-2. **MCP trust/visibility refinement**
-3. **evaluation substrate expansion**
-4. **onboarding/distribution polish**
-5. **ACP/editor embedding only after MCP client and memory/session maturity**
+1. **private repo / release hygiene**
+2. **packaging and install flow**
+3. **release hardening around setup recovery, credentials, and channel diagnostics**
+4. **runtime CLI UI polish and broader localization**
+5. **workflow-learning, MCP trust, and eval substrate refinement**
 
 ## Product Gap Analysis
 
@@ -219,9 +225,11 @@ The following product areas came up explicitly and should be treated as tracked 
 
 ### 1. Onboarding experience
 
-State: Phase 1 guided setup is built.
+State: MVP first-run onboarding is built and live-proven.
 
-- canonical `estacoda setup` wizard exists `smoke-tested`
+- canonical first-run setup wizard exists `live-proven`
+- English/Arabic onboarding exists `live-proven`
+- provider -> model, optional backup model, protected credential capture, security mode, workflow-learning mode, optional capabilities, and compact setup check exist `live-proven` / `smoke-tested`
 - secret persistence to `~/.estacoda/.env` exists `smoke-tested`
 - readiness verification via `estacoda verify` exists `smoke-tested`
 - lightweight settings category view exists `smoke-tested`
@@ -231,7 +239,8 @@ State: Phase 1 guided setup is built.
 What remains:
 
 - better recovery from bad credentials/config
-- clearer provider selection UX, especially around vision and local models
+- deeper runtime CLI copy polish beyond onboarding
+- richer localized approval cards and status copy
 - packaging/install polish for non-builders
 
 ### 2. Migration from Hermes / OpenClaw
@@ -355,7 +364,7 @@ What remains:
 
 ### 9. Image Generation
 
-State: Hermes-aligned first foundation exists.
+State: Hermes-aligned first foundation exists; Telegram image delivery is live-proven.
 
 - `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
 - BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY`, Seedream 5 as the default model, and version aliases for Seedream 5/4.5/4.0 `smoke-tested`
@@ -374,10 +383,11 @@ State: Hermes-aligned first foundation exists.
 - OpenAI-style fragmented streaming tool calls preserve their function name across argument-only chunks, so provider-safe `image_generate` maps back to `image.generate` instead of `unknown` `smoke-tested`
 - media-generation intents execute deterministic `image.generate` exactly once and suppress duplicate provider tool selection for the same turn `smoke-tested`
 - BytePlus `ModelNotOpen` failures now explain that model access is version-specific and point users to `estacoda image models --provider byteplus` plus `--model-version` setup aliases `smoke-tested`
+- BytePlus/Seedream generated images were live-tested through Telegram delivery with `sendPhoto` attachment behavior. `live-proven`
 
 What remains:
 
-- live provider proof with real FAL and BytePlus credentials
+- broader live provider proof with FAL and additional BytePlus model versions
 - richer CLI image/audio artifact cards remain follow-up; generated artifact prompt paths are now safe `artifact://<id>` references with internal `localPath` delivery support
 - Telegram/channel protected credential capture and resume UX
 - richer model picker UX similar to Hermes' `hermes tools`
@@ -427,14 +437,14 @@ What remains:
 Closest honest label:
 
 - usable internal alpha: yes
-- small private MVP soon: yes
+- small private MVP candidate: yes
 - public-ready MVP today: no
 
 Main blockers to MVP:
 
-- repeated user preferences and project facts now promote cleanly, and bounded workflow learning now exists through `skills.autonomy`
-- the next gap is better workflow heuristics, candidate quality, and skill patch/update behavior rather than basic workflow learning itself
-- provider-route hardening is incomplete
-- Telegram image path is live-proven with Kimi, but not yet broadly proven across providers
 - install/distribution polish is not done
+- private repo/release hygiene still needs completion
+- recovery UX for bad provider/channel credentials still needs polish
+- runtime CLI localization is not yet as complete as onboarding localization
 - channel-level verbosity/profile controls are still missing
+- provider breadth still needs repeated live proof beyond the current accepted routes

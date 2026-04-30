@@ -36,6 +36,8 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## CLI / UX
 
+- First-run onboarding is now live-proven in English and Arabic, but the broader runtime CLI is not fully localized. Arabic support should currently be described as onboarding plus supported setup/status labels, not full-shell localization. `live-proven`
+- Mixed Arabic + English technical tokens can still show terminal bidi artifacts around paths, env vars, provider names, and commands. LTR isolation is used in onboarding copy, but terminals vary. `live-proven`
 - Interactive multiline paste ergonomics are still rough. `live-proven`
 - Some answers remain too “assistant-ish” or too doc-like in tone/format depending on surface. `live-proven`
 
@@ -58,6 +60,6 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Non-Telegram launch channels are not product-ready.
 - Packaging/distribution path is not decided.
 - Hermes/OpenClaw migration path is not designed.
-- Voice input/transcription is not implemented.
+- Voice/TTS/STT foundation exists, but full TUI voice input and richer local backend detection remain follow-up work.
 - User-facing profiles/modes now exist as a first global config slice; profile effects beyond prompt guidance remain incomplete.
 - Update/install lifecycle for end users is not finalized.

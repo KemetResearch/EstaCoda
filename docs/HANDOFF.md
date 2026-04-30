@@ -5,24 +5,9 @@ This document is for a coding agent taking over the EstaCoda v2 codebase. It is 
 ## Repo Snapshot
 
 - Current branch: `main`
-- Current git status:
+- Current git status at this handoff: clean before this documentation refresh.
 
-```text
- M src/channels/channel-gateway.ts
- M src/channels/gateway-runner.ts
- M src/cli/cli.ts
- M src/cli/session-loop.ts
- M src/cli/slash-menu.ts
- M src/config/config-tools.ts
- M src/config/runtime-config.ts
- M src/index.ts
- M src/runtime/create-runtime.ts
- M src/smoke.ts
-?? agent-proof-live.md
-?? alpha-proof.md
-?? live-tool-smoke.ts
-?? src/mcp/
-```
+Local scratch files may still exist on the developer machine and are intentionally ignored.
 
 Evidence labels used in this document:
 
@@ -46,7 +31,7 @@ The guiding product rule is: stay Hermes-aligned by default unless there is a de
 
 ## 2. Current Milestone
 
-Current milestone: **strong internal alpha / pre-MVP hardening**.
+Current milestone: **MVP candidate / private internal alpha**.
 
 What has been achieved:
 
@@ -62,6 +47,7 @@ What has been achieved:
 - An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, editor-backed file reads, and a live-proven JetBrains approval flow.
 - A cron foundation now exists with persistent jobs, prompt safety scanning, tick locking, bounded workspace-local script-backed jobs, the `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks. It is `smoke-tested`; broader channel delivery remains follow-up work.
 - Browser automation now has a Hermes-shaped local-CDP core: status/config, `/browser status|connect|disconnect`, navigate, snapshot, click, type, scroll, press, back, image listing, page-local console capture, raw CDP passthrough, screenshot capture, screenshot vision analysis, and basic JavaScript dialog response. It is `smoke-tested`; Browserbase, Browser Use, Firecrawl, Camofox, and persistent dialog supervisor/cloud dialog bridging remain follow-up work.
+- First-run onboarding now covers interface language/style, workspace trust, primary provider/model, optional backup model, protected local credential capture, security mode, workflow-learning mode, optional capabilities, readiness verification, and immediate session start. English and Arabic onboarding are operator-tested; full runtime CLI localization remains follow-up work.
 
 Evidence:
 
@@ -76,14 +62,15 @@ Evidence:
 - evaluation substrate: `implemented but not live-proven`
 - MCP client foundation across stdio + HTTP: stdio path `live-proven`; HTTP path `smoke-tested`
 - ACP foundation: JetBrains chat, file reads, shell execution, and approval prompts are `live-proven`
-- Phase 1 onboarding wizard: `estacoda setup`, secret store, workspace trust, security mode, skill autonomy, `estacoda verify`, and `estacoda settings` are `smoke-tested`
-- Phase 2A/2B onboarding branches have started: `estacoda telegram setup` plus Telegram management/test commands, and `estacoda browser setup/test` are `smoke-tested`
+- First-run onboarding wizard: interface language/style, protected provider key capture, workspace trust, primary/backup model selection, security mode, workflow-learning mode, optional capability setup, compact verify output, and immediate session start are `smoke-tested` and manually E2E-tested.
+- Optional onboarding capability branches include Telegram, voice, vision/image generation, and browser setup. Telegram setup plus Telegram image delivery are `live-proven`; browser/voice/vision setup branches are `smoke-tested`.
 - Phase 2C/2D profile/UI foundation now separates interface language, aesthetic flavor, activity-label locale, agent behavior mode, and response-language policy. `smoke-tested`
 - Security-mode and skill-autonomy settings now render localized English/Arabic labels from `ui.language` while preserving English config values. `smoke-tested`
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
 - Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
 - Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
 - Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support with Seedream 5 as the default plus `image models`/`--model-version` aliases for provider-specific versions, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, exactly-once deterministic media-generation execution, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
+- Telegram image generation and delivery via BytePlus/Seedream was live-tested end-to-end with generated images attached in Telegram. `live-proven`
 
 ## 3. Current Working Capabilities
 

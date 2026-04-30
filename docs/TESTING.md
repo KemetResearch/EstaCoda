@@ -90,6 +90,43 @@ cd /Users/ahnwy/estacoda-v2
 /Users/ahnwy/.bun/bin/bun run dev
 ```
 
+## Fresh First-Run Onboarding E2E
+
+Use this when validating the real first-launch experience rather than an already-configured developer machine:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+rm -rf /tmp/estacoda-e2e-home
+mkdir -p /tmp/estacoda-e2e-home
+HOME=/tmp/estacoda-e2e-home /Users/ahnwy/.bun/bin/bun run dev
+```
+
+Expected path:
+
+- setup asks whether to run when no usable provider credential exists
+- interface language and expression style can be selected with arrow keys
+- workspace trust prompt appears
+- primary provider and primary model are selected as separate steps
+- optional backup model can be skipped or configured
+- hosted-provider API keys are captured with masked input and saved to `.estacoda/.env`
+- security mode and workflow-learning mode are selected with arrow keys
+- optional capabilities can be skipped or entered
+- setup check reports `ready`
+- the first agent session starts immediately
+
+Manual Arabic check:
+
+- choose Arabic interface during first-run setup
+- confirm selector chrome is localized (`استخدم ↑/↓ للتنقّل، ثم Enter للاختيار.` and `تم الاختيار`)
+- confirm technical tokens such as provider names, paths, env vars, and commands remain readable even when terminal bidi rendering is imperfect
+- confirm runtime shell labels are not assumed to be fully localized yet
+
+Evidence level:
+
+- English onboarding path: `live-proven`
+- Arabic onboarding path: `live-proven` with expected terminal bidi caveats
+- optional capability branches: `smoke-tested`; Telegram image delivery branch is `live-proven`
+
 Inside the interactive session, useful checks:
 
 - `/trust`
@@ -102,12 +139,13 @@ Inside the interactive session, useful checks:
 
 Evidence level:
 
-- Phase 1 setup wizard: `smoke-tested`
+- first-run setup wizard: `live-proven`
 - local `~/.estacoda/.env` secret store with `0600`: `smoke-tested`
 - setup verification and settings overview: `smoke-tested`
-- Phase 2A Telegram guided setup and management commands: `smoke-tested`
-- Phase 2B browser setup/test command alignment: `smoke-tested`
-- Phase 2C/2D profile and UI language/flavor foundation: `smoke-tested`
+- Telegram guided setup and management commands: `smoke-tested`
+- browser setup/test command alignment: `smoke-tested`
+- profile and UI language/flavor foundation: `smoke-tested`
+- English/Arabic onboarding selectors and localized setup labels: `live-proven`
 - CLI file edit/read/verify flow: `live-proven`
 - broader CLI ergonomics: partial and still needs judgment during live runs
 
@@ -240,6 +278,7 @@ Evidence level:
 
 - Telegram document path: `live-proven`
 - Telegram image path with Kimi: `live-proven`
+- Telegram generated-image delivery through `sendPhoto`: `live-proven`
 - broader provider coverage: `implemented but not live-proven`
 
 ## What Smoke Currently Covers

@@ -1,38 +1,83 @@
 # EstaCoda v2
 
-EstaCoda v2 is the clean platform build described in [`../docs/v2/PRD.md`](../docs/v2/PRD.md).
+EstaCoda v2 is a Hermes-aligned TypeScript agent runtime for local, channel, and editor-based agent work.
 
-This workspace is intentionally separate from the v1 codebase so the new runtime can be built without inheriting old provider, prompt, permission, or branding assumptions.
+The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, and artifact paths are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a broad public release.
 
-## Direction
+## Quick Start
 
-- TypeScript-first platform.
-- Python-first tool execution lane.
-- Language-agnostic, agent-authored skill system.
-- Capability-first security.
-- Generic channel layer with Telegram as the first adapter.
-- Hermes-aligned bounded memory.
-- Research/RL-ready trajectory capture.
-- Kemet Blue visual identity.
-
-## Early Module Map
-
-```text
-src/
-  contracts/       Shared interfaces and schemas
-  runtime/         Agent loop and orchestration shell
-  theme/           Theme definitions
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun install
+/Users/ahnwy/.bun/bin/bun run dev
 ```
 
-## First Proof
+On first launch, EstaCoda runs an interactive setup flow:
 
-The first proof should show:
+- choose interface language and expression style
+- trust the active workspace
+- choose primary and optional backup model routes
+- store hosted-provider keys locally in `~/.estacoda/.env` with `0600` permissions
+- choose security mode: `strict`, `adaptive`, or `open`
+- choose workflow-learning mode: `none`, `suggest`, `proactive`, or `autonomous`
+- optionally configure Telegram, voice, vision/image generation, and browser support
+- verify readiness, then start the first agent session
 
-1. CLI/runtime starts.
-2. Provider abstraction accepts a model profile.
-3. Tool registry can register and resolve tools.
-4. Skills can be loaded from declarative files.
-5. Memory files are loaded with bounded budgets.
-6. Intent router detects a YouTube knowledge-base task.
-7. Trajectory events are recorded.
+## Core Capabilities
 
+- Provider-backed CLI agent loop with real tool execution.
+- Capability-first security with approval modes, hard safety floor, `/yolo`, and audit/debug views.
+- Local and project config overlays with local secret storage.
+- Bounded memory through `MEMORY.md`, `USER.md`, `SOUL.md`, and `AGENTS.md`.
+- Skill system with visibility, usage telemetry, evolution overlays, gated proposals, snapshots, rollback, and scored eval fixtures.
+- Telegram gateway with allowlists, approvals, sessions, attachments, voice transcription hooks, and generated-image delivery.
+- MCP client for stdio and HTTP servers, including reload semantics.
+- ACP stdio server foundation for editor clients.
+- Browser automation through a local Chrome DevTools Protocol backend.
+- Cron jobs with prompt scanning, script-backed jobs, tick locking, and local outputs.
+- Voice/TTS/STT configuration foundation and audio artifacts.
+- Image generation with FAL and BytePlus/ModelArk Seedream provider support.
+- English and Arabic first-run onboarding, with localized setup labels and supported status copy.
+
+## Checks
+
+Run these before pushing changes:
+
+```bash
+cd /Users/ahnwy/estacoda-v2
+/Users/ahnwy/.bun/bin/bun run typecheck
+/Users/ahnwy/.bun/bin/bun run smoke
+```
+
+For a clean first-run onboarding check:
+
+```bash
+rm -rf /tmp/estacoda-e2e-home
+mkdir -p /tmp/estacoda-e2e-home
+HOME=/tmp/estacoda-e2e-home /Users/ahnwy/.bun/bin/bun run dev
+```
+
+## State
+
+By default, user-level state lives under `~/.estacoda/`:
+
+- `config.json`
+- `.env`
+- `trust.json`
+- `sessions.sqlite`
+- `memory/`
+- `skills/`
+- `cron/`
+- `image-cache/`
+- `audio-cache/`
+- `channel-media/`
+
+Project overlays live under `<workspace>/.estacoda/`.
+
+## Docs
+
+- [Architecture](/Users/ahnwy/estacoda-v2/docs/ARCHITECTURE.md)
+- [Testing](/Users/ahnwy/estacoda-v2/docs/TESTING.md)
+- [Roadmap](/Users/ahnwy/estacoda-v2/docs/ROADMAP.md)
+- [Known Issues](/Users/ahnwy/estacoda-v2/docs/KNOWN_ISSUES.md)
+- [Handoff](/Users/ahnwy/estacoda-v2/docs/HANDOFF.md)
