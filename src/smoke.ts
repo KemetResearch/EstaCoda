@@ -633,6 +633,18 @@ await setupVoiceConfig({
   input: {
     ttsProvider: "elevenlabs",
     ttsApiKeyEnv: "CUSTOM_ELEVENLABS_KEY",
+    sttProvider: "openai",
+    sttApiKeyEnv: "CUSTOM_STT_OPENAI_KEY",
+    scope: "user"
+  }
+});
+await setupVoiceConfig({
+  workspaceRoot: voiceConfigWorkspace,
+  homeDir: voiceConfigHome,
+  input: {
+    ttsProvider: "elevenlabs",
+    sttProvider: "openai",
+    sttModel: "whisper-1",
     scope: "user"
   }
 });
@@ -683,6 +695,18 @@ const pairingScopeUserPath = join(pairingScopeHome, ".estacoda", "config.json");
 const pairingScopeProjectPath = join(pairingScopeWorkspace, ".estacoda", "config.json");
 const originalMathRandom = Math.random;
 let cryptoPairingCode: Awaited<ReturnType<typeof createTelegramPairingCode>>;
+const projectScopedPairingError = await createTelegramPairingCode({
+  workspaceRoot: pairingScopeWorkspace,
+  homeDir: pairingScopeHome,
+  projectConfigPath: pairingScopeProjectPath,
+  userConfigPath: pairingScopeUserPath,
+  input: {
+    scope: "project"
+  }
+}).then(
+  () => undefined,
+  (error: unknown) => error
+);
 try {
   Math.random = () => {
     throw new Error("Math.random must not be used for pairing codes");
@@ -692,9 +716,7 @@ try {
     homeDir: pairingScopeHome,
     projectConfigPath: pairingScopeProjectPath,
     userConfigPath: pairingScopeUserPath,
-    input: {
-      scope: "project"
-    }
+    input: {}
   });
 } finally {
   Math.random = originalMathRandom;
@@ -3162,11 +3184,17 @@ assert(imageBaseUrlConfig.imageGen.baseUrl === "https://byteplus.example/api/v3"
 assert(defaultImageBaseUrlConfig.imageGen.baseUrl === "https://fal.run", "expected image config to expose provider default base URL");
 assert(explicitImageSetupConfig.imageGen.baseUrl === "https://top-level-image.example/api/v3", "expected explicit top-level image base URL to win");
 assert(loadedVoiceConfig.tts.elevenlabs?.apiKeyEnv === "CUSTOM_ELEVENLABS_KEY", "expected ElevenLabs custom API key env to survive normalize and reload");
+assert(loadedVoiceConfig.stt.openai?.apiKeyEnv === "CUSTOM_STT_OPENAI_KEY", "expected OpenAI STT custom API key env to survive voice setup without explicit env");
 assert(loadedEnglishUiConfig.ui.language === "en", "expected UI language to switch to English");
 assert(loadedEnglishUiConfig.ui.flavor === "standard", "expected switching UI language to English to reset Arabic flavor");
 assert(loadedEnglishUiConfig.ui.activityLabels === "en", "expected switching UI language to English to reset Arabic activity labels");
 assert(loadedExplicitUiConfig.ui.flavor === "arabic-light", "expected explicit UI flavor to win");
 assert(loadedExplicitUiConfig.ui.activityLabels === "ar", "expected explicit activity labels to win");
+assert(projectScopedPairingError instanceof Error, "expected project-scoped Telegram pairing to be rejected");
+assert(
+  projectScopedPairingError.message.includes("user-scoped"),
+  "expected project-scoped Telegram pairing rejection to explain user scoping"
+);
 assert(/^\d{6}$/u.test(cryptoPairingCode.code), "expected crypto pairing code to be six digits");
 assert(cryptoPairingCode.path === pairingScopeUserPath, "expected Telegram pairing code creation to use user config path");
 assert(consumedCryptoPairingCode.paired === true, "expected user-scoped Telegram pairing code to be consumed");

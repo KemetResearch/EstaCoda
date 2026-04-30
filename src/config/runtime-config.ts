@@ -1165,8 +1165,12 @@ export async function setupVoiceConfig(options: {
   const previousStt = normalizeSttConfig(existing.config.stt);
   const ttsProvider = options.input.ttsProvider ?? previousTts.provider;
   const sttProvider = options.input.sttProvider ?? previousStt.provider;
-  const ttsApiKeyEnv = options.input.ttsApiKeyEnv ?? ttsDefaultApiKeyEnv(ttsProvider);
-  const sttApiKeyEnv = options.input.sttApiKeyEnv ?? sttDefaultApiKeyEnv(sttProvider);
+  const ttsApiKeyEnv = options.input.ttsApiKeyEnv ??
+    ttsProviderApiKeyEnv(previousTts, ttsProvider) ??
+    ttsDefaultApiKeyEnv(ttsProvider);
+  const sttApiKeyEnv = options.input.sttApiKeyEnv ??
+    sttProviderApiKeyEnv(previousStt, sttProvider) ??
+    sttDefaultApiKeyEnv(sttProvider);
   const secretPaths: string[] = [];
 
   if (options.input.ttsApiKey !== undefined && options.input.ttsApiKey.trim().length > 0 && ttsApiKeyEnv !== undefined) {
@@ -1564,6 +1568,9 @@ export async function createTelegramPairingCode(options: {
   expiresAt: string;
 }> {
   const input = options.input ?? {};
+  if (input.scope === "project") {
+    throw new Error("Telegram pairing codes are user-scoped for MVP.");
+  }
   const targetPath = options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
   const now = options.now?.() ?? new Date();
@@ -1884,6 +1891,27 @@ function ttsDefaultApiKeyEnv(provider: TtsProvider): string | undefined {
   }
 }
 
+function ttsProviderApiKeyEnv(config: LoadedRuntimeConfig["tts"], provider: TtsProvider): string | undefined {
+  switch (provider) {
+    case "edge":
+    case "neutts":
+    case "kittentts":
+      return undefined;
+    case "elevenlabs":
+      return config.elevenlabs?.apiKeyEnv ?? config.elevenlabs?.api_key_env;
+    case "openai":
+      return config.openai?.apiKeyEnv ?? config.openai?.api_key_env;
+    case "minimax":
+      return config.minimax?.apiKeyEnv ?? config.minimax?.api_key_env;
+    case "mistral":
+      return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
+    case "gemini":
+      return config.gemini?.apiKeyEnv ?? config.gemini?.api_key_env;
+    case "xai":
+      return config.xai?.apiKeyEnv ?? config.xai?.api_key_env;
+  }
+}
+
 function sttDefaultApiKeyEnv(provider: SttProvider): string | undefined {
   switch (provider) {
     case "local":
@@ -1894,6 +1922,19 @@ function sttDefaultApiKeyEnv(provider: SttProvider): string | undefined {
       return "VOICE_TOOLS_OPENAI_KEY";
     case "mistral":
       return "MISTRAL_API_KEY";
+  }
+}
+
+function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttProvider): string | undefined {
+  switch (provider) {
+    case "local":
+      return undefined;
+    case "groq":
+      return config.groq?.apiKeyEnv ?? config.groq?.api_key_env;
+    case "openai":
+      return config.openai?.apiKeyEnv ?? config.openai?.api_key_env;
+    case "mistral":
+      return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
   }
 }
 
