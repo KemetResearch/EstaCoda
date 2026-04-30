@@ -32,7 +32,7 @@ import {
   renderSkillAutonomyOption,
   type Locale
 } from "../ui/settings-labels.js";
-import { onboardingCopy, type OnboardingCopy } from "./onboarding-copy.js";
+import { ltr, onboardingCopy, type OnboardingCopy } from "./onboarding-copy.js";
 import {
   formatProviderModel,
   interfaceLanguageChoices,
@@ -149,13 +149,13 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const reviewLines = renderReview({
       copy,
       interfaceLabel: `${interfaceLanguage.label} / ${interfaceStyle.label}`,
-      provider: selected.provider,
-      model: selected.model,
-      backup: backup === undefined ? copy.review.backupSkipped : formatProviderModel(backup.model.provider, backup.model.model),
+      provider: technical(copy, selected.provider),
+      model: technical(copy, selected.model),
+      backup: backup === undefined ? copy.review.backupSkipped : technical(copy, formatProviderModel(backup.model.provider, backup.model.model)),
       credential: normalizedEnvName === undefined
         ? copy.review.noHostedKey
         : copy.review.credentialLine(normalizedEnvName),
-      trust: trustWorkspace ? workspaceRoot : copy.review.notTrusted,
+      trust: trustWorkspace ? technical(copy, workspaceRoot) : copy.review.notTrusted,
       securityMode: formatSecurityMode(securityMode, locale).label,
       workflowLearning: formatSkillAutonomy(skillAutonomy, locale).label,
       capabilities: summarizeCapabilities(optionalCapabilities, copy)
@@ -233,7 +233,7 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const setupCheck = diagnostic.status === "ready" && verification.ok
         ? [
           copy.setupCheck.ready,
-          `${copy.setupCheck.provider}: ${formatProviderModel(loaded.model.provider, loaded.model.id)}`,
+          `${copy.setupCheck.provider}: ${technical(copy, formatProviderModel(loaded.model.provider, loaded.model.id))}`,
           `${copy.setupCheck.workspace}: ${trustWorkspace ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
           `${copy.setupCheck.security}: ${security.label}`,
           `${copy.setupCheck.workflow}: ${autonomy.label}`
@@ -254,11 +254,11 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
       output: [
         copy.final.complete,
         copy.final.ready,
-        `${copy.final.configured}: ${formatProviderModel(selected.provider, selected.model)}`,
-        backup === undefined ? undefined : `${copy.final.backupRoute}: ${formatProviderModel(backup.model.provider, backup.model.model)}`,
-        `${copy.final.config}: ${result.configPath}`,
-        result.secretPath === undefined ? undefined : `${copy.final.secretStore}: ${result.secretPath}`,
-        normalizedEnvName === undefined ? undefined : `${copy.final.usingCredential} ${normalizedEnvName}.`,
+        `${copy.final.configured}: ${technical(copy, formatProviderModel(selected.provider, selected.model))}`,
+        backup === undefined ? undefined : `${copy.final.backupRoute}: ${technical(copy, formatProviderModel(backup.model.provider, backup.model.model))}`,
+        `${copy.final.config}: ${technical(copy, result.configPath)}`,
+        result.secretPath === undefined ? undefined : `${copy.final.secretStore}: ${technical(copy, result.secretPath)}`,
+        normalizedEnvName === undefined ? undefined : `${copy.final.usingCredential} ${technical(copy, normalizedEnvName)}.`,
         `${copy.final.interface}: ${interfaceLanguage.label} / ${interfaceStyle.label}`,
         `${copy.final.workspaceTrust}: ${trustWorkspace ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
         `${copy.final.securityMode}: ${security.label} (${security.value})`,
@@ -293,10 +293,22 @@ export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): bool
   return input.isTTY === true;
 }
 
+function withSelectChrome<T>(copy: OnboardingCopy, input: SelectPromptInput<T>): SelectPromptInput<T> {
+  return {
+    ...input,
+    instruction: input.instruction ?? copy.common.selectInstruction,
+    selectedLabel: input.selectedLabel ?? copy.common.selectedLabel
+  };
+}
+
+function technical(copy: OnboardingCopy, value: string): string {
+  return copy.common.selectedLabel === "تم الاختيار" ? ltr(value) : value;
+}
+
 async function selectInterfaceLanguage(prompt: Prompt, copy: OnboardingCopy): Promise<InterfaceChoice> {
   const choices = interfaceLanguageChoices(copy);
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.interfaceLanguage.title,
       body: copy.interfaceLanguage.body,
       defaultIndex: 0,
@@ -306,7 +318,7 @@ async function selectInterfaceLanguage(prompt: Prompt, copy: OnboardingCopy): Pr
         description: choice.description
       })),
       fallbackPrompt: `${renderNumberedChoices(copy.interfaceLanguage.title, copy.interfaceLanguage.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderNumberedChoices(copy.interfaceLanguage.title, copy.interfaceLanguage.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
@@ -317,7 +329,7 @@ async function selectInterfaceLanguage(prompt: Prompt, copy: OnboardingCopy): Pr
 async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage, copy: OnboardingCopy): Promise<InterfaceStyleChoice> {
   const choices = interfaceStyleChoices(language, copy);
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.interfaceStyle.title,
       body: copy.interfaceStyle.body,
       defaultIndex: 0,
@@ -327,7 +339,7 @@ async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage, copy: 
         description: choice.description
       })),
       fallbackPrompt: `${renderNumberedChoices(copy.interfaceStyle.title, copy.interfaceStyle.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderNumberedChoices(copy.interfaceStyle.title, copy.interfaceStyle.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
@@ -342,7 +354,7 @@ async function selectProvider(
   const choices = providerChoices(copy);
   const defaultIndex = 0;
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.providers.title,
       body: copy.providers.body,
       defaultIndex,
@@ -352,7 +364,7 @@ async function selectProvider(
         description: option.description
       })),
       fallbackPrompt: `${renderProviderPicker(copy, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderProviderPicker(copy, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
@@ -376,13 +388,13 @@ async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId, co
   ];
   const decision = prompt.select === undefined
     ? choices[parseChoiceIndex(await prompt(`${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`), choices.length, 0)]?.value ?? "skip"
-    : await prompt.select({
+    : await prompt.select(withSelectChrome(copy, {
       title: copy.backup.title,
       body: copy.backup.body,
       defaultIndex: 0,
       options: choices,
       fallbackPrompt: `${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
 
   if (decision === "skip") {
     return undefined;
@@ -414,7 +426,7 @@ async function selectProviderFromChoices(
   copy: OnboardingCopy
 ): Promise<ProviderChoice> {
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: input.title,
       body: input.body,
       defaultIndex: 0,
@@ -424,7 +436,7 @@ async function selectProviderFromChoices(
         description: choice.description
       })),
       fallbackPrompt: `${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
@@ -438,7 +450,7 @@ async function selectModel(prompt: Prompt, provider: ProviderChoice, copy: Onboa
     return provider.models[0]!;
   }
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.providers.modelTitle(provider.label),
       body: copy.providers.modelBody,
       defaultIndex,
@@ -448,7 +460,7 @@ async function selectModel(prompt: Prompt, provider: ProviderChoice, copy: Onboa
         description: model.description
       })),
       fallbackPrompt: `${renderModelPicker(provider, copy)}\n${renderFallbackChoicePrompt(copy, 0, provider.models)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderModelPicker(provider, copy)}\n${renderFallbackChoicePrompt(copy, 0, provider.models)}`);
@@ -460,7 +472,7 @@ async function selectSecurityMode(prompt: Prompt, locale: Locale, copy: Onboardi
   const options: SecurityApprovalMode[] = ["strict", "adaptive", "open"];
   const defaultIndex = 1;
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.security.title,
       body: copy.security.body,
       defaultIndex,
@@ -473,7 +485,7 @@ async function selectSecurityMode(prompt: Prompt, locale: Locale, copy: Onboardi
         };
       }),
       fallbackPrompt: renderSecurityModePrompt(locale, copy)
-    });
+    }));
   }
 
   return parseSecurityMode(await prompt(renderSecurityModePrompt(locale, copy)));
@@ -483,7 +495,7 @@ async function selectSkillAutonomy(prompt: Prompt, locale: Locale, copy: Onboard
   const options: SkillAutonomy[] = ["none", "suggest", "proactive", "autonomous"];
   const defaultIndex = 1;
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.workflowLearning.title,
       body: copy.workflowLearning.body,
       defaultIndex,
@@ -496,7 +508,7 @@ async function selectSkillAutonomy(prompt: Prompt, locale: Locale, copy: Onboard
         };
       }),
       fallbackPrompt: renderSkillAutonomyPrompt(locale, copy)
-    });
+    }));
   }
 
   return parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt(locale, copy)));
@@ -546,13 +558,13 @@ async function selectOptionalCapability(prompt: Prompt, hasConfigured: boolean, 
   ];
   const body = hasConfigured ? copy.optional.bodyAfterSelection : copy.optional.body;
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.optional.title,
       body,
       defaultIndex: 0,
       options: choices,
       fallbackPrompt: `${renderNumberedChoices(copy.optional.title, body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
   const selectedRaw = await prompt(`${renderNumberedChoices(copy.optional.title, body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
@@ -564,13 +576,13 @@ async function selectChannel(prompt: Prompt, copy: OnboardingCopy): Promise<"ski
     { value: "telegram" as const, label: copy.channels.telegramLabel, description: copy.channels.telegramDescription }
   ];
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(copy, {
       title: copy.channels.title,
       body: copy.channels.body,
       defaultIndex: 0,
       options: choices,
       fallbackPrompt: `${renderNumberedChoices(copy.channels.title, copy.channels.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    });
+    }));
   }
   const selectedRaw = await prompt(`${renderNumberedChoices(copy.channels.title, copy.channels.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
@@ -783,13 +795,13 @@ async function selectSimpleChoice<T extends string>(prompt: Prompt, input: {
   copy: OnboardingCopy;
 }): Promise<T> {
   if (prompt.select !== undefined) {
-    return await prompt.select({
+    return await prompt.select(withSelectChrome(input.copy, {
       title: input.title,
       body: input.body,
       defaultIndex: input.defaultIndex,
       options: input.choices,
       fallbackPrompt: `${renderNumberedChoices(input.title, input.body, input.choices)}\n${renderFallbackChoicePrompt(input.copy, input.defaultIndex, input.choices)}`
-    });
+    }));
   }
 
   const selectedRaw = await prompt(`${renderNumberedChoices(input.title, input.body, input.choices)}\n${renderFallbackChoicePrompt(input.copy, input.defaultIndex, input.choices)}`);

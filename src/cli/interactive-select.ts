@@ -5,6 +5,8 @@ import type { Readable, Writable } from "node:stream";
 export type SelectPromptInput<T> = {
   title: string;
   body?: string;
+  instruction?: string;
+  selectedLabel?: string;
   options: Array<{
     value: T;
     label: string;
@@ -58,7 +60,7 @@ export async function selectOption<T>(input: Readable, output: Writable, selecti
       }
       settled = true;
       restoreTerminal();
-      output.write(`\nSelected: ${selection.options[selectedIndex]?.label ?? "option"}\n\n`);
+      output.write(`\n${selection.selectedLabel ?? "Selected"}: ${selection.options[selectedIndex]?.label ?? "option"}\n\n`);
       resolve(value);
     };
 
@@ -108,7 +110,7 @@ function renderSelectFrame<T>(selection: SelectPromptInput<T>, selectedIndex: nu
   const lines = [
     selection.title,
     selection.body,
-    "Use ↑/↓ to move, Enter to select.",
+    selection.instruction ?? "Use ↑/↓ to move, Enter to select.",
     "",
     ...selection.options.flatMap((option, index) => {
       const marker = index === selectedIndex ? "›" : " ";

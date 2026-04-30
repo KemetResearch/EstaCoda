@@ -4209,7 +4209,8 @@ assert(cliProjectOverridePromptSecrets.some(Boolean), "expected project override
 assert(cliArabicInteractiveSetup.output.includes("اكتمل الإعداد."), "expected Arabic onboarding final output");
 assert(cliArabicInteractiveConfig.ui.language === "ar", "expected Arabic onboarding to persist Arabic UI language");
 assert(cliArabicInteractivePrompts.some((prompt) => prompt.includes("Choose interface language")), "expected onboarding to ask for interface language before locale is selected");
-assert(cliArabicInteractivePrompts.some((prompt) => prompt.includes("اختر نموذج Kimi")), "expected Arabic onboarding model prompt");
+const cliArabicInteractivePromptText = cliArabicInteractivePrompts.join("\n").replace(/[\u2066\u2069]/gu, "");
+assert(cliArabicInteractivePromptText.includes("اختر نموذج Kimi"), "expected Arabic onboarding model prompt");
 assert(cliEmptySecretSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected setup to recover after empty API key retry");
 assert(cliEmptySecretPromptSecrets.filter(Boolean).length >= 2, "expected empty API key to be rejected and re-prompted as secret");
 assert(cliEmptySecretPrompts.some((prompt) => prompt.includes("cannot be empty")), "expected empty API key validation message");

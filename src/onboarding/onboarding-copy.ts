@@ -2,9 +2,17 @@ import type { ImageGenerationProvider } from "../config/runtime-config.js";
 
 export type OnboardingLocale = "en" | "ar";
 
+const LRI = "\u2066";
+const PDI = "\u2069";
+
+export function ltr(value: string): string {
+  return `${LRI}${value}${PDI}`;
+}
+
 export type OnboardingCopy = {
   common: {
     selectInstruction: string;
+    selectedLabel: string;
     pressEnterToBegin: string;
     pressEnterToContinue: string;
     pressEnterToSave: string;
@@ -252,6 +260,7 @@ export function onboardingCopy(locale: OnboardingLocale): OnboardingCopy {
 export const onboardingCopyEn: OnboardingCopy = {
   common: {
     selectInstruction: "Use ↑/↓ to move, Enter to select.",
+    selectedLabel: "Selected",
     pressEnterToBegin: "Press Enter to begin.",
     pressEnterToContinue: "Press Enter to continue.",
     pressEnterToSave: "Press Enter to save this setup.",
@@ -587,18 +596,20 @@ export const onboardingCopyAr: OnboardingCopy = {
   ...onboardingCopyEn,
   common: {
     ...onboardingCopyEn.common,
-    selectInstruction: "استخدم ↑/↓ للتنقّل، ثم Enter للاختيار.",
-    pressEnterToBegin: "اضغط Enter للبدء.",
-    pressEnterToContinue: "اضغط Enter للمتابعة.",
-    pressEnterToSave: "اضغط Enter لحفظ هذا الإعداد.",
+    selectInstruction: `استخدم ↑/↓ للتنقّل، ثم ${ltr("Enter")} للاختيار.`,
+    selectedLabel: "تم الاختيار",
+    pressEnterToBegin: `اضغط ${ltr("Enter")} للبدء.`,
+    pressEnterToContinue: `اضغط ${ltr("Enter")} للمتابعة.`,
+    pressEnterToSave: `اضغط ${ltr("Enter")} لحفظ هذا الإعداد.`,
     skipForNow: "تخطي الآن",
     done: "تم",
+    localProviderNoKey: `مزوّد محلي، لا يحتاج مفتاح ${ltr("API")} مستضافاً`,
     firstOption: "الخيار الأول",
     choicePrompt: (defaultIndex, defaultLabel) => `أدخل رقم الاختيار [الافتراضي: ${defaultIndex} ${defaultLabel}]: `
   },
   welcome: {
     titleSuffix: "إعداد أولي",
-    intro: "مرحباً. هذا الإعداد يجهّز EstaCoda لهذا المشروع:",
+    intro: `مرحباً. هذا الإعداد يجهّز ${ltr("EstaCoda")} لهذا المشروع:`,
     steps: [
       "اختيار لغة الواجهة وأسلوب التعبير.",
       "منح الثقة لهذا المجلد لأعمال الملفات والطرفية المحلية.",
@@ -612,10 +623,10 @@ export const onboardingCopyAr: OnboardingCopy = {
   },
   interfaceLanguage: {
     title: "اختر لغة الواجهة",
-    body: "يتحكم هذا في نص الإعداد ورسائل الحالة وتسميات CLI.",
+    body: `يتحكم هذا في لغة الإعداد ورسائل الحالة وتسميات ${ltr("CLI")} المدعومة.`,
     options: {
-      en: { label: "English", description: "استخدم الإنجليزية في CLI." },
-      ar: { label: "العربية", description: "استخدم العربية في CLI." }
+      en: { label: ltr("English"), description: `استخدم الإنجليزية في ${ltr("CLI")}.` },
+      ar: { label: "العربية", description: `استخدم العربية في الإعداد ورسائل ${ltr("CLI")} المدعومة.` }
     }
   },
   interfaceStyle: {
@@ -627,48 +638,87 @@ export const onboardingCopyAr: OnboardingCopy = {
   },
   workspace: {
     rootPrompt: (root) => `مجلد العمل [${root}]: `,
-    trustPrompt: "هل تثق بهذا المجلد حتى تتمكن EstaCoda من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [Y/n]: "
+    trustPrompt: `هل تثق بهذا المجلد حتى تتمكن ${ltr("EstaCoda")} من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [Y/n]: `
   },
   providers: {
     ...onboardingCopyEn.providers,
     title: "اختر مزوّد النموذج الأساسي",
-    body: "اختر مزوّد النموذج الذي يجب أن تستخدمه EstaCoda أولاً.",
-    modelTitle: (providerLabel) => `اختر نموذج ${providerLabel}`,
-    modelBody: "اختر النموذج الذي ستستخدمه EstaCoda لهذا المشروع.",
-    apiKeyPrompt: (modelLabel, envName) => `الصق مفتاح API الخاص بـ ${modelLabel} ليُحفظ باسم ${envName}: `,
-    requiredSecretError: (label) => `لا يمكن ترك ${label} فارغاً. الصق المفتاح، أو اضغط Ctrl+C لإلغاء الإعداد.`,
+    body: `اختر مزوّد النموذج الذي يجب أن تستخدمه ${ltr("EstaCoda")} أولاً.`,
+    modelTitle: (providerLabel) => `اختر نموذج ${ltr(providerLabel)}`,
+    modelBody: `اختر النموذج الذي ستستخدمه ${ltr("EstaCoda")} لهذا المشروع.`,
+    apiKeyPrompt: (modelLabel, envName) => `الصق مفتاح ${ltr("API")} الخاص بـ ${ltr(modelLabel)} ليُحفظ باسم ${ltr(envName)}: `,
+    requiredSecretError: (label) => `لا يمكن ترك ${ltr(label)} فارغاً. الصق المفتاح، أو اضغط ${ltr("Ctrl+C")} لإلغاء الإعداد.`,
     catalog: {
       openai: {
         ...onboardingCopyEn.providers.catalog.openai,
-        description: "دعم واسع لاستخدام الأدوات والوسائط المتعددة."
+        label: ltr("OpenAI"),
+        description: "دعم واسع لاستخدام الأدوات والوسائط المتعددة.",
+        models: {
+          "gpt-4.1-mini": {
+            label: ltr("GPT-4.1 Mini"),
+            description: "مسار متوازن للأدوات والوسائط."
+          }
+        }
       },
       kimi: {
         ...onboardingCopyEn.providers.catalog.kimi,
-        description: "مسار قوي للاستخدام العام والبرمجة."
+        label: ltr("Kimi"),
+        description: "مسار قوي للاستخدام العام والبرمجة.",
+        models: {
+          "kimi-k2.5": {
+            label: ltr("Kimi K2.5"),
+            description: "النموذج المتوازن الموصى به."
+          },
+          "kimi-k2-turbo-preview": {
+            label: ltr("Kimi K2 Turbo Preview"),
+            description: "مسار معاينة أسرع."
+          }
+        }
       },
       deepseek: {
         ...onboardingCopyEn.providers.catalog.deepseek,
-        description: "مسار مستضاف مناسب للبرمجة."
+        label: ltr("DeepSeek"),
+        description: "مسار مستضاف مناسب للبرمجة.",
+        models: {
+          "deepseek-chat": {
+            label: ltr("DeepSeek Chat"),
+            description: "نموذج محادثة وبرمجة مستضاف."
+          }
+        }
       },
       openrouter: {
         ...onboardingCopyEn.providers.catalog.openrouter,
-        description: "استخدم النماذج عبر حساب OpenRouter."
+        label: ltr("OpenRouter"),
+        description: `استخدم النماذج عبر حساب ${ltr("OpenRouter")}.`,
+        models: {
+          "qwen/qwen3.6-plus": {
+            label: ltr("Qwen 3.6 Plus"),
+            description: `نموذج مستضاف عبر ${ltr("OpenRouter")}.`
+          }
+        }
       },
       local: {
         ...onboardingCopyEn.providers.catalog.local,
-        description: "استخدم مشغلاً محلياً متوافقاً مع OpenAI."
+        label: "محلي",
+        description: `استخدم مشغلاً محلياً متوافقاً مع ${ltr("OpenAI")}.`,
+        models: {
+          "ollama/auto": {
+            label: ltr("Ollama Auto"),
+            description: "اكتشاف تلقائي لمشغل محلي."
+          }
+        }
       }
     }
   },
   backup: {
     title: "اختر نموذجاً احتياطياً",
-    body: "يمكن لـ EstaCoda استخدامه إذا تعطل المزوّد الأساسي.",
+    body: `يمكن لـ ${ltr("EstaCoda")} استخدامه إذا تعطل المزوّد الأساسي.`,
     skipLabel: "تخطي الآن",
     skipDescription: "استخدم النموذج الأساسي فقط.",
     addLabel: "إضافة نموذج احتياطي",
     addDescription: "اختر مزوّداً ونموذجاً آخر.",
     providerTitle: "اختر المزوّد الاحتياطي",
-    providerBody: "اختر الحساب الذي ستجربه EstaCoda إذا تعطل المزوّد الأساسي."
+    providerBody: `اختر الحساب الذي ستجربه ${ltr("EstaCoda")} إذا تعطل المزوّد الأساسي.`
   },
   security: {
     title: "اختر وضع الأمان",
@@ -688,73 +738,73 @@ export const onboardingCopyAr: OnboardingCopy = {
     bodyAfterSelection: "أضف إمكانية أخرى، أو اختر تم للمتابعة.",
     skipDescription: "ابدأ بالوكيل الأساسي في الطرفية.",
     doneDescription: "تابع بالإمكانات التي اخترتها.",
-    channels: { label: "القنوات", description: "اربط Telegram للرسائل والتحديثات عن بُعد." },
+    channels: { label: "القنوات", description: `اربط ${ltr("Telegram")} للرسائل والتحديثات عن بُعد.` },
     voice: { label: "الصوت", description: "اضبط الإدخال الصوتي والردود المنطوقة." },
     vision: { label: "الرؤية", description: "تحقق من فهم الصور وتوليدها." },
     browser: { label: "المتصفح", description: "اضبط أتمتة المتصفح." }
   },
   channels: {
     title: "إعداد القنوات",
-    body: "تسمح القنوات لـ EstaCoda باستقبال الرسائل وإرسال التحديثات خارج هذه الطرفية.\nالقناة المتاحة حالياً: Telegram",
+    body: `تسمح القنوات لـ ${ltr("EstaCoda")} باستقبال الرسائل وإرسال التحديثات خارج هذه الطرفية.\nالقناة المتاحة حالياً: ${ltr("Telegram")}`,
     skipDescription: "لا تربط قناة رسائل.",
-    telegramLabel: "Telegram",
-    telegramDescription: "اربط بوت Telegram."
+    telegramLabel: ltr("Telegram"),
+    telegramDescription: `اربط بوت ${ltr("Telegram")}.`
   },
   telegram: {
     intro: [
-      "إعداد Telegram",
+      `إعداد ${ltr("Telegram")}`,
       "",
-      "  اربط بوت Telegram حتى تتمكن EstaCoda من استقبال الرسائل عن بُعد وإرسال التحديثات.",
+      `  اربط بوت ${ltr("Telegram")} حتى تتمكن ${ltr("EstaCoda")} من استقبال الرسائل عن بُعد وإرسال التحديثات.`,
       "",
       "  تحتاج إلى:",
-      "    1. bot token من BotFather.",
-      "    2. رقم Telegram user ID الخاص بك.",
+      `    1. ${ltr("bot token")} من ${ltr("BotFather")}.`,
+      `    2. رقم ${ltr("Telegram user ID")} الخاص بك.`,
       "",
       "  هذا المستخدم المسموح له فقط يمكنه التحكم بهذا الوكيل.",
       "",
-      "اضغط Enter للمتابعة."
+      `اضغط ${ltr("Enter")} للمتابعة.`
     ],
     tokenPrompt: [
-      "احصل على bot token",
+      `احصل على ${ltr("bot token")}`,
       "",
-      "  1. افتح Telegram.",
-      "  2. ابحث عن BotFather.",
-      "  3. افتح محادثة BotFather الموثقة.",
-      "  4. أرسل /newbot.",
+      `  1. افتح ${ltr("Telegram")}.`,
+      `  2. ابحث عن ${ltr("BotFather")}.`,
+      `  3. افتح محادثة ${ltr("BotFather")} الموثقة.`,
+      `  4. أرسل ${ltr("/newbot")}.`,
       "  5. اختر اسم العرض للبوت.",
-      "  6. اختر اسم مستخدم ينتهي بـ bot.",
-      "  7. انسخ API token الذي يعطيك إياه BotFather.",
+      `  6. اختر اسم مستخدم ينتهي بـ ${ltr("bot")}.`,
+      `  7. انسخ ${ltr("API token")} الذي يعطيك إياه ${ltr("BotFather")}.`,
       "",
       "  احتفظ بهذا المفتاح سرياً. أي شخص يملكه يمكنه التحكم بالبوت.",
       "",
-      "الصق Telegram bot token",
-      "سيُحفظ محلياً باسم ESTACODA_TELEGRAM_BOT_TOKEN في ~/.estacoda/.env: "
+      `الصق ${ltr("Telegram bot token")}`,
+      `سيُحفظ محلياً باسم ${ltr("ESTACODA_TELEGRAM_BOT_TOKEN")} في ${ltr("~/.estacoda/.env")}: `
     ],
     tokenSaved: [
-      "تم التقاط bot token.",
-      "سيُحفظ محلياً باسم ESTACODA_TELEGRAM_BOT_TOKEN في ~/.estacoda/.env."
+      `تم التقاط ${ltr("bot token")}.`,
+      `سيُحفظ محلياً باسم ${ltr("ESTACODA_TELEGRAM_BOT_TOKEN")} في ${ltr("~/.estacoda/.env")}.`
     ],
-    tokenInvalid: "Telegram bot token غير صالح. الصيغة المتوقعة: 123456789:ABC...",
+    tokenInvalid: `${ltr("Telegram bot token")} غير صالح. الصيغة المتوقعة: ${ltr("123456789:ABC...")}`,
     userIdPrompt: [
-      "احصل على Telegram user ID",
+      `احصل على ${ltr("Telegram user ID")}`,
       "",
-      "  1. افتح Telegram.",
-      "  2. ابحث عن userinfobot.",
+      `  1. افتح ${ltr("Telegram")}.`,
+      `  2. ابحث عن ${ltr("userinfobot")}.`,
       "  3. ابدأ المحادثة.",
       "  4. انسخ الرقم الذي يرسله لك.",
       "",
-      "  استخدم الرقم فقط، وليس @username.",
+      `  استخدم الرقم فقط، وليس ${ltr("@username")}.`,
       "",
-      "الصق Telegram user ID المسموح له",
-      "هذا المستخدم فقط يمكنه إرسال أوامر إلى EstaCoda: "
+      `الصق ${ltr("Telegram user ID")} المسموح له`,
+      `هذا المستخدم فقط يمكنه إرسال أوامر إلى ${ltr("EstaCoda")}: `
     ],
-    userIdInvalid: "Telegram user ID غير صالح. استخدم الرقم فقط.",
-    verifyTitle: "التحقق من Telegram بعد الحفظ",
-    verifyBody: "يمكن لـ EstaCoda التحقق من bot token والمستخدم المسموح له بعد حفظ هذا الإعداد.",
+    userIdInvalid: `${ltr("Telegram user ID")} غير صالح. استخدم الرقم فقط.`,
+    verifyTitle: `التحقق من ${ltr("Telegram")} بعد الحفظ`,
+    verifyBody: `يمكن لـ ${ltr("EstaCoda")} التحقق من ${ltr("bot token")} والمستخدم المسموح له بعد حفظ هذا الإعداد.`,
     verifyLabel: "تحقق بعد الحفظ",
-    verifyDescription: "شغّل تحقق Telegram بعد حفظ الإعدادات.",
+    verifyDescription: `شغّل تحقق ${ltr("Telegram")} بعد حفظ الإعدادات.`,
     verifySkipDescription: "احفظ الإعدادات بدون تحقق.",
-    verifyAfterSaveNotice: "سيتم التحقق من إعدادات Telegram بعد حفظها. اضغط Enter للمتابعة."
+    verifyAfterSaveNotice: `سيتم التحقق من إعدادات ${ltr("Telegram")} بعد حفظها. اضغط ${ltr("Enter")} للمتابعة.`
   },
   voice: {
     ...onboardingCopyEn.voice,
@@ -762,23 +812,23 @@ export const onboardingCopyAr: OnboardingCopy = {
     body: "اضبط الإدخال الصوتي والردود المنطوقة.",
     skipDescription: "ابقَ على التفاعل النصي فقط.",
     setupLabel: "إعداد الصوت",
-    setupDescription: "اضبط speech-to-text و text-to-speech.",
-    sttTitle: "Speech-to-text",
+    setupDescription: `اضبط ${ltr("speech-to-text")} و ${ltr("text-to-speech")}.`,
+    sttTitle: ltr("Speech-to-text"),
     sttBody: "اختر كيف يتحول الكلام إلى نص.",
     sttSkipDescription: "لا تفعّل الإدخال الصوتي.",
     sttLocalLabel: "محلي",
-    sttLocalDescription: "استخدم backend محلياً للتفريغ الصوتي.",
+    sttLocalDescription: `استخدم ${ltr("backend")} محلياً للتفريغ الصوتي.`,
     sttHostedLabel: "مستضاف",
     sttHostedDescription: "استخدم مزوّداً مستضافاً للتفريغ الصوتي.",
-    ttsTitle: "Text-to-speech",
-    ttsBody: "اختر كيف تنطق EstaCoda الردود.",
+    ttsTitle: ltr("Text-to-speech"),
+    ttsBody: `اختر كيف تنطق ${ltr("EstaCoda")} الردود.`,
     ttsSkipDescription: "لا تفعّل الردود المنطوقة.",
     ttsLocalLabel: "محلي",
-    ttsLocalDescription: "استخدم backend صوتياً محلياً.",
+    ttsLocalDescription: `استخدم ${ltr("backend")} صوتياً محلياً.`,
     ttsHostedLabel: "مستضاف",
     ttsHostedDescription: "استخدم مزوّداً صوتياً مستضافاً.",
-    sttKeyPrompt: "الصق مفتاح API الخاص بـ speech-to-text ليُحفظ باسم OPENAI_API_KEY: ",
-    ttsKeyPrompt: "الصق مفتاح API الخاص بـ text-to-speech ليُحفظ باسم OPENAI_API_KEY: "
+    sttKeyPrompt: `الصق مفتاح ${ltr("API")} الخاص بـ ${ltr("speech-to-text")} ليُحفظ باسم ${ltr("OPENAI_API_KEY")}: `,
+    ttsKeyPrompt: `الصق مفتاح ${ltr("API")} الخاص بـ ${ltr("text-to-speech")} ليُحفظ باسم ${ltr("OPENAI_API_KEY")}: `
   },
   vision: {
     ...onboardingCopyEn.vision,
@@ -788,14 +838,14 @@ export const onboardingCopyAr: OnboardingCopy = {
     setupLabel: "إعداد الرؤية",
     setupDescription: "تحقق من إدخال الصور وتوليدها.",
     inputTitle: "التحقق من الرؤية بعد الحفظ",
-    inputBody: "يمكن لـ EstaCoda التحقق مما إذا كان النموذج المختار يقرأ الصور بعد حفظ هذا الإعداد.",
+    inputBody: `يمكن لـ ${ltr("EstaCoda")} التحقق مما إذا كان النموذج المختار يقرأ الصور بعد حفظ هذا الإعداد.`,
     inputVerifyLabel: "تحقق بعد الحفظ",
     inputVerifyDescription: "شغّل تحقق الرؤية بعد حفظ الإعدادات.",
     inputSkipDescription: "احفظ الإعدادات بدون تحقق.",
     imageTitle: "توليد الصور",
-    imageBody: "اختر ما إذا كانت EstaCoda تستطيع إنشاء الصور.",
+    imageBody: `اختر ما إذا كانت ${ltr("EstaCoda")} تستطيع إنشاء الصور.`,
     imageSkipDescription: "لا تفعّل توليد الصور.",
-    imageKeyPrompt: (envName) => `الصق مفتاح API الخاص بتوليد الصور ليُحفظ باسم ${envName}: `,
+    imageKeyPrompt: (envName) => `الصق مفتاح ${ltr("API")} الخاص بتوليد الصور ليُحفظ باسم ${ltr(envName)}: `,
     imageVerifyTitle: "تحقق من توليد الصور بعد الحفظ",
     imageVerifyBody: "يمكن لـ EstaCoda التحقق من إعداد مزوّد الصور بعد حفظ هذا الإعداد.",
     imageVerifyLabel: "تحقق بعد الحفظ",
@@ -807,7 +857,7 @@ export const onboardingCopyAr: OnboardingCopy = {
     body: "اضبط أتمتة المتصفح لصفحات الويب.",
     skipDescription: "لا تضبط أتمتة المتصفح.",
     setupLabel: "إعداد المتصفح",
-    setupDescription: "استخدم متصفحاً محلياً متوافقاً مع Chrome DevTools."
+    setupDescription: `استخدم متصفحاً محلياً متوافقاً مع ${ltr("Chrome DevTools")}.`
   },
   verifyChoice: {
     skipLabel: "تخطي التحقق"
@@ -830,8 +880,8 @@ export const onboardingCopyAr: OnboardingCopy = {
     notTrusted: "غير موثوق",
     backupSkipped: "تم التخطي",
     optionalSkipped: "تم التخطي",
-    credentialLine: (envName) => `حفظ في ~/.estacoda/.env باسم ${envName}`,
-    note: "تحفظ EstaCoda الإعدادات ومراجع المفاتيح. المفاتيح الخام للمزوّدين المستضافين تُحفظ فقط في ~/.estacoda/.env."
+    credentialLine: (envName) => `حفظ في ${ltr("~/.estacoda/.env")} باسم ${ltr(envName)}`,
+    note: `تحفظ ${ltr("EstaCoda")} الإعدادات ومراجع المفاتيح. المفاتيح الخام للمزوّدين المستضافين تُحفظ فقط في ${ltr("~/.estacoda/.env")}.`
   },
   setupCheck: {
     title: "فحص الإعداد",
@@ -866,24 +916,24 @@ export const onboardingCopyAr: OnboardingCopy = {
     warningsTitle: "تحذيرات:",
     nextActionsTitle: "الخطوات التالية:",
     statusReady: "الحالة: جاهز",
-    nextReady: "التالي: شغّل estacoda، أو اضبط القنوات الاختيارية عبر estacoda telegram setup / estacoda browser setup.",
+    nextReady: `التالي: شغّل ${ltr("estacoda")}، أو اضبط القنوات الاختيارية عبر ${ltr("estacoda telegram setup")} / ${ltr("estacoda browser setup")}.`,
     fallbackNextAction: "أصلح التحذيرات أعلاه، ثم أعد تشغيل estacoda verify.",
     actions: {
-      providerIncomplete: "شغّل estacoda setup لاختيار مزوّد ونموذج.",
+      providerIncomplete: `شغّل ${ltr("estacoda setup")} لاختيار مزوّد ونموذج.`,
       missingApiKey: (envName) => envName === undefined
-        ? "صدّر مفتاح API الناقص، أو أعد تشغيل estacoda setup لحفظه محلياً."
-        : `صدّر ${envName}، أو أعد تشغيل estacoda setup واختر تخزين المفتاح محلياً.`,
-      noCredentialPool: "شغّل estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>.",
-      networkDisabled: "فعّل الاستدلال عبر الشبكة للمزوّد المستضاف المختار باستخدام estacoda setup --advanced.",
-      workspaceNotTrusted: "شغّل /workspace.trust.grant داخل جلسة تفاعلية، أو أعد تشغيل estacoda setup ومنح الثقة لهذا المجلد.",
-      secretPermissions: "شغّل chmod 600 ~/.estacoda/.env لتقييد صلاحيات مخزن المفاتيح المحلي.",
-      stateNotWritable: "تحقق من صلاحيات الكتابة في ~/.estacoda.",
-      readOnlyTool: "ابدأ جلسة تفاعلية بعد إصلاح تحذيرات المزوّد/الثقة، ثم أعد تشغيل estacoda verify."
+        ? `صدّر مفتاح ${ltr("API")} الناقص، أو أعد تشغيل ${ltr("estacoda setup")} لحفظه محلياً.`
+        : `صدّر ${ltr(envName)}، أو أعد تشغيل ${ltr("estacoda setup")} واختر تخزين المفتاح محلياً.`,
+      noCredentialPool: `شغّل ${ltr("estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>")}.`,
+      networkDisabled: `فعّل الاستدلال عبر الشبكة للمزوّد المستضاف المختار باستخدام ${ltr("estacoda setup --advanced")}.`,
+      workspaceNotTrusted: `شغّل ${ltr("/workspace.trust.grant")} داخل جلسة تفاعلية، أو أعد تشغيل ${ltr("estacoda setup")} ومنح الثقة لهذا المجلد.`,
+      secretPermissions: `شغّل ${ltr("chmod 600 ~/.estacoda/.env")} لتقييد صلاحيات مخزن المفاتيح المحلي.`,
+      stateNotWritable: `تحقق من صلاحيات الكتابة في ${ltr("~/.estacoda")}.`,
+      readOnlyTool: `ابدأ جلسة تفاعلية بعد إصلاح تحذيرات المزوّد/الثقة، ثم أعد تشغيل ${ltr("estacoda verify")}.`
     }
   },
   final: {
     complete: "اكتمل الإعداد.",
-    ready: "EstaCoda جاهزة لاستخدام إعدادات هذا المشروع.",
+    ready: `${ltr("EstaCoda")} جاهزة لاستخدام إعدادات هذا المشروع.`,
     configured: "تم الإعداد",
     backupRoute: "المسار الاحتياطي",
     config: "ملف الإعداد",
@@ -894,10 +944,10 @@ export const onboardingCopyAr: OnboardingCopy = {
     securityMode: "وضع الأمان",
     workflowLearning: "تعلّم سير العمل",
     optionalCapabilities: "الإمكانات الاختيارية",
-    startSession: "بدء أول جلسة EstaCoda الآن.",
-    nextNoSession: "التالي: شغّل estacoda، أو شغّل estacoda verify في أي وقت لإعادة فحص الإعداد.",
+    startSession: `بدء أول جلسة ${ltr("EstaCoda")} الآن.`,
+    nextNoSession: `التالي: شغّل ${ltr("estacoda")}، أو شغّل ${ltr("estacoda verify")} في أي وقت لإعادة فحص الإعداد.`,
     configuredModelFallback: "النموذج المُعد",
-    alreadyConfigured: (model) => `EstaCoda معدّة بالفعل لاستخدام ${model}.`,
+    alreadyConfigured: (model) => `${ltr("EstaCoda")} معدّة بالفعل لاستخدام ${ltr(model)}.`,
     providerStepUnavailable: "خطوة اختيار المزوّد في الإعداد غير متاحة."
   }
 };
