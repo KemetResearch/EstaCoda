@@ -3,7 +3,22 @@ import { createInterface as createCallbackInterface } from "node:readline";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Writable, Readable } from "node:stream";
 import { parseChoiceIndex, selectOption, type SelectPromptInput } from "../cli/interactive-select.js";
-import { defaultEnvKey, loadRuntimeConfig, setupSecurityConfig, setupSkillConfig } from "../config/runtime-config.js";
+import {
+  defaultEnvKey,
+  loadRuntimeConfig,
+  setupBrowserConfig,
+  setupImageGenerationConfig,
+  setupProviderConfig,
+  setupSecurityConfig,
+  setupSkillConfig,
+  setupTelegramConfig,
+  setupUiConfig,
+  setupVoiceConfig,
+  type ActivityLabelsLocale,
+  type ImageGenerationProvider,
+  type UiFlavor,
+  type UiLanguage
+} from "../config/runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
@@ -11,6 +26,7 @@ import type { SecurityApprovalMode } from "../contracts/security.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { defaultImageApiKeyEnv, defaultImageModel } from "../contracts/image-generation.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -40,6 +56,58 @@ type ProviderChoice = {
   models: ModelChoice[];
 };
 
+type InterfaceChoice = {
+  language: UiLanguage;
+  label: string;
+  description: string;
+};
+
+type InterfaceStyleChoice = {
+  flavor: UiFlavor;
+  activityLabels: ActivityLabelsLocale;
+  label: string;
+  description: string;
+};
+
+type BackupRouteChoice = {
+  provider: ProviderChoice;
+  model: ModelChoice;
+  apiKeyEnv?: string;
+  apiKey?: string;
+};
+
+type TelegramSetupDraft = {
+  botToken: string;
+  allowedUserId: string;
+  runTest: boolean;
+};
+
+type VoiceSetupDraft = {
+  mode: "push-to-talk" | "continuous";
+  sttProvider?: "local" | "openai";
+  sttApiKeyEnv?: string;
+  sttApiKey?: string;
+  ttsProvider?: "edge" | "openai";
+  ttsApiKeyEnv?: string;
+  ttsApiKey?: string;
+};
+
+type VisionSetupDraft = {
+  runInputCheck: boolean;
+  imageProvider?: ImageGenerationProvider;
+  imageModel?: string;
+  imageApiKeyEnv?: string;
+  imageApiKey?: string;
+  runImageTest: boolean;
+};
+
+type OptionalCapabilityDraft = {
+  telegram?: TelegramSetupDraft;
+  voice?: VoiceSetupDraft;
+  vision?: VisionSetupDraft;
+  browser?: boolean;
+};
+
 export type InteractiveOnboardingResult = {
   completed: boolean;
   output: string;
@@ -53,7 +121,7 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
 }): Promise<InteractiveOnboardingResult> {
   const status = await getOnboardingStatus(options);
   const loadedConfig = await loadRuntimeConfig(options);
-  const locale: Locale = loadedConfig.ui.language === "ar" ? "ar" : "en";
+  let locale: Locale = loadedConfig.ui.language === "ar" ? "ar" : "en";
   const theme = options.theme ?? kemetBlueTheme;
 
   if (!status.needed) {
@@ -78,13 +146,16 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
 
   try {
     await prompt(`${renderWelcome({ theme, body: welcomeStep?.body ?? providerStep.body })}\nPress Enter to begin... `);
-
+    const interfaceLanguage = await selectInterfaceLanguage(prompt);
+    locale = interfaceLanguage.language === "ar" ? "ar" : "en";
+    const interfaceStyle = await selectInterfaceStyle(prompt, interfaceLanguage.language);
     const workspaceRaw = await prompt(`Workspace root [${options.workspaceRoot}]: `);
     const workspaceRoot = workspaceRaw.trim().length === 0 ? options.workspaceRoot : workspaceRaw.trim();
     const trustRaw = await prompt("Trust this workspace for normal local file and terminal work? [Y/n]: ");
     const trustWorkspace = parseYesNo(trustRaw, true);
     const provider = await selectProvider(prompt);
     const selected = await selectModel(prompt, provider);
+    const backup = await selectBackupRoute(prompt, selected.provider);
     const defaultApiKeyEnv = selected.provider === "local" ? undefined : defaultEnvKey(selected.provider);
     const normalizedEnvName = defaultApiKeyEnv;
     const apiKey = selected.provider === "local"
@@ -92,17 +163,31 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
       : await prompt(`Paste ${selected.label} API key to store as ${normalizedEnvName}: `, { secret: true });
     const securityMode = await selectSecurityMode(prompt, locale);
     const skillAutonomy = await selectSkillAutonomy(prompt, locale);
+    const optionalCapabilities = await collectOptionalCapabilities(prompt);
     const reviewLines = renderReview({
+      interfaceLabel: `${interfaceLanguage.label} / ${interfaceStyle.label}`,
       provider: selected.provider,
       model: selected.model,
+      backup: backup === undefined ? "skipped" : formatProviderModel(backup.model.provider, backup.model.model),
       credential: normalizedEnvName === undefined
         ? "local provider, no hosted API key"
         : `save to ~/.estacoda/.env as ${normalizedEnvName}`,
       trust: trustWorkspace ? workspaceRoot : "not trusted",
       securityMode,
-      skillAutonomy
+      skillAutonomy,
+      capabilities: summarizeCapabilities(optionalCapabilities)
     });
     await prompt(`${reviewLines}\nPress Enter to save this setup... `);
+    await setupUiConfig({
+      ...options,
+      workspaceRoot,
+      input: {
+        scope: "user",
+        language: interfaceLanguage.language,
+        flavor: interfaceStyle.flavor,
+        activityLabels: interfaceStyle.activityLabels
+      }
+    });
     const result = await completeOnboarding({
       ...options,
       workspaceRoot,
@@ -115,6 +200,22 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         enableNetwork: selected.provider !== "local"
       }
     });
+    if (backup !== undefined) {
+      await setupProviderConfig({
+        ...options,
+        workspaceRoot,
+        input: {
+          scope: "user",
+          provider: backup.model.provider,
+          model: backup.model.model,
+          apiKeyEnv: backup.apiKeyEnv,
+          apiKey: backup.apiKey,
+          enableNetwork: backup.model.provider !== "local",
+          primary: false,
+          backupForMain: true
+        }
+      });
+    }
     await setupSecurityConfig({
       ...options,
       workspaceRoot,
@@ -130,6 +231,11 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         scope: "user",
         autonomy: skillAutonomy
       }
+    });
+    await applyOptionalCapabilities({
+      ...options,
+      workspaceRoot,
+      capabilities: optionalCapabilities
     });
     if (trustWorkspace) {
       await new WorkspaceTrustStore({
@@ -166,12 +272,15 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         "Setup complete.",
         "EstaCoda is ready to use this workspace configuration.",
         `Configured: ${formatProviderModel(selected.provider, selected.model)}`,
+        backup === undefined ? undefined : `Backup route: ${formatProviderModel(backup.model.provider, backup.model.model)}`,
         `Config: ${result.configPath}`,
         result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
         normalizedEnvName === undefined ? undefined : `Using credential from ${normalizedEnvName}.`,
+        `Interface: ${interfaceLanguage.label} / ${interfaceStyle.label}`,
         `Workspace trust: ${trustWorkspace ? "trusted" : "not trusted"}`,
         `Security mode: ${security.label} (${security.value})`,
         `Skill autonomy: ${autonomy.label} (${autonomy.value})`,
+        `Optional capabilities: ${summarizeCapabilities(optionalCapabilities)}`,
         "",
         setupCheck,
         sessionLine
@@ -251,6 +360,97 @@ function providerChoices(): ProviderChoice[] {
   ];
 }
 
+function interfaceLanguageChoices(): InterfaceChoice[] {
+  return [
+    {
+      language: "en",
+      label: "English",
+      description: "Use English across the CLI."
+    },
+    {
+      language: "ar",
+      label: "Arabic",
+      description: "Use Arabic across the CLI."
+    }
+  ];
+}
+
+function interfaceStyleChoices(language: UiLanguage): InterfaceStyleChoice[] {
+  if (language === "ar") {
+    return [
+      {
+        flavor: "arabic-light",
+        activityLabels: "ar",
+        label: "Arabic-light",
+        description: "Use Arabic labels with light regional phrasing."
+      },
+      {
+        flavor: "standard",
+        activityLabels: "ar",
+        label: "Standard",
+        description: "Use clear Arabic labels with neutral status text."
+      }
+    ];
+  }
+
+  return [
+    {
+      flavor: "standard",
+      activityLabels: "en",
+      label: "Standard",
+      description: "Clear, neutral CLI language."
+    },
+    {
+      flavor: "arabic-light",
+      activityLabels: "en",
+      label: "Arabic-light",
+      description: "Adds light Arabic identity to status and activity messages."
+    }
+  ];
+}
+
+async function selectInterfaceLanguage(prompt: Prompt): Promise<InterfaceChoice> {
+  const choices = interfaceLanguageChoices();
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: "Choose interface language",
+      body: "This controls setup text, status messages, and CLI labels.",
+      defaultIndex: 0,
+      options: choices.map((choice) => ({
+        value: choice,
+        label: choice.label,
+        description: choice.description
+      })),
+      fallbackPrompt: `${renderNumberedChoices("Choose interface language", "This controls setup text, status messages, and CLI labels.", choices)}\nEnter choice number [default: 1 English]: `
+    });
+  }
+
+  const selectedRaw = await prompt(`${renderNumberedChoices("Choose interface language", "This controls setup text, status messages, and CLI labels.", choices)}\nEnter choice number [default: 1 English]: `);
+  const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
+  return choices[selectedIndex] ?? choices[0]!;
+}
+
+async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage): Promise<InterfaceStyleChoice> {
+  const choices = interfaceStyleChoices(language);
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: "Choose expression style",
+      body: "This controls how much regional language appears in status messages.",
+      defaultIndex: 0,
+      options: choices.map((choice) => ({
+        value: choice,
+        label: choice.label,
+        description: choice.description
+      })),
+      fallbackPrompt: `${renderNumberedChoices("Choose expression style", "This controls how much regional language appears in status messages.", choices)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "Standard"}]: `
+    });
+  }
+
+  const selectedRaw = await prompt(`${renderNumberedChoices("Choose expression style", "This controls how much regional language appears in status messages.", choices)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "Standard"}]: `);
+  const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
+  return choices[selectedIndex] ?? choices[0]!;
+}
+
 async function selectProvider(
   prompt: Prompt
 ): Promise<ProviderChoice> {
@@ -273,6 +473,76 @@ async function selectProvider(
   const parsedIndex = Number.parseInt(selectedRaw, 10) - 1;
   const selectedIndex = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? parsedIndex : defaultIndex;
   return providerChoices()[selectedIndex] ?? providerChoices()[defaultIndex] ?? providerChoices()[0]!;
+}
+
+async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId): Promise<BackupRouteChoice | undefined> {
+  const choices = [
+    {
+      value: "skip" as const,
+      label: "Skip for now",
+      description: "Use only the primary model."
+    },
+    {
+      value: "add" as const,
+      label: "Add backup model",
+      description: "Choose another provider and model."
+    }
+  ];
+  const decision = prompt.select === undefined
+    ? choices[parseChoiceIndex(await prompt(`${renderNumberedChoices("Choose backup model", "EstaCoda can use this if the primary provider fails.", choices)}\nEnter choice number [default: 1 Skip for now]: `), choices.length, 0)]?.value ?? "skip"
+    : await prompt.select({
+      title: "Choose backup model",
+      body: "EstaCoda can use this if the primary provider fails.",
+      defaultIndex: 0,
+      options: choices,
+      fallbackPrompt: `${renderNumberedChoices("Choose backup model", "EstaCoda can use this if the primary provider fails.", choices)}\nEnter choice number [default: 1 Skip for now]: `
+    });
+
+  if (decision === "skip") {
+    return undefined;
+  }
+
+  const backupProviders = providerChoices().filter((provider) => provider.provider !== primaryProvider);
+  const provider = await selectProviderFromChoices(prompt, backupProviders, {
+    title: "Choose backup provider",
+    body: "Pick the account EstaCoda should try if the primary provider fails."
+  });
+  const model = await selectModel(prompt, provider);
+  const apiKeyEnv = model.provider === "local" ? undefined : defaultEnvKey(model.provider);
+  const apiKey = model.provider === "local"
+    ? undefined
+    : await prompt(`Paste ${model.label} API key to store as ${apiKeyEnv}: `, { secret: true });
+
+  return {
+    provider,
+    model,
+    apiKeyEnv,
+    apiKey
+  };
+}
+
+async function selectProviderFromChoices(
+  prompt: Prompt,
+  choices: ProviderChoice[],
+  input: { title: string; body: string }
+): Promise<ProviderChoice> {
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: input.title,
+      body: input.body,
+      defaultIndex: 0,
+      options: choices.map((choice) => ({
+        value: choice,
+        label: choice.label,
+        description: choice.description
+      })),
+      fallbackPrompt: `${renderProviderPicker(choices, input.title, input.body)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "first option"}]: `
+    });
+  }
+
+  const selectedRaw = await prompt(`${renderProviderPicker(choices, input.title, input.body)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "first option"}]: `);
+  const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
+  return choices[selectedIndex] ?? choices[0]!;
 }
 
 async function selectModel(prompt: Prompt, provider: ProviderChoice): Promise<ModelChoice> {
@@ -345,6 +615,355 @@ async function selectSkillAutonomy(prompt: Prompt, locale: Locale): Promise<Skil
   return parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt(locale)));
 }
 
+async function collectOptionalCapabilities(prompt: Prompt): Promise<OptionalCapabilityDraft> {
+  const draft: OptionalCapabilityDraft = {};
+  while (true) {
+    const choice = await selectOptionalCapability(prompt);
+    if (choice === "skip") {
+      return draft;
+    }
+    if (choice === "channels") {
+      const channel = await selectChannel(prompt);
+      if (channel === "telegram") {
+        draft.telegram = await collectTelegramSetup(prompt);
+      }
+    }
+    if (choice === "voice") {
+      const voice = await collectVoiceSetup(prompt);
+      if (voice !== undefined) {
+        draft.voice = voice;
+      }
+    }
+    if (choice === "vision") {
+      const vision = await collectVisionSetup(prompt);
+      if (vision !== undefined) {
+        draft.vision = vision;
+      }
+    }
+    if (choice === "browser") {
+      draft.browser = await collectBrowserSetup(prompt);
+    }
+  }
+}
+
+async function selectOptionalCapability(prompt: Prompt): Promise<"skip" | "channels" | "voice" | "vision" | "browser"> {
+  const choices = [
+    { value: "skip" as const, label: "Skip for now", description: "Start with the core terminal agent." },
+    { value: "channels" as const, label: "Channels", description: "Connect Telegram for remote messages and updates." },
+    { value: "voice" as const, label: "Voice", description: "Configure speech input and spoken replies." },
+    { value: "vision" as const, label: "Vision", description: "Check image understanding and image generation support." },
+    { value: "browser" as const, label: "Browser", description: "Configure browser automation." }
+  ];
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: "Optional capabilities",
+      body: "Set up extra capabilities now or skip them for later.",
+      defaultIndex: 0,
+      options: choices,
+      fallbackPrompt: `${renderNumberedChoices("Optional capabilities", "Set up extra capabilities now or skip them for later.", choices)}\nEnter choice number [default: 1 Skip for now]: `
+    });
+  }
+  const selectedRaw = await prompt(`${renderNumberedChoices("Optional capabilities", "Set up extra capabilities now or skip them for later.", choices)}\nEnter choice number [default: 1 Skip for now]: `);
+  return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
+}
+
+async function selectChannel(prompt: Prompt): Promise<"skip" | "telegram"> {
+  const choices = [
+    { value: "skip" as const, label: "Skip for now", description: "Do not connect a messaging channel." },
+    { value: "telegram" as const, label: "Telegram", description: "Connect a Telegram bot." }
+  ];
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: "Set up channels",
+      body: "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram",
+      defaultIndex: 0,
+      options: choices,
+      fallbackPrompt: `${renderNumberedChoices("Set up channels", "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram", choices)}\nEnter choice number [default: 1 Skip for now]: `
+    });
+  }
+  const selectedRaw = await prompt(`${renderNumberedChoices("Set up channels", "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram", choices)}\nEnter choice number [default: 1 Skip for now]: `);
+  return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
+}
+
+async function collectTelegramSetup(prompt: Prompt): Promise<TelegramSetupDraft> {
+  await prompt([
+    "Telegram setup",
+    "Connect a Telegram bot so EstaCoda can receive remote messages and send updates.",
+    "You need:",
+    "1. A bot token from BotFather.",
+    "2. Your numeric Telegram user ID.",
+    "Only the allowed user ID can control this agent.",
+    "Press Enter to continue."
+  ].join("\n"));
+  await prompt([
+    "Get a bot token",
+    "1. Open Telegram.",
+    "2. Search for BotFather.",
+    "3. Open the verified BotFather chat.",
+    "4. Send /newbot.",
+    "5. Choose a display name for the bot.",
+    "6. Choose a username ending in bot.",
+    "7. Copy the API token BotFather gives you.",
+    "Keep this token private. Anyone with the token can control the bot.",
+    "Press Enter when you have the token."
+  ].join("\n"));
+  const botToken = await promptForValidatedSecret(
+    prompt,
+    "Paste Telegram bot token\nStored locally as ESTACODA_TELEGRAM_BOT_TOKEN in ~/.estacoda/.env: ",
+    (value) => /^\d+:[A-Za-z0-9_-]+$/u.test(value.trim()),
+    "Invalid Telegram bot token. Expected format: 123456789:ABC..."
+  );
+  await prompt([
+    "Get your Telegram user ID",
+    "1. Open Telegram.",
+    "2. Search for userinfobot.",
+    "3. Start the chat.",
+    "4. Copy the numeric ID it sends back.",
+    "Use the numeric ID only, not your @username.",
+    "Press Enter when you have the user ID."
+  ].join("\n"));
+  const allowedUserId = await promptForValidatedText(
+    prompt,
+    "Paste allowed Telegram user ID\nOnly this Telegram user can send commands to EstaCoda: ",
+    (value) => /^\d+$/u.test(value.trim()),
+    "Invalid Telegram user ID. Use the numeric ID only."
+  );
+  const runTest = await selectRunSkip(prompt, {
+    title: "Test Telegram connection",
+    body: "EstaCoda will verify the bot token and allowed user configuration.",
+    runLabel: "Run test",
+    runDescription: "Verify the bot connection now.",
+    skipDescription: "Save settings without testing."
+  });
+  if (runTest) {
+    // Full network verification is handled by `estacoda telegram status/test`; first-run keeps the setup local and deterministic.
+    await prompt("Telegram settings will be verified after they are saved. Press Enter to continue.");
+  }
+  return {
+    botToken,
+    allowedUserId,
+    runTest
+  };
+}
+
+async function collectVoiceSetup(prompt: Prompt): Promise<VoiceSetupDraft | undefined> {
+  const setup = await selectBinarySetup(prompt, {
+    title: "Voice setup",
+    body: "Configure speech input and spoken replies.",
+    skipLabel: "Skip for now",
+    skipDescription: "Keep text-only interaction.",
+    setupLabel: "Set up voice",
+    setupDescription: "Configure speech-to-text and text-to-speech."
+  });
+  if (!setup) {
+    return undefined;
+  }
+  const mode = await selectVoiceMode(prompt);
+  const sttChoice = await selectSimpleChoice(prompt, {
+    title: "Speech-to-text",
+    body: "Choose how spoken input becomes text.",
+    defaultIndex: 0,
+    choices: [
+      { value: "skip" as const, label: "Skip for now", description: "Do not enable speech input." },
+      { value: "local" as const, label: "Local", description: "Use a local transcription backend." },
+      { value: "hosted" as const, label: "Hosted", description: "Use a hosted transcription provider." }
+    ]
+  });
+  const ttsChoice = await selectSimpleChoice(prompt, {
+    title: "Text-to-speech",
+    body: "Choose how EstaCoda speaks responses.",
+    defaultIndex: 0,
+    choices: [
+      { value: "skip" as const, label: "Skip for now", description: "Do not enable spoken replies." },
+      { value: "local" as const, label: "Local", description: "Use a local speech backend." },
+      { value: "hosted" as const, label: "Hosted", description: "Use a hosted speech provider." }
+    ]
+  });
+  const sttApiKey = sttChoice === "hosted"
+    ? await prompt("Paste hosted speech-to-text API key to store as OPENAI_API_KEY: ", { secret: true })
+    : undefined;
+  const ttsApiKey = ttsChoice === "hosted"
+    ? await prompt("Paste hosted text-to-speech API key to store as OPENAI_API_KEY: ", { secret: true })
+    : undefined;
+
+  return {
+    mode,
+    sttProvider: sttChoice === "local" ? "local" : sttChoice === "hosted" ? "openai" : undefined,
+    sttApiKeyEnv: sttChoice === "hosted" ? "OPENAI_API_KEY" : undefined,
+    sttApiKey,
+    ttsProvider: ttsChoice === "local" ? "edge" : ttsChoice === "hosted" ? "openai" : undefined,
+    ttsApiKeyEnv: ttsChoice === "hosted" ? "OPENAI_API_KEY" : undefined,
+    ttsApiKey
+  };
+}
+
+async function collectVisionSetup(prompt: Prompt): Promise<VisionSetupDraft | undefined> {
+  const setup = await selectBinarySetup(prompt, {
+    title: "Vision setup",
+    body: "Check image understanding and image generation support.",
+    skipLabel: "Skip for now",
+    skipDescription: "Keep text and code workflows only.",
+    setupLabel: "Set up vision",
+    setupDescription: "Check image input and image generation."
+  });
+  if (!setup) {
+    return undefined;
+  }
+  const runInputCheck = await selectRunSkip(prompt, {
+    title: "Vision readiness",
+    body: "EstaCoda will check whether the selected model can read images.",
+    runLabel: "Run check",
+    runDescription: "Verify image input support.",
+    skipDescription: "Save settings without testing."
+  });
+  const imageChoice = await selectSimpleChoice(prompt, {
+    title: "Image generation",
+    body: "Choose whether EstaCoda can create images.",
+    defaultIndex: 0,
+    choices: [
+      { value: "skip" as const, label: "Skip for now", description: "Do not enable image generation." },
+      { value: "byteplus" as const, label: "BytePlus Seedream", description: "Use BytePlus ModelArk image generation." },
+      { value: "fal" as const, label: "FAL", description: "Use a hosted FAL image generation route." }
+    ]
+  });
+  if (imageChoice === "skip") {
+    return {
+      runInputCheck,
+      runImageTest: false
+    };
+  }
+  const imageApiKeyEnv = defaultImageApiKeyEnv(imageChoice);
+  const imageModel = defaultImageModel(imageChoice);
+  const imageApiKey = await prompt(`Paste image generation API key to store as ${imageApiKeyEnv}: `, { secret: true });
+  const runImageTest = await selectRunSkip(prompt, {
+    title: "Test image generation",
+    body: "EstaCoda will verify the image provider configuration.",
+    runLabel: "Run test",
+    runDescription: "Verify image generation now.",
+    skipDescription: "Save settings without testing."
+  });
+  return {
+    runInputCheck,
+    imageProvider: imageChoice,
+    imageModel,
+    imageApiKeyEnv,
+    imageApiKey,
+    runImageTest
+  };
+}
+
+async function collectBrowserSetup(prompt: Prompt): Promise<boolean> {
+  return await selectBinarySetup(prompt, {
+    title: "Browser setup",
+    body: "Configure browser automation for web pages.",
+    skipLabel: "Skip for now",
+    skipDescription: "Do not configure browser automation.",
+    setupLabel: "Set up browser",
+    setupDescription: "Use a local Chrome DevTools-compatible browser."
+  });
+}
+
+async function selectVoiceMode(prompt: Prompt): Promise<"push-to-talk" | "continuous"> {
+  return await selectSimpleChoice(prompt, {
+    title: "Choose voice mode",
+    body: "This controls how EstaCoda listens.",
+    defaultIndex: 0,
+    choices: [
+      { value: "push-to-talk" as const, label: "Push to talk", description: "Start and stop recording manually." },
+      { value: "continuous" as const, label: "Continuous", description: "Listen until speech ends." }
+    ]
+  });
+}
+
+async function selectRunSkip(prompt: Prompt, input: {
+  title: string;
+  body: string;
+  runLabel: string;
+  runDescription: string;
+  skipDescription: string;
+}): Promise<boolean> {
+  const value = await selectSimpleChoice(prompt, {
+    title: input.title,
+    body: input.body,
+    defaultIndex: 0,
+    choices: [
+      { value: "run" as const, label: input.runLabel, description: input.runDescription },
+      { value: "skip" as const, label: "Skip test", description: input.skipDescription }
+    ]
+  });
+  return value === "run";
+}
+
+async function selectBinarySetup(prompt: Prompt, input: {
+  title: string;
+  body: string;
+  skipLabel: string;
+  skipDescription: string;
+  setupLabel: string;
+  setupDescription: string;
+}): Promise<boolean> {
+  const value = await selectSimpleChoice(prompt, {
+    title: input.title,
+    body: input.body,
+    defaultIndex: 0,
+    choices: [
+      { value: "skip" as const, label: input.skipLabel, description: input.skipDescription },
+      { value: "setup" as const, label: input.setupLabel, description: input.setupDescription }
+    ]
+  });
+  return value === "setup";
+}
+
+async function selectSimpleChoice<T extends string>(prompt: Prompt, input: {
+  title: string;
+  body: string;
+  defaultIndex: number;
+  choices: Array<{ value: T; label: string; description: string }>;
+}): Promise<T> {
+  if (prompt.select !== undefined) {
+    return await prompt.select({
+      title: input.title,
+      body: input.body,
+      defaultIndex: input.defaultIndex,
+      options: input.choices,
+      fallbackPrompt: `${renderNumberedChoices(input.title, input.body, input.choices)}\nEnter choice number [default: ${input.defaultIndex + 1} ${input.choices[input.defaultIndex]?.label ?? "first option"}]: `
+    });
+  }
+
+  const selectedRaw = await prompt(`${renderNumberedChoices(input.title, input.body, input.choices)}\nEnter choice number [default: ${input.defaultIndex + 1} ${input.choices[input.defaultIndex]?.label ?? "first option"}]: `);
+  return input.choices[parseChoiceIndex(selectedRaw, input.choices.length, input.defaultIndex)]?.value ?? input.choices[input.defaultIndex]!.value;
+}
+
+async function promptForValidatedText(
+  prompt: Prompt,
+  question: string,
+  isValid: (value: string) => boolean,
+  failure: string
+): Promise<string> {
+  while (true) {
+    const value = await prompt(question);
+    if (isValid(value)) {
+      return value.trim();
+    }
+    await prompt(`${failure}\nPress Enter to try again.`);
+  }
+}
+
+async function promptForValidatedSecret(
+  prompt: Prompt,
+  question: string,
+  isValid: (value: string) => boolean,
+  failure: string
+): Promise<string> {
+  while (true) {
+    const value = await prompt(question, { secret: true });
+    if (isValid(value)) {
+      return value.trim();
+    }
+    await prompt(`${failure}\nPress Enter to try again.`);
+  }
+}
+
 function renderWelcome(input: {
   theme: ThemeDefinition;
   body: string;
@@ -368,15 +987,32 @@ function renderWelcome(input: {
   ].join("\n");
 }
 
-function renderProviderPicker(): string {
+function renderProviderPicker(
+  choices: ProviderChoice[] = providerChoices(),
+  title = "Choose a provider",
+  body = "Pick the account you want EstaCoda to use first."
+): string {
   return [
-    "Choose a provider",
-    "Pick the account you want EstaCoda to use first.",
+    title,
+    body,
     "",
-    ...providerChoices().map((option, index) => {
+    ...choices.map((option, index) => {
       const credential = option.provider === "local" ? "no API key" : `${defaultEnvKey(option.provider)}`;
       return `${index + 1}. ${option.label.padEnd(14)} ${option.description} (${credential})`;
     })
+  ].join("\n");
+}
+
+function renderNumberedChoices(
+  title: string,
+  body: string,
+  choices: Array<{ label: string; description?: string }>
+): string {
+  return [
+    title,
+    body,
+    "",
+    ...choices.map((choice, index) => `${index + 1}. ${choice.label}${choice.description === undefined ? "" : `\n   ${choice.description}`}`)
   ].join("\n");
 }
 
@@ -389,22 +1025,95 @@ function renderModelPicker(provider: ProviderChoice): string {
   ].join("\n");
 }
 
+async function applyOptionalCapabilities(options: OnboardingOptions & {
+  workspaceRoot: string;
+  capabilities: OptionalCapabilityDraft;
+}): Promise<void> {
+  if (options.capabilities.telegram !== undefined) {
+    await setupTelegramConfig({
+      ...options,
+      input: {
+        scope: "user",
+        enabled: true,
+        botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+        botToken: options.capabilities.telegram.botToken,
+        allowedUserIds: [options.capabilities.telegram.allowedUserId]
+      }
+    });
+  }
+
+  if (options.capabilities.voice !== undefined) {
+    await setupVoiceConfig({
+      ...options,
+      input: {
+        scope: "user",
+        sttProvider: options.capabilities.voice.sttProvider,
+        sttApiKeyEnv: options.capabilities.voice.sttApiKeyEnv,
+        sttApiKey: options.capabilities.voice.sttApiKey,
+        ttsProvider: options.capabilities.voice.ttsProvider,
+        ttsApiKeyEnv: options.capabilities.voice.ttsApiKeyEnv,
+        ttsApiKey: options.capabilities.voice.ttsApiKey
+      }
+    });
+  }
+
+  if (options.capabilities.vision?.imageProvider !== undefined) {
+    await setupImageGenerationConfig({
+      ...options,
+      input: {
+        scope: "user",
+        provider: options.capabilities.vision.imageProvider,
+        model: options.capabilities.vision.imageModel,
+        apiKeyEnv: options.capabilities.vision.imageApiKeyEnv,
+        apiKey: options.capabilities.vision.imageApiKey
+      }
+    });
+  }
+
+  if (options.capabilities.browser === true) {
+    await setupBrowserConfig({
+      ...options,
+      input: {
+        scope: "user",
+        backend: "local-cdp",
+        autoLaunch: false
+      }
+    });
+  }
+}
+
+function summarizeCapabilities(input: OptionalCapabilityDraft): string {
+  const capabilities = [
+    input.telegram === undefined ? undefined : "Telegram",
+    input.voice === undefined ? undefined : "Voice",
+    input.vision === undefined ? undefined : "Vision",
+    input.browser === true ? "Browser" : undefined
+  ].filter((value): value is string => value !== undefined);
+  return capabilities.length === 0 ? "skipped" : capabilities.join(", ");
+}
+
 function renderReview(input: {
+  interfaceLabel: string;
   provider: string;
   model: string;
+  backup: string;
   credential: string;
   trust: string;
   securityMode: SecurityApprovalMode;
   skillAutonomy: SkillAutonomy;
+  capabilities: string;
 }): string {
   return [
     "Review setup",
+    `Interface:  ${input.interfaceLabel}`,
     `Provider:   ${input.provider}`,
     `Model:      ${input.model}`,
+    `Backup:     ${input.backup}`,
     `Credential: ${input.credential}`,
     `Workspace:  ${input.trust}`,
     `Security:   ${input.securityMode}`,
     `Skills:     ${input.skillAutonomy}`,
+    `Optional:   ${input.capabilities}`,
     "",
     "EstaCoda stores configuration and credential references. Raw hosted keys go only into ~/.estacoda/.env."
   ].join("\n");

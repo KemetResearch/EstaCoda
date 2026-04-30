@@ -615,7 +615,7 @@ const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-in
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
 const cliInteractivePromptSecrets: boolean[] = [];
-const cliInteractiveAnswers = ["", "", "", "2", "", "TEST_KIMI_SECRET", "", "", ""];
+const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET", "", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -640,7 +640,7 @@ const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
 const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
 const cliProjectOverridePrompts: string[] = [];
 const cliProjectOverridePromptSecrets: boolean[] = [];
-const cliProjectOverrideAnswers = ["", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", ""];
+const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", ""];
 const cliProjectOverrideSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: firstRunProjectConfigWorkspace,
@@ -4125,14 +4125,18 @@ assert(cliInteractiveSetup.output.includes("EstaCoda is ready to use this worksp
 assert(cliInteractiveSetup.output.includes("Secret store:"), "expected interactive setup secret store output");
 assert(cliInteractiveSetup.output.includes("Setup check"), "expected interactive setup diagnostics");
 assert(!cliInteractiveSetup.output.includes("EstaCoda verify"), "expected successful interactive setup to use compact verification output");
-assert(cliInteractivePrompts.length === 9, "expected interactive setup prompts");
+assert(cliInteractivePrompts.length === 13, "expected interactive setup prompts");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose interface language")), "expected interactive setup to ask for interface language");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("OpenAI")), "expected interactive setup to offer OpenAI");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose Kimi model")), "expected interactive setup to split provider and model selection");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose backup model")), "expected interactive setup to offer backup model selection");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("Optional capabilities")), "expected interactive setup to offer optional capabilities");
 assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Credential storage")), "expected first-run setup to default to local credential storage");
 assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Environment variable for Kimi K2.5 API key")), "expected local key storage not to ask for env var name");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("Paste Kimi K2.5 API key")), "expected interactive setup to ask for Kimi key separately");
 assert(cliInteractivePromptSecrets.some(Boolean), "expected interactive setup API key prompt to be masked");
 assert(cliInteractiveConfig.model.provider === "kimi", "expected interactive setup to save provider");
+assert(cliInteractiveConfig.ui.language === "en", "expected interactive setup to save interface language");
 assert(cliInteractiveConfig.security.approvalMode === "adaptive", "expected interactive setup to save default security mode");
 assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive setup to save default skill autonomy");
 assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"TEST_KIMI_SECRET\""), "expected interactive setup to write local env secret");

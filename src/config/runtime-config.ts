@@ -333,6 +333,8 @@ export type ProviderSetupInput = {
   enableNetwork?: boolean;
   scope?: "user" | "project";
   credentialPoolStrategy?: CredentialRotationStrategy;
+  primary?: boolean;
+  backupForMain?: boolean;
 };
 
 export type WebSetupInput = {
@@ -1008,11 +1010,22 @@ export async function setupProviderConfig(options: {
     models: [options.input.model],
     enableNetwork: options.input.enableNetwork ?? true
   };
+  const primaryModelPatch = options.input.primary === false
+    ? {}
+    : {
+      model: {
+        provider: options.input.provider,
+        id: options.input.model
+      }
+    };
+  const mainProviderOrder = options.input.backupForMain === true
+    ? [
+      existing.config.model?.provider,
+      options.input.provider
+    ].filter((provider, index, providers): provider is ProviderId => provider !== undefined && providers.indexOf(provider) === index)
+    : undefined;
   const config = mergeConfig(existing.config, {
-    model: {
-      provider: options.input.provider,
-      id: options.input.model
-    },
+    ...primaryModelPatch,
     providers: {
       [options.input.provider]: providerConfig
     },
@@ -1028,6 +1041,13 @@ export async function setupProviderConfig(options: {
                 priority: 1
               }
             ]
+          }
+        },
+    auxiliaryProviders: mainProviderOrder === undefined
+      ? undefined
+      : {
+          main: {
+            providerOrder: mainProviderOrder
           }
         }
   });
