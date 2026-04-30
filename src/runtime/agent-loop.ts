@@ -1558,6 +1558,7 @@ export class AgentLoop {
     await this.#recordPromptAssembly(prompt.budget);
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+      provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
@@ -1566,7 +1567,7 @@ export class AgentLoop {
         ? input.providerTools
         : undefined
     }), {
-      requireTools: this.#model.supportsTools,
+      requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
@@ -1655,11 +1656,14 @@ export class AgentLoop {
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,
-      attachments: input.attachments
+      attachments: input.attachments,
+      ui: this.#ui,
+      agentProfile: this.#agentProfile
     });
     await this.#recordPromptAssembly(prompt.budget);
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+      provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
@@ -1668,7 +1672,7 @@ export class AgentLoop {
         ? input.providerTools
         : undefined
     }), {
-      requireTools: this.#model.supportsTools,
+      requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],

@@ -1902,6 +1902,111 @@ const providerExecutionSecondFallback = await providerExecutor.complete(
     sessionId: "provider-smoke"
   }
 );
+const pooledExecutionFetchCalls: Array<{
+  authorization?: string;
+  body: unknown;
+}> = [];
+const pooledExecutionRegistry = new ProviderRegistry();
+pooledExecutionRegistry.register(createOpenAICompatibleProvider({
+  id: "deepseek",
+  endpoint: {
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKey: {
+      kind: "env",
+      name: "ESTACODA_MISSING_DEEPSEEK_KEY"
+    }
+  },
+  models: ["deepseek-chat"],
+  enableNetwork: true,
+  fetch: async (_url, init) => {
+    pooledExecutionFetchCalls.push({
+      authorization: init.headers.authorization,
+      body: JSON.parse(init.body) as unknown
+    });
+    return fakeFetchResponse(200, {
+      choices: [{ message: { content: "pooled ok" } }]
+    }) as any;
+  }
+}));
+const pooledExecutionCredentials = new CredentialPoolRegistry();
+pooledExecutionCredentials.register(new CredentialPool({
+  provider: "deepseek",
+  entries: [{
+    id: "deepseek-pooled",
+    source: { kind: "literal", value: "pooled-execution-key" }
+  }]
+}));
+const pooledCredentialExecution = await new ProviderExecutor({
+  registry: pooledExecutionRegistry,
+  credentialPools: pooledExecutionCredentials
+}).complete({
+  provider: "deepseek",
+  model: "deepseek-chat",
+  messages: [{ role: "user", content: "credential pool route" }]
+}, {
+  providerOrder: ["deepseek"]
+});
+const collisionRegistry = new ProviderRegistry();
+collisionRegistry.register(fakeProvider({
+  id: "deepseek",
+  models: [inferModelProfile({ provider: "deepseek", model: "shared-model" })],
+  responses: [{
+    ok: true,
+    content: "wrong provider",
+    model: "shared-model",
+    provider: "deepseek"
+  }]
+}));
+collisionRegistry.register(fakeProvider({
+  id: "kimi",
+  models: [inferModelProfile({ provider: "kimi", model: "shared-model" })],
+  responses: [{
+    ok: true,
+    content: "explicit provider",
+    model: "shared-model",
+    provider: "kimi"
+  }]
+}));
+const explicitCollisionExecution = await new ProviderExecutor({
+  registry: collisionRegistry
+}).complete({
+  provider: "kimi",
+  model: "shared-model",
+  messages: [{ role: "user", content: "pick exact provider" }]
+}, {
+  providerOrder: ["deepseek", "kimi"]
+});
+const explicitFallbackRegistry = new ProviderRegistry();
+explicitFallbackRegistry.register(fakeProvider({
+  id: "deepseek",
+  models: [inferModelProfile({ provider: "deepseek", model: "shared-model" })],
+  responses: [{
+    ok: false,
+    content: "temporary model outage",
+    model: "shared-model",
+    provider: "deepseek",
+    errorClass: "model-unavailable"
+  }]
+}));
+explicitFallbackRegistry.register(fakeProvider({
+  id: "kimi",
+  models: [inferModelProfile({ provider: "kimi", model: "kimi-k2.5" })],
+  responses: [{
+    ok: true,
+    content: "explicit fallback ok",
+    model: "kimi-k2.5",
+    provider: "kimi"
+  }]
+}));
+const explicitProviderFallbackExecution = await new ProviderExecutor({
+  registry: explicitFallbackRegistry
+}).complete({
+  provider: "deepseek",
+  model: "shared-model",
+  messages: [{ role: "user", content: "fall back from exact route" }]
+}, {
+  providerOrder: ["deepseek", "kimi"]
+});
 const streamingRegistry = new ProviderRegistry();
 streamingRegistry.register(fakeProvider({
   id: "deepseek",
@@ -5127,17 +5232,16 @@ assert(localProviderRequest.body.temperature === 2, "expected local temperature 
 assert(localProviderRequest.body.tools === undefined, "expected local non-tool model to omit tools");
 assert(localProviderRequest.body.response_format === undefined, "expected local provider to omit response format");
 assert(localToolProviderRequest.body.tools !== undefined, "expected local tool-capable model to preserve tools");
-assert(normalizedAdjacentMessages.messages[0]?.role === "system", "expected provider request system identity");
 assert(
-  flattenProviderMessageContent(normalizedAdjacentMessages.messages[0]?.content).includes("Describe yourself as an agent"),
-  "expected provider request identity to prefer agent self-description"
+  normalizedAdjacentMessages.messages[0]?.role === "user",
+  "expected provider message normalizer not to inject product identity"
 );
 assert(
-  normalizedAdjacentMessages.messages[1]?.content === "hello\n\nagain",
+  normalizedAdjacentMessages.messages[0]?.content === "hello\n\nagain",
   "expected adjacent provider messages to merge"
 );
 assert(
-  normalizedAdjacentMessages.messages[2]?.content === "[empty]",
+  normalizedAdjacentMessages.messages[1]?.content === "[empty]",
   "expected empty provider messages to be explicit"
 );
 assert(strictMessageNormalization.messages[0]?.role === "system", "expected strict normalization to move system first");
@@ -5149,6 +5253,12 @@ assert(
   strictMessageNormalization.warnings.includes("tool-message-without-assistant-before-it"),
   "expected strict normalization to flag invalid tool alternation"
 );
+assert(
+  !strictMessageNormalization.messages.some((message) =>
+    flattenProviderMessageContent(message.content).includes("proactive autonomous agent")
+  ),
+  "expected strict normalization to avoid product identity injection"
+);
 assert(providerExecution.ok, "expected provider fallback execution to succeed");
 assert(providerExecution.attempts.length === 2, "expected provider fallback attempts");
 assert(providerExecution.attempts[0]?.credentialId === "deepseek-a", "expected first pooled credential");
@@ -5159,6 +5269,17 @@ assert(
   "expected first 429 to keep credential available"
 );
 assert(providerExecutionSecondFallback.attempts.length === 1, "expected one-shot fallback per session");
+assert(pooledCredentialExecution.ok, "expected credential-pool override to bypass missing endpoint env health");
+assert(pooledExecutionFetchCalls[0]?.authorization === "Bearer pooled-execution-key", "expected pooled execution credential to be sent");
+assert(explicitCollisionExecution.response?.provider === "kimi", "expected explicit provider/model route to disambiguate shared model IDs");
+assert(explicitCollisionExecution.response?.content === "explicit provider", "expected explicit provider response");
+assert(explicitProviderFallbackExecution.ok, "expected explicit provider/model route to fall back on eligible failure");
+assert(explicitProviderFallbackExecution.fallbackUsed, "expected fallback marker after explicit route failure");
+assert(
+  explicitProviderFallbackExecution.attempts.map((attempt) => `${attempt.provider}/${attempt.model}`).join(",") ===
+    "deepseek/shared-model,kimi/kimi-k2.5",
+  "expected explicit route fallback chain"
+);
 assert(streamingExecution.ok, "expected streaming provider execution to succeed");
 assert(streamingExecution.response?.content === "stream success", "expected streaming provider content aggregation");
 assert(streamingProviderEvents.join("") === "stream success", "expected provider streaming token events");

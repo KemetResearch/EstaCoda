@@ -9,7 +9,7 @@ import type {
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { routeProvider } from "./provider-router.js";
+import { buildFallbackChain, routeProvider } from "./provider-router.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -101,18 +101,7 @@ export class ProviderExecutor {
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
     const models = await this.#registry.listModels();
-    const explicitModel = request.model === undefined
-      ? undefined
-      : models.find((model) => model.id === request.model);
-    const route = explicitModel === undefined
-      ? routeProvider(models, preferences)
-      : {
-        primary: explicitModel,
-        fallbacks: routeProvider(models, preferences)?.fallbacks.filter((model) =>
-          model.provider !== explicitModel.provider || model.id !== explicitModel.id
-        ) ?? [],
-        reason: `explicit model ${explicitModel.provider}/${explicitModel.id}`
-      };
+    const route = resolveProviderExecutionRoute(models, request, preferences);
 
     if (route === undefined) {
       return {
@@ -161,6 +150,7 @@ export class ProviderExecutor {
             model: model.id,
             stream: provider.stream({
               ...request,
+              provider: model.provider,
               model: model.id,
               stream: true
             }, {
@@ -175,9 +165,10 @@ export class ProviderExecutor {
             onEvent: options.onEvent,
             toolCalls,
             signal: options.signal
-          })
+      })
         : await provider.complete({
             ...request,
+            provider: model.provider,
             model: model.id
           }, {
             credential: credential === undefined
@@ -260,6 +251,42 @@ export class ProviderExecutor {
       toolCalls
     };
   }
+}
+
+function resolveProviderExecutionRoute(
+  models: ModelProfile[],
+  request: Omit<ProviderRequest, "model"> & { model?: string },
+  preferences: ProviderRoutePreferences
+): ProviderRoute | undefined {
+  if (request.provider !== undefined && request.model !== undefined) {
+    const explicit = models.find((model) => model.provider === request.provider && model.id === request.model);
+
+    if (explicit === undefined) {
+      return undefined;
+    }
+
+    return {
+      primary: explicit,
+      fallbacks: buildFallbackChain(models, explicit, preferences),
+      reason: `explicit provider/model ${explicit.provider}/${explicit.id}`
+    };
+  }
+
+  if (request.model !== undefined) {
+    const explicit = models.find((model) => model.id === request.model);
+
+    if (explicit === undefined) {
+      return undefined;
+    }
+
+    return {
+      primary: explicit,
+      fallbacks: buildFallbackChain(models, explicit, preferences),
+      reason: `explicit model ${explicit.provider}/${explicit.id}`
+    };
+  }
+
+  return routeProvider(models, preferences);
 }
 
 async function collectProviderStream(input: {

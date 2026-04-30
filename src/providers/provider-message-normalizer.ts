@@ -7,8 +7,7 @@ export type ProviderMessageNormalization = {
 };
 
 export type ProviderMessageNormalizationOptions = {
-  ensureSystemIdentity?: boolean;
-  identity?: string;
+  ensureSystemMessage?: boolean;
 };
 
 export function normalizeProviderMessagesStrict(
@@ -17,10 +16,6 @@ export function normalizeProviderMessagesStrict(
 ): ProviderMessageNormalization {
   const warnings: string[] = [];
   const repairs: string[] = [];
-  const identity = options.identity ?? [
-    "You are EstaCoda, a proactive autonomous agent.",
-    "Describe yourself as an agent, never as an assistant, AI assistant, or code assistant."
-  ].join("\n");
   const normalized: Array<Omit<ProviderMessage, "content"> & { content: unknown }> = [];
   let systemContent: unknown;
 
@@ -83,12 +78,12 @@ export function normalizeProviderMessagesStrict(
       role: "system",
       content: systemContent
     });
-  } else if (options.ensureSystemIdentity !== false) {
+  } else if (options.ensureSystemMessage === true) {
     normalized.unshift({
       role: "system",
-      content: identity
+      content: "[empty]"
     });
-    repairs.push("inserted-system-identity");
+    repairs.push("inserted-empty-system-message");
   }
 
   for (let index = 1; index < normalized.length; index += 1) {

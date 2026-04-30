@@ -117,6 +117,7 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
     oneShotFallbackPerSession: false
   });
   const execution = await executor.complete({
+    provider: config.model.provider,
     model: config.model.id,
     messages: [
       {

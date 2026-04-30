@@ -63,7 +63,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
       const health = await this.health();
       const preparedRequest = buildOpenAICompatibleRequest(options.endpoint, request, completionOptions?.credential?.value, options.id);
 
-      if (!health.available) {
+      if (!health.available && completionOptions?.credential?.value === undefined) {
         return {
           ok: false,
           content: health.reason ?? "Provider is not available.",
@@ -101,7 +101,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
         stream: true
       }, completionOptions?.credential?.value, options.id);
 
-      if (!health.available) {
+      if (!health.available && completionOptions?.credential?.value === undefined) {
         yield {
           kind: "error",
           provider: options.id,

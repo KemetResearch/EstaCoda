@@ -80,6 +80,7 @@ export type ProviderMessage = {
 };
 
 export type ProviderRequest = {
+  provider?: ProviderId;
   model: string;
   messages: ProviderMessage[];
   temperature?: number;
