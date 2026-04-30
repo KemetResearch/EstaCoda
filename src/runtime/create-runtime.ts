@@ -15,7 +15,6 @@ import { createCronTools } from "../cron/cron-tools.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
 import { createDelegationTools } from "../delegation/delegation-tools.js";
 import { createMemoryTool } from "../memory/memory-tool.js";
-import { renderMemorySnapshot } from "../memory/memory-renderer.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
@@ -23,12 +22,11 @@ import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
-import { AuxiliaryProviderRouter, summarizeAuxiliaryRoutes } from "../providers/auxiliary-provider-router.js";
+import { AuxiliaryProviderRouter } from "../providers/auxiliary-provider-router.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { inferModelProfile, knownModelProfiles } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import { routeProvider } from "../providers/provider-router.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -187,21 +185,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     models: providerModels,
     config: options.auxiliaryProviders
   });
-  const auxiliaryRoutes = options.model.provider === "unconfigured"
-    ? []
-    : auxiliaryProviderRouter.resolveAll();
   const approvalAuxiliaryRoute = options.model.provider === "unconfigured"
     ? undefined
     : auxiliaryProviderRouter.resolve("approval");
-  const providerRoute = options.model.provider === "unconfigured"
-    ? undefined
-    : routeProvider(providerModels, {
-      requireTools: options.model.supportsTools,
-      requireVision: options.model.supportsVision,
-      requireStructuredOutput: options.model.supportsStructuredOutput,
-      providerOrder: [options.model.provider],
-      preferFreeOrOpenWeights: true
-    });
   const processManager = new ProcessManager({ workspaceRoot });
   const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
   const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
@@ -649,40 +635,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
     },
     describe() {
-      const memorySnapshot = memoryStore.snapshot();
-      const renderedMemory = renderMemorySnapshot(memorySnapshot);
-      const trajectory = trajectoryRecorder.snapshot();
-
       return [
-        `${options.theme.branding.responseLabel} v2 runtime scaffold`,
-        `theme: ${options.theme.name}`,
+        `${options.theme.branding.responseLabel} is ready`,
         `model: ${options.model.provider}/${options.model.id}`,
-        `provider route: ${providerRoute === undefined ? "unavailable" : `${providerRoute.primary.provider}/${providerRoute.primary.id}`}`,
-        `provider fallbacks: ${providerRoute === undefined ? 0 : providerRoute.fallbacks.length}`,
-        `auxiliary routes: ${auxiliaryRoutes.length === 0 ? "unavailable" : summarizeAuxiliaryRoutes(auxiliaryRoutes)}`,
-        `security mode: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
+        `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
+        `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
-        `mcp servers: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
-        `skills: ${sessionSkillCatalog.length}`,
+        `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         loadedOfficialSkills.errors.length === 0 ? undefined : `skill load warnings: ${loadedOfficialSkills.errors.length}`,
-        `skill autonomy: ${options.skillAutonomy ?? "suggest"}`,
-        `profile: ${options.agentProfile?.mode ?? "builder"} (${options.agentProfile?.responseLanguage ?? "match-user"})`,
-        `ui: ${options.ui?.language ?? "en"} / ${options.ui?.flavor ?? "standard"} / labels:${options.ui?.activityLabels ?? "en"}`,
-        `project context files: ${projectContext.files.length}`,
-        `project context bytes: ${renderedProjectContext.length}`,
-        `trust store: ${trustStore.path}`,
-        `cron store: ${cronStore.path}`,
-        `memory files: ${memorySnapshot.files.size}`,
-        `memory usage: ${renderedMemory.usage
-          .map((entry) =>
-            entry.maxChars === undefined
-              ? `${entry.kind} ${entry.chars}`
-              : `${entry.kind} ${entry.chars}/${entry.maxChars}`
-          )
-          .join(", ")}`,
-        `trajectory events: ${trajectory.events.length}`,
-        `session: ${sessionId}`,
-        "status: ready for first runtime loop"
+        "status: ready"
       ].filter((line) => line !== undefined).join("\n");
     }
   };

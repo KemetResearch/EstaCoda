@@ -1,5 +1,6 @@
 import type { ProviderId } from "../contracts/provider.js";
 import { loadRuntimeConfig, setupProviderConfig, type ProviderSetupInput } from "../config/runtime-config.js";
+import { diagnoseProviderConfig } from "../config/provider-diagnostics.js";
 
 export type OnboardingStep =
   | {
@@ -46,13 +47,24 @@ export type OnboardingOptions = {
 
 export async function getOnboardingStatus(options: OnboardingOptions): Promise<OnboardingStatus> {
   const config = await loadRuntimeConfig(options);
-  const configured = config.model.provider !== "unconfigured" && config.model.id !== "unconfigured";
+  const userConfigPath = options.userConfigPath ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/config.json`;
+  const hasUserConfig = config.sources.includes(userConfigPath);
+  const hasConfiguredModel = config.model.provider !== "unconfigured" && config.model.id !== "unconfigured";
+  const diagnostic = await diagnoseProviderConfig(config);
+  const configured = hasConfiguredModel && diagnostic.status !== "blocked";
+  const blockedWarning = diagnostic.warnings.find((warning) =>
+    /incomplete|missing|blocked|disabled|No provider|No credential/iu.test(warning)
+  );
 
   return {
     needed: !configured,
     reason: configured
       ? "Provider is already configured."
-      : "No configured provider/model was found.",
+      : hasConfiguredModel
+        ? hasUserConfig
+          ? `Provider route exists but is not ready: ${blockedWarning ?? "provider check is blocked"}.`
+          : "No personal provider credential is configured yet."
+        : "No configured provider/model was found.",
     configuredModel: configured ? `${config.model.provider}/${config.model.id}` : undefined,
     sources: config.sources,
     steps: configured ? [readyStep(`${config.model.provider}/${config.model.id}`)] : defaultOnboardingSteps()
@@ -94,6 +106,7 @@ export function defaultOnboardingSteps(): OnboardingStep[] {
       title: "Choose a provider",
       body: "Pick the provider/model you want EstaCoda to use first. You can add fallback providers later.",
       options: [
+        { provider: "openai", model: "gpt-4.1-mini", label: "OpenAI GPT-4.1 Mini" },
         { provider: "deepseek", model: "deepseek-chat", label: "DeepSeek Chat" },
         { provider: "kimi", model: "kimi-k2.5", label: "Kimi K2.5" },
         { provider: "openrouter", model: "qwen/qwen3.6-plus", label: "OpenRouter Qwen 3.6 Plus" },

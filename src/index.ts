@@ -26,7 +26,7 @@ if (argv.length === 0 && canRunInteractive()) {
 
   if (onboarding.needed) {
     const prompt = createReadlinePrompt();
-    const answer = await prompt("No EstaCoda setup found.\nRun setup now? [Y/n]: ");
+    const answer = await prompt(`${onboarding.reason}\nRun setup now? [Y/n]: `);
     prompt.close?.();
     if (answer.trim().length > 0 && !["y", "yes"].includes(answer.trim().toLowerCase())) {
       console.log("Setup skipped. Run `estacoda setup` when you are ready.");

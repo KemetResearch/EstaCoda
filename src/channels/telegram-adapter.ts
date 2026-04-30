@@ -266,10 +266,12 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async setCommands(commands: TelegramCommand[]): Promise<void> {
     await this.#call("setMyCommands", {
-      commands: commands.map((command) => ({
-        command: command.command.startsWith("/") ? command.command.slice(1) : command.command,
-        description: command.description
-      }))
+      commands: commands
+        .map((command) => ({
+          command: command.command.startsWith("/") ? command.command.slice(1) : command.command,
+          description: command.description.slice(0, 256)
+        }))
+        .filter((command) => /^[a-z0-9_]{1,32}$/u.test(command.command))
     });
   }
 

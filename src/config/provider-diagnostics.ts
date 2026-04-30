@@ -67,17 +67,22 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
 
   if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && selectedPool === undefined) {
     warnings.push(`No credential pool is configured for ${selectedProvider}.`);
+  } else if (
+    selectedProvider !== "local" &&
+    selectedProvider !== "unconfigured" &&
+    selectedPool !== undefined &&
+    selectedPool.entries.length > 0 &&
+    !selectedPool.entries.some((entry) => entry.available)
+  ) {
+    warnings.push(`No available credential is configured for ${selectedProvider}.`);
   }
 
-  const fallbackProviders = models
-    .filter((model) => model.provider !== selectedProvider)
-    .map((model) => `${model.provider}/${model.id}`)
-    .slice(0, 4);
-  lines.push(`Fallback candidates: ${fallbackProviders.length === 0 ? "none" : fallbackProviders.join(", ")}`);
+  const fallbackCount = models.filter((model) => model.provider !== selectedProvider).length;
+  lines.push(`Fallback routes: ${fallbackCount === 0 ? "none" : `${fallbackCount} configured`}`);
 
   const status = warnings.length === 0
     ? "ready"
-    : warnings.some((warning) => /incomplete|missing|blocked|disabled|No provider|No credential/u.test(warning))
+    : warnings.some((warning) => /incomplete|missing|blocked|disabled|No provider|No credential|No available credential/u.test(warning))
       ? "blocked"
       : "warning";
 

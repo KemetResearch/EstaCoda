@@ -498,33 +498,27 @@ export class AgentLoop {
     });
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
-    const providerLoop = deterministicImageGenerationRan
-      ? {
-          providerExecution: undefined,
-          toolExecutions: [],
-          iterations: 0
-        }
-      : await this.#runProviderLoop({
-          userText: effectiveText,
-          routedText,
-          selectedSkill,
-          selectedSkillInstructions,
-          selectedSkillResources,
-          selectedSkillSetup,
-          intent,
-          securityDecision,
-          toolExecutions,
-          context,
-          projectContext: this.#projectContext,
-          attachments,
-          memoryContext: this.#memoryContext,
-          providerTools,
-          fallbackText: fallbackResponse.text,
-          onEvent: input.onEvent,
-          toolPlans,
-          trustedWorkspace,
-          signal: input.signal
-        });
+    const providerLoop = await this.#runProviderLoop({
+      userText: effectiveText,
+      routedText,
+      selectedSkill,
+      selectedSkillInstructions,
+      selectedSkillResources,
+      selectedSkillSetup,
+      intent,
+      securityDecision,
+      toolExecutions,
+      context,
+      projectContext: this.#projectContext,
+      attachments,
+      memoryContext: this.#memoryContext,
+      providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
+      fallbackText: fallbackResponse.text,
+      onEvent: input.onEvent,
+      toolPlans,
+      trustedWorkspace,
+      signal: input.signal
+    });
     const effectiveProviderExecution = providerLoop.providerExecution;
 
     toolExecutions.push(...providerLoop.toolExecutions);
@@ -1568,8 +1562,8 @@ export class AgentLoop {
       messages: prompt.messages,
       temperature: 0.2,
       maxTokens: 1_200,
-      tools: this.#model.supportsTools && this.#providerTools.length > 0
-        ? this.#providerTools
+      tools: this.#model.supportsTools && input.providerTools.length > 0
+        ? input.providerTools
         : undefined
     }), {
       requireTools: this.#model.supportsTools,
@@ -1631,6 +1625,7 @@ export class AgentLoop {
     projectContext: ProjectContextSnapshot | undefined;
     attachments: ChannelAttachment[] | undefined;
     memoryContext: MemoryProviderContext | undefined;
+    providerTools: OpenAICompatibleToolSchema[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
     fallbackText: string;
@@ -1669,8 +1664,8 @@ export class AgentLoop {
       messages: prompt.messages,
       temperature: 0.2,
       maxTokens: 1_200,
-      tools: this.#model.supportsTools && this.#providerTools.length > 0
-        ? this.#providerTools
+      tools: this.#model.supportsTools && input.providerTools.length > 0
+        ? input.providerTools
         : undefined
     }), {
       requireTools: this.#model.supportsTools,
@@ -2137,6 +2132,10 @@ function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): strin
       `- ${artifactReference(artifact)} (${artifact.kind}, ${formatBytes(artifact.bytes)})${artifact.summary === undefined ? "" : ` - ${truncateSummary(artifact.summary)}`}`
     )
   ].join("\n");
+}
+
+function suppressImageGenerationTools(tools: OpenAICompatibleToolSchema[]): OpenAICompatibleToolSchema[] {
+  return tools.filter((tool) => tool.function.name !== "image_generate" && tool.function.name !== "image.generate");
 }
 
 function renderArtifactSummary(artifacts: ArtifactRecord[]): string {

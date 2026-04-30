@@ -19,6 +19,7 @@ import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
 import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
+import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
 import { loadRuntimeConfig, mergeConfig, setupMcpConfig, setupProviderConfig, setupSecurityConfig } from "./config/runtime-config.js";
 import { ContextReferenceExpander } from "./context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
@@ -573,22 +574,56 @@ const loadedRuntimeConfig = await loadRuntimeConfig({
 });
 const cliWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-workspace-"));
 const cliHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-home-"));
+const firstRunProjectConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-first-run-project-config-"));
+const firstRunProjectConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-first-run-home-"));
+await mkdir(join(firstRunProjectConfigWorkspace, ".estacoda"));
+delete process.env.OPENAI_API_KEY;
+await writeFile(
+  join(firstRunProjectConfigWorkspace, ".estacoda", "config.json"),
+  JSON.stringify({
+    model: {
+      provider: "openai",
+      id: "gpt-4.1-mini"
+    },
+    providers: {
+      openai: {
+        apiKeyEnv: "OPENAI_API_KEY",
+        models: ["gpt-4.1-mini"],
+        enableNetwork: true
+      }
+    },
+    credentialPools: {
+      openai: {
+        strategy: "fill_first",
+        entries: [{ id: "openai-OPENAI_API_KEY", source: { kind: "env", name: "OPENAI_API_KEY" }, priority: 1 }]
+      }
+    }
+  }),
+  "utf8"
+);
+const firstRunProjectConfigOnboarding = await getOnboardingStatus({
+  workspaceRoot: firstRunProjectConfigWorkspace,
+  homeDir: firstRunProjectConfigHome
+});
 const cliSetupPrompt = await runCliCommand({
   argv: ["setup"],
   workspaceRoot: cliWorkspace,
-  homeDir: cliHome
+  homeDir: cliHome,
+  interactive: false
 });
 const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-workspace-"));
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
-const cliInteractiveAnswers = ["", "", "", "2", "", "", "TEST_KIMI_SECRET", "", "", ""];
+const cliInteractivePromptSecrets: boolean[] = [];
+const cliInteractiveAnswers = ["", "", "", "2", "", "TEST_KIMI_SECRET", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
   homeDir: cliInteractiveHome,
   prompt: Object.assign(
-    async (question: string) => {
+    async (question: string, options?: { secret?: boolean }) => {
       cliInteractivePrompts.push(question);
+      cliInteractivePromptSecrets.push(options?.secret === true);
       return cliInteractiveAnswers.shift() ?? "";
     },
     {
@@ -603,6 +638,28 @@ const cliInteractiveConfig = await loadRuntimeConfig({
 const cliInteractiveEnvPath = join(cliInteractiveHome, ".estacoda", ".env");
 const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
 const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
+const cliProjectOverridePrompts: string[] = [];
+const cliProjectOverridePromptSecrets: boolean[] = [];
+const cliProjectOverrideAnswers = ["", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", ""];
+const cliProjectOverrideSetup = await runCliCommand({
+  argv: ["setup", "-i"],
+  workspaceRoot: firstRunProjectConfigWorkspace,
+  homeDir: firstRunProjectConfigHome,
+  prompt: Object.assign(
+    async (question: string, options?: { secret?: boolean }) => {
+      cliProjectOverridePrompts.push(question);
+      cliProjectOverridePromptSecrets.push(options?.secret === true);
+      return cliProjectOverrideAnswers.shift() ?? "";
+    },
+    {
+      close: () => undefined
+    }
+  )
+});
+const cliProjectOverrideConfig = await loadRuntimeConfig({
+  workspaceRoot: firstRunProjectConfigWorkspace,
+  homeDir: firstRunProjectConfigHome
+});
 const cliVerify = await runCliCommand({
   argv: ["verify"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -1048,15 +1105,17 @@ delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
 const telegramSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-workspace-"));
 const telegramSetupHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-home-"));
 const telegramSetupPrompts: string[] = [];
-const telegramSetupAnswers = ["", "", "TEST_TELEGRAM_SETUP_TOKEN", "", "4242", "-1004242", "-1004242", ""];
+const telegramSetupPromptSecrets: boolean[] = [];
+const telegramSetupAnswers = ["TEST_TELEGRAM_SETUP_TOKEN", "", "4242", "-1004242", "-1004242", ""];
 const telegramSetupRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
 const cliTelegramSetup = await runCliCommand({
   argv: ["telegram", "setup"],
   workspaceRoot: telegramSetupWorkspace,
   homeDir: telegramSetupHome,
   prompt: Object.assign(
-    async (question: string) => {
+    async (question: string, options?: { secret?: boolean }) => {
       telegramSetupPrompts.push(question);
+      telegramSetupPromptSecrets.push(options?.secret === true);
       return telegramSetupAnswers.shift() ?? "";
     },
     { close: () => undefined }
@@ -2849,7 +2908,7 @@ assert(deepMergedConfig.mcpServers?.filesystem?.timeoutMs === 30_000, "expected 
 assert(deepMergedConfig.mcpServers?.filesystem?.tools?.include?.[0] === "read_file", "expected MCP nested tools include to survive partial override");
 assert(deepMergedConfig.mcpServers?.filesystem?.tools?.prompts === true, "expected MCP nested tools prompt override");
 assert(loadedRuntimeConfig.sources.length === 2, "expected user and project config sources");
-assert(loadedRuntimeConfig.model.provider === "kimi", "expected project config model override");
+assert(loadedRuntimeConfig.model.provider === "deepseek", "expected personal model route to override project default");
 assert((await loadedRuntimeConfig.providerRegistry.listModels()).length === 2, "expected configured provider models");
 assert(
   loadedRuntimeConfig.credentialPools.snapshots().some((snapshot) => snapshot.provider === "deepseek"),
@@ -4056,6 +4115,8 @@ assert(
 );
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
+assert(firstRunProjectConfigOnboarding.needed, "expected first-run onboarding when project config points at a missing provider key");
+assert(!firstRunProjectConfigOnboarding.reason.includes("OPENAI_API_KEY"), "expected first-run onboarding reason to avoid stale project-provider details");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
 assert(cliSetupPrompt.output.includes("Recommended path"), "expected CLI setup prompt to show the recommended path");
 assert(cliSetupPrompt.output.includes("After setup"), "expected CLI setup prompt to show post-setup commands");
@@ -4063,13 +4124,22 @@ assert(cliInteractiveSetup.output.includes("Configured: kimi/kimi-k2.5"), "expec
 assert(cliInteractiveSetup.output.includes("EstaCoda is ready to use this workspace configuration."), "expected interactive setup to explain readiness");
 assert(cliInteractiveSetup.output.includes("Secret store:"), "expected interactive setup secret store output");
 assert(cliInteractiveSetup.output.includes("Setup check"), "expected interactive setup diagnostics");
-assert(cliInteractiveSetup.output.includes("EstaCoda verify"), "expected interactive setup verification output");
-assert(cliInteractivePrompts.length === 10, "expected interactive setup prompts");
+assert(!cliInteractiveSetup.output.includes("EstaCoda verify"), "expected successful interactive setup to use compact verification output");
+assert(cliInteractivePrompts.length === 9, "expected interactive setup prompts");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("OpenAI")), "expected interactive setup to offer OpenAI");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose Kimi model")), "expected interactive setup to split provider and model selection");
+assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Credential storage")), "expected first-run setup to default to local credential storage");
+assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Environment variable for Kimi K2.5 API key")), "expected local key storage not to ask for env var name");
+assert(cliInteractivePrompts.some((prompt) => prompt.includes("Paste Kimi K2.5 API key")), "expected interactive setup to ask for Kimi key separately");
+assert(cliInteractivePromptSecrets.some(Boolean), "expected interactive setup API key prompt to be masked");
 assert(cliInteractiveConfig.model.provider === "kimi", "expected interactive setup to save provider");
 assert(cliInteractiveConfig.security.approvalMode === "adaptive", "expected interactive setup to save default security mode");
 assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive setup to save default skill autonomy");
 assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"TEST_KIMI_SECRET\""), "expected interactive setup to write local env secret");
 assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret mode 0600");
+assert(cliProjectOverrideSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected project override setup output");
+assert(cliProjectOverrideConfig.model.provider === "kimi", "expected onboarding to override blocking project provider route");
+assert(cliProjectOverridePromptSecrets.some(Boolean), "expected project override setup API key prompt to be masked");
 assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
 assert(cliVerify.output.includes("Checks your local setup"), "expected CLI verify output to explain what it checks");
 assert(cliVerify.output.includes("Next:"), "expected CLI verify output to include next action guidance");
@@ -4594,7 +4664,9 @@ assert(cliTelegramStatusReady.exitCode === 0, "expected Telegram status to pass 
 assert(cliTelegramStatusReady.output.includes("Status: ready"), "expected Telegram ready status output");
 assert(cliTelegramSetup.output.includes("Telegram setup complete."), "expected Telegram guided setup output");
 assert(cliTelegramSetup.output.includes("Token check: ready"), "expected Telegram setup token verification");
-assert(telegramSetupPrompts.length === 8, "expected Telegram setup prompts");
+assert(telegramSetupPrompts.length === 6, "expected Telegram setup prompts");
+assert(telegramSetupPrompts[0]?.includes("Paste Telegram bot token"), "expected Telegram setup to ask for token first");
+assert(telegramSetupPromptSecrets[0] === true, "expected Telegram setup token prompt to be masked");
 assert(telegramSetupEnv.includes("ESTACODA_TELEGRAM_BOT_TOKEN=\"TEST_TELEGRAM_SETUP_TOKEN\""), "expected Telegram setup to store token");
 assert(telegramSetupEnvMode === 0o600, "expected Telegram setup secret mode 0600");
 assert(telegramSetupRequests.some((request) => request.url.endsWith("/getMe")), "expected Telegram setup to verify token");
@@ -8616,6 +8688,10 @@ imageIntentProviderRegistry.register({
   ],
   stream: async function* (request) {
     imageIntentProviderCalls += 1;
+    assert(
+      !((request.tools as Array<{ function?: { name?: string } }> | undefined) ?? []).some((tool) => tool.function?.name === "image_generate"),
+      "expected image.generate to be suppressed after deterministic image generation"
+    );
     yield {
       kind: "start",
       provider: "openai",
@@ -8627,7 +8703,7 @@ imageIntentProviderRegistry.register({
       model: request.model,
       response: {
         ok: true,
-        content: "",
+        content: "Here is the image. I kept it clean and product-style, with a blue lotus observatory at sunrise.",
         model: request.model,
         provider: "openai"
       }
@@ -8709,7 +8785,8 @@ assert(
   imageIntentResponse.toolExecutions.filter((execution) => execution.tool.name === "image.generate").length === 1,
   "expected media-generation intent to execute image.generate exactly once"
 );
-assert(imageIntentProviderCalls === 0, "expected deterministic image intent not to call the provider after image.generate");
+assert(imageIntentProviderCalls === 1, "expected deterministic image intent to call provider once for agentic response wrap");
+assert(imageIntentResponse.text.includes("Here is the image"), "expected deterministic image generation response to include provider wrap text");
 delete process.env.BYTEPLUS_ARK_API_KEY;
 const providerRuntimeEvents = await sessionDb.listEvents(providerRuntime.sessionId);
 const providerRuntimeRequestCountBeforeResume = runtimeProviderRequests.length;
@@ -10994,7 +11071,8 @@ await telegramAdapter.delivery.sendText({
 });
 await telegramAdapter.setCommands([
   { command: "/help", description: "Show help" },
-  { command: "/status", description: "Show status" }
+  { command: "/status", description: "Show status" },
+  { command: "/workspace.trust.status", description: "Unsupported Telegram command alias" }
 ]);
 await telegramAdapter.delivery.sendProgress({
   platform: "telegram",
@@ -11140,6 +11218,15 @@ assert(
 assert(
   telegramRequests.some((request) => request.url.endsWith("/setMyCommands")),
   "expected Telegram command sync request"
+);
+assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/setMyCommands") &&
+      Array.isArray(request.body.commands) &&
+      request.body.commands.some((command) => (command as { command?: string }).command === "help") &&
+      !request.body.commands.some((command) => (command as { command?: string }).command === "workspace.trust.status")
+  ),
+  "expected Telegram command sync to filter unsupported command names"
 );
 assert(
   telegramRequests.some((request) => request.url.endsWith("/sendMessage") && String(request.body.text).includes("Artifact ready")),

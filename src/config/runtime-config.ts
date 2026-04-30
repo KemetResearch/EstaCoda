@@ -453,8 +453,8 @@ export async function loadRuntimeConfig(options: {
 }): Promise<LoadedRuntimeConfig> {
   await loadDotEnvSecrets({ homeDir: options.homeDir });
   const sources = [
-    options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
-    options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"),
+    options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json")
   ];
   const loaded = await Promise.all(sources.map((path) => readConfig(path)));
   const config = mergeConfig(...loaded.map((entry) => entry.config));

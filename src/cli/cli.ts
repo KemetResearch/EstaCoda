@@ -58,7 +58,6 @@ import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
-import { writeEnvSecret } from "../config/env-secret-store.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 import {
   formatSecurityMode,
@@ -78,6 +77,7 @@ export type CliOptions = {
   argv: string[];
   workspaceRoot: string;
   homeDir?: string;
+  interactive?: boolean;
   userConfigPath?: string;
   projectConfigPath?: string;
   tools?: ToolDefinition[];
@@ -147,8 +147,9 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
 
 async function setup(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const parsed = parseSetupArgs(args);
+  const allowInteractive = options.interactive !== false;
 
-  if (hasFlag(args, "--interactive", "-i") || (args.length === 0 && (options.prompt !== undefined || canRunInteractive()))) {
+  if (hasFlag(args, "--interactive", "-i") || (allowInteractive && args.length === 0 && (options.prompt !== undefined || canRunInteractive()))) {
     const result = await runInteractiveOnboarding({
       ...options,
       prompt: options.prompt
@@ -1409,17 +1410,13 @@ async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
   const closePrompt = options.prompt === undefined;
 
   try {
-    await prompt([
+    const token = await prompt([
       "Telegram guided setup",
       "Telegram bots must be explicitly allowed before they can control EstaCoda.",
-      "Create a bot with @BotFather, then paste the token here.",
-      ""
-    ].join("\n"));
-    const tokenMode = await prompt("Store bot token in ~/.estacoda/.env? [Y/n]: ");
-    const saveToken = parseYesNo(tokenMode, true);
-    const token = saveToken
-      ? await prompt("Paste Telegram bot token: ", { secret: true })
-      : "";
+      "Create a bot with @BotFather.",
+      "Paste Telegram bot token to store in ~/.estacoda/.env, or leave blank to use an existing environment variable.",
+      "Paste Telegram bot token: "
+    ].join("\n"), { secret: true });
     const tokenEnvRaw = await prompt("Bot token environment variable [ESTACODA_TELEGRAM_BOT_TOKEN]: ");
     const tokenEnv = tokenEnvRaw.trim().length === 0 ? "ESTACODA_TELEGRAM_BOT_TOKEN" : tokenEnvRaw.trim();
     const allowUser = await prompt("Allowed Telegram user ID (optional): ");
@@ -1427,22 +1424,13 @@ async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
     const defaultChat = await prompt("Default chat ID for tests/notifications (optional): ");
     const pollTimeoutRaw = await prompt("Poll timeout seconds [25]: ");
     const pollTimeoutSeconds = Number.parseInt(pollTimeoutRaw.trim(), 10);
-    let secretPath: string | undefined;
-
-    if (saveToken && token.trim().length > 0) {
-      secretPath = (await writeEnvSecret({
-        homeDir: options.homeDir,
-        key: tokenEnv,
-        value: token.trim()
-      })).path;
-      process.env[tokenEnv] = token.trim();
-    }
 
     const result = await setupTelegramConfig({
       ...options,
       input: {
         enabled: true,
         botTokenEnv: tokenEnv,
+        botToken: token.trim().length === 0 ? undefined : token.trim(),
         allowedUserIds: allowUser.trim().length === 0 ? undefined : [allowUser.trim()],
         allowedChatIds: allowChat.trim().length === 0 ? undefined : [allowChat.trim()],
         defaultChatId: defaultChat.trim().length === 0 ? undefined : defaultChat.trim(),
@@ -1461,7 +1449,7 @@ async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
         "Telegram setup complete.",
         `Config: ${result.path}`,
         `Bot token env: ${tokenEnv}`,
-        secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
+        result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
         result.config.channels?.telegram?.defaultChatId === undefined ? undefined : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
         `Allowed users: ${(result.config.channels?.telegram?.allowedUserIds ?? []).join(", ") || "none"}`,
         `Allowed chats: ${(result.config.channels?.telegram?.allowedChatIds ?? []).join(", ") || "none"}`,
@@ -1865,14 +1853,6 @@ async function callTelegramApi(input: {
       message: error instanceof Error ? error.message : "unknown Telegram API error"
     };
   }
-}
-
-function parseYesNo(value: string, defaultValue: boolean): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.length === 0) {
-    return defaultValue;
-  }
-  return normalized === "y" || normalized === "yes";
 }
 
 function uniqueStrings(values: string[]): string[] {
