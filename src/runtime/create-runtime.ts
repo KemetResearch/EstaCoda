@@ -360,8 +360,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createSkillTools({
     registry: skillRegistry,
     visibleRegistry: sessionSkillRegistry,
-    personalSkillsRoot,
-    projectSkillsRoot,
+    localSkillsRoot: personalSkillsRoot,
     skillEvolutionStore
   })) {
     toolRegistry.register(tool);

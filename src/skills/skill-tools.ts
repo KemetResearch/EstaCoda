@@ -1,16 +1,17 @@
-import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile } from "./skill-loader.js";
+import { assertSkillMutable } from "./skill-mutation-policy.js";
+import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
 import type { SkillRegistry } from "./skill-registry.js";
 
 export type SkillToolsOptions = {
   registry: SkillRegistry;
   visibleRegistry?: SkillRegistry;
-  personalSkillsRoot: string;
-  projectSkillsRoot?: string;
+  localSkillsRoot: string;
   skillEvolutionStore?: SkillEvolutionStore;
 };
 
@@ -515,8 +516,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (!trustGate.ok) {
           return errorResult(trustGate.reason);
         }
-        const target = requirePersonalSkill(options, proposal.skillName);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, proposal.skillName, "promote");
+        if (!isLocalSkillTarget(target)) {
           return errorResult(`Skill patch proposal ${proposalId} targets ${proposal.skillName}, but only local skills can be promoted directly.`);
         }
         const current = await readFile(target.skillPath, "utf8");
@@ -525,7 +526,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         const next = applySkillPatch(current, proposal.patch);
         const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, next, {
           sourceKind: "local",
-          sourceRoot: options.personalSkillsRoot
+          sourceRoot: options.localSkillsRoot
         }));
         if (loaded.name !== proposal.skillName) {
           return errorResult(`Promoted patch changed skill name from ${proposal.skillName} to ${loaded.name}`);
@@ -535,7 +536,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (evalGate.status === "failed") {
           return errorResult(`Skill patch proposal ${proposal.id} failed eval gate: ${evalGate.failures.join("; ")}`);
         }
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, proposal.skillName);
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, proposal.skillName);
         await writeFile(target.skillPath, next, "utf8");
         options.registry.register(loaded);
         const promotion = await options.skillEvolutionStore.recordPromotion({
@@ -597,7 +598,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.create requires name");
         }
 
-        const skillDir = personalSkillDirectory(options, input.name);
+        const skillDir = localSkillDirectory(options, input.name);
         const skillPath = join(skillDir, "SKILL.md");
         let content: string;
         try {
@@ -610,7 +611,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
 
         const loaded = await hydrateSkillResources(parseSkillFile(skillPath, content, {
           sourceKind: "local",
-          sourceRoot: options.personalSkillsRoot
+          sourceRoot: options.localSkillsRoot
         }));
         if (loaded.name !== input.name) {
           return errorResult(`skill.create content name mismatch: expected ${input.name}, found ${loaded.name}`);
@@ -667,8 +668,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.patch requires name, old_string, and new_string");
         }
 
-        const target = requirePersonalSkill(options, input.name);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, input.name, "patch");
+        if (!isLocalSkillTarget(target)) {
           return target;
         }
 
@@ -682,12 +683,12 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult(`skill.patch matched ${occurrences} occurrences. Pass replace_all=true to patch all occurrences, or use a more specific old_string.`);
         }
 
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         const next = replaceAll
           ? current.split(oldString).join(newString)
           : current.replace(oldString, newString);
         await writeFile(target.skillPath, next, "utf8");
-        const loaded = await reloadPersonalSkill(options, target.skillPath);
+        const loaded = await reloadLocalSkill(options, target.skillPath);
         await options.skillEvolutionStore?.recordMutation({
           skillName: loaded.name,
           source: loaded.sourceKind,
@@ -726,19 +727,19 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.edit requires name and content");
         }
 
-        const target = requirePersonalSkill(options, input.name);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, input.name, "edit");
+        if (!isLocalSkillTarget(target)) {
           return target;
         }
 
         const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, input.content, {
           sourceKind: "local",
-          sourceRoot: options.personalSkillsRoot
+          sourceRoot: options.localSkillsRoot
         }));
         if (loaded.name !== input.name) {
           return errorResult(`skill.edit content name mismatch: expected ${input.name}, found ${loaded.name}`);
         }
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         await writeFile(target.skillPath, input.content, "utf8");
         options.registry.register(loaded);
         await options.skillEvolutionStore?.recordMutation({
@@ -759,7 +760,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.delete",
-      description: "Delete a local skill directory.",
+      description: "Archive a local skill directory and remove it from the active registry.",
       inputSchema: {
         type: "object",
         properties: {
@@ -777,13 +778,13 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.delete requires name");
         }
 
-        const target = requirePersonalSkill(options, input.name);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, input.name, "delete");
+        if (!isLocalSkillTarget(target)) {
           return target;
         }
 
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
-        await rm(target.skillDir, { recursive: true, force: true });
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
+        const archivePath = await archiveLocalSkillTarget(options, target, input.name);
         options.registry.unregister(input.name);
         await options.skillEvolutionStore?.recordMutation({
           skillName: input.name,
@@ -793,11 +794,12 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
 
         return {
           ok: true,
-          content: `Deleted skill ${input.name} from ${target.skillDir}.`,
+          content: `Archived skill ${input.name} from ${target.skillDir}.`,
           metadata: {
             name: input.name,
-            deleted: true,
+            archived: true,
             path: target.skillDir,
+            archivePath,
             snapshotPath
           }
         };
@@ -828,21 +830,22 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (!("path" in snapshot)) {
           return snapshot;
         }
-        const skillDir = personalSkillDirectory(options, input.name);
+        const skillDir = localSkillDirectory(options, input.name);
         const current = options.registry.get(input.name);
         let preRollbackSnapshot: string | undefined;
         if (current !== undefined && isLoadedSkill(current) && current.sourceKind === "local") {
-          preRollbackSnapshot = await snapshotPersonalSkillTarget(options, {
+          preRollbackSnapshot = await snapshotLocalSkillTarget(options, {
             ok: true,
             skillDir: dirname(current.sourcePath),
-            skillPath: current.sourcePath
+            skillPath: current.sourcePath,
+            skill: current
           }, input.name);
         }
 
         await rm(skillDir, { recursive: true, force: true });
         await mkdir(dirname(skillDir), { recursive: true });
         await cp(snapshot.path, skillDir, { recursive: true });
-        const loaded = await reloadPersonalSkill(options, join(skillDir, "SKILL.md"));
+        const loaded = await reloadLocalSkill(options, join(skillDir, "SKILL.md"));
         await options.skillEvolutionStore?.recordMutation({
           skillName: loaded.name,
           source: loaded.sourceKind,
@@ -892,17 +895,17 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.write_file requires name, file_path, and file_content");
         }
 
-        const target = requirePersonalSkill(options, input.name);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, input.name, "write-file");
+        if (!isLocalSkillTarget(target)) {
           return target;
         }
 
-        const supportFile = resolveSkillSupportPath(target.skillDir, filePath);
+        const supportFile = await resolveSkillSupportPath(target.skillDir, filePath);
         if (!isSkillSupportTarget(supportFile)) {
           return supportFile;
         }
 
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         await mkdir(dirname(supportFile.path), { recursive: true });
         await writeFile(supportFile.path, fileContent, "utf8");
         await options.skillEvolutionStore?.recordMutation({
@@ -946,17 +949,17 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.remove_file requires name and file_path");
         }
 
-        const target = requirePersonalSkill(options, input.name);
-        if (!isPersonalSkillTarget(target)) {
+        const target = await requireMutableLocalSkill(options, input.name, "remove-file");
+        if (!isLocalSkillTarget(target)) {
           return target;
         }
 
-        const supportFile = resolveSkillSupportPath(target.skillDir, filePath);
+        const supportFile = await resolveSkillSupportPath(target.skillDir, filePath);
         if (!isSkillSupportTarget(supportFile)) {
           return supportFile;
         }
 
-        const snapshotPath = await snapshotPersonalSkillTarget(options, target, input.name);
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         await rm(supportFile.path, { force: true });
         await options.skillEvolutionStore?.recordMutation({
           skillName: input.name,
@@ -1652,50 +1655,101 @@ function clampEvalScore(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function personalSkillDirectory(options: SkillToolsOptions, name: string): string {
-  return join(options.personalSkillsRoot, slugifySkillName(name));
+function localSkillDirectory(options: SkillToolsOptions, name: string): string {
+  return join(options.localSkillsRoot, slugifySkillName(name));
 }
 
-function requirePersonalSkill(
+async function requireMutableLocalSkill(
   options: SkillToolsOptions,
-  name: string
-): { ok: true; skillDir: string; skillPath: string } | ToolResult {
+  name: string,
+  action: "patch" | "edit" | "delete" | "write-file" | "remove-file" | "promote"
+): Promise<{ ok: true; skillDir: string; skillPath: string; skill: LoadedSkill } | ToolResult> {
   const existing = options.registry.get(name);
   if (existing !== undefined) {
-    if (!isLoadedSkill(existing) || existing.sourceKind !== "local") {
-      return errorResult(`Skill ${name} is not a local skill and cannot be modified here.`);
+    if (!isLoadedSkill(existing)) {
+      return errorResult(`Skill ${name} is not a file-backed skill and cannot be modified here.`);
+    }
+    const mutable = await assertSkillMutable({
+      skill: existing,
+      action,
+      store: options.skillEvolutionStore
+    });
+    if (!mutable.ok) {
+      return errorResult(mutable.reason);
+    }
+    if (existing.sourceKind !== "local") {
+      return await createLocalWorkingCopy(options, existing);
     }
 
     return {
       ok: true,
       skillDir: dirname(existing.sourcePath),
-      skillPath: existing.sourcePath
+      skillPath: existing.sourcePath,
+      skill: existing
     };
   }
 
   return errorResult(`Local skill not found: ${name}`);
 }
 
-function isPersonalSkillTarget(
-  value: { ok: true; skillDir: string; skillPath: string } | ToolResult
-): value is { ok: true; skillDir: string; skillPath: string } {
+function isLocalSkillTarget(
+  value: { ok: true; skillDir: string; skillPath: string; skill: LoadedSkill } | ToolResult
+): value is { ok: true; skillDir: string; skillPath: string; skill: LoadedSkill } {
   return value.ok === true && "skillDir" in value && "skillPath" in value;
 }
 
-async function reloadPersonalSkill(options: SkillToolsOptions, skillPath: string): Promise<LoadedSkill> {
+async function reloadLocalSkill(options: SkillToolsOptions, skillPath: string): Promise<LoadedSkill> {
   const loaded = await hydrateSkillResources(parseSkillFile(skillPath, await readFile(skillPath, "utf8"), {
     sourceKind: "local",
-    sourceRoot: options.personalSkillsRoot
+    sourceRoot: options.localSkillsRoot
   }));
   options.registry.register(loaded);
   return loaded;
 }
 
-function resolveSkillSupportPath(
+async function createLocalWorkingCopy(
+  options: SkillToolsOptions,
+  skill: LoadedSkill
+): Promise<{ ok: true; skillDir: string; skillPath: string; skill: LoadedSkill } | ToolResult> {
+  await mkdir(options.localSkillsRoot, { recursive: true });
+  const contained = await ensureContainedDirectory(options.localSkillsRoot, slugifySkillName(skill.name));
+  if (!contained.ok) {
+    return errorResult(contained.reason);
+  }
+  const skillDir = contained.path;
+
+  await rm(skillDir, { recursive: true, force: true });
+  await mkdir(dirname(skillDir), { recursive: true });
+  await cp(dirname(skill.sourcePath), skillDir, { recursive: true });
+  const localSkillPath = join(skillDir, "SKILL.md");
+  const loaded = await reloadLocalSkill(options, localSkillPath);
+
+  await options.skillEvolutionStore?.recordMutation({
+    skillName: loaded.name,
+    source: loaded.sourceKind,
+    kind: "created"
+  });
+
+  return {
+    ok: true,
+    skillDir,
+    skillPath: localSkillPath,
+    skill: loaded
+  };
+}
+
+async function resolveSkillSupportPath(
   skillDir: string,
   requestedPath: string
-): { ok: true; path: string; relativePath: string } | ToolResult {
-  const target = resolve(skillDir, requestedPath);
+): Promise<{ ok: true; path: string; relativePath: string } | ToolResult> {
+  if (!isSafeRelativeSkillPath(requestedPath)) {
+    return errorResult("Skill support file path must be a safe relative path inside the skill directory.");
+  }
+  const contained = await ensureContainedDirectory(skillDir, requestedPath);
+  if (!contained.ok) {
+    return errorResult(contained.reason);
+  }
+  const target = contained.path;
   const relativePath = relative(skillDir, target);
 
   if (
@@ -1832,17 +1886,30 @@ function parseJsonPointer(path: string): string[] {
     .map((part) => part.replace(/~1/gu, "/").replace(/~0/gu, "~"));
 }
 
-async function snapshotPersonalSkillTarget(
+async function snapshotLocalSkillTarget(
+  options: SkillToolsOptions,
+  target: { ok: true; skillDir: string; skillPath: string; skill?: LoadedSkill },
+  name: string
+): Promise<string> {
+  const slug = slugifySkillName(name);
+  const snapshotRoot = join(options.localSkillsRoot, ".snapshots", slug);
+  const snapshotPath = join(snapshotRoot, timestampForPath());
+  await mkdir(snapshotRoot, { recursive: true });
+  await cp(target.skillDir, snapshotPath, { recursive: true });
+  return snapshotPath;
+}
+
+async function archiveLocalSkillTarget(
   options: SkillToolsOptions,
   target: { ok: true; skillDir: string; skillPath: string },
   name: string
 ): Promise<string> {
   const slug = slugifySkillName(name);
-  const snapshotRoot = join(options.personalSkillsRoot, ".snapshots", slug);
-  const snapshotPath = join(snapshotRoot, timestampForPath());
-  await mkdir(snapshotRoot, { recursive: true });
-  await cp(target.skillDir, snapshotPath, { recursive: true });
-  return snapshotPath;
+  const archiveRoot = join(options.localSkillsRoot, ".archive", slug);
+  const archivePath = join(archiveRoot, timestampForPath());
+  await mkdir(archiveRoot, { recursive: true });
+  await rename(target.skillDir, archivePath);
+  return archivePath;
 }
 
 async function resolveSkillSnapshotPath(
@@ -1850,7 +1917,7 @@ async function resolveSkillSnapshotPath(
   name: string,
   requestedPath: string | undefined
 ): Promise<{ ok: true; path: string } | ToolResult> {
-  const snapshotRoot = resolve(options.personalSkillsRoot, ".snapshots", slugifySkillName(name));
+  const snapshotRoot = resolve(options.localSkillsRoot, ".snapshots", slugifySkillName(name));
   const snapshotPath = requestedPath === undefined
     ? await latestSnapshotPath(snapshotRoot)
     : resolve(requestedPath);

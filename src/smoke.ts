@@ -290,7 +290,7 @@ for (const tool of builtinTools) {
 }
 for (const tool of createSkillTools({
   registry: skills,
-  personalSkillsRoot: personalSkillRoot,
+  localSkillsRoot: personalSkillRoot,
   skillEvolutionStore
 })) {
   tools.register(tool);
@@ -5815,6 +5815,16 @@ const skillWriteFileExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const skillWriteEscapeExecution = await toolExecutor.executeTool({
+  tool: "skill.write_file",
+  input: {
+    name: "sample-personal-skill",
+    file_path: "../escape.md",
+    file_content: "This should not be written outside the skill directory."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const skillPatchExecution = await toolExecutor.executeTool({
   tool: "skill.patch",
   input: {
@@ -6034,6 +6044,7 @@ assert(
   "expected skill.inspect to find created skill"
 );
 assert(skillWriteFileExecution?.result?.ok === true, "expected skill.write_file to succeed");
+assert(skillWriteEscapeExecution?.result?.ok === false, "expected skill.write_file to reject path escape");
 assert(skillPatchExecution?.result?.ok === true, "expected skill.patch to succeed");
 assert(skillEditExecution?.result?.ok === true, "expected skill.edit to succeed");
 assert(skillRemoveFileExecution?.result?.ok === true, "expected skill.remove_file to succeed");
@@ -6082,13 +6093,26 @@ assert(
   "expected imported skill to index asset resources"
 );
 assert(skillExportExecution?.result?.ok === true, "expected skill.export to succeed");
-assert(externalSkillPatchExecution?.result?.ok === false, "expected external skill patch to fail");
+assert(externalSkillPatchExecution?.result?.ok === true, "expected external skill patch to create a local working copy");
+const importedExternalSource = await readFile(join(importSkillRoot, "imported", "SKILL.md"), "utf8");
+const importedLocalOverlay = await readFile(join(personalSkillRoot, "imported-skill", "SKILL.md"), "utf8");
+assert(
+  importedExternalSource.includes("Imported instructions."),
+  "expected external skill source to remain read-only after local overlay patch"
+);
+assert(
+  importedLocalOverlay.includes("Should not edit external skills."),
+  "expected external skill patch to write a local overlay"
+);
 const skillPatchSnapshotPath = (skillPatchExecution.result.metadata as { snapshotPath?: string } | undefined)?.snapshotPath;
 assert(skillPatchSnapshotPath !== undefined, "expected skill.patch to record a snapshot");
 assert((await stat(skillPatchSnapshotPath).catch(() => undefined))?.isDirectory() === true, "expected skill.patch snapshot directory");
 const skillDeleteSnapshotPath = (skillDeleteExecution.result.metadata as { snapshotPath?: string } | undefined)?.snapshotPath;
 assert(skillDeleteSnapshotPath !== undefined, "expected skill.delete to record a snapshot");
 assert((await stat(skillDeleteSnapshotPath).catch(() => undefined))?.isDirectory() === true, "expected skill.delete snapshot directory");
+const skillDeleteArchivePath = (skillDeleteExecution.result.metadata as { archivePath?: string } | undefined)?.archivePath;
+assert(skillDeleteArchivePath !== undefined, "expected skill.delete to record an archive path");
+assert((await stat(skillDeleteArchivePath).catch(() => undefined))?.isDirectory() === true, "expected skill.delete archive directory");
 const invalidYamlSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-invalid-yaml-skill-"));
 await mkdir(join(invalidYamlSkillRoot, "bad-workflow"), { recursive: true });
 await writeFile(join(invalidYamlSkillRoot, "bad-workflow", "SKILL.md"), [
