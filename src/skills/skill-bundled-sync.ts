@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import type { BundledManifest, BundledManifestEntry } from "../contracts/skill.js";
@@ -167,7 +167,8 @@ export async function resetBundledSkill(options: {
   const bundledRoot = resolve(options.bundledSkillsDir);
   const bundledSkills = await discoverBundledSkills(bundledRoot);
   const bundledByPath = new Map(bundledSkills.map((skill) => [skill.relativePath, skill]));
-  const match = Object.entries(manifest.entries).find(([, entry]) => entry.name === options.name);
+  const matches = Object.entries(manifest.entries).filter(([, entry]) => entry.name === options.name);
+  const match = matches[0];
 
   if (match === undefined) {
     return {
@@ -175,6 +176,18 @@ export async function resetBundledSkill(options: {
       mode,
       name: options.name,
       message: `No bundled manifest entry found for ${options.name}.`
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      mode,
+      name: options.name,
+      message: [
+        `Multiple bundled manifest entries share the skill name ${options.name}; reset is ambiguous.`,
+        "Choose one bundled path explicitly after resolving the duplicate names:",
+        ...matches.map(([, entry]) => `- ${entry.bundledPath}`)
+      ].join("\n")
     };
   }
 
@@ -362,7 +375,9 @@ async function readBundledManifest(path: string): Promise<BundledManifest> {
 
 async function writeBundledManifest(path: string, manifest: BundledManifest): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const tempPath = `${path}.tmp-${randomUUID()}`;
+  await writeFile(tempPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await rename(tempPath, path);
 }
 
 async function directoryExists(path: string): Promise<boolean> {
