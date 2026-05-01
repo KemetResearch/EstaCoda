@@ -201,10 +201,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           selectedWorkflowStep: { type: "string" },
           toolsAttempted: { type: "array", items: { type: "string" } },
           outcome: { type: "string" },
-          candidateImprovement: { type: "string" },
-          sourceTrust: { type: "string" },
-          mayPromoteAutomatically: { type: "boolean" },
-          requiresHumanApproval: { type: "boolean" }
+          candidateImprovement: { type: "string" }
         },
         required: ["name", "type", "lesson"]
       },
@@ -222,9 +219,6 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         toolsAttempted?: string[];
         outcome?: "succeeded" | "failed" | "blocked" | "partial";
         candidateImprovement?: string;
-        sourceTrust?: SkillSourceTrust;
-        mayPromoteAutomatically?: boolean;
-        requiresHumanApproval?: boolean;
       }) => {
         if (options.skillEvolutionStore === undefined) {
           return errorResult("Skill evolution store is not configured.");
@@ -243,9 +237,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           toolsAttempted: input.toolsAttempted,
           outcome: input.outcome,
           candidateImprovement: input.candidateImprovement,
-          sourceTrust: normalizeSourceTrust(input.sourceTrust),
-          mayPromoteAutomatically: input.mayPromoteAutomatically,
-          requiresHumanApproval: input.requiresHumanApproval
+          ...deriveToolObservationTrust()
         });
         return {
           ok: true,
@@ -266,9 +258,6 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           observationIds: { type: "array", items: { type: "string" } },
           successes: { type: "number" },
           failures: { type: "number" },
-          sourceTrust: { type: "string" },
-          mayPromoteAutomatically: { type: "boolean" },
-          requiresHumanApproval: { type: "boolean" },
           patch: { type: "object" }
         },
         required: ["name", "reason", "patch"]
@@ -285,9 +274,6 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         observationIds?: string[];
         successes?: number;
         failures?: number;
-        sourceTrust?: SkillSourceTrust;
-        mayPromoteAutomatically?: boolean;
-        requiresHumanApproval?: boolean;
         patch?: SkillPatchOperation;
       }) => {
         if (options.skillEvolutionStore === undefined) {
@@ -305,9 +291,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           observationIds: input.observationIds,
           successes: input.successes,
           failures: input.failures,
-          sourceTrust: normalizeSourceTrust(input.sourceTrust),
-          mayPromoteAutomatically: input.mayPromoteAutomatically,
-          requiresHumanApproval: input.requiresHumanApproval,
+          ...deriveToolProposalTrust(),
           patch: input.patch
         });
         return {
@@ -1327,23 +1311,34 @@ function stringArrayOrEmpty(value: unknown): string[] {
   return Array.isArray(value) ? value.filter(isNonEmptyString) : [];
 }
 
-function normalizeSourceTrust(value: unknown): SkillSourceTrust | undefined {
-  return isSourceTrust(value) ? value : undefined;
-}
-
-function isSourceTrust(value: unknown): value is SkillSourceTrust {
-  return value === "untrusted_web" ||
-    value === "untrusted_document" ||
-    value === "user_direct" ||
-    value === "tool_error" ||
-    value === "runtime_internal" ||
-    value === "developer";
-}
-
 function errorResult(content: string): ToolResult {
   return {
     ok: false,
     content
+  };
+}
+
+function deriveToolObservationTrust(): {
+  sourceTrust: SkillSourceTrust;
+  mayPromoteAutomatically: boolean;
+  requiresHumanApproval: boolean;
+} {
+  return {
+    sourceTrust: "untrusted_document",
+    mayPromoteAutomatically: false,
+    requiresHumanApproval: true
+  };
+}
+
+function deriveToolProposalTrust(): {
+  sourceTrust: SkillSourceTrust;
+  mayPromoteAutomatically: boolean;
+  requiresHumanApproval: boolean;
+} {
+  return {
+    sourceTrust: "untrusted_document",
+    mayPromoteAutomatically: false,
+    requiresHumanApproval: true
   };
 }
 
@@ -1613,7 +1608,11 @@ function evaluateProposalTrust(
       reason: "Skill patch proposal is derived from untrusted content and requires review before promotion."
     };
   }
-  if (observations.length > 0 && observations.every((observation) => isUntrustedSource(observation.sourceTrust))) {
+  if (
+    observations.length > 0 &&
+    observations.every((observation) => isUntrustedSource(observation.sourceTrust)) &&
+    proposal.approvedAt === undefined
+  ) {
     return {
       ok: false,
       reason: "Skill patch proposal only cites untrusted observations and requires review before promotion."

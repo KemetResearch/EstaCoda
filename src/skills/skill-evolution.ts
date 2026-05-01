@@ -190,8 +190,6 @@ export class SkillEvolutionStore {
     const now = this.#nowIso();
     const source = skillSource(input.skill);
     const usage = await this.#updateUsage(input.skill.name, source, (record) => {
-      record.useCount += 1;
-      record.lastUsedAt = now;
       record.state = "active";
       if (input.outcome.status === "succeeded") {
         record.successCount += 1;
@@ -225,6 +223,18 @@ export class SkillEvolutionStore {
     };
     await this.appendObservation(observation);
     return observation;
+  }
+
+  async recordSkillUsed(input: {
+    skill: LoadedSkill | SkillDefinition;
+    selectedAt?: string;
+  }): Promise<SkillUsageRecord> {
+    const now = input.selectedAt ?? this.#nowIso();
+    return await this.#updateUsage(input.skill.name, skillSource(input.skill), (record) => {
+      record.useCount += 1;
+      record.lastUsedAt = now;
+      record.state = "active";
+    });
   }
 
   async recordSkillViewed(input: {
@@ -538,12 +548,18 @@ export class SkillEvolutionStore {
     }
     const raw = await readFile(this.#usagePath, "utf8").catch(() => undefined);
     if (raw !== undefined) {
-      const parsed = JSON.parse(raw) as UsageFile;
-      for (const record of parsed.skills ?? []) {
-        this.#usage.set(record.skillName, {
-          ...defaultUsageRecord(record.skillName, record.source),
-          ...record
-        });
+      try {
+        const parsed = JSON.parse(raw) as UsageFile;
+        for (const record of parsed.skills ?? []) {
+          this.#usage.set(record.skillName, {
+            ...defaultUsageRecord(record.skillName, record.source),
+            ...record
+          });
+        }
+      } catch {
+        const corruptPath = `${this.#usagePath}.corrupt-${this.#nowIso().replace(/[:.]/gu, "-")}`;
+        await rename(this.#usagePath, corruptPath).catch(() => undefined);
+        this.#usage.clear();
       }
     }
     this.#loaded = true;

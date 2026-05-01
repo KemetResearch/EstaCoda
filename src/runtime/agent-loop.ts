@@ -1592,6 +1592,12 @@ export class AgentLoop {
     for (const telemetry of routeTelemetry) {
       await this.#skillEvolutionStore?.recordSkillRouteTelemetry(telemetry);
     }
+    if (input.selectedSkill !== undefined) {
+      await this.#skillEvolutionStore?.recordSkillUsed({
+        skill: input.selectedSkill,
+        selectedAt: timestamp
+      });
+    }
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "skill-route-telemetry",
       telemetry: {

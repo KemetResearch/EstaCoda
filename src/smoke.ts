@@ -6266,6 +6266,24 @@ assert(
     JSON.stringify(skillReviewProposalExecution.result.metadata).includes("\"riskLevel\": \"low\""),
   "expected low-risk review for examples-only patch"
 );
+assert(
+  (skillObservationExecution.result.metadata as { sourceTrust?: string }).sourceTrust !== "runtime_internal",
+  "expected skill.observe tool input not to self-declare runtime_internal trust"
+);
+assert(
+  (skillProposePatchExecution.result.metadata as { sourceTrust?: string; requiresHumanApproval?: boolean }).sourceTrust === "untrusted_document" &&
+  (skillProposePatchExecution.result.metadata as { requiresHumanApproval?: boolean }).requiresHumanApproval === true,
+  "expected skill.propose_patch tool input to derive conservative trust metadata"
+);
+const skillApproveLowRiskPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.approve_patch",
+  input: {
+    proposal_id: proposedPatchId,
+    approvedBy: "smoke"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const skillPromotePatchExecution = await toolExecutor.executeTool({
   tool: "skill.promote_patch",
   input: {
@@ -6390,6 +6408,7 @@ const promotedProposalListExecution = await toolExecutor.executeTool({
   sessionId: directSession.id
 });
 assert(skillPromotePatchExecution?.result?.ok === true, "expected skill.promote_patch to promote a proposal");
+assert(skillApproveLowRiskPatchExecution?.result?.ok === true, "expected low-risk tool-suggested proposal to require approval before promotion");
 assert(skillReviewUntrustedExecution?.result?.ok === true, "expected skill.review_proposal to review untrusted proposal");
 assert(skillUntrustedPromoteExecution?.result?.ok === false, "expected untrusted-only skill proposal promotion to be blocked");
 assert(skillMediumRiskPromoteBeforeApprovalExecution?.result?.ok === false, "expected medium-risk skill proposal to require approval");
