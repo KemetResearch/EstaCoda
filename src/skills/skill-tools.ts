@@ -1,10 +1,11 @@
-import { cp, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
 import { resetBundledSkill } from "./skill-bundled-sync.js";
-import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile } from "./skill-loader.js";
+import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "./skill-limits.js";
+import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "./skill-loader.js";
 import { assertSkillMutable } from "./skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
 import type { SkillRegistry } from "./skill-registry.js";
@@ -1905,6 +1906,10 @@ async function resolveSkillSupportPath(
   }
   const target = contained.path;
   const relativePath = relative(skillDir, target);
+  const existingTarget = await lstat(target).catch(() => undefined);
+  if (existingTarget?.isSymbolicLink() === true) {
+    return errorResult("Supporting file path cannot target an existing symlink.");
+  }
 
   if (
     relativePath.length === 0 ||
@@ -2135,8 +2140,15 @@ async function readSkillReference(skill: LoadedSkill, path: string): Promise<Too
     return errorResult("Skill reference path is outside the skill directory.");
   }
 
-  const content = await readFile(canonical);
   const metadata = await stat(canonical).catch(() => undefined);
+  if (metadata === undefined || !metadata.isFile()) {
+    return errorResult(`Skill reference is not a file: ${path}`);
+  }
+  if (metadata.size > MAX_SKILL_RESOURCE_BYTES) {
+    return errorResult(`Skill reference ${relativePath} is ${metadata.size} bytes; maximum readable resource size is ${MAX_SKILL_RESOURCE_BYTES} bytes.`);
+  }
+
+  const content = await readFile(canonical);
   const inferredKind = skill.resources?.find((resource) => resource.path === relativePath)?.kind;
 
   if (!isProbablyText(content)) {
@@ -2158,17 +2170,21 @@ async function readSkillReference(skill: LoadedSkill, path: string): Promise<Too
   }
 
   const decoded = content.toString("utf8");
+  const truncated = truncateContextDocument(decoded, MAX_SKILL_RESOURCE_CHARS);
 
   return {
     ok: true,
-    content: `# ${skill.name} / ${relativePath}\n\n${decoded.slice(0, 24_000)}`,
+    content: `# ${skill.name} / ${relativePath}\n\n${truncated.content}`,
     metadata: {
       skill: skill.name,
       path: relativePath,
       kind: inferredKind ?? inferSkillResourceKind(relativePath),
       bytes: metadata?.size ?? content.byteLength,
       text: true,
-      truncated: decoded.length > 24_000
+      truncated: truncated.truncated,
+      originalChars: truncated.originalChars,
+      headChars: truncated.headChars,
+      tailChars: truncated.tailChars
     }
   };
 }

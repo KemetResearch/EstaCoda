@@ -1,5 +1,5 @@
-import { mkdir, realpath } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export type PathSafetyResult =
   | { ok: true; path: string }
@@ -17,6 +17,10 @@ export function isSafeRelativeSkillPath(path: string): boolean {
 }
 
 export async function resolveContainedPath(root: string, requestedPath: string): Promise<PathSafetyResult> {
+  if (isAbsolute(requestedPath) || !isSafeRelativeSkillPath(requestedPath)) {
+    return { ok: false, reason: "Skill path must be a safe relative path inside the skill root." };
+  }
+
   const target = resolve(root, requestedPath);
   const rootReal = await realpath(root).catch(() => undefined);
 
@@ -38,8 +42,6 @@ export async function resolveContainedPath(root: string, requestedPath: string):
 }
 
 export async function ensureContainedDirectory(root: string, requestedPath: string): Promise<PathSafetyResult> {
-  const target = resolve(root, requestedPath);
-  await mkdir(dirname(target), { recursive: true });
   return await resolveContainedPath(root, requestedPath);
 }
 
@@ -56,4 +58,3 @@ async function canonicalExistingParent(path: string): Promise<string | undefined
 
   return undefined;
 }
-
