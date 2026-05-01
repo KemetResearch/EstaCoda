@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type {
   LoadedSkill,
@@ -16,9 +16,16 @@ import type {
 } from "../contracts/skill.js";
 import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
-
-const MAX_SKILL_SCAN_DEPTH = 8;
-const MAX_SKILL_FILES = 500;
+import {
+  assertKnownToolsetName,
+  MAX_SKILL_FILES,
+  MAX_SKILL_MD_BYTES,
+  MAX_SKILL_MD_CHARS,
+  MAX_SKILL_RESOURCE_BYTES,
+  MAX_SKILL_RESOURCE_FILES,
+  MAX_SKILL_RESOURCE_SCAN_DEPTH,
+  MAX_SKILL_SCAN_DEPTH
+} from "./skill-limits.js";
 
 export type SkillLoadResult = {
   skills: LoadedSkill[];
@@ -59,6 +66,10 @@ export async function loadSkillsFromDirectory(root: string, options: SkillLoadOp
 
   for (const path of skillFiles) {
     try {
+      const fileStat = await stat(path);
+      if (fileStat.size > MAX_SKILL_MD_BYTES) {
+        throw new Error(`SKILL.md exceeds ${MAX_SKILL_MD_BYTES} byte safety limit`);
+      }
       const parsed = parseSkillFile(path, await readFile(path, "utf8"), {
         sourceKind: options.sourceKind ?? "external",
         sourceRoot: options.sourceRoot ?? root
@@ -88,13 +99,53 @@ export function parseSkillFile(
 
   const parsed = parseFrontmatter(match.groups.frontmatter);
   const definition = validateSkillDefinition(parsed);
+  const instructions = match.groups.instructions.trim();
+  const providerView = truncateContextDocument(instructions, MAX_SKILL_MD_CHARS);
 
   return {
     ...definition,
     sourcePath,
     sourceKind: options.sourceKind ?? "external",
     sourceRoot: options.sourceRoot ?? sourcePath,
-    instructions: match.groups.instructions.trim()
+    instructions,
+    providerInstructions: providerView.truncated
+      ? {
+          content: providerView.content,
+          truncated: true,
+          originalChars: providerView.originalChars
+        }
+      : undefined
+  };
+}
+
+export function truncateContextDocument(input: string, maxChars = MAX_SKILL_MD_CHARS): {
+  content: string;
+  truncated: boolean;
+  originalChars: number;
+  headChars: number;
+  tailChars: number;
+} {
+  if (input.length <= maxChars) {
+    return {
+      content: input,
+      truncated: false,
+      originalChars: input.length,
+      headChars: input.length,
+      tailChars: 0
+    };
+  }
+
+  const marker = `\n\n[TRUNCATED: omitted ${input.length - maxChars} characters from the middle]\n\n`;
+  const remaining = Math.max(0, maxChars - marker.length);
+  const headChars = Math.floor(remaining * 0.7);
+  const tailChars = Math.floor(remaining * 0.2);
+
+  return {
+    content: `${input.slice(0, headChars)}${marker}${input.slice(input.length - tailChars)}`,
+    truncated: true,
+    originalChars: input.length,
+    headChars,
+    tailChars
   };
 }
 
@@ -121,7 +172,7 @@ async function findSkillFiles(
   const entries = await readdir(root, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (entry.name.startsWith(".")) {
+    if (entry.name.startsWith(".") || entry.isSymbolicLink()) {
       continue;
     }
 
@@ -176,7 +227,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
   const legacyIntentLabels = stringArrayOrEmpty(definition.intentLabels ?? definition.intent_labels);
   const legacyTriggerPatterns = legacyPatternArray(definition.triggerPatterns ?? definition.trigger_patterns);
   const legacyNegativePatterns = legacyPatternArray(definition.negativePatterns ?? definition.negative_patterns);
-  const requiredToolsets = stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]);
+  const requiredToolsets = toolsetArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"], "requiredToolsets");
   const routing = normalizeSkillRouting(definition.routing, {
     labels: legacyIntentLabels,
     triggerPatterns: legacyTriggerPatterns,
@@ -201,7 +252,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     negativePatterns: legacyNegativePatterns.map(patternToLegacyString),
     whenToUse: stringArrayOrDefault(definition.whenToUse ?? definition.when_to_use, [definition.description]),
     requiredToolsets,
-    optionalToolsets: stringArrayOrEmpty(definition.optionalToolsets ?? definition.optional_toolsets),
+    optionalToolsets: toolsetArrayOrEmpty(definition.optionalToolsets ?? definition.optional_toolsets, "optionalToolsets"),
     requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
     requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
     configFields: inferredConfigFields,
@@ -235,10 +286,10 @@ function normalizeSkillRouting(value: unknown, legacy: Required<Pick<SkillRoutin
     ...normalizeSkillPatterns(explicit.negativePatterns),
     ...legacy.negativePatterns
   ]);
-  const requiredToolsets = dedupeStrings([
+  const requiredToolsets = toolsetArrayOrEmpty(dedupeStrings([
     ...normalizeStringList(explicit.requiredToolsets),
     ...legacy.requiredToolsets
-  ]) as ToolsetName[];
+  ]), "routing.requiredToolsets");
   const confirmation = normalizeConfirmation(explicit.confirmation);
   const deferWhen = normalizeDeferRules(explicit.deferWhen);
   const priority = typeof explicit.priority === "number" && Number.isFinite(explicit.priority)
@@ -398,7 +449,7 @@ function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWo
     return {
       id: entry.id,
       description: entry.description,
-      toolsets: stringArrayOrEmpty(entry.toolsets) as ToolsetName[],
+      toolsets: toolsetArrayOrEmpty(entry.toolsets, `workflow[${index}].toolsets`),
       preferredTool: firstNonEmptyString(entry.preferredTool, entry.preferred_tool),
       toolCandidates: stringArrayOrEmpty(entry.toolCandidates ?? entry.tool_candidates),
       fallbackTo: stringArrayOrEmpty(entry.fallbackTo ?? entry.fallback_to),
@@ -425,7 +476,7 @@ function normalizeEvaluations(value: unknown): SkillEvaluation[] {
 
     return {
       input: entry.input,
-      shouldUseToolsets: stringArrayOrEmpty(entry.shouldUseToolsets ?? entry.should_use_toolsets) as ToolsetName[],
+      shouldUseToolsets: toolsetArrayOrEmpty(entry.shouldUseToolsets ?? entry.should_use_toolsets, `evaluations[${index}].shouldUseToolsets`),
       shouldNotAskUserFirst: entry.shouldNotAskUserFirst === true || entry.should_not_ask_user_first === true,
       expectedOutcome: firstNonEmptyString(entry.expectedOutcome, entry.expected_outcome)
     };
@@ -453,6 +504,18 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 function stringArrayOrDefault(value: unknown, fallback: string[]): string[] {
   const array = stringArrayOrEmpty(value);
   return array.length === 0 ? fallback : array;
+}
+
+function toolsetArrayOrDefault(value: unknown, fallback: ToolsetName[], field: string): ToolsetName[] {
+  const array = toolsetArrayOrEmpty(value, field);
+  return array.length === 0 ? fallback : array;
+}
+
+function toolsetArrayOrEmpty(value: unknown, field: string): ToolsetName[] {
+  return stringArrayOrEmpty(value).map((entry, index) => {
+    assertKnownToolsetName(entry, `${field}[${index}]`);
+    return entry;
+  });
 }
 
 function stringArrayOrEmpty(value: unknown): string[] {
@@ -729,7 +792,9 @@ function camelize(value: string): string {
 
 async function loadSkillResourceIndex(skill: LoadedSkill): Promise<SkillResourceEntry[]> {
   const skillRoot = dirname(skill.sourcePath);
+  const canonicalSkillRoot = await realpath(skillRoot).catch(() => skillRoot);
   const resources = new Map<string, SkillResourceEntry>();
+  const scanState = { count: 0 };
 
   for (const declaredReference of skill.references ?? []) {
     const normalized = normalizeRelativeSkillPath(skillRoot, declaredReference);
@@ -738,6 +803,10 @@ async function loadSkillResourceIndex(skill: LoadedSkill): Promise<SkillResource
     }
 
     const fullPath = resolve(skillRoot, normalized);
+    const canonicalPath = await realpath(fullPath).catch(() => undefined);
+    if (canonicalPath === undefined || !isPathInside(canonicalSkillRoot, canonicalPath)) {
+      continue;
+    }
     const bytes = await stat(fullPath).then((entry) => entry.size).catch(() => undefined);
     resources.set(`reference:${normalized}`, {
       kind: "reference",
@@ -747,10 +816,10 @@ async function loadSkillResourceIndex(skill: LoadedSkill): Promise<SkillResource
     });
   }
 
-  await collectResourceDirectory(skillRoot, "references", "reference", resources);
-  await collectResourceDirectory(skillRoot, "templates", "template", resources);
-  await collectResourceDirectory(skillRoot, "scripts", "script", resources);
-  await collectResourceDirectory(skillRoot, "assets", "asset", resources);
+  await collectResourceDirectory(skillRoot, "references", "reference", resources, scanState);
+  await collectResourceDirectory(skillRoot, "templates", "template", resources, scanState);
+  await collectResourceDirectory(skillRoot, "scripts", "script", resources, scanState);
+  await collectResourceDirectory(skillRoot, "assets", "asset", resources, scanState);
 
   return [...resources.values()].sort((left, right) =>
     left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path)
@@ -761,33 +830,70 @@ async function collectResourceDirectory(
   skillRoot: string,
   directoryName: string,
   kind: SkillResourceKind,
-  resources: Map<string, SkillResourceEntry>
+  resources: Map<string, SkillResourceEntry>,
+  scanState: { count: number }
 ): Promise<void> {
   const root = join(skillRoot, directoryName);
-  const files = await walkFiles(root).catch(() => []);
+  const files = await walkFiles(root, {
+    baseRoot: skillRoot,
+    maxDepth: MAX_SKILL_RESOURCE_SCAN_DEPTH,
+    maxFiles: MAX_SKILL_RESOURCE_FILES,
+    state: scanState
+  }).catch(() => []);
 
   for (const filePath of files) {
     const relativePath = relative(skillRoot, filePath);
+    const bytes = await stat(filePath).then((entry) => entry.size).catch(() => undefined);
     resources.set(`${kind}:${relativePath}`, {
       kind,
       path: relativePath,
-      bytes: await stat(filePath).then((entry) => entry.size).catch(() => undefined),
+      bytes,
       declared: kind === "reference" ? resources.get(`reference:${relativePath}`)?.declared === true : undefined
     });
   }
 }
 
-async function walkFiles(root: string): Promise<string[]> {
+async function walkFiles(
+  root: string,
+  options: {
+    baseRoot: string;
+    maxDepth: number;
+    maxFiles: number;
+    state: { count: number };
+  },
+  depth = 0
+): Promise<string[]> {
+  if (depth > options.maxDepth || options.state.count >= options.maxFiles) {
+    return [];
+  }
+
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
+  const canonicalBaseRoot = await realpath(options.baseRoot).catch(() => options.baseRoot);
 
   for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.isSymbolicLink()) {
+      continue;
+    }
+
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await walkFiles(path)));
+      files.push(...(await walkFiles(path, options, depth + 1)));
       continue;
     }
     if (entry.isFile()) {
+      if (options.state.count >= options.maxFiles) {
+        break;
+      }
+      const canonicalPath = await realpath(path).catch(() => undefined);
+      if (canonicalPath === undefined || !isPathInside(canonicalBaseRoot, canonicalPath)) {
+        continue;
+      }
+      const bytes = await stat(path).then((entryStat) => entryStat.size).catch(() => undefined);
+      if (bytes !== undefined && bytes > MAX_SKILL_RESOURCE_BYTES) {
+        continue;
+      }
+      options.state.count += 1;
       files.push(path);
     }
   }
@@ -802,4 +908,9 @@ function normalizeRelativeSkillPath(skillRoot: string, path: string): string | u
     return undefined;
   }
   return relativePath;
+}
+
+function isPathInside(root: string, path: string): boolean {
+  const relativePath = relative(root, path);
+  return relativePath.length === 0 || (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
 }

@@ -92,6 +92,7 @@ import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
 import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
+import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_FILES } from "./skills/skill-limits.js";
 import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
@@ -3596,6 +3597,76 @@ assert(sharedTeamSkill?.description === "Personal override version.", "expected 
 assert(sharedTeamSkill?.sourceKind === "local", "expected overridden skill to be marked local");
 assert(envExternalSkill?.sourceKind === "external", "expected env external skill to load as external");
 assert(renderSlashMenu(externalDirsRuntime).includes("/env-external-skill"), "expected external skill to appear in slash menu");
+const conflictRegistry = new SkillRegistry();
+const duplicateExternalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-duplicate-external-"));
+await mkdir(join(duplicateExternalRoot, "shared-team-skill"), { recursive: true });
+await writeFile(join(duplicateExternalRoot, "shared-team-skill", "SKILL.md"), `---
+name: shared-team-skill
+description: Duplicate external shared skill.
+version: 0.1.0
+category: research
+required_toolsets:
+  - files
+permission_expectations:
+  - auto-read
+---
+Duplicate external instructions.
+`, "utf8");
+for (const skill of (await loadSkillsFromDirectory(homeSharedSkills, { sourceKind: "external", sourceRoot: homeSharedSkills })).skills) {
+  conflictRegistry.register(skill);
+}
+for (const skill of (await loadSkillsFromDirectory(duplicateExternalRoot, { sourceKind: "external", sourceRoot: duplicateExternalRoot })).skills) {
+  conflictRegistry.register(skill);
+}
+assert(conflictRegistry.get("shared-team-skill")?.description === "External shared version.", "expected first external duplicate to remain selected");
+assert(
+  conflictRegistry.listConflicts().some((conflict) => conflict.name === "shared-team-skill" && conflict.reason === "duplicate-source"),
+  "expected external duplicate to be recorded as a registry conflict"
+);
+const longSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-long-skill-"));
+const longInstructions = "A".repeat(25_000);
+await mkdir(join(longSkillRoot, "long-skill"), { recursive: true });
+await writeFile(join(longSkillRoot, "long-skill", "SKILL.md"), `---
+{
+  "name": "long-skill",
+  "description": "Long provider-facing instructions.",
+  "version": "0.1.0",
+  "category": "research",
+  "requiredToolsets": ["core"],
+  "permissionExpectations": ["auto-read"]
+}
+---
+${longInstructions}
+`, "utf8");
+const loadedLongSkill = (await loadSkillsFromDirectory(longSkillRoot, { sourceKind: "local", sourceRoot: longSkillRoot })).skills[0];
+assert(loadedLongSkill?.instructions.length === longInstructions.length, "expected full long skill instructions to remain available locally");
+assert(loadedLongSkill.providerInstructions?.truncated === true, "expected long skill to expose truncated provider instructions");
+assert((loadedLongSkill.providerInstructions?.content.length ?? 0) <= 20_000, "expected provider-facing skill instructions to stay under context cap");
+const oversizedSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-oversized-skill-"));
+await mkdir(join(oversizedSkillRoot, "oversized"), { recursive: true });
+await writeFile(join(oversizedSkillRoot, "oversized", "SKILL.md"), "x".repeat(MAX_SKILL_MD_BYTES + 1), "utf8");
+const oversizedSkillLoad = await loadSkillsFromDirectory(oversizedSkillRoot, { sourceKind: "local", sourceRoot: oversizedSkillRoot });
+assert(oversizedSkillLoad.skills.length === 0, "expected oversized SKILL.md to be rejected");
+assert(oversizedSkillLoad.errors.some((error) => error.message.includes("byte safety limit")), "expected oversized skill rejection to mention byte safety limit");
+const resourceLimitRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-resource-limit-"));
+await mkdir(join(resourceLimitRoot, "resource-skill", "references"), { recursive: true });
+await writeFile(join(resourceLimitRoot, "resource-skill", "SKILL.md"), `---
+name: resource-skill
+description: Resource limit smoke skill.
+version: 0.1.0
+category: research
+required_toolsets:
+  - core
+permission_expectations:
+  - auto-read
+---
+Resource scan smoke.
+`, "utf8");
+for (let index = 0; index < MAX_SKILL_RESOURCE_FILES + 10; index += 1) {
+  await writeFile(join(resourceLimitRoot, "resource-skill", "references", `note-${index}.md`), `note ${index}`, "utf8");
+}
+const resourceLimitSkill = (await loadSkillsFromDirectory(resourceLimitRoot, { sourceKind: "local", sourceRoot: resourceLimitRoot })).skills[0];
+assert((resourceLimitSkill?.resources?.length ?? 0) <= MAX_SKILL_RESOURCE_FILES, "expected skill resource scan to obey file count limit");
 const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));
 const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-workspace-"));
 const mcpServerScript = join(mcpWorkspace, "fake-mcp-server.js");

@@ -6,6 +6,19 @@ const SOURCE_PRIORITY: Record<SkillSourceKind, number> = {
   bundled: 2,
   external: 1
 };
+
+export type SkillRegistryConflict = {
+  name: string;
+  kept: {
+    sourceKind?: SkillSourceKind;
+    sourcePath?: string;
+  };
+  ignored: {
+    sourceKind?: SkillSourceKind;
+    sourcePath?: string;
+  };
+  reason: "local-shadows-external" | "local-shadows-bundled" | "duplicate-source" | "external-shadowed";
+};
 const GENERIC_MATCH_WORDS = new Set([
   "agent",
   "artifact",
@@ -29,12 +42,21 @@ const GENERIC_MATCH_WORDS = new Set([
 
 export class SkillRegistry {
   readonly #skills = new Map<string, LoadedSkill | SkillDefinition>();
+  readonly #conflicts: SkillRegistryConflict[] = [];
 
   register(skill: LoadedSkill | SkillDefinition): void {
     const existing = this.#skills.get(skill.name);
 
-    if (existing !== undefined && !shouldOverride(existing, skill)) {
-      return;
+    if (existing !== undefined) {
+      const decision = resolveConflict(existing, skill);
+
+      if (decision.conflict !== undefined) {
+        this.#conflicts.push(decision.conflict);
+      }
+
+      if (!decision.useIncoming) {
+        return;
+      }
     }
 
     this.#skills.set(skill.name, skill);
@@ -42,6 +64,14 @@ export class SkillRegistry {
 
   get(name: string): LoadedSkill | SkillDefinition | undefined {
     return this.#skills.get(name);
+  }
+
+  resolve(name: string): LoadedSkill | SkillDefinition | undefined {
+    return this.get(name);
+  }
+
+  listConflicts(): SkillRegistryConflict[] {
+    return [...this.#conflicts];
   }
 
   unregister(name: string): void {
@@ -107,11 +137,53 @@ export class SkillRegistry {
   }
 }
 
-function shouldOverride(existing: LoadedSkill | SkillDefinition, incoming: LoadedSkill | SkillDefinition): boolean {
+function resolveConflict(
+  existing: LoadedSkill | SkillDefinition,
+  incoming: LoadedSkill | SkillDefinition
+): { useIncoming: boolean; conflict?: SkillRegistryConflict } {
   const existingPriority = isLoadedSkill(existing) ? SOURCE_PRIORITY[existing.sourceKind] : 0;
   const incomingPriority = isLoadedSkill(incoming) ? SOURCE_PRIORITY[incoming.sourceKind] : 0;
 
-  return incomingPriority >= existingPriority;
+  const useIncoming = incomingPriority > existingPriority;
+  const kept = useIncoming ? incoming : existing;
+  const ignored = useIncoming ? existing : incoming;
+
+  return {
+    useIncoming,
+    conflict: {
+      name: incoming.name,
+      kept: sourceSummary(kept),
+      ignored: sourceSummary(ignored),
+      reason: conflictReason(kept, ignored)
+    }
+  };
+}
+
+function sourceSummary(skill: LoadedSkill | SkillDefinition): SkillRegistryConflict["kept"] {
+  return {
+    sourceKind: isLoadedSkill(skill) ? skill.sourceKind : undefined,
+    sourcePath: isLoadedSkill(skill) ? skill.sourcePath : undefined
+  };
+}
+
+function conflictReason(
+  kept: LoadedSkill | SkillDefinition,
+  ignored: LoadedSkill | SkillDefinition
+): SkillRegistryConflict["reason"] {
+  const keptSource = isLoadedSkill(kept) ? kept.sourceKind : undefined;
+  const ignoredSource = isLoadedSkill(ignored) ? ignored.sourceKind : undefined;
+
+  if (keptSource === ignoredSource) {
+    return "duplicate-source";
+  }
+  if (keptSource === "local" && ignoredSource === "external") {
+    return "local-shadows-external";
+  }
+  if (keptSource === "local" && ignoredSource === "bundled") {
+    return "local-shadows-bundled";
+  }
+
+  return "external-shadowed";
 }
 
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
