@@ -1777,6 +1777,19 @@ const auxiliaryRouter = new AuxiliaryProviderRouter({
 const auxiliaryVisionRoute = auxiliaryRouter.resolve("vision");
 const auxiliaryDelegationRoute = auxiliaryRouter.resolve("delegation");
 const auxiliaryRouteSummary = summarizeAuxiliaryRoutes(auxiliaryRouter.resolveAll());
+const primaryAuxiliaryRouter = new AuxiliaryProviderRouter({
+  models: providerModels,
+  primaryProvider: "kimi",
+  config: {
+    main: {
+      providerOrder: ["deepseek"]
+    }
+  }
+});
+const primaryMainRoute = primaryAuxiliaryRouter.resolve("main");
+const primaryVisionRoute = primaryAuxiliaryRouter.resolve("vision");
+const primaryCompressionRoute = primaryAuxiliaryRouter.resolve("compression");
+const primaryDelegationRoute = primaryAuxiliaryRouter.resolve("delegation");
 const preparedProviderRequest = buildOpenAICompatibleRequest(
   {
     baseUrl: "https://api.deepseek.com/v1",
@@ -5302,6 +5315,15 @@ assert(auxiliaryVisionRoute.route?.primary.provider === "kimi", "expected auxili
 assert(auxiliaryDelegationRoute.route?.primary.provider === "deepseek", "expected auxiliary delegation route");
 assert(auxiliaryRouteSummary.includes("memory_flush:"), "expected auxiliary route summary");
 assert(auxiliaryRouteSummary.includes("approval:"), "expected approval auxiliary route summary");
+assert(primaryMainRoute.preferences.providerOrder?.[0] === "kimi", "expected primary provider to lead auxiliary provider order");
+assert(primaryMainRoute.preferences.providerOrder?.[1] === "deepseek", "expected configured auxiliary provider order after primary");
+assert(primaryMainRoute.preferences.requireTools === true, "expected main auxiliary route to require tools");
+assert(primaryMainRoute.route?.primary.provider === "kimi", "expected primary provider to win when it satisfies main task");
+assert(primaryVisionRoute.preferences.requireVision === true, "expected vision auxiliary route to require vision");
+assert(primaryVisionRoute.route?.primary.provider === "kimi", "expected vision route to select vision-capable primary");
+assert(primaryCompressionRoute.preferences.requireStructuredOutput === true, "expected compression route to require structured output");
+assert(primaryDelegationRoute.preferences.requireTools === true, "expected delegation route to require tools");
+assert(!/apiKey|accessToken|baseUrl/u.test(JSON.stringify(primaryMainRoute)), "expected auxiliary routes to avoid credential and endpoint metadata");
 assert(
   preparedProviderRequest.url === "https://api.deepseek.com/v1/chat/completions",
   "expected OpenAI-compatible request URL"

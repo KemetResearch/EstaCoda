@@ -183,7 +183,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const providerModels = await providerRegistry.listModels();
   const auxiliaryProviderRouter = new AuxiliaryProviderRouter({
     models: providerModels,
-    config: options.auxiliaryProviders
+    config: options.auxiliaryProviders,
+    primaryProvider: options.model.provider === "unconfigured" ? undefined : options.model.provider
   });
   const approvalAuxiliaryRoute = options.model.provider === "unconfigured"
     ? undefined

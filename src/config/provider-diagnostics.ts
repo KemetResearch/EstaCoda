@@ -18,13 +18,18 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
   const selectedProvider = config.model.provider;
   const selectedModel = config.model.id;
   const provider = config.providerRegistry.get(selectedProvider);
+  const registeredSelectedModel = models.find((model) => model.provider === selectedProvider && model.id === selectedModel);
+  const selectedProfile = registeredSelectedModel ?? config.model;
+  const pools = config.credentialPools.snapshots();
+  const selectedPool = pools.find((pool) => pool.provider === selectedProvider);
+  const selectedPoolHasAvailableCredential = selectedPool?.entries.some((entry) => entry.available) === true;
   const warnings: string[] = [];
   const lines: string[] = [
     `Selected route: ${selectedProvider}/${selectedModel}`,
-    `Context window: ${formatCount(config.model.contextWindowTokens)} tokens`,
-    `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
-    `Vision: ${config.model.supportsVision ? "yes" : "no"}`,
-    `Structured output: ${config.model.supportsStructuredOutput ? "yes" : "no"}`
+    `Context window: ${formatCount(selectedProfile.contextWindowTokens)} tokens`,
+    `Tools: ${selectedProfile.supportsTools ? "yes" : "no"}`,
+    `Vision: ${selectedProfile.supportsVision ? "yes" : "no"}`,
+    `Structured output: ${selectedProfile.supportsStructuredOutput ? "yes" : "no"}`
   ];
 
   if (selectedProvider === "unconfigured" || selectedModel === "unconfigured") {
@@ -35,9 +40,11 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     lines.push("Provider health: adapter missing");
   } else {
     const health = await provider.health();
-    lines.push(`Provider health: ${health.available ? "available" : `blocked (${health.reason ?? "unknown reason"})`}`);
+    const blockedByMissingEndpointEnv = !health.available && /Missing\s+[A-Z0-9_]+/u.test(health.reason ?? "");
+    const healthAvailableViaPool = blockedByMissingEndpointEnv && selectedPoolHasAvailableCredential;
+    lines.push(`Provider health: ${health.available || healthAvailableViaPool ? "available" : `blocked (${health.reason ?? "unknown reason"})`}`);
 
-    if (!health.available) {
+    if (!health.available && !healthAvailableViaPool) {
       warnings.push(humanProviderHealthIssue(health.reason));
     }
 
@@ -46,7 +53,7 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     }
   }
 
-  if (config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
+  if (selectedProfile.contextWindowTokens > 0 && selectedProfile.contextWindowTokens < 64_000) {
     warnings.push("Configured model context window is below 64K tokens.");
   }
 
@@ -61,8 +68,6 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     lines.push("Network inference: local OpenAI-compatible route");
   }
 
-  const pools = config.credentialPools.snapshots();
-  const selectedPool = pools.find((pool) => pool.provider === selectedProvider);
   lines.push(`Credential pool: ${selectedPool === undefined ? "none" : `${selectedPool.entries.length} entr${selectedPool.entries.length === 1 ? "y" : "ies"}`}`);
 
   if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && selectedPool === undefined) {
@@ -78,7 +83,7 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
   }
 
   const fallbackCount = models.filter((model) => model.provider !== selectedProvider).length;
-  lines.push(`Fallback routes: ${fallbackCount === 0 ? "none" : `${fallbackCount} configured`}`);
+  lines.push(`Fallback candidates: ${fallbackCount === 0 ? "none" : `${fallbackCount} configured`}`);
 
   const status = warnings.length === 0
     ? "ready"
