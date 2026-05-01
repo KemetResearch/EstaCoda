@@ -392,6 +392,39 @@ const nativeVisionTelegramRoute = visionAwareIntentRouter.route("Please inspect 
 const asciiVideoRoute = intentRouter.route("Create a 10 second ASCII logo animation.");
 const genericKnowledgeRoute = intentRouter.route("Build a knowledge base from this folder.");
 const imageGenerationRoute = intentRouter.route("Create an image of a blue lotus sigil.");
+const imageGenerationNoAttachmentRoute = intentRouter.route("Generate an image of a blue falcon.");
+const imageConditionedRoute = intentRouter.route("Generate an image based on this attached image.", {
+  attachments: [{
+    id: "source-image",
+    kind: "image",
+    status: "ready",
+    localPath: "media/source.png"
+  }]
+});
+const imageEditRoute = intentRouter.route("Edit this image.", {
+  attachments: [{
+    id: "edit-image",
+    kind: "image",
+    status: "ready",
+    localPath: "media/edit.png"
+  }]
+});
+const audioTranscriptionRoute = intentRouter.route("Transcribe this audio.", {
+  attachments: [{
+    id: "voice-note",
+    kind: "audio",
+    status: "ready",
+    localPath: "media/audio.m4a"
+  }]
+});
+const documentAttachmentRoute = intentRouter.route("Please summarize this attachment.", {
+  attachments: [{
+    id: "source-document",
+    kind: "document",
+    status: "ready",
+    localPath: "docs/source.pdf"
+  }]
+});
 const availableTools = await tools.listAvailable();
 const compressed = trajectory.compress();
 const renderedMemory = renderMemorySnapshot(memory.snapshot());
@@ -7439,6 +7472,13 @@ assert(
   "expected simple native-vision image inspection to avoid telegram-media-analysis over-selection"
 );
 assert(
+  nativeVisionTelegramRoute.evidence.some((entry) =>
+    entry.kind === "skill-defer-rule" &&
+    entry.source === "telegram-media-analysis"
+  ),
+  "expected deferred telegram-media-analysis routing evidence to be preserved"
+);
+assert(
   asciiVideoRoute.suggestedSkills.some((skill) => skill.name === "ascii-video"),
   "expected ASCII animation prompt to route to ascii-video skill"
 );
@@ -7446,6 +7486,26 @@ assert(imageGenerationRoute.nativeIntent === "image-generation", "expected image
 assert(
   imageGenerationRoute.suggestedSkills.length === 0,
   "expected image generation prompt to use native image.generate rather than requiring a skill"
+);
+assert(
+  imageGenerationNoAttachmentRoute.nativeIntent === "image-generation",
+  "expected text-only image request to route as image-generation native intent"
+);
+assert(
+  imageConditionedRoute.nativeIntent === "attachment-analysis",
+  "expected image-conditioned generation request to route as attachment analysis until image editing is supported"
+);
+assert(
+  imageEditRoute.nativeIntent === "attachment-analysis",
+  "expected image edit request with ready image attachment to route as attachment analysis"
+);
+assert(
+  audioTranscriptionRoute.nativeIntent === "voice-transcription",
+  "expected explicit audio transcription with ready audio attachment to route as voice transcription"
+);
+assert(
+  documentAttachmentRoute.nativeIntent === "attachment-analysis",
+  "expected generic document attachment to route as attachment analysis"
 );
 assert(
   !genericKnowledgeRoute.suggestedSkills.some((skill) => skill.name === "youtube-knowledge-base"),
@@ -9715,6 +9775,345 @@ assert(
   focusedToolEvents.some((event) => event.kind === "provider-tool-call") &&
     focusedToolEvents.some((event) => event.kind === "tool-result" && event.tool === "file.read" && event.ok === true),
   "expected focused provider tool E2E to emit provider tool-call and tool-result events"
+);
+
+const deferredRouteUsageRegistry = new ProviderRegistry();
+deferredRouteUsageRegistry.register({
+  id: "openai",
+  name: "Deferred route usage provider",
+  health: () => ({ available: true }),
+  listModels: () => [{
+    id: "gpt-4.1-mini",
+    provider: "openai",
+    contextWindowTokens: 1_000_000,
+    supportsTools: true,
+    supportsVision: true,
+    supportsStructuredOutput: true
+  }],
+  stream: async function* (request) {
+    yield {
+      kind: "start",
+      provider: "openai",
+      model: request.model
+    };
+    yield {
+      kind: "token",
+      provider: "openai",
+      model: request.model,
+      text: "Deferred route usage final answer."
+    };
+    yield {
+      kind: "done",
+      provider: "openai",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "openai"
+      }
+    };
+  },
+  complete: async (request) => ({
+    ok: true,
+    content: "Deferred route usage final answer.",
+    model: request.model,
+    provider: "openai"
+  })
+} satisfies ProviderAdapter);
+const deferredRouteUsageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-deferred-route-"));
+await mkdir(join(deferredRouteUsageWorkspace, ".estacoda", "skills", "deferred-image-proof"), { recursive: true });
+await mkdir(join(deferredRouteUsageWorkspace, "media"), { recursive: true });
+await writeFile(join(deferredRouteUsageWorkspace, "media", "deferred-route.png"), "not a real png but enough for attachment routing smoke", "utf8");
+await writeFile(join(deferredRouteUsageWorkspace, ".estacoda", "skills", "deferred-image-proof", "SKILL.md"), `---
+{
+  "name": "deferred-image-proof",
+  "description": "Smoke-test deferred route telemetry.",
+  "version": "0.1.0",
+  "category": "testing",
+  "routing": {
+    "triggerPatterns": [{ "type": "attachment-kind", "value": "image" }],
+    "deferWhen": [{
+      "when": {
+        "nativeIntent": "attachment-analysis",
+        "attachmentKinds": ["image"],
+        "modelSupportsVision": true
+      },
+      "reason": "Vision-capable model can inspect the image directly."
+    }],
+    "priority": 100
+  },
+  "whenToUse": ["The user asks to inspect an attached image."],
+  "requiredToolsets": [],
+  "workflow": [{
+    "id": "inspect-image",
+    "description": "Inspect the image.",
+    "toolsets": ["media"],
+    "successCriteria": ["image inspected"]
+  }],
+  "permissionExpectations": ["auto-read"],
+  "examples": ["inspect this image"]
+}
+---
+
+Inspect the attached image.
+`, "utf8");
+const deferredRouteUsageSessionId = "deferred-route-usage-smoke";
+const deferredRouteUsageRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: deferredRouteUsageSessionId,
+  profileId: "smoke",
+  workspaceRoot: deferredRouteUsageWorkspace,
+  providerRegistry: deferredRouteUsageRegistry,
+  model: {
+    id: "gpt-4.1-mini",
+    provider: "openai",
+    contextWindowTokens: 1_000_000,
+    supportsTools: true,
+    supportsVision: true,
+    supportsStructuredOutput: true
+  }
+});
+await deferredRouteUsageRuntime.handle({
+  text: "Please inspect this image and include any visible text.",
+  channel: "cli",
+  trustedWorkspace: true,
+  attachments: [{
+    id: "deferred-route-image",
+    kind: "image",
+    status: "ready",
+    localPath: "media/deferred-route.png"
+  }]
+});
+const deferredRouteUsageEvents = await sessionDb.listEvents(deferredRouteUsageSessionId);
+const deferredRouteUsageEvent = deferredRouteUsageEvents.find((event) => event.kind === "skill-route-usage");
+assert(
+  deferredRouteUsageEvent?.kind === "skill-route-usage" &&
+    deferredRouteUsageEvent.deferred === true &&
+    typeof deferredRouteUsageEvent.deferReason === "string" &&
+    deferredRouteUsageEvent.deferReason.length > 0,
+  "expected skill-route-usage telemetry to record deferred skill routing"
+);
+
+const localRiskEscalationRegistry = new ProviderRegistry();
+let localRiskEscalationRequests = 0;
+localRiskEscalationRegistry.register({
+  id: "deepseek",
+  name: "Local risk escalation provider",
+  health: () => ({ available: true }),
+  listModels: () => [{
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }],
+  stream: async function* (request) {
+    localRiskEscalationRequests += 1;
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+    if (localRiskEscalationRequests === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "risk-escalation-terminal",
+        name: "terminal_run",
+        argumentsText: JSON.stringify({
+          command: "echo risk-escalation-smoke"
+        })
+      };
+    } else {
+      yield {
+        kind: "token",
+        provider: "deepseek",
+        model: request.model,
+        text: "Risk escalation complete."
+      };
+    }
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => ({
+    ok: true,
+    content: "Risk escalation complete.",
+    model: request.model,
+    provider: "deepseek"
+  })
+} satisfies ProviderAdapter);
+const localRiskEscalationRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "local-risk-escalation-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: localRiskEscalationRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const localRiskEscalationEvents: RuntimeEvent[] = [];
+await localRiskEscalationRuntime.handle({
+  text: "Run a safe terminal echo command.",
+  channel: "cli",
+  trustedWorkspace: true,
+  onEvent: (event) => {
+    localRiskEscalationEvents.push(event);
+  }
+});
+assert(
+  localRiskEscalationEvents.some((event) =>
+    event.kind === "security-risk-escalated" &&
+    event.from === "read-only-local" &&
+    event.to === "workspace-write"
+  ),
+  "expected provider workspace-write tool to emit risk escalation from read-only-local posture"
+);
+
+const workspaceRiskBaselineWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-risk-baseline-"));
+await mkdir(join(workspaceRiskBaselineWorkspace, ".estacoda", "skills", "risk-baseline"), { recursive: true });
+await writeFile(join(workspaceRiskBaselineWorkspace, ".estacoda", "skills", "risk-baseline", "SKILL.md"), `---
+{
+  "name": "risk-baseline",
+  "description": "Smoke-test workspace-write baseline risk handling.",
+  "version": "0.1.0",
+  "category": "testing",
+  "routing": {
+    "triggerPatterns": [{ "type": "contains", "value": "network baseline proof" }],
+    "requiredToolsets": ["web"],
+    "priority": 100
+  },
+  "whenToUse": ["The user asks for the network baseline proof."],
+  "requiredToolsets": ["web"],
+  "workflow": [{
+    "id": "fetch-proof",
+    "description": "Fetch proof content.",
+    "toolsets": ["web"],
+    "successCriteria": ["proof content fetched"]
+  }],
+  "permissionExpectations": ["ask-before-write"],
+  "examples": ["network baseline proof"]
+}
+---
+
+Use web.extract for the proof URL.
+`, "utf8");
+const workspaceRiskBaselineRegistry = new ProviderRegistry();
+let workspaceRiskBaselineRequests = 0;
+workspaceRiskBaselineRegistry.register({
+  id: "deepseek",
+  name: "Workspace risk baseline provider",
+  health: () => ({ available: true }),
+  listModels: () => [{
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }],
+  stream: async function* (request) {
+    workspaceRiskBaselineRequests += 1;
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+    if (workspaceRiskBaselineRequests === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "risk-baseline-web",
+        name: "web_extract",
+        argumentsText: JSON.stringify({
+          url: "https://example.com/risk-baseline"
+        })
+      };
+    } else {
+      yield {
+        kind: "token",
+        provider: "deepseek",
+        model: request.model,
+        text: "Workspace baseline complete."
+      };
+    }
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => ({
+    ok: true,
+    content: "Workspace baseline complete.",
+    model: request.model,
+    provider: "deepseek"
+  })
+} satisfies ProviderAdapter);
+const workspaceRiskBaselineRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "workspace-risk-baseline-smoke",
+  profileId: "smoke",
+  workspaceRoot: workspaceRiskBaselineWorkspace,
+  providerRegistry: workspaceRiskBaselineRegistry,
+  enableWebNetwork: true,
+  webFetch: async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: {
+      get: (name: string) => name.toLowerCase() === "content-type" ? "text/html" : null
+    },
+    text: async () => "<html><body>risk baseline proof</body></html>"
+  }),
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const workspaceRiskBaselineEvents: RuntimeEvent[] = [];
+await workspaceRiskBaselineRuntime.handle({
+  text: "Run the network baseline proof.",
+  channel: "cli",
+  trustedWorkspace: true,
+  onEvent: (event) => {
+    workspaceRiskBaselineEvents.push(event);
+  }
+});
+assert(
+  workspaceRiskBaselineEvents.every((event) => event.kind !== "security-risk-escalated"),
+  "expected read-only-network provider tool not to escalate from workspace-write initial posture"
 );
 
 const multiStepProviderRegistry = new ProviderRegistry();

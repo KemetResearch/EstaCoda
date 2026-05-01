@@ -135,9 +135,9 @@ export class IntentRouter {
         model
       }))
       .filter((match): match is SkillMatch => match !== undefined)
-      .filter((match) => !match.deferred)
       .sort(compareSkillMatches);
-    const suggestedSkills = skillMatches.map((match) => match.skill);
+    const activeSkillMatches = skillMatches.filter((match) => !match.deferred);
+    const suggestedSkills = activeSkillMatches.map((match) => match.skill);
     const evidence = [
       ...native.evidence,
       ...skillMatches.flatMap((match) => match.evidence),
@@ -170,6 +170,18 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
   const readyAttachments = readyRoutableAttachments(attachments);
 
   if (readyAttachments.length > 0) {
+    if (hasReadyAttachmentKind(readyAttachments, ["audio", "voice"]) && matchesVoiceTranscription(normalized)) {
+      return {
+        nativeIntent: "voice-transcription",
+        labels: ["voice-transcription"],
+        evidence: [{
+          kind: "native-intent",
+          detail: "Prompt explicitly asks to transcribe or read attached audio.",
+          weight: 0.95
+        }]
+      };
+    }
+
     return {
       nativeIntent: "attachment-analysis",
       labels: ["attachment-analysis"],
@@ -373,6 +385,13 @@ function readyRoutableAttachments(attachments: ChannelAttachment[] | undefined):
     (attachment.status === undefined || attachment.status === "ready") &&
     isRoutableAttachmentKind(attachment.kind)
   );
+}
+
+function hasReadyAttachmentKind(
+  attachments: Array<ChannelAttachment & { kind: Exclude<ChannelAttachmentKind, "link" | "unknown"> }>,
+  kinds: Array<Exclude<ChannelAttachmentKind, "link" | "unknown">>
+): boolean {
+  return attachments.some((attachment) => kinds.includes(attachment.kind));
 }
 
 function matchesImageGeneration(normalized: string): boolean {

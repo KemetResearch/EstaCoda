@@ -436,8 +436,9 @@ export class AgentLoop {
       });
     }
 
+    const initialRiskClass = inferInitialRiskClass(selectedSkill);
     const securityAssessment = await assessSecurityPolicy(this.#securityPolicy, {
-      riskClass: inferInitialRiskClass(selectedSkill),
+      riskClass: initialRiskClass,
       description: selectedSkill === undefined ? "respond to user prompt" : `run skill ${selectedSkill.name}`,
       context: {
         trustedWorkspace,
@@ -527,6 +528,7 @@ export class AgentLoop {
       onEvent: input.onEvent,
       toolPlans,
       trustedWorkspace,
+      initialRiskClass,
       signal: input.signal
     });
     const effectiveProviderExecution = providerLoop.providerExecution;
@@ -1010,11 +1012,18 @@ export class AgentLoop {
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     remainingToolCalls: number;
+    riskBaseline: ToolRiskClass;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
-  }): Promise<ToolExecutionRecord[]> {
+  }): Promise<{
+    executions: ToolExecutionRecord[];
+    maxObservedRisk: ToolRiskClass;
+  }> {
     if (this.#toolCallPlanner === undefined || input.providerExecution === undefined) {
-      return [];
+      return {
+        executions: [],
+        maxObservedRisk: input.riskBaseline
+      };
     }
 
     const executions: ToolExecutionRecord[] = [];
@@ -1039,7 +1048,7 @@ export class AgentLoop {
       });
     }
 
-    let maxObservedRisk: ToolRiskClass = "read-only-local";
+    let maxObservedRisk: ToolRiskClass = input.riskBaseline;
     for (const group of groupProviderToolPlans(pending, this.#budgets.maxConcurrentSafeTools)) {
       const nextRisk = maxRiskClass(group.entries.map((entry) => entry.definition?.riskClass));
       if (riskRank(nextRisk) > riskRank(maxObservedRisk)) {
@@ -1078,7 +1087,10 @@ export class AgentLoop {
       }
     }
 
-    return executions;
+    return {
+      executions,
+      maxObservedRisk
+    };
   }
 
   async #executeProviderToolPlan(input: {
@@ -1282,6 +1294,7 @@ export class AgentLoop {
     onEvent?: RuntimeEventSink;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
+    initialRiskClass: ToolRiskClass;
     signal?: AbortSignal;
   }): Promise<{
     providerExecution: ProviderExecutionResult | undefined;
@@ -1294,6 +1307,7 @@ export class AgentLoop {
     let iterations = 0;
     const loopStartedAt = Date.now();
     const repeatedFailures = new Map<string, number>();
+    let maxObservedRisk = input.initialRiskClass;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -1350,14 +1364,17 @@ export class AgentLoop {
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
-      const loopToolExecutions = await this.#executeProviderToolPlans({
+      const loopToolExecutionResult = await this.#executeProviderToolPlans({
         providerExecution: execution,
         toolPlans: input.toolPlans,
         trustedWorkspace: input.trustedWorkspace,
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
+        riskBaseline: maxObservedRisk,
         signal: input.signal,
         onEvent: input.onEvent
       });
+      const loopToolExecutions = loopToolExecutionResult.executions;
+      maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
       const currentPlans = input.toolPlans.slice(beforePlans);
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
