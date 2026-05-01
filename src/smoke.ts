@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
@@ -97,6 +97,8 @@ import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "./skil
 import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
+import { evaluateSkillVisibility } from "./skills/skill-visibility.js";
+import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "./skills/skill-workflow-planner.js";
 import { buildSkillFileContent, createSkillTools } from "./skills/skill-tools.js";
 import { createSkillRouteTelemetry } from "./skills/skill-usage-telemetry.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
@@ -3669,78 +3671,7 @@ for (let index = 0; index < MAX_SKILL_RESOURCE_FILES + 10; index += 1) {
 }
 const resourceLimitSkill = (await loadSkillsFromDirectory(resourceLimitRoot, { sourceKind: "local", sourceRoot: resourceLimitRoot })).skills[0];
 assert((resourceLimitSkill?.resources?.length ?? 0) <= MAX_SKILL_RESOURCE_FILES, "expected skill resource scan to obey file count limit");
-const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-sync-"));
-const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-local-"));
-const bundledNestedSkillDir = join(bundledSyncRoot, "media", "proof-skill");
-const bundledLocalSkillDir = join(bundledSyncLocalRoot, "media", "proof-skill");
-await mkdir(bundledNestedSkillDir, { recursive: true });
-await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
-  name: "bundled-proof-skill",
-  description: "Bundled sync proof skill.",
-  category: "research",
-  whenToUse: ["when proving bundled sync"],
-  requiredToolsets: ["core"],
-  instructions: "Bundled instructions v1."
-}), "utf8");
-const bundledSyncInitial = await syncBundledSkills({
-  bundledSkillsDir: bundledSyncRoot,
-  localSkillsRoot: bundledSyncLocalRoot
-});
-assert(bundledSyncInitial.copied === 1, "expected missing bundled skill to copy into local root");
-assert(await stat(join(bundledLocalSkillDir, "SKILL.md")).then((entry) => entry.isFile()).catch(() => false), "expected bundled sync to preserve relative skill path");
-assert((await readFile(join(bundledSyncLocalRoot, ".bundled_manifest.json"), "utf8")).includes("bundled-proof-skill"), "expected bundled manifest to record synced skill");
-await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
-  name: "bundled-proof-skill",
-  description: "Bundled sync proof skill.",
-  category: "research",
-  whenToUse: ["when proving bundled sync"],
-  requiredToolsets: ["core"],
-  instructions: "Bundled instructions v2."
-}), "utf8");
-const bundledSyncUpdated = await syncBundledSkills({
-  bundledSkillsDir: bundledSyncRoot,
-  localSkillsRoot: bundledSyncLocalRoot
-});
-assert(bundledSyncUpdated.updated === 1, "expected unmodified local bundled copy to receive bundled update");
-assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v2."), "expected local bundled copy to contain updated bundled instructions");
-await writeFile(join(bundledLocalSkillDir, "SKILL.md"), buildSkillFileContent({
-  name: "bundled-proof-skill",
-  description: "Locally evolved bundled skill.",
-  category: "research",
-  whenToUse: ["when proving bundled sync"],
-  requiredToolsets: ["core"],
-  instructions: "Locally evolved instructions."
-}), "utf8");
-await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
-  name: "bundled-proof-skill",
-  description: "Bundled sync proof skill.",
-  category: "research",
-  whenToUse: ["when proving bundled sync"],
-  requiredToolsets: ["core"],
-  instructions: "Bundled instructions v3."
-}), "utf8");
-const bundledSyncUserModified = await syncBundledSkills({
-  bundledSkillsDir: bundledSyncRoot,
-  localSkillsRoot: bundledSyncLocalRoot
-});
-assert(bundledSyncUserModified.userModified === 1, "expected user-modified bundled working copy to be preserved");
-assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Locally evolved instructions."), "expected bundled sync not to overwrite user-modified local skill");
-const rebaselineResult = await resetBundledSkill({
-  name: "bundled-proof-skill",
-  mode: "rebaseline",
-  bundledSkillsDir: bundledSyncRoot,
-  localSkillsRoot: bundledSyncLocalRoot
-});
-assert(rebaselineResult.ok, "expected bundled rebaseline reset to succeed");
-assert((await hashSkillDirectory(bundledLocalSkillDir)).length === 32, "expected bundled skill directory hash to be stable");
-const restoreResult = await resetBundledSkill({
-  name: "bundled-proof-skill",
-  mode: "restore",
-  bundledSkillsDir: bundledSyncRoot,
-  localSkillsRoot: bundledSyncLocalRoot
-});
-assert(restoreResult.ok, "expected bundled restore reset to succeed");
-assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v3."), "expected bundled restore to replace local copy with bundled baseline");
+await runBundledSkillSyncSmoke();
 const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));
 const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-workspace-"));
 const mcpServerScript = join(mcpWorkspace, "fake-mcp-server.js");
@@ -5899,6 +5830,16 @@ const skillWriteEscapeExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const skillWriteReservedExecution = await toolExecutor.executeTool({
+  tool: "skill.write_file",
+  input: {
+    name: "sample-personal-skill",
+    file_path: ".usage.json",
+    file_content: "Reserved metadata should not be overwritten."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const skillPatchExecution = await toolExecutor.executeTool({
   tool: "skill.patch",
   input: {
@@ -6119,6 +6060,7 @@ assert(
 );
 assert(skillWriteFileExecution?.result?.ok === true, "expected skill.write_file to succeed");
 assert(skillWriteEscapeExecution?.result?.ok === false, "expected skill.write_file to reject path escape");
+assert(skillWriteReservedExecution?.result?.ok === false, "expected skill.write_file to reject reserved metadata paths");
 assert(skillPatchExecution?.result?.ok === true, "expected skill.patch to succeed");
 assert(skillEditExecution?.result?.ok === true, "expected skill.edit to succeed");
 assert(skillRemoveFileExecution?.result?.ok === true, "expected skill.remove_file to succeed");
@@ -6458,6 +6400,73 @@ assert((updatedSkillUsage?.routeSelectedCount ?? 0) >= 1, "expected skill route 
 assert(pinnedArchiveAttempt.state !== "archived", "expected pinned skill to block archive transition");
 assert(archivedUsage.state === "archived", "expected unpinned skill to archive");
 assert(restoredUsage.state === "active", "expected archived skill to restore");
+const visibilitySmokeSkill = skills.get("sample-personal-skill");
+assert(visibilitySmokeSkill !== undefined, "expected sample skill for visibility smoke");
+const visibleSkillContext = {
+  platform: process.platform,
+  availableToolsets: new Set(["core"] as const),
+  availableTools: new Set<string>()
+};
+assert(
+  evaluateSkillVisibility(visibilitySmokeSkill, {
+    ...visibleSkillContext,
+    lifecycleState: "archived"
+  }).visible === false,
+  "expected archived skill to be hidden without explicit invocation"
+);
+assert(
+  evaluateSkillVisibility(visibilitySmokeSkill, {
+    ...visibleSkillContext,
+    lifecycleState: "archived",
+    explicitInvocation: true
+  }).visible === true,
+  "expected explicit invocation to allow archived skill visibility checks"
+);
+assert(
+  evaluateSkillVisibility(visibilitySmokeSkill, {
+    ...visibleSkillContext,
+    lifecycleState: "stale",
+    routeConfidence: 0.5
+  }).reasons.includes("stale-weak-match"),
+  "expected weak stale route to be diagnosed"
+);
+assert(
+  evaluateSkillVisibility(visibilitySmokeSkill, {
+    ...visibleSkillContext,
+    lifecycleState: "stale",
+    routeConfidence: 0.9
+  }).visible === true,
+  "expected high-confidence stale route to stay visible"
+);
+const workflowDiagnosticPlan = compileSkillWorkflowPlan({
+  ...visibilitySmokeSkill,
+  workflow: [
+    { id: "first", description: "First step.", toolsets: [] },
+    { id: "first", description: "Duplicate step.", fallbackTo: ["missing"] },
+    { id: "cycle-a", description: "Cycle A.", fallbackTo: ["cycle-b"] },
+    { id: "cycle-b", description: "Cycle B.", fallbackTo: ["cycle-a"] }
+  ]
+});
+assert(
+  workflowDiagnosticPlan.steps[0]?.preferredToolsets.includes("core") === true,
+  "expected empty workflow toolsets to normalize to core"
+);
+assert(
+  workflowDiagnosticPlan.warnings?.some((warning) => warning.includes("Duplicate workflow step id")) === true,
+  "expected duplicate workflow step warning"
+);
+assert(
+  workflowDiagnosticPlan.warnings?.some((warning) => warning.includes("missing step")) === true,
+  "expected missing fallback target warning"
+);
+assert(
+  workflowDiagnosticPlan.warnings?.some((warning) => warning.includes("Fallback cycle")) === true,
+  "expected fallback cycle warning"
+);
+assert(
+  renderSkillWorkflowPlan(workflowDiagnosticPlan).includes("Workflow warnings:"),
+  "expected workflow warnings to render for provider prompt diagnostics"
+);
 assert(
   promotedProposalListExecution?.result?.content.includes(proposedPatchId) === true,
   "expected promoted proposal to appear in proposal list"
@@ -8226,6 +8235,7 @@ const runtime = await createRuntime({
   sessionId: "runtime-smoke",
   profileId: "smoke",
   workspaceRoot: contextWorkspace,
+  localSkillsRoot: join(contextWorkspace, ".estacoda", "skills"),
   trustStorePath: join(await mkdtemp(join(tmpdir(), "estacoda-v2-session-loop-trust-")), "trust.json"),
   enableWebNetwork: true,
   webFetch: async () => ({
@@ -8257,8 +8267,9 @@ const response = await runtime.handle({
   trustedWorkspace: true
 });
 const runtimePersistedMemory = await readFile(join(contextWorkspace, ".estacoda", "memory", "MEMORY.md"), "utf8");
-const runtimeSkillUsage = await readFile(join(contextWorkspace, ".estacoda", "skill-usage.json"), "utf8");
-const runtimeSkillObservationLog = await readFile(join(contextWorkspace, ".estacoda", "skill-evolution", "observations.jsonl"), "utf8");
+const runtimeSkillUsage = await readFile(join(contextWorkspace, ".estacoda", "skills", ".usage.json"), "utf8");
+const legacyRuntimeSkillUsage = await stat(join(contextWorkspace, ".estacoda", "skill-usage.json")).catch(() => undefined);
+const runtimeSkillObservationLog = await readFile(join(contextWorkspace, ".estacoda", "skills", ".evolution", "observations.jsonl"), "utf8");
 let sessionLoopPromptIndex = 0;
 let sessionLoopClosed = false;
 const sessionLoopOutput: string[] = [];
@@ -9408,6 +9419,7 @@ assert(response.skillOutcomes.some((outcome) => outcome.skill === "youtube-knowl
 assert(runtimeEvents.some((event) => event.kind === "memory-write" && event.outcome.skill === "youtube-knowledge-base"), "expected runtime memory-write event");
 assert(runtimePersistedMemory.includes("skill:youtube-knowledge-base"), "expected runtime memory outcome to persist to workspace memory");
 assert(runtimeSkillUsage.includes("\"skillName\": \"youtube-knowledge-base\""), "expected runtime skill usage sidecar to track selected skill");
+assert(legacyRuntimeSkillUsage === undefined, "expected v0.3 runtime not to preserve workspace skill-usage compatibility path");
 assert(runtimeSkillObservationLog.includes("\"skillName\":\"youtube-knowledge-base\""), "expected runtime skill observation log to track selected skill");
 
 const runtimeProviderRegistry = new ProviderRegistry();
@@ -13357,6 +13369,99 @@ assert(
 );
 
 console.log("v2 smoke passed");
+
+async function runBundledSkillSyncSmoke(): Promise<void> {
+  const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-sync-"));
+  const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-local-"));
+  const bundledNestedSkillDir = join(bundledSyncRoot, "media", "proof-skill");
+  const bundledLocalSkillDir = join(bundledSyncLocalRoot, "media", "proof-skill");
+  await mkdir(bundledNestedSkillDir, { recursive: true });
+  await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+    name: "bundled-proof-skill",
+    description: "Bundled sync proof skill.",
+    category: "research",
+    whenToUse: ["when proving bundled sync"],
+    requiredToolsets: ["core"],
+    instructions: "Bundled instructions v1."
+  }), "utf8");
+  const bundledSyncInitial = await syncBundledSkills({
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(bundledSyncInitial.copied === 1, "expected missing bundled skill to copy into local root");
+  assert(await stat(join(bundledLocalSkillDir, "SKILL.md")).then((entry) => entry.isFile()).catch(() => false), "expected bundled sync to preserve relative skill path");
+  assert((await readFile(join(bundledSyncLocalRoot, ".bundled_manifest.json"), "utf8")).includes("bundled-proof-skill"), "expected bundled manifest to record synced skill");
+  await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+    name: "bundled-proof-skill",
+    description: "Bundled sync proof skill.",
+    category: "research",
+    whenToUse: ["when proving bundled sync"],
+    requiredToolsets: ["core"],
+    instructions: "Bundled instructions v2."
+  }), "utf8");
+  const bundledSyncUpdated = await syncBundledSkills({
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(bundledSyncUpdated.updated === 1, "expected unmodified local bundled copy to receive bundled update");
+  assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v2."), "expected local bundled copy to contain updated bundled instructions");
+  assert(
+    !(await readdir(join(bundledSyncLocalRoot, "media"))).some((entry) => entry.includes(".bundled-backup-")),
+    "expected bundled sync to remove successful update backups"
+  );
+  await writeFile(join(bundledLocalSkillDir, "SKILL.md"), buildSkillFileContent({
+    name: "bundled-proof-skill",
+    description: "Locally evolved bundled skill.",
+    category: "research",
+    whenToUse: ["when proving bundled sync"],
+    requiredToolsets: ["core"],
+    instructions: "Locally evolved instructions."
+  }), "utf8");
+  await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+    name: "bundled-proof-skill",
+    description: "Bundled sync proof skill.",
+    category: "research",
+    whenToUse: ["when proving bundled sync"],
+    requiredToolsets: ["core"],
+    instructions: "Bundled instructions v3."
+  }), "utf8");
+  const bundledSyncUserModified = await syncBundledSkills({
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(bundledSyncUserModified.userModified === 1, "expected user-modified bundled working copy to be preserved");
+  assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Locally evolved instructions."), "expected bundled sync not to overwrite user-modified local skill");
+  const rebaselineResult = await resetBundledSkill({
+    name: "bundled-proof-skill",
+    mode: "rebaseline",
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(rebaselineResult.ok, "expected bundled rebaseline reset to succeed");
+  assert((await hashSkillDirectory(bundledLocalSkillDir)).length === 32, "expected bundled skill directory hash to be stable");
+  const restoreResult = await resetBundledSkill({
+    name: "bundled-proof-skill",
+    mode: "restore",
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(restoreResult.ok, "expected bundled restore reset to succeed");
+  assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v3."), "expected bundled restore to replace local copy with bundled baseline");
+  await rm(bundledLocalSkillDir, { recursive: true, force: true });
+  const bundledSyncDeletedLocal = await syncBundledSkills({
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(bundledSyncDeletedLocal.skipped >= 1, "expected deleted-by-user bundled skill not to be re-added");
+  assert(await stat(bundledLocalSkillDir).then(() => false).catch(() => true), "expected deleted-by-user bundled skill to remain absent");
+  await rm(bundledNestedSkillDir, { recursive: true, force: true });
+  const bundledSyncRemovedSource = await syncBundledSkills({
+    bundledSkillsDir: bundledSyncRoot,
+    localSkillsRoot: bundledSyncLocalRoot
+  });
+  assert(bundledSyncRemovedSource.cleaned >= 1, "expected removed bundled skill to clean manifest entry");
+  assert(!(await readFile(join(bundledSyncLocalRoot, ".bundled_manifest.json"), "utf8")).includes("bundled-proof-skill"), "expected cleaned bundled manifest to omit removed skill");
+}
 
 function assert(condition: boolean, message: string): asserts condition {
   if (!condition) {

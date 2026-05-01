@@ -340,8 +340,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const browserAvailable = await browserBackend.isAvailable();
   const toolAvailability = await toolRegistry.snapshot();
   const skillEvolutionStore = new SkillEvolutionStore({
-    usagePath: join(workspaceRoot, ".estacoda", "skill-usage.json"),
-    evolutionRoot: join(workspaceRoot, ".estacoda", "skill-evolution")
+    usagePath: join(localSkillsRoot, ".usage.json"),
+    evolutionRoot: join(localSkillsRoot, ".evolution")
   });
   const skillUsageByName = new Map((await skillEvolutionStore.usage()).map((record) => [record.skillName, record]));
   const skillVisibilityContext = createSkillVisibilityContext({

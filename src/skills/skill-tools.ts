@@ -1831,9 +1831,9 @@ async function resolveSkillSupportPath(
     relativePath.length === 0 ||
     relativePath.startsWith("..") ||
     relativePath.startsWith("/") ||
-    relativePath === "SKILL.md"
+    isReservedSkillSupportPath(relativePath)
   ) {
-    return errorResult("Supporting file path must stay inside the skill directory and cannot target SKILL.md.");
+    return errorResult("Supporting file path must stay inside the skill directory and cannot target reserved skill metadata.");
   }
 
   return {
@@ -1847,6 +1847,16 @@ function isSkillSupportTarget(
   value: { ok: true; path: string; relativePath: string } | ToolResult
 ): value is { ok: true; path: string; relativePath: string } {
   return value.ok === true && "path" in value && "relativePath" in value;
+}
+
+function isReservedSkillSupportPath(relativePath: string): boolean {
+  const normalized = relativePath.split("\\").join("/");
+
+  return normalized === "SKILL.md" ||
+    normalized === ".usage.json" ||
+    normalized === ".bundled_manifest.json" ||
+    normalized.startsWith(".archive/") ||
+    normalized.startsWith(".snapshots/");
 }
 
 function countOccurrences(content: string, needle: string): number {
