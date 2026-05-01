@@ -393,6 +393,14 @@ const asciiVideoRoute = intentRouter.route("Create a 10 second ASCII logo animat
 const genericKnowledgeRoute = intentRouter.route("Build a knowledge base from this folder.");
 const imageGenerationRoute = intentRouter.route("Create an image of a blue lotus sigil.");
 const imageGenerationNoAttachmentRoute = intentRouter.route("Generate an image of a blue falcon.");
+const imageGenerationWithUnrelatedDocumentRoute = intentRouter.route("Generate an image of a blue falcon.", {
+  attachments: [{
+    id: "unrelated-document",
+    kind: "document",
+    status: "ready",
+    localPath: "docs/unrelated.pdf"
+  }]
+});
 const imageConditionedRoute = intentRouter.route("Generate an image based on this attached image.", {
   attachments: [{
     id: "source-image",
@@ -7490,6 +7498,10 @@ assert(
 assert(
   imageGenerationNoAttachmentRoute.nativeIntent === "image-generation",
   "expected text-only image request to route as image-generation native intent"
+);
+assert(
+  imageGenerationWithUnrelatedDocumentRoute.nativeIntent === "image-generation",
+  "expected text-only image request with unrelated attachment to stay image-generation native intent"
 );
 assert(
   imageConditionedRoute.nativeIntent === "attachment-analysis",

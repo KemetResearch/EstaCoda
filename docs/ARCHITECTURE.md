@@ -157,7 +157,7 @@ Artifact records use prompt-safe references for `path` such as `artifact://<id>`
 3. record input to session DB + trajectory
 4. normalize attachment statuses
 5. short-circuit on attachment preflight failures
-6. route intent and skill
+6. route native intent and skill
 7. make security decision
 8. assemble prompt
 9. call provider
@@ -174,6 +174,8 @@ Important guardrails inside the loop:
 - repeated tool failures are capped
 - safe tool concurrency is bounded
 - security decisions are attached to tool executions, not just final replies
+
+Native intent routing handles the product-owned paths before normal provider planning. Explicit text-to-image prompts route to `image-generation` and execute deterministic `image.generate` once per turn. Ready image attachments only take precedence when the prompt asks to use, reference, edit, modify, transform, or generate from the attached image; those requests remain `attachment-analysis` for MVP until a dedicated image-editing path exists. Generic ready attachments still route to `attachment-analysis`, and audio/voice transcription wording routes to `voice-transcription`.
 
 ## Provider Architecture
 

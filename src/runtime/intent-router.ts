@@ -169,26 +169,14 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
 } {
   const readyAttachments = readyRoutableAttachments(attachments);
 
-  if (readyAttachments.length > 0) {
-    if (hasReadyAttachmentKind(readyAttachments, ["audio", "voice"]) && matchesVoiceTranscription(normalized)) {
-      return {
-        nativeIntent: "voice-transcription",
-        labels: ["voice-transcription"],
-        evidence: [{
-          kind: "native-intent",
-          detail: "Prompt explicitly asks to transcribe or read attached audio.",
-          weight: 0.95
-        }]
-      };
-    }
-
+  if (hasReadyImageAttachment(attachments) && asksToUseAttachedImage(normalized)) {
     return {
       nativeIntent: "attachment-analysis",
       labels: ["attachment-analysis"],
       evidence: [{
         kind: "attachment",
-        detail: `Ready attachment context: ${readyAttachments.map((attachment) => attachment.kind).join(", ")}.`,
-        weight: 0.8
+        detail: "Ready image attachment with prompt asking to use or transform the attached image.",
+        weight: 0.85
       }]
     };
   }
@@ -200,6 +188,18 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
       evidence: [{
         kind: "native-intent",
         detail: "Prompt explicitly asks to create or generate an image.",
+        weight: 0.95
+      }]
+    };
+  }
+
+  if (hasReadyAttachmentKind(readyAttachments, ["audio", "voice"]) && matchesVoiceTranscription(normalized)) {
+    return {
+      nativeIntent: "voice-transcription",
+      labels: ["voice-transcription"],
+      evidence: [{
+        kind: "native-intent",
+        detail: "Prompt explicitly asks to transcribe or read attached audio.",
         weight: 0.95
       }]
     };
@@ -225,6 +225,18 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
         kind: "native-intent",
         detail: "Prompt explicitly asks for speech or read-aloud output.",
         weight: 0.9
+      }]
+    };
+  }
+
+  if (readyAttachments.length > 0) {
+    return {
+      nativeIntent: "attachment-analysis",
+      labels: ["attachment-analysis"],
+      evidence: [{
+        kind: "attachment",
+        detail: `Ready attachment context: ${readyAttachments.map((attachment) => attachment.kind).join(", ")}.`,
+        weight: 0.8
       }]
     };
   }
@@ -392,6 +404,15 @@ function hasReadyAttachmentKind(
   kinds: Array<Exclude<ChannelAttachmentKind, "link" | "unknown">>
 ): boolean {
   return attachments.some((attachment) => kinds.includes(attachment.kind));
+}
+
+function hasReadyImageAttachment(attachments: ChannelAttachment[] | undefined): boolean {
+  return readyRoutableAttachments(attachments).some((attachment) => attachment.kind === "image");
+}
+
+function asksToUseAttachedImage(normalized: string): boolean {
+  return /\b(this|attached|uploaded|reference|based on|use this|from this|edit|modify|transform|turn this|make this)\b/iu.test(normalized) &&
+    /\b(image|picture|photo|attachment|upload|reference)\b/iu.test(normalized);
 }
 
 function matchesImageGeneration(normalized: string): boolean {

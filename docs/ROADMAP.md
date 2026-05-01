@@ -369,7 +369,7 @@ State: Hermes-aligned first foundation exists; Telegram image delivery is live-p
 - `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
 - BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY`, Seedream 5 as the default model, and version aliases for Seedream 5/4.5/4.0 `smoke-tested`
 - `image.generate` accepts a minimal agent-facing schema: prompt, aspect ratio, model override, and seed `smoke-tested`
-- image-generation prompts route to native media tooling rather than requiring a skill `smoke-tested`
+- image-generation prompts route to native image tooling rather than requiring a skill, while image-conditioned/edit prompts with ready image attachments stay on attachment analysis until a dedicated image-editing path exists `smoke-tested`
 - `estacoda image status/setup/models` exists, including local secret-store support when a user provides an API key and a model-version picker surface for provider-specific image model IDs `smoke-tested`
 - agent-facing `config.image.status` and `config.image.setup` tools exist so EstaCoda can configure image generation provider/model/key-env references without advertising raw API-key input `smoke-tested`
 - FAL aspect ratios map to model-native `image_size` presets `smoke-tested`
@@ -381,7 +381,7 @@ State: Hermes-aligned first foundation exists; Telegram image delivery is live-p
 - image setup now uses the shared capability secret-storage primitive, ready to generalize to voice/search/browser credentials `smoke-tested`
 - CLI runtime intercepts image `setup_needed`, captures the API key with masked input outside the provider loop, stores it in `.estacoda/.env`, verifies setup, and resumes the original `image.generate` call `smoke-tested`
 - OpenAI-style fragmented streaming tool calls preserve their function name across argument-only chunks, so provider-safe `image_generate` maps back to `image.generate` instead of `unknown` `smoke-tested`
-- media-generation intents execute deterministic `image.generate` exactly once and suppress duplicate provider tool selection for the same turn `smoke-tested`
+- native `image-generation` intents execute deterministic `image.generate` exactly once and suppress duplicate provider tool selection for the same turn `smoke-tested`
 - BytePlus `ModelNotOpen` failures now explain that model access is version-specific and point users to `estacoda image models --provider byteplus` plus `--model-version` setup aliases `smoke-tested`
 - BytePlus/Seedream generated images were live-tested through Telegram delivery with `sendPhoto` attachment behavior. `live-proven`
 

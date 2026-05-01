@@ -303,8 +303,11 @@ At a high level:
 - missing image-generation credentials returning structured `setup_needed` metadata before any provider request
 - CLI runtime-owned image setup flow with masked credential prompt, local secret storage, no secret leakage to output, verification before retry, and automatic resume of the original `image.generate` call
 - OpenAI-style fragmented streaming tool-call chunks preserving the original `image_generate` name across argument-only chunks
-- deterministic media-generation execution calls `image.generate` exactly once and does not re-enter the provider loop for duplicate image tool selection
-- image prompt intent routing to native media generation without mandatory skill selection
+- deterministic native `image-generation` execution calls `image.generate` exactly once and does not re-enter the provider loop for duplicate image tool selection
+- image prompt intent routing to native image generation without mandatory skill selection, including unrelated ready attachments not overriding explicit text-to-image prompts
+- image-conditioned/edit prompts with ready image attachments route to attachment analysis instead of deterministic image generation
+- deferred skill routing evidence remains visible in route telemetry even when deferred skills are not suggested
+- provider tool risk escalation is measured from the initial turn posture and preserved across provider iterations
 - image status/setup/models/verify CLI config persistence, local secret-store write for pasted API keys, missing-key verification failure, version-alias model selection, and ready-state provider capability probe
 - agent-facing image config status/setup tools
 - Telegram image artifact delivery through `sendPhoto` with artifact-notice fallback
