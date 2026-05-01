@@ -3593,7 +3593,7 @@ assert(
   "expected configured missing external dir to remain listed and be skipped later"
 );
 assert(sharedTeamSkill?.description === "Personal override version.", "expected personal skill to shadow external skill with the same name");
-assert(sharedTeamSkill?.sourceKind === "personal", "expected overridden skill to be marked personal");
+assert(sharedTeamSkill?.sourceKind === "local", "expected overridden skill to be marked local");
 assert(envExternalSkill?.sourceKind === "external", "expected env external skill to load as external");
 assert(renderSlashMenu(externalDirsRuntime).includes("/env-external-skill"), "expected external skill to appear in slash menu");
 const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));

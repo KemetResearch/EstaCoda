@@ -2,10 +2,9 @@ import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillSourceKind }
 import type { ToolsetName } from "../contracts/tool.js";
 
 const SOURCE_PRIORITY: Record<SkillSourceKind, number> = {
-  project: 4,
-  personal: 3,
-  external: 2,
-  official: 1
+  local: 3,
+  bundled: 2,
+  external: 1
 };
 const GENERIC_MATCH_WORDS = new Set([
   "agent",
@@ -67,7 +66,9 @@ export class SkillRegistry {
         requiredToolsets: [...skill.requiredToolsets],
         sourceKind: isLoadedSkill(skill) ? skill.sourceKind : undefined,
         sourcePath: isLoadedSkill(skill) ? skill.sourcePath : undefined,
-        instructionBytes: isLoadedSkill(skill) ? Buffer.byteLength(skill.instructions) : undefined
+        instructionBytes: isLoadedSkill(skill) ? Buffer.byteLength(skill.instructions) : undefined,
+        provenanceKind: isLoadedSkill(skill) ? skill.provenance?.kind : undefined,
+        lifecycleState: isLoadedSkill(skill) ? skill.lifecycleState : undefined
       }))
       .sort((left, right) => left.category.localeCompare(right.category) || left.name.localeCompare(right.name));
   }

@@ -136,7 +136,60 @@ export type SkillDefinition = {
   evaluations: SkillEvaluation[];
 };
 
-export type SkillSourceKind = "official" | "personal" | "project" | "external";
+export type SkillSourceKind = "bundled" | "local" | "external";
+
+export type SkillProvenanceKind =
+  | "bundled-seed"
+  | "agent-created"
+  | "user-created"
+  | "imported"
+  | "hub-installed"
+  | "unknown";
+
+export type SkillLifecycleState =
+  | "active"
+  | "stale"
+  | "archived"
+  | "inactive";
+
+export type SkillProvenance = {
+  kind: SkillProvenanceKind;
+  createdAt?: string;
+  createdBy?: "system" | "user" | "agent" | "import" | "hub";
+  sourceSessionId?: string;
+  sourceSessionIds?: string[];
+  sourceObservationIds?: string[];
+  importedFrom?: string;
+  bundledName?: string;
+  bundledVersion?: string;
+};
+
+export type SkillRouteTelemetry = {
+  skillName: string;
+  routeId?: string;
+  matchedAt: string;
+  selected: boolean;
+  explicitInvocation: boolean;
+  confidence: number;
+  labels: string[];
+  evidence: string[];
+  sourceKind: SkillSourceKind;
+};
+
+export type BundledManifest = {
+  version: 1;
+  entries: Record<string, BundledManifestEntry>;
+};
+
+export type BundledManifestEntry = {
+  name: string;
+  bundledPath: string;
+  localPath: string;
+  originHash: string;
+  bundledHash: string;
+  seededAt: string;
+  lastSyncedAt?: string;
+};
 
 export type LoadedSkill = SkillDefinition & {
   sourcePath: string;
@@ -144,6 +197,14 @@ export type LoadedSkill = SkillDefinition & {
   sourceRoot: string;
   instructions: string;
   resources?: SkillResourceEntry[];
+  provenance?: SkillProvenance;
+  lifecycleState?: SkillLifecycleState;
+  loadWarnings?: string[];
+  providerInstructions?: {
+    content: string;
+    truncated: boolean;
+    originalChars: number;
+  };
 };
 
 export type SkillCatalogEntry = {
@@ -155,4 +216,6 @@ export type SkillCatalogEntry = {
   sourceKind?: SkillSourceKind;
   sourcePath?: string;
   instructionBytes?: number;
+  provenanceKind?: SkillProvenanceKind;
+  lifecycleState?: SkillLifecycleState;
 };

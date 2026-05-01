@@ -211,7 +211,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
 
   const loadedOfficialSkills = await loadSkillsFromDirectory(new URL("../../skills/official", import.meta.url).pathname, {
-    sourceKind: "official"
+    sourceKind: "bundled"
   });
   const loadedMcpServers = await loadMcpServers({
     servers: options.mcpServers ?? {}
@@ -227,7 +227,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   for (const root of [personalSkillsRoot, projectSkillsRoot, ...(options.externalSkillRoots ?? [])]) {
     const loaded = await loadSkillsFromDirectory(root, {
-      sourceKind: root === personalSkillsRoot ? "personal" : root === projectSkillsRoot ? "project" : "external",
+      sourceKind: root === personalSkillsRoot || root === projectSkillsRoot ? "local" : "external",
       sourceRoot: root
     }).catch(() => ({ skills: [], errors: [] }));
 

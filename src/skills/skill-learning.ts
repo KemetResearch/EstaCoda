@@ -180,7 +180,7 @@ export class SkillLearningManager {
     await mkdir(skillDir, { recursive: true });
     await writeFile(skillPath, content, "utf8");
     const loaded = await hydrateSkillResources(parseSkillFile(skillPath, content, {
-      sourceKind: "project" satisfies SkillSourceKind,
+      sourceKind: "local" satisfies SkillSourceKind,
       sourceRoot: this.#projectSkillsRoot
     }));
     this.#registry.register(loaded);

@@ -72,6 +72,26 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
+      kind: "skill-route-telemetry";
+      promptHash: string;
+      selectedSkill?: string;
+      confidence: number;
+      candidates: Array<{
+        skillName: string;
+        selected: boolean;
+        explicitInvocation: boolean;
+        confidence: number;
+        sourceKind: string;
+      }>;
+    }
+  | {
+      kind: "skill-lifecycle-changed";
+      skillName: string;
+      from?: string;
+      to: string;
+      reason?: string;
+    }
+  | {
       kind: "agent-cancelled";
       reason: string;
       resumeNote?: string;

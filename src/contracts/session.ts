@@ -8,7 +8,7 @@ import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
-import type { SkillWorkflowPlan } from "./skill.js";
+import type { SkillLifecycleState, SkillRouteTelemetry, SkillWorkflowPlan } from "./skill.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
 
@@ -201,6 +201,24 @@ export type SessionEvent =
       confidence: number;
       evidenceKinds: string[];
       surface?: string;
+    }
+  | {
+      kind: "skill-route-telemetry";
+      telemetry: {
+        promptHash: string;
+        labels: string[];
+        confidence: number;
+        selectedSkill?: string;
+        explicitInvocation: boolean;
+        candidates: SkillRouteTelemetry[];
+      };
+    }
+  | {
+      kind: "skill-lifecycle-changed";
+      skillName: string;
+      from?: SkillLifecycleState;
+      to: SkillLifecycleState;
+      reason?: string;
     }
   | {
       kind: "security-risk-escalated";

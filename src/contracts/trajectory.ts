@@ -19,6 +19,8 @@ export type TrajectoryEventKind =
   | "provider-iteration"
   | "provider-budget-exhausted"
   | "skill-route-usage"
+  | "skill-route-telemetry"
+  | "skill-lifecycle-changed"
   | "security-risk-escalated"
   | "agent-cancelled"
   | "prompt-assembled"

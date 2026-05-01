@@ -477,7 +477,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.promote_patch",
-      description: "Promote a proposed patch into a local personal skill after snapshot and schema/frontmatter validation.",
+      description: "Promote a proposed patch into a local skill after snapshot and schema/frontmatter validation.",
       inputSchema: {
         type: "object",
         properties: {
@@ -517,14 +517,14 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         }
         const target = requirePersonalSkill(options, proposal.skillName);
         if (!isPersonalSkillTarget(target)) {
-          return errorResult(`Skill patch proposal ${proposalId} targets ${proposal.skillName}, but only local personal skills can be promoted directly.`);
+          return errorResult(`Skill patch proposal ${proposalId} targets ${proposal.skillName}, but only local skills can be promoted directly.`);
         }
         const current = await readFile(target.skillPath, "utf8");
         const currentSkill = options.registry.get(proposal.skillName);
         const beforeEvalGate = currentSkill === undefined ? undefined : await runSkillEvalGate(currentSkill);
         const next = applySkillPatch(current, proposal.patch);
         const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, next, {
-          sourceKind: "personal",
+          sourceKind: "local",
           sourceRoot: options.personalSkillsRoot
         }));
         if (loaded.name !== proposal.skillName) {
@@ -565,7 +565,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.create",
-      description: "Create a personal skill from full SKILL.md content or from metadata and instructions.",
+      description: "Create a local skill from full SKILL.md content or from metadata and instructions.",
       inputSchema: {
         type: "object",
         properties: {
@@ -609,7 +609,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         }
 
         const loaded = await hydrateSkillResources(parseSkillFile(skillPath, content, {
-          sourceKind: "personal",
+          sourceKind: "local",
           sourceRoot: options.personalSkillsRoot
         }));
         if (loaded.name !== input.name) {
@@ -633,7 +633,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.patch",
-      description: "Apply a targeted text replacement to a local personal skill SKILL.md file.",
+      description: "Apply a targeted text replacement to a local skill SKILL.md file.",
       inputSchema: {
         type: "object",
         properties: {
@@ -707,7 +707,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.edit",
-      description: "Replace a local personal skill SKILL.md file with full content.",
+      description: "Replace a local skill SKILL.md file with full content.",
       inputSchema: {
         type: "object",
         properties: {
@@ -732,7 +732,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         }
 
         const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, input.content, {
-          sourceKind: "personal",
+          sourceKind: "local",
           sourceRoot: options.personalSkillsRoot
         }));
         if (loaded.name !== input.name) {
@@ -759,7 +759,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.delete",
-      description: "Delete a local personal skill directory.",
+      description: "Delete a local skill directory.",
       inputSchema: {
         type: "object",
         properties: {
@@ -787,7 +787,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         options.registry.unregister(input.name);
         await options.skillEvolutionStore?.recordMutation({
           skillName: input.name,
-          source: "personal",
+          source: "local",
           kind: "deleted"
         });
 
@@ -805,7 +805,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.rollback",
-      description: "Restore a local personal skill from a versioned snapshot created before an edit, patch, or delete.",
+      description: "Restore a local skill from a versioned snapshot created before an edit, patch, or delete.",
       inputSchema: {
         type: "object",
         properties: {
@@ -831,7 +831,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         const skillDir = personalSkillDirectory(options, input.name);
         const current = options.registry.get(input.name);
         let preRollbackSnapshot: string | undefined;
-        if (current !== undefined && isLoadedSkill(current) && current.sourceKind === "personal") {
+        if (current !== undefined && isLoadedSkill(current) && current.sourceKind === "local") {
           preRollbackSnapshot = await snapshotPersonalSkillTarget(options, {
             ok: true,
             skillDir: dirname(current.sourcePath),
@@ -862,7 +862,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.write_file",
-      description: "Write a supporting file inside a local personal skill directory.",
+      description: "Write a supporting file inside a local skill directory.",
       inputSchema: {
         type: "object",
         properties: {
@@ -907,7 +907,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         await writeFile(supportFile.path, fileContent, "utf8");
         await options.skillEvolutionStore?.recordMutation({
           skillName: input.name,
-          source: "personal",
+          source: "local",
           kind: "edited"
         });
 
@@ -925,7 +925,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.remove_file",
-      description: "Remove a supporting file from a local personal skill directory.",
+      description: "Remove a supporting file from a local skill directory.",
       inputSchema: {
         type: "object",
         properties: {
@@ -960,7 +960,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         await rm(supportFile.path, { force: true });
         await options.skillEvolutionStore?.recordMutation({
           skillName: input.name,
-          source: "personal",
+          source: "local",
           kind: "edited"
         });
 
@@ -992,7 +992,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       progressLabel: "importing skills",
       maxResultSizeChars: 8000,
       isAvailable: () => true,
-      run: async (input: { path?: string; sourceKind?: "personal" | "project" | "external" | "official" }) => {
+      run: async (input: { path?: string; sourceKind?: "local" | "external" | "bundled" }) => {
         if (!isNonEmptyString(input.path)) {
           return errorResult("skill.import requires path");
         }
@@ -1662,8 +1662,8 @@ function requirePersonalSkill(
 ): { ok: true; skillDir: string; skillPath: string } | ToolResult {
   const existing = options.registry.get(name);
   if (existing !== undefined) {
-    if (!isLoadedSkill(existing) || existing.sourceKind !== "personal") {
-      return errorResult(`Skill ${name} is not a local personal skill and cannot be modified here.`);
+    if (!isLoadedSkill(existing) || existing.sourceKind !== "local") {
+      return errorResult(`Skill ${name} is not a local skill and cannot be modified here.`);
     }
 
     return {
@@ -1673,7 +1673,7 @@ function requirePersonalSkill(
     };
   }
 
-  return errorResult(`Local personal skill not found: ${name}`);
+  return errorResult(`Local skill not found: ${name}`);
 }
 
 function isPersonalSkillTarget(
@@ -1684,7 +1684,7 @@ function isPersonalSkillTarget(
 
 async function reloadPersonalSkill(options: SkillToolsOptions, skillPath: string): Promise<LoadedSkill> {
   const loaded = await hydrateSkillResources(parseSkillFile(skillPath, await readFile(skillPath, "utf8"), {
-    sourceKind: "personal",
+    sourceKind: "local",
     sourceRoot: options.personalSkillsRoot
   }));
   options.registry.register(loaded);
@@ -1864,7 +1864,7 @@ async function resolveSkillSnapshotPath(
   }
   const relativeSnapshot = relative(canonicalRoot, canonicalSnapshot);
   if (relativeSnapshot.startsWith("..") || relativeSnapshot.startsWith("/")) {
-    return errorResult("Skill snapshot path must stay inside the personal skill snapshot directory.");
+    return errorResult("Skill snapshot path must stay inside the local skill snapshot directory.");
   }
   const skillFile = await stat(join(canonicalSnapshot, "SKILL.md")).catch(() => undefined);
   if (skillFile === undefined || !skillFile.isFile()) {
