@@ -93,10 +93,11 @@ import { InMemorySessionDB } from "./session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
 import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
 import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_FILES } from "./skills/skill-limits.js";
+import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "./skills/skill-bundled-sync.js";
 import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
-import { createSkillTools } from "./skills/skill-tools.js";
+import { buildSkillFileContent, createSkillTools } from "./skills/skill-tools.js";
 import { createSkillRouteTelemetry } from "./skills/skill-usage-telemetry.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { builtinTools } from "./tools/builtin-tools.js";
@@ -3668,6 +3669,78 @@ for (let index = 0; index < MAX_SKILL_RESOURCE_FILES + 10; index += 1) {
 }
 const resourceLimitSkill = (await loadSkillsFromDirectory(resourceLimitRoot, { sourceKind: "local", sourceRoot: resourceLimitRoot })).skills[0];
 assert((resourceLimitSkill?.resources?.length ?? 0) <= MAX_SKILL_RESOURCE_FILES, "expected skill resource scan to obey file count limit");
+const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-sync-"));
+const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-local-"));
+const bundledNestedSkillDir = join(bundledSyncRoot, "media", "proof-skill");
+const bundledLocalSkillDir = join(bundledSyncLocalRoot, "media", "proof-skill");
+await mkdir(bundledNestedSkillDir, { recursive: true });
+await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+  name: "bundled-proof-skill",
+  description: "Bundled sync proof skill.",
+  category: "research",
+  whenToUse: ["when proving bundled sync"],
+  requiredToolsets: ["core"],
+  instructions: "Bundled instructions v1."
+}), "utf8");
+const bundledSyncInitial = await syncBundledSkills({
+  bundledSkillsDir: bundledSyncRoot,
+  localSkillsRoot: bundledSyncLocalRoot
+});
+assert(bundledSyncInitial.copied === 1, "expected missing bundled skill to copy into local root");
+assert(await stat(join(bundledLocalSkillDir, "SKILL.md")).then((entry) => entry.isFile()).catch(() => false), "expected bundled sync to preserve relative skill path");
+assert((await readFile(join(bundledSyncLocalRoot, ".bundled_manifest.json"), "utf8")).includes("bundled-proof-skill"), "expected bundled manifest to record synced skill");
+await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+  name: "bundled-proof-skill",
+  description: "Bundled sync proof skill.",
+  category: "research",
+  whenToUse: ["when proving bundled sync"],
+  requiredToolsets: ["core"],
+  instructions: "Bundled instructions v2."
+}), "utf8");
+const bundledSyncUpdated = await syncBundledSkills({
+  bundledSkillsDir: bundledSyncRoot,
+  localSkillsRoot: bundledSyncLocalRoot
+});
+assert(bundledSyncUpdated.updated === 1, "expected unmodified local bundled copy to receive bundled update");
+assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v2."), "expected local bundled copy to contain updated bundled instructions");
+await writeFile(join(bundledLocalSkillDir, "SKILL.md"), buildSkillFileContent({
+  name: "bundled-proof-skill",
+  description: "Locally evolved bundled skill.",
+  category: "research",
+  whenToUse: ["when proving bundled sync"],
+  requiredToolsets: ["core"],
+  instructions: "Locally evolved instructions."
+}), "utf8");
+await writeFile(join(bundledNestedSkillDir, "SKILL.md"), buildSkillFileContent({
+  name: "bundled-proof-skill",
+  description: "Bundled sync proof skill.",
+  category: "research",
+  whenToUse: ["when proving bundled sync"],
+  requiredToolsets: ["core"],
+  instructions: "Bundled instructions v3."
+}), "utf8");
+const bundledSyncUserModified = await syncBundledSkills({
+  bundledSkillsDir: bundledSyncRoot,
+  localSkillsRoot: bundledSyncLocalRoot
+});
+assert(bundledSyncUserModified.userModified === 1, "expected user-modified bundled working copy to be preserved");
+assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Locally evolved instructions."), "expected bundled sync not to overwrite user-modified local skill");
+const rebaselineResult = await resetBundledSkill({
+  name: "bundled-proof-skill",
+  mode: "rebaseline",
+  bundledSkillsDir: bundledSyncRoot,
+  localSkillsRoot: bundledSyncLocalRoot
+});
+assert(rebaselineResult.ok, "expected bundled rebaseline reset to succeed");
+assert((await hashSkillDirectory(bundledLocalSkillDir)).length === 32, "expected bundled skill directory hash to be stable");
+const restoreResult = await resetBundledSkill({
+  name: "bundled-proof-skill",
+  mode: "restore",
+  bundledSkillsDir: bundledSyncRoot,
+  localSkillsRoot: bundledSyncLocalRoot
+});
+assert(restoreResult.ok, "expected bundled restore reset to succeed");
+assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v3."), "expected bundled restore to replace local copy with bundled baseline");
 const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));
 const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-workspace-"));
 const mcpServerScript = join(mcpWorkspace, "fake-mcp-server.js");
@@ -6620,7 +6693,7 @@ const liveSkillRuntime = await createRuntime({
   sessionId: "provider-session-stable-skill-smoke",
   profileId: "smoke",
   workspaceRoot: liveSkillWorkspace,
-  personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
+  localSkillsRoot: liveSkillProjectSkillsRoot,
   projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
   skillConfig: {
     "provider-file-proof": {
@@ -6652,7 +6725,7 @@ const refreshedSkillRuntime = await createRuntime({
   sessionId: "provider-session-refreshed-skill-smoke",
   profileId: "smoke",
   workspaceRoot: liveSkillWorkspace,
-  personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
+  localSkillsRoot: liveSkillProjectSkillsRoot,
   projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
   skillConfig: {
     "provider-file-proof": {
@@ -6920,6 +6993,7 @@ const templateRuntime = await createRuntime({
   sessionId: "provider-template-skill-smoke",
   profileId: "smoke",
   workspaceRoot: templateSkillWorkspace,
+  localSkillsRoot: join(templateSkillWorkspace, ".estacoda", "skills"),
   providerRegistry: templateProviderRegistry,
   model: {
     id: "deepseek-chat",
@@ -7141,6 +7215,7 @@ const scriptRuntime = await createRuntime({
   sessionId: "provider-script-skill-smoke",
   profileId: "smoke",
   workspaceRoot: scriptSkillWorkspace,
+  localSkillsRoot: join(scriptSkillWorkspace, ".estacoda", "skills"),
   providerRegistry: scriptProviderRegistry,
   model: {
     id: "deepseek-chat",
@@ -7416,6 +7491,7 @@ const composedRuntime = await createRuntime({
   sessionId: "provider-composed-skill-smoke",
   profileId: "smoke",
   workspaceRoot: composedSkillWorkspace,
+  localSkillsRoot: join(composedSkillWorkspace, ".estacoda", "skills"),
   providerRegistry: composedProviderRegistry,
   model: {
     id: "deepseek-chat",
@@ -7540,6 +7616,7 @@ const packageRefreshRuntime = await createRuntime({
   sessionId: "provider-package-refresh-before",
   profileId: "smoke",
   workspaceRoot: packageRefreshWorkspace,
+  localSkillsRoot: join(packageRefreshWorkspace, ".estacoda", "skills"),
   providerRegistry: packageRefreshRegistry,
   model: {
     id: "deepseek-chat",
@@ -7562,6 +7639,7 @@ const packageRefreshRuntimeAfter = await createRuntime({
   sessionId: "provider-package-refresh-after",
   profileId: "smoke",
   workspaceRoot: packageRefreshWorkspace,
+  localSkillsRoot: join(packageRefreshWorkspace, ".estacoda", "skills"),
   providerRegistry: packageRefreshRegistry,
   model: {
     id: "deepseek-chat",
@@ -8444,6 +8522,7 @@ const resetRuntimeFactory = async (sessionId: string) => createRuntime({
   sessionId,
   profileId: "smoke",
   workspaceRoot: resetSkillWorkspace,
+  localSkillsRoot: join(resetSkillWorkspace, ".estacoda", "skills"),
   trustStorePath: resetTrustStorePath,
   model: {
     id: "smoke-model",
@@ -9252,6 +9331,7 @@ const filteredSkillRuntime = await createRuntime({
   profileId: "smoke",
   workspaceRoot: visibilityWorkspace,
   homeDir: visibilityHome,
+  localSkillsRoot: visibilitySkillRoot,
   providerRegistry: visibilityProviderRegistry,
   currentPlatform: "darwin",
   model: {
@@ -9292,6 +9372,7 @@ const availableSkillRuntime = await createRuntime({
   profileId: "smoke",
   workspaceRoot: visibilityWorkspace,
   homeDir: visibilityHome,
+  localSkillsRoot: visibilitySkillRoot,
   enableWebNetwork: true,
   telegramReady: true,
   browserBackend: createMockBrowserBackend({
@@ -10039,6 +10120,7 @@ const deferredRouteUsageRuntime = await createRuntime({
   sessionId: deferredRouteUsageSessionId,
   profileId: "smoke",
   workspaceRoot: deferredRouteUsageWorkspace,
+  localSkillsRoot: join(deferredRouteUsageWorkspace, ".estacoda", "skills"),
   providerRegistry: deferredRouteUsageRegistry,
   model: {
     id: "gpt-4.1-mini",
@@ -10256,6 +10338,7 @@ const workspaceRiskBaselineRuntime = await createRuntime({
   sessionId: "workspace-risk-baseline-smoke",
   profileId: "smoke",
   workspaceRoot: workspaceRiskBaselineWorkspace,
+  localSkillsRoot: join(workspaceRiskBaselineWorkspace, ".estacoda", "skills"),
   providerRegistry: workspaceRiskBaselineRegistry,
   enableWebNetwork: true,
   webFetch: async () => ({

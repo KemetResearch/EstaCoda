@@ -34,6 +34,7 @@ import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
 import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt
@@ -389,7 +390,7 @@ export class AgentLoop {
     const selectedSkill = intent.suggestedSkills[0];
     const selectedSkillInstructions = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
       ? undefined
-      : selectedSkill.instructions;
+      : selectedSkill.providerInstructions?.content ?? selectedSkill.instructions;
     const selectedSkillResources = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
       ? undefined
       : selectedSkill.resources;
@@ -413,7 +414,9 @@ export class AgentLoop {
     await this.#recordRouteUsage({
       intent,
       selectedSkill,
-      channel: input.channel
+      channel: input.channel,
+      userText: effectiveText,
+      onEvent: input.onEvent
     });
 
     if (selectedSkill !== undefined) {
@@ -1554,10 +1557,25 @@ export class AgentLoop {
     intent: IntentRoute;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     channel: ChannelKind;
+    userText: string;
+    onEvent?: RuntimeEventSink;
   }): Promise<void> {
+    const promptHash = hashSkillRoutePrompt(input.userText);
+    const timestamp = new Date().toISOString();
+    const routeTelemetry = input.intent.suggestedSkills.map((skill) => createSkillRouteTelemetry({
+      skillName: skill.name,
+      sourceKind: isLoadedSkill(skill) ? skill.sourceKind : "local",
+      selected: input.selectedSkill?.name === skill.name,
+      explicitInvocation: input.intent.invocation?.explicit === true,
+      confidence: input.intent.confidence,
+      labels: input.intent.labels,
+      evidence: input.intent.evidence.map((entry) => `${entry.kind}: ${entry.detail}`),
+      routeId: promptHash,
+      matchedAt: timestamp
+    }));
     const event = {
       kind: "skill-route-usage" as const,
-      timestamp: new Date().toISOString(),
+      timestamp,
       skillName: input.selectedSkill?.name,
       nativeIntent: input.intent.nativeIntent,
       labels: input.intent.labels,
@@ -1571,6 +1589,41 @@ export class AgentLoop {
     };
     await this.#sessionDb.appendEvent(this.#sessionId, event);
     this.#trajectoryRecorder.record("skill-route-usage", event);
+    for (const telemetry of routeTelemetry) {
+      await this.#skillEvolutionStore?.recordSkillRouteTelemetry(telemetry);
+    }
+    await this.#sessionDb.appendEvent(this.#sessionId, {
+      kind: "skill-route-telemetry",
+      telemetry: {
+        promptHash,
+        labels: input.intent.labels,
+        confidence: input.intent.confidence,
+        selectedSkill: input.selectedSkill?.name,
+        explicitInvocation: input.intent.invocation?.explicit === true,
+        candidates: routeTelemetry
+      }
+    });
+    this.#trajectoryRecorder.record("skill-route-telemetry", {
+      promptHash,
+      labels: input.intent.labels,
+      confidence: input.intent.confidence,
+      selectedSkill: input.selectedSkill?.name,
+      explicitInvocation: input.intent.invocation?.explicit === true,
+      candidates: routeTelemetry
+    });
+    await emit(input.onEvent, {
+      kind: "skill-route-telemetry",
+      promptHash,
+      selectedSkill: input.selectedSkill?.name,
+      confidence: input.intent.confidence,
+      candidates: routeTelemetry.map((telemetry) => ({
+        skillName: telemetry.skillName,
+        selected: telemetry.selected,
+        explicitInvocation: telemetry.explicitInvocation,
+        confidence: telemetry.confidence,
+        sourceKind: telemetry.sourceKind
+      }))
+    });
   }
 
   async #recordSecurityRiskEscalation(input: {

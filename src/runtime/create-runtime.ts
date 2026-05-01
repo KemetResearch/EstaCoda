@@ -41,6 +41,7 @@ import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
+import { syncBundledSkills } from "../skills/skill-bundled-sync.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
 import { builtinTools } from "../tools/builtin-tools.js";
@@ -68,8 +69,7 @@ export type RuntimeOptions = {
   sessionId?: string;
   sessionDb?: SessionDB;
   workspaceRoot?: string;
-  personalSkillsRoot?: string;
-  projectSkillsRoot?: string;
+  localSkillsRoot?: string;
   externalSkillRoots?: string[];
   mcpServers?: Record<string, MCPServerConfig>;
   skillAutonomy?: SkillAutonomy;
@@ -175,8 +175,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const personalSkillsRoot = options.personalSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
-  const projectSkillsRoot = options.projectSkillsRoot ?? `${workspaceRoot}/.estacoda/skills`;
+  const localSkillsRoot = options.localSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
   const cronStore = options.cronStore ?? new CronStore({ homeDir: options.homeDir });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
@@ -210,26 +209,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     modelId: options.model.id
   });
 
-  const loadedOfficialSkills = await loadSkillsFromDirectory(new URL("../../skills/official", import.meta.url).pathname, {
-    sourceKind: "bundled"
+  const bundledSkillsDir = new URL("../../skills/official", import.meta.url).pathname;
+  const bundledSync = await syncBundledSkills({
+    bundledSkillsDir,
+    localSkillsRoot
   });
+  const skillLoadWarnings = [...bundledSync.warnings];
   const loadedMcpServers = await loadMcpServers({
     servers: options.mcpServers ?? {}
   });
 
-  for (const skill of loadedOfficialSkills.skills) {
-    skillRegistry.register(skill);
-  }
   for (const server of loadedMcpServers) {
     for (const tool of server.tools) {
       toolRegistry.register(tool);
     }
   }
-  for (const root of [personalSkillsRoot, projectSkillsRoot, ...(options.externalSkillRoots ?? [])]) {
+  for (const root of [localSkillsRoot, ...(options.externalSkillRoots ?? [])]) {
     const loaded = await loadSkillsFromDirectory(root, {
-      sourceKind: root === personalSkillsRoot || root === projectSkillsRoot ? "local" : "external",
+      sourceKind: root === localSkillsRoot ? "local" : "external",
       sourceRoot: root
     }).catch(() => ({ skills: [], errors: [] }));
+    skillLoadWarnings.push(...loaded.errors.map((error) => error.message));
 
     for (const skill of loaded.skills) {
       skillRegistry.register(skill);
@@ -360,7 +360,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createSkillTools({
     registry: skillRegistry,
     visibleRegistry: sessionSkillRegistry,
-    localSkillsRoot: personalSkillsRoot,
+    localSkillsRoot,
+    bundledSkillsRoot: bundledSkillsDir,
     skillEvolutionStore
   })) {
     toolRegistry.register(tool);
@@ -385,7 +386,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillLearningManager = new SkillLearningManager({
     autonomy: options.skillAutonomy ?? "suggest",
     registry: skillRegistry,
-    localSkillsRoot: personalSkillsRoot,
+    localSkillsRoot,
     storePath: skillLearningStorePath,
     sessionDb
   });
@@ -641,7 +642,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
         `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
-        loadedOfficialSkills.errors.length === 0 ? undefined : `skill load warnings: ${loadedOfficialSkills.errors.length}`,
+        skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
     }

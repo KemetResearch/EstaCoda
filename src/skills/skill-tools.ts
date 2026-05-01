@@ -3,6 +3,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
+import { resetBundledSkill } from "./skill-bundled-sync.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile } from "./skill-loader.js";
 import { assertSkillMutable } from "./skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
@@ -12,6 +13,7 @@ export type SkillToolsOptions = {
   registry: SkillRegistry;
   visibleRegistry?: SkillRegistry;
   localSkillsRoot: string;
+  bundledSkillsRoot?: string;
   skillEvolutionStore?: SkillEvolutionStore;
 };
 
@@ -869,6 +871,61 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
             ...toSkillMetadata(loaded),
             snapshotPath: snapshot.path,
             preRollbackSnapshot
+          }
+        };
+      }
+    },
+    {
+      name: "skill.reset",
+      description: "Reset a bundled-derived local skill to its bundled baseline, or rebaseline the current local copy.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          mode: { type: "string", enum: ["restore", "rebaseline"] }
+        },
+        required: ["name"]
+      },
+      riskClass: "workspace-write",
+      toolsets: ["core", "files", "coding"],
+      progressLabel: "resetting bundled skill",
+      maxResultSizeChars: 4000,
+      isAvailable: () => options.bundledSkillsRoot !== undefined,
+      run: async (input: { name?: string; mode?: "restore" | "rebaseline" }) => {
+        if (!isNonEmptyString(input.name)) {
+          return errorResult("skill.reset requires name");
+        }
+        if (options.bundledSkillsRoot === undefined) {
+          return errorResult("skill.reset requires a bundled skills root");
+        }
+        const mode = input.mode ?? "restore";
+        const reset = await resetBundledSkill({
+          name: input.name,
+          mode,
+          bundledSkillsDir: options.bundledSkillsRoot,
+          localSkillsRoot: options.localSkillsRoot
+        });
+        if (!reset.ok) {
+          return errorResult(reset.message);
+        }
+
+        const skillPath = join(options.localSkillsRoot, reset.localPath ?? slugifySkillName(input.name), "SKILL.md");
+        const loaded = await reloadLocalSkill(options, skillPath);
+        await options.skillEvolutionStore?.recordMutation({
+          skillName: loaded.name,
+          source: loaded.sourceKind,
+          provenanceKind: loaded.provenance?.kind,
+          kind: "rolled-back"
+        });
+
+        return {
+          ok: true,
+          content: reset.message,
+          metadata: {
+            ...toSkillMetadata(loaded),
+            mode,
+            bundledPath: reset.bundledPath,
+            localPath: reset.localPath
           }
         };
       }
