@@ -5,8 +5,8 @@ This file is for engineers and coding agents validating the current milestone.
 ## Install / Bootstrap
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun install
+cd /path/to/EstaCoda
+bun install
 ```
 
 ## Fast Regression Checks
@@ -14,9 +14,9 @@ cd /Users/ahnwy/estacoda-v2
 Run these first:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run typecheck
-/Users/ahnwy/.bun/bin/bun run smoke
+cd /path/to/EstaCoda
+bun run typecheck
+bun run smoke
 ```
 
 These should stay green before and after most changes.
@@ -29,16 +29,16 @@ Evidence level:
 ## MCP Checks
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- mcp status
-/Users/ahnwy/.bun/bin/bun run dev -- mcp reload
+cd /path/to/EstaCoda
+bun run dev -- mcp status
+bun run dev -- mcp reload
 ```
 
 Interactive CLI:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun run dev
 ```
 
 Inside the session:
@@ -62,8 +62,8 @@ Evidence level:
 ## ACP Checks
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- acp manifest
+cd /path/to/EstaCoda
+bun run dev -- acp manifest
 ```
 
 Current evidence level:
@@ -78,16 +78,16 @@ Current evidence level:
 ## CLI Sanity Checks
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- setup
-/Users/ahnwy/.bun/bin/bun run dev -- verify
-/Users/ahnwy/.bun/bin/bun run dev -- settings
-/Users/ahnwy/.bun/bin/bun run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
-/Users/ahnwy/.bun/bin/bun run dev -- browser test
-/Users/ahnwy/.bun/bin/bun run dev -- telegram setup
-/Users/ahnwy/.bun/bin/bun run dev -- telegram sync-commands
-/Users/ahnwy/.bun/bin/bun run dev -- doctor --live
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun run dev -- setup
+bun run dev -- verify
+bun run dev -- settings
+bun run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
+bun run dev -- browser test
+bun run dev -- telegram setup
+bun run dev -- telegram sync-commands
+bun run dev -- doctor --live
+bun run dev
 ```
 
 ## Fresh First-Run Onboarding E2E
@@ -95,10 +95,10 @@ cd /Users/ahnwy/estacoda-v2
 Use this when validating the real first-launch experience rather than an already-configured developer machine:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
+cd /path/to/EstaCoda
 rm -rf /tmp/estacoda-e2e-home
 mkdir -p /tmp/estacoda-e2e-home
-HOME=/tmp/estacoda-e2e-home /Users/ahnwy/.bun/bin/bun run dev
+HOME=/tmp/estacoda-e2e-home bun run dev
 ```
 
 Expected path:
@@ -154,33 +154,33 @@ Evidence level:
 Generate a tracked run folder:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run alpha:harness
+cd /path/to/EstaCoda
+bun run alpha:harness
 ```
 
 Then follow:
 
-- [docs/INTERNAL_ALPHA_RUNBOOK.md](/Users/ahnwy/estacoda-v2/docs/INTERNAL_ALPHA_RUNBOOK.md)
+- [docs/INTERNAL_ALPHA_RUNBOOK.md](docs/INTERNAL_ALPHA_RUNBOOK.md)
 
 ## Evaluation Substrate
 
 Generate an evaluation run folder:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run eval:substrate
+cd /path/to/EstaCoda
+bun run eval:substrate
 ```
 
 Then use:
 
-- [docs/EVALUATION.md](/Users/ahnwy/estacoda-v2/docs/EVALUATION.md)
+- [docs/EVALUATION.md](docs/EVALUATION.md)
 - `evals/tasks/*.json`
 
 For the live provider acceptance sweep, run:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run provider:hardening
+cd /path/to/EstaCoda
+bun run provider:hardening
 ```
 
 This must run from a shell where the provider credentials are already exported.
@@ -201,8 +201,8 @@ Evidence level:
 ## CLI Session Checks
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun run dev
 ```
 
 Inside the interactive CLI:
@@ -219,16 +219,16 @@ Inside the interactive CLI:
 ### Setup
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- telegram status
-/Users/ahnwy/.bun/bin/bun run dev -- gateway status
+cd /path/to/EstaCoda
+bun run dev -- telegram status
+bun run dev -- gateway status
 ```
 
 ### Start gateway
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- gateway start --telegram
+cd /path/to/EstaCoda
+bun run dev -- gateway start --telegram
 ```
 
 Restart the gateway after channel-formatting, progress, approval, or attachment-path changes. The running foreground process will not hot-reload those edits.
@@ -295,7 +295,7 @@ At a high level:
 - browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, screenshot vision, dialog response, and mock click/image-list automation tools
 - browser setup/test aliases and settings browser view
 - local model setup/status/test with Ollama-compatible `/models` discovery, no-key config, auto-select for one visible model, and blocked-endpoint recovery
-- voice setup/status/settings config for Hermes-aligned TTS/STT defaults and provider key-env persistence
+- voice setup/status/settings config for agent-runtime aligned TTS/STT defaults and provider key-env persistence
 - OpenAI-compatible `voice.speak` execution with mocked audio response, audio-cache write, and artifact recording
 - OpenAI-compatible `voice.transcribe` execution with mocked transcription response, transcript-cache write, artifact recording, and audio prompt-tool suggestion
 - artifact hardening for prompt-safe generated artifact references, internal `localPath` delivery, invalid kind rejection, summary truncation, and invalid image aspect-ratio rejection

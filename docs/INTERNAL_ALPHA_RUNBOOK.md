@@ -27,7 +27,7 @@ Each internal alpha run should cover:
 Initialize a fresh run folder:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
+cd /path/to/EstaCoda
 bun run alpha:harness
 ```
 

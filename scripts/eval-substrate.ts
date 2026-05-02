@@ -179,9 +179,9 @@ function renderCommands(
     "",
     "```bash",
     `cd ${environment.workspaceRoot}`,
-    "/Users/ahnwy/.bun/bin/bun run typecheck",
-    "/Users/ahnwy/.bun/bin/bun run smoke",
-    "/Users/ahnwy/.bun/bin/bun run dev -- doctor --live",
+    "bun run typecheck",
+    "bun run smoke",
+    "bun run dev -- doctor --live",
     "```",
     ""
   ];

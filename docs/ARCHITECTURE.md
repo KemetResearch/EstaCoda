@@ -6,108 +6,108 @@ Evidence note:
 
 - this file is primarily a structural map of the implemented codebase
 - unless a section says otherwise, read architecture statements here as `implemented but not live-proven`
-- use [HANDOFF.md](/Users/ahnwy/estacoda-v2/docs/HANDOFF.md) and [TESTING.md](/Users/ahnwy/estacoda-v2/docs/TESTING.md) for live-vs-smoke evidence
+- use [HANDOFF.md](docs/HANDOFF.md) and [TESTING.md](docs/TESTING.md) for live-vs-smoke evidence
 
 ## System Map
 
 ### Entrypoints
 
-- [src/index.ts](/Users/ahnwy/estacoda-v2/src/index.ts)
+- [src/index.ts](src/index.ts)
   Main boot flow. Also restores the active CLI workspace session from the persisted CLI session store before interactive launch. `implemented but not live-proven`
-- [src/cli/cli.ts](/Users/ahnwy/estacoda-v2/src/cli/cli.ts)
+- [src/cli/cli.ts](src/cli/cli.ts)
   CLI command surface.
-- [src/cli/session-loop.ts](/Users/ahnwy/estacoda-v2/src/cli/session-loop.ts)
+- [src/cli/session-loop.ts](src/cli/session-loop.ts)
   Interactive terminal loop. Handles in-session admin commands like `/sessions`, `/search`, `/switch`, and `/reset`. `smoke-tested`
-- [src/cli/cli-session-store.ts](/Users/ahnwy/estacoda-v2/src/cli/cli-session-store.ts)
+- [src/cli/cli-session-store.ts](src/cli/cli-session-store.ts)
   Persisted active CLI session pointer keyed by workspace root. `smoke-tested`
-- [src/channels/gateway-runner.ts](/Users/ahnwy/estacoda-v2/src/channels/gateway-runner.ts)
+- [src/channels/gateway-runner.ts](src/channels/gateway-runner.ts)
   Telegram gateway runtime wrapper.
 
 ### Core orchestration
 
-- [src/runtime/create-runtime.ts](/Users/ahnwy/estacoda-v2/src/runtime/create-runtime.ts)
-- [src/runtime/agent-loop.ts](/Users/ahnwy/estacoda-v2/src/runtime/agent-loop.ts)
-- [src/runtime/intent-router.ts](/Users/ahnwy/estacoda-v2/src/runtime/intent-router.ts)
+- [src/runtime/create-runtime.ts](src/runtime/create-runtime.ts)
+- [src/runtime/agent-loop.ts](src/runtime/agent-loop.ts)
+- [src/runtime/intent-router.ts](src/runtime/intent-router.ts)
 
 ### Prompting
 
-- [src/prompt/prompt-assembly.ts](/Users/ahnwy/estacoda-v2/src/prompt/prompt-assembly.ts)
-- [src/prompt/history-packer.ts](/Users/ahnwy/estacoda-v2/src/prompt/history-packer.ts)
-- [src/prompt/prompt-cache.ts](/Users/ahnwy/estacoda-v2/src/prompt/prompt-cache.ts)
+- [src/prompt/prompt-assembly.ts](src/prompt/prompt-assembly.ts)
+- [src/prompt/history-packer.ts](src/prompt/history-packer.ts)
+- [src/prompt/prompt-cache.ts](src/prompt/prompt-cache.ts)
 
 ### Providers
 
-- [src/providers/provider-executor.ts](/Users/ahnwy/estacoda-v2/src/providers/provider-executor.ts)
-- [src/providers/openai-compatible-provider.ts](/Users/ahnwy/estacoda-v2/src/providers/openai-compatible-provider.ts)
-- [src/providers/provider-router.ts](/Users/ahnwy/estacoda-v2/src/providers/provider-router.ts)
-- [src/providers/auxiliary-provider-router.ts](/Users/ahnwy/estacoda-v2/src/providers/auxiliary-provider-router.ts)
-- [src/providers/credential-pool.ts](/Users/ahnwy/estacoda-v2/src/providers/credential-pool.ts)
-- [src/providers/model-catalog.ts](/Users/ahnwy/estacoda-v2/src/providers/model-catalog.ts)
+- [src/providers/provider-executor.ts](src/providers/provider-executor.ts)
+- [src/providers/openai-compatible-provider.ts](src/providers/openai-compatible-provider.ts)
+- [src/providers/provider-router.ts](src/providers/provider-router.ts)
+- [src/providers/auxiliary-provider-router.ts](src/providers/auxiliary-provider-router.ts)
+- [src/providers/credential-pool.ts](src/providers/credential-pool.ts)
+- [src/providers/model-catalog.ts](src/providers/model-catalog.ts)
 
 ### Tools
 
-- [src/tools/tool-registry.ts](/Users/ahnwy/estacoda-v2/src/tools/tool-registry.ts)
-- [src/tools/tool-executor.ts](/Users/ahnwy/estacoda-v2/src/tools/tool-executor.ts)
-- [src/tools/tool-call-planner.ts](/Users/ahnwy/estacoda-v2/src/tools/tool-call-planner.ts)
-- [src/tools/tool-schema.ts](/Users/ahnwy/estacoda-v2/src/tools/tool-schema.ts)
-- [src/tools/workspace-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/workspace-tools.ts)
-- [src/tools/media-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/media-tools.ts)
-- [src/tools/vision-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/vision-tools.ts)
-- [src/tools/web-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/web-tools.ts)
-- [src/tools/execute-code-tool.ts](/Users/ahnwy/estacoda-v2/src/tools/execute-code-tool.ts)
+- [src/tools/tool-registry.ts](src/tools/tool-registry.ts)
+- [src/tools/tool-executor.ts](src/tools/tool-executor.ts)
+- [src/tools/tool-call-planner.ts](src/tools/tool-call-planner.ts)
+- [src/tools/tool-schema.ts](src/tools/tool-schema.ts)
+- [src/tools/workspace-tools.ts](src/tools/workspace-tools.ts)
+- [src/tools/media-tools.ts](src/tools/media-tools.ts)
+- [src/tools/vision-tools.ts](src/tools/vision-tools.ts)
+- [src/tools/web-tools.ts](src/tools/web-tools.ts)
+- [src/tools/execute-code-tool.ts](src/tools/execute-code-tool.ts)
 
 ### MCP
 
-- [src/mcp/mcp-client.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-client.ts)
+- [src/mcp/mcp-client.ts](src/mcp/mcp-client.ts)
   MCP client transport for stdio and HTTP. stdio path `live-proven`; HTTP path `smoke-tested`
-- [src/mcp/mcp-tools.ts](/Users/ahnwy/estacoda-v2/src/mcp/mcp-tools.ts)
+- [src/mcp/mcp-tools.ts](src/mcp/mcp-tools.ts)
   Discovery/registration layer plus server-level trust-to-risk mapping. `smoke-tested`
 
 ### ACP
 
-- [src/acp/server.ts](/Users/ahnwy/estacoda-v2/src/acp/server.ts)
+- [src/acp/server.ts](src/acp/server.ts)
   ACP stdio JSON-RPC server, in-process ACP session manager, cwd-bound runtime creation, `session/update` streaming, editor-backed file reads via ACP fs requests, and approval bridging for gated shell actions. Basic JetBrains chat + file-read + approval flow is `live-proven`.
 
 ### Browser
 
-- [src/browser/browser-backend.ts](/Users/ahnwy/estacoda-v2/src/browser/browser-backend.ts)
+- [src/browser/browser-backend.ts](src/browser/browser-backend.ts)
   Browser backend abstraction with mock and local Chrome CDP backends. Local CDP supports navigation, snapshots with `@eN` element refs, click/type/scroll/press/back actions, image listing, page-local console capture, raw CDP passthrough, screenshots, and JavaScript dialog response. Cloud backends are recognized in config but remain follow-up implementation work.
-- [src/tools/web-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/web-tools.ts)
-  Web extraction plus Hermes-shaped browser tools: `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`. Provider tool schemas are built from available tools only so unconfigured browser backends do not displace core/skill tools.
+- [src/tools/web-tools.ts](src/tools/web-tools.ts)
+  Web extraction plus structured browser tools: `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`. Provider tool schemas are built from available tools only so unconfigured browser backends do not displace core/skill tools.
 
 ### Cron
 
-- [src/cron/cron-store.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-store.ts)
+- [src/cron/cron-store.ts](src/cron/cron-store.ts)
   Persistent scheduled-task storage at `~/.estacoda/cron/jobs.json`, atomic writes, schedule parsing for relative delays, intervals, cron expressions, and ISO timestamps, prompt safety scanning, optional workspace-local script metadata, plus local output files.
-- [src/cron/cron-tools.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-tools.ts)
-  Hermes-shaped model-facing `cronjob` tool with create/list/update/pause/resume/run/remove actions, skill-list edits, and script fields.
-- [src/cron/cron-runner.ts](/Users/ahnwy/estacoda-v2/src/cron/cron-runner.ts)
+- [src/cron/cron-tools.ts](src/cron/cron-tools.ts)
+  structured model-facing `cronjob` tool with create/list/update/pause/resume/run/remove actions, skill-list edits, and script fields.
+- [src/cron/cron-runner.ts](src/cron/cron-runner.ts)
   Scheduler tick runner that executes due jobs, enforces `.tick.lock`, runs bounded workspace-contained scripts without shell expansion, handles `[SILENT]`, delivers origin/Telegram outputs when configured, and writes wrapped output to `~/.estacoda/cron/output/`.
 
 ### Skills
 
-- [src/skills/skill-loader.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-loader.ts)
-- [src/skills/skill-registry.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-registry.ts)
-- [src/skills/skill-visibility.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-visibility.ts)
-- [src/skills/skill-tools.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-tools.ts)
-- [src/skills/skill-workflow-planner.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-workflow-planner.ts)
+- [src/skills/skill-loader.ts](src/skills/skill-loader.ts)
+- [src/skills/skill-registry.ts](src/skills/skill-registry.ts)
+- [src/skills/skill-visibility.ts](src/skills/skill-visibility.ts)
+- [src/skills/skill-tools.ts](src/skills/skill-tools.ts)
+- [src/skills/skill-workflow-planner.ts](src/skills/skill-workflow-planner.ts)
 
 ### Channels
 
-- [src/channels/channel-gateway.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-gateway.ts)
-- [src/channels/channel-session-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-session-store.ts)
-- [src/channels/telegram-adapter.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-adapter.ts)
-- [src/channels/channel-approval-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-approval-store.ts)
-- [src/channels/telegram-format.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-format.ts)
-- [src/channels/activity-labels.ts](/Users/ahnwy/estacoda-v2/src/channels/activity-labels.ts)
+- [src/channels/channel-gateway.ts](src/channels/channel-gateway.ts)
+- [src/channels/channel-session-store.ts](src/channels/channel-session-store.ts)
+- [src/channels/telegram-adapter.ts](src/channels/telegram-adapter.ts)
+- [src/channels/channel-approval-store.ts](src/channels/channel-approval-store.ts)
+- [src/channels/telegram-format.ts](src/channels/telegram-format.ts)
+- [src/channels/activity-labels.ts](src/channels/activity-labels.ts)
 
 ### Memory / session / trajectory
 
-- [src/memory/memory-store.ts](/Users/ahnwy/estacoda-v2/src/memory/memory-store.ts)
-- [src/memory/local-memory-provider.ts](/Users/ahnwy/estacoda-v2/src/memory/local-memory-provider.ts)
-- [src/session/sqlite-session-db.ts](/Users/ahnwy/estacoda-v2/src/session/sqlite-session-db.ts)
-- [src/session/in-memory-session-db.ts](/Users/ahnwy/estacoda-v2/src/session/in-memory-session-db.ts)
-- [src/trajectory/trajectory-recorder.ts](/Users/ahnwy/estacoda-v2/src/trajectory/trajectory-recorder.ts)
+- [src/memory/memory-store.ts](src/memory/memory-store.ts)
+- [src/memory/local-memory-provider.ts](src/memory/local-memory-provider.ts)
+- [src/session/sqlite-session-db.ts](src/session/sqlite-session-db.ts)
+- [src/session/in-memory-session-db.ts](src/session/in-memory-session-db.ts)
+- [src/trajectory/trajectory-recorder.ts](src/trajectory/trajectory-recorder.ts)
 
 ## Runtime Composition
 
@@ -353,13 +353,13 @@ Interactive CLI session behavior is now split into two layers:
 2. **workspace session pointer**
    - a persisted mapping from workspace root to the active CLI session id
 
-The CLI startup path in [src/index.ts](/Users/ahnwy/estacoda-v2/src/index.ts) now:
+The CLI startup path in [src/index.ts](src/index.ts) now:
 
-1. loads the persisted workspace session id from [src/cli/cli-session-store.ts](/Users/ahnwy/estacoda-v2/src/cli/cli-session-store.ts)
+1. loads the persisted workspace session id from [src/cli/cli-session-store.ts](src/cli/cli-session-store.ts)
 2. builds the runtime with that session when present
 3. persists the resulting active session id back to the same store
 
-The interactive loop in [src/cli/session-loop.ts](/Users/ahnwy/estacoda-v2/src/cli/session-loop.ts) then updates that pointer when:
+The interactive loop in [src/cli/session-loop.ts](src/cli/session-loop.ts) then updates that pointer when:
 
 - `/reset` or `/new` creates a fresh session
 - `/switch <session-id>` adopts an existing session
@@ -375,7 +375,7 @@ Important traits:
 - approval modes are `strict`, `adaptive`, and `open`
 - `adaptive` is the default and now uses deterministic triage first, then an optional auxiliary security assessor for ambiguous cases
 - `open` still preserves a hard dangerous-command floor
-- `/yolo` is a session-scoped CLI and gateway toggle for `open` mode, aligned with Hermes operator ergonomics, but it cannot bypass the hard floor
+- `/yolo` is a session-scoped CLI and gateway toggle for `open` mode, aligned with reference agent operator ergonomics, but it cannot bypass the hard floor
 - assessor failures, malformed output, or timeouts fall back to `ask`
 - tool risk classes drive gating
 - structured `targetKey` values are the approval boundary

@@ -18,7 +18,7 @@ Evidence labels used in this document:
 
 ## 1. Product Goal
 
-EstaCoda v2 is intended to become a Hermes-class autonomous agent platform with:
+EstaCoda v2 is intended to become a production-grade autonomous agent platform with:
 
 - a real provider-backed agent loop
 - reusable skill packages as procedural knowledge
@@ -27,7 +27,7 @@ EstaCoda v2 is intended to become a Hermes-class autonomous agent platform with:
 - multi-channel delivery, with Telegram as the first real adapter
 - a runtime that can learn over time without drifting away from deterministic operator control
 
-The guiding product rule is: stay Hermes-aligned by default unless there is a deliberate, documented reason to diverge.
+The guiding product rule is: stay agent-runtime aligned by default unless there is a deliberate, documented reason to diverge.
 
 ## 2. Current Milestone
 
@@ -43,10 +43,10 @@ What has been achieved:
 - Internal alpha testing now has a repeatable harness and runbook.
 - Vision-backed image analysis support has been added to the runtime and is now live-proven with Kimi; broader provider coverage still depends on configuring and validating additional vision-capable routes.
 - A Phase 0 evaluation substrate now exists for future self-evolution work, but it is not yet an autonomous optimization loop.
-- A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
+- A structured MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
 - An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, editor-backed file reads, and a live-proven JetBrains approval flow.
 - A cron foundation now exists with persistent jobs, prompt safety scanning, tick locking, bounded workspace-local script-backed jobs, the `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks. It is `smoke-tested`; broader channel delivery remains follow-up work.
-- Browser automation now has a Hermes-shaped local-CDP core: status/config, `/browser status|connect|disconnect`, navigate, snapshot, click, type, scroll, press, back, image listing, page-local console capture, raw CDP passthrough, screenshot capture, screenshot vision analysis, and basic JavaScript dialog response. It is `smoke-tested`; Browserbase, Browser Use, Firecrawl, Camofox, and persistent dialog supervisor/cloud dialog bridging remain follow-up work.
+- Browser automation now has a structured local-CDP core: status/config, `/browser status|connect|disconnect`, navigate, snapshot, click, type, scroll, press, back, image listing, page-local console capture, raw CDP passthrough, screenshot capture, screenshot vision analysis, and basic JavaScript dialog response. It is `smoke-tested`; Browserbase, Browser Use, Firecrawl, Camofox, and persistent dialog supervisor/cloud dialog bridging remain follow-up work.
 - First-run onboarding now covers interface language/style, workspace trust, primary provider/model, optional backup model, protected local credential capture, security mode, workflow-learning mode, optional capabilities, readiness verification, and immediate session start. English and Arabic onboarding are operator-tested; full runtime CLI localization remains follow-up work.
 
 Evidence:
@@ -68,9 +68,9 @@ Evidence:
 - Security-mode and skill-autonomy settings now render localized English/Arabic labels from `ui.language` while preserving English config values. `smoke-tested`
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
 - Provider hardening now has models.dev-backed metadata infrastructure wrapped around the existing model catalog resolver, explicit provider/model execution, catalog-only discovery adapters, primary-provider-aware auxiliary routing, credential-pool-preserving provider execution, and runtime config catalog resolution that defaults to `allowNetwork: false`. `smoke-tested`
-- Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
-- Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
-- Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support with Seedream 5 as the default plus `image models`/`--model-version` aliases for provider-specific versions, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, native `image-generation` routing with attachment-aware precedence, exactly-once deterministic `image.generate` execution, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
+- Local model setup now has `estacoda local setup/status/test`, aligned with reference agent' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
+- Voice configuration foundation now has agent-runtime aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
+- Image generation foundation now has agent-runtime aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support with Seedream 5 as the default plus `image models`/`--model-version` aliases for provider-specific versions, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, native `image-generation` routing with attachment-aware precedence, exactly-once deterministic `image.generate` execution, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
 - Telegram image generation and delivery via BytePlus/Seedream was live-tested end-to-end with generated images attached in Telegram. `live-proven`
 
 ## 3. Current Working Capabilities
@@ -209,82 +209,82 @@ Project-local overlays live under `<workspace>/.estacoda/` and can override or e
 
 ## 5. Important Files
 
-- [src/index.ts](/Users/ahnwy/estacoda-v2/src/index.ts)
+- [src/index.ts](src/index.ts)
   Main entrypoint. Best place to understand startup modes.
 
-- [src/runtime/create-runtime.ts](/Users/ahnwy/estacoda-v2/src/runtime/create-runtime.ts)
+- [src/runtime/create-runtime.ts](src/runtime/create-runtime.ts)
   Runtime composition root. Most important architectural file.
 
-- [src/runtime/agent-loop.ts](/Users/ahnwy/estacoda-v2/src/runtime/agent-loop.ts)
+- [src/runtime/agent-loop.ts](src/runtime/agent-loop.ts)
   Core agent orchestration. If behavior feels “wrong,” it is usually here or in prompt assembly.
 
-- [src/prompt/prompt-assembly.ts](/Users/ahnwy/estacoda-v2/src/prompt/prompt-assembly.ts)
+- [src/prompt/prompt-assembly.ts](src/prompt/prompt-assembly.ts)
   Prompt layering and attachment/skill/tool-result injection.
 
-- [src/providers/provider-executor.ts](/Users/ahnwy/estacoda-v2/src/providers/provider-executor.ts)
+- [src/providers/provider-executor.ts](src/providers/provider-executor.ts)
   Provider route execution, fallback behavior, and tool-call stream collection.
 
-- [src/providers/openai-compatible-provider.ts](/Users/ahnwy/estacoda-v2/src/providers/openai-compatible-provider.ts)
+- [src/providers/openai-compatible-provider.ts](src/providers/openai-compatible-provider.ts)
   Network transport for OpenAI-compatible providers.
 
-- [src/providers/auxiliary-provider-router.ts](/Users/ahnwy/estacoda-v2/src/providers/auxiliary-provider-router.ts)
+- [src/providers/auxiliary-provider-router.ts](src/providers/auxiliary-provider-router.ts)
   Defines auxiliary routes including `vision` and the dedicated `approval` assessor lane.
 
-- [src/config/runtime-config.ts](/Users/ahnwy/estacoda-v2/src/config/runtime-config.ts)
+- [src/config/runtime-config.ts](src/config/runtime-config.ts)
   Config schema, merging, provider registry construction, channel config, and setup helpers.
 
-- [src/channels/channel-gateway.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-gateway.ts)
+- [src/channels/channel-gateway.ts](src/channels/channel-gateway.ts)
   Channel session handling, approvals, commands, and runtime bridging.
 
-- [src/channels/channel-session-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-session-store.ts)
+- [src/channels/channel-session-store.ts](src/channels/channel-session-store.ts)
   Persisted channel-session mapping, normalized session-key policy, and auto-reset lifecycle logic.
 
-- [src/channels/gateway-runner.ts](/Users/ahnwy/estacoda-v2/src/channels/gateway-runner.ts)
+- [src/channels/gateway-runner.ts](src/channels/gateway-runner.ts)
   Telegram gateway startup path and diagnostics.
 
-- [src/channels/telegram-adapter.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-adapter.ts)
+- [src/channels/telegram-adapter.ts](src/channels/telegram-adapter.ts)
   Telegram polling, attachment download, send/edit progress messages, callback handling.
 
-- [src/channels/telegram-format.ts](/Users/ahnwy/estacoda-v2/src/channels/telegram-format.ts)
+- [src/channels/telegram-format.ts](src/channels/telegram-format.ts)
   Telegram final-reply formatting layer.
 
-- [src/channels/channel-approval-store.ts](/Users/ahnwy/estacoda-v2/src/channels/channel-approval-store.ts)
+- [src/channels/channel-approval-store.ts](src/channels/channel-approval-store.ts)
   Persistent approval storage.
 
-- [src/tools/tool-executor.ts](/Users/ahnwy/estacoda-v2/src/tools/tool-executor.ts)
+- [src/tools/tool-executor.ts](src/tools/tool-executor.ts)
   Applies security decisions, target keys, tool execution, and result persistence.
 
-- [src/tools/vision-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/vision-tools.ts)
+- [src/tools/vision-tools.ts](src/tools/vision-tools.ts)
   Vision-backed image analysis via the auxiliary vision route.
 
-- [src/skills/skill-tools.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-tools.ts)
+- [src/skills/skill-tools.ts](src/skills/skill-tools.ts)
   Skill management surface.
 
-- [src/skills/skill-loader.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-loader.ts)
+- [src/skills/skill-loader.ts](src/skills/skill-loader.ts)
   Skill parsing, hydration, and resource discovery.
 
-- [src/skills/skill-visibility.ts](/Users/ahnwy/estacoda-v2/src/skills/skill-visibility.ts)
-  Hermes-style session visibility filtering.
+- [src/skills/skill-visibility.ts](src/skills/skill-visibility.ts)
+  operator-style session visibility filtering.
 
-- [src/memory/local-memory-provider.ts](/Users/ahnwy/estacoda-v2/src/memory/local-memory-provider.ts)
+- [src/memory/local-memory-provider.ts](src/memory/local-memory-provider.ts)
   Current memory write path.
 
-- [src/session/sqlite-session-db.ts](/Users/ahnwy/estacoda-v2/src/session/sqlite-session-db.ts)
+- [src/session/sqlite-session-db.ts](src/session/sqlite-session-db.ts)
   Persistent session/event/message store used by the gateway.
 
-- [src/smoke.ts](/Users/ahnwy/estacoda-v2/src/smoke.ts)
+- [src/smoke.ts](src/smoke.ts)
   Current regression net. Very important.
 
-- [docs/INTERNAL_ALPHA_RUNBOOK.md](/Users/ahnwy/estacoda-v2/docs/INTERNAL_ALPHA_RUNBOOK.md)
+- [docs/INTERNAL_ALPHA_RUNBOOK.md](docs/INTERNAL_ALPHA_RUNBOOK.md)
   Manual operator runbook for real alpha passes.
 
-- [NEXT_PHASE_ROADMAP.md](/Users/ahnwy/estacoda-v2/NEXT_PHASE_ROADMAP.md)
+- [NEXT_PHASE_ROADMAP.md](NEXT_PHASE_ROADMAP.md)
   Current tracked roadmap.
 
-- [docs/EVALUATION.md](/Users/ahnwy/estacoda-v2/docs/EVALUATION.md)
+- [docs/EVALUATION.md](docs/EVALUATION.md)
   Phase 0 evaluation-substrate overview for future self-evolution work.
 
-- [scripts/eval-substrate.ts](/Users/ahnwy/estacoda-v2/scripts/eval-substrate.ts)
+- [scripts/eval-substrate.ts](scripts/eval-substrate.ts)
   Generates a repeatable evaluation run folder and task manifest from `evals/tasks`.
 
 ## 6. Execution Flow
@@ -365,10 +365,10 @@ For Telegram:
 - Telegram image vision path is live-proven with Kimi, but not yet broadly live-proven across providers after the native-main-route wiring.
 - Live provider support is strongest for OpenAI-compatible providers; catalog-only providers are discovery-only.
 - Memory promotion is off the pre-routing full-scan path, but a future idle/background queue could make promotion fully non-blocking after response delivery.
-- Telegram final reply formatting is much better than before, but still not full Hermes parity.
+- Telegram final reply formatting is much better than before, but still not full feature parity.
 - Channel verbosity/profile controls are not implemented yet.
 - CLI now resumes the active workspace session across launches through a persisted CLI session pointer. `smoke-tested`
-- Session-admin UX now has a first real surface (`/sessions`, `/search`, `/switch`) in both CLI and channel flows, but it is still thinner than Hermes overall. `smoke-tested`
+- Session-admin UX now has a first real surface (`/sessions`, `/search`, `/switch`) in both CLI and channel flows, but it is still thinner than reference agent overall. `smoke-tested`
 - Internal alpha harness is strong but still manual; it is not a full release gate yet.
 - `doctor --live` can return successful status with empty response text for some providers. This is noted but not fully improved.
 - CLI multiline paste ergonomics are still rough in interactive mode.
@@ -377,7 +377,7 @@ For Telegram:
 
 ## 8. Design Decisions
 
-- **Hermes alignment first**
+- **reference agent alignment first**
   Skills are session-stable, progressively disclosed, and executed through the normal provider/tool loop.
 
 - **Separate v2 codebase**
@@ -410,10 +410,10 @@ For Telegram:
 ## 9. Rejected Approaches
 
 - **Pre-executing skill workflows before the provider turn**
-  Rejected because it drifted away from Hermes and made skills feel like hidden local macros.
+  Rejected because it drifted away from reference agent and made skills feel like hidden local macros.
 
 - **Mid-session live mutation of provider-visible skill catalogs**
-  Rejected because Hermes semantics are session-stable with explicit refresh.
+  Rejected because reference agent semantics are session-stable with explicit refresh.
 
 - **Unstructured persistent approvals**
   Rejected. Persistent approvals now match on structured target keys, not loose summaries.
@@ -429,9 +429,9 @@ For Telegram:
 Primary checks:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run typecheck
-/Users/ahnwy/.bun/bin/bun run smoke
+cd /path/to/EstaCoda
+bun run typecheck
+bun run smoke
 ```
 
 What smoke currently covers at a high level:
@@ -454,20 +454,20 @@ Important nuance:
 
 Manual operator path:
 
-- [docs/INTERNAL_ALPHA_RUNBOOK.md](/Users/ahnwy/estacoda-v2/docs/INTERNAL_ALPHA_RUNBOOK.md)
+- [docs/INTERNAL_ALPHA_RUNBOOK.md](docs/INTERNAL_ALPHA_RUNBOOK.md)
 
 Harness:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run alpha:harness
+cd /path/to/EstaCoda
+bun run alpha:harness
 ```
 
 Evaluation substrate:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run eval:substrate
+cd /path/to/EstaCoda
+bun run eval:substrate
 ```
 
 ## 11. Environment Setup
@@ -475,37 +475,37 @@ cd /Users/ahnwy/estacoda-v2
 Install / bootstrap:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun install
+cd /path/to/EstaCoda
+bun install
 ```
 
 Typecheck:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run typecheck
+cd /path/to/EstaCoda
+bun run typecheck
 ```
 
 Smoke tests:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run smoke
+cd /path/to/EstaCoda
+bun run smoke
 ```
 
 Live provider checks:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
+cd /path/to/EstaCoda
 export KIMI_API_KEY='REDACTED'
-/Users/ahnwy/.bun/bin/bun run dev -- doctor --live
+bun run dev -- doctor --live
 ```
 
 Interactive CLI session:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun run dev
 ```
 
 Key env vars by provider:
@@ -530,7 +530,7 @@ Config files:
 
 - user config: `~/.estacoda/config.json`
 - project config: `<workspace>/.estacoda/config.json`
-- reference environment guide: [ENVIRONMENT.md](/Users/ahnwy/estacoda-v2/docs/ENVIRONMENT.md)
+- reference environment guide: [ENVIRONMENT.md](docs/ENVIRONMENT.md)
 
 Important runtime state paths:
 
@@ -584,7 +584,7 @@ This is the shortest honest path from strong internal alpha to a private MVP can
 - What is the right packaging/distribution shape for MVP: Bun-based install, npm wrapper, packaged binary, Homebrew, or multiple?
 - Which non-Telegram channel is next at launch, and does it share the same approval UX model?
 - Should the vision route be configured as an explicit separate user-facing setup surface during onboarding?
-- What should the Hermes/OpenClaw migration story be: documentation-only, import tooling, partial compatibility layer, or something deeper?
+- What should the legacy agent frameworks migration story be: documentation-only, import tooling, partial compatibility layer, or something deeper?
 - How should local/open-source model support be explained and constrained for users, especially around tool-calling and vision differences?
 - Do profiles/modes belong in config, memory, channel settings, or all three?
 - Is voice input a core MVP-adjacent feature or a post-MVP channel enhancement?

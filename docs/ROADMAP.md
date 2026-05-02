@@ -1,6 +1,6 @@
 # Roadmap
 
-This is the agent-facing roadmap snapshot. It mirrors the intent of [NEXT_PHASE_ROADMAP.md](/Users/ahnwy/estacoda-v2/NEXT_PHASE_ROADMAP.md) but is written for implementation handoff.
+This is the agent-facing roadmap snapshot. It mirrors the intent of [NEXT_PHASE_ROADMAP.md](NEXT_PHASE_ROADMAP.md) but is written for implementation handoff.
 
 ## Current Stage
 
@@ -134,7 +134,7 @@ Done:
 - Phase 2A Telegram guided setup via `estacoda telegram setup` with local secret storage, token verification, allow/remove management, command sync, and test message path `smoke-tested`
 - Phase 2B browser command alignment via `estacoda browser setup`, `estacoda browser test`, and `estacoda settings browser` `smoke-tested`
 - Phase 2C/2D profile/UI foundation via `estacoda profile`, `profile set`, `profile language`, and `settings ui`; config separates UI language, UI flavor, activity labels, agent mode, and response language `smoke-tested`
-- Phase 2E local model setup via `estacoda local setup/status/test`; defaults to Ollama's OpenAI-compatible endpoint, probes `/models`, stores no API key, and surfaces Hermes-style 64K context guidance `smoke-tested`
+- Phase 2E local model setup via `estacoda local setup/status/test`; defaults to Ollama's OpenAI-compatible endpoint, probes `/models`, stores no API key, and surfaces operator-style 64K context guidance `smoke-tested`
 - provider config `smoke-tested`
 - doctor checks `live-proven`
 
@@ -206,7 +206,7 @@ Next:
 
 - add richer per-server trust/visibility controls
 - refine resource/prompt ergonomics
-- deepen ACP toward Hermes parity after MCP client and memory/session maturity
+- deepen ACP toward feature parity after MCP client and memory/session maturity
   The next explicit live proof should be richer terminal/process rendering and cleaner result formatting across editor clients.
 - treat MCP server bridging as later than MCP client and ACP
 
@@ -244,7 +244,7 @@ What remains:
 - richer localized approval cards and status copy
 - packaging/install polish for non-builders
 
-### 2. Migration from Hermes / OpenClaw
+### 2. Migration from reference agent / OpenClaw
 
 State: not meaningfully built.
 
@@ -273,7 +273,7 @@ State: partially built.
 - CLI security audit/debug views now exist for recent decisions `smoke-tested`
 - `/yolo` session-scoped open-mode toggles now exist in CLI and gateway `smoke-tested`
 - cron foundation now exists: `cronjob`, `estacoda cron`, `/cron`, persistent jobs, prompt scanning, bounded workspace-local script-backed jobs, tick locking, local output, origin/Telegram delivery hooks, and gateway ticks `smoke-tested`
-- browser automation now has a Hermes-shaped local-CDP core: navigate, snapshot refs, click/type/scroll/press/back, image listing, console capture, raw CDP, screenshots, screenshot vision, dialog response, `/browser`, and config/status `smoke-tested`
+- browser automation now has a structured local-CDP core: navigate, snapshot refs, click/type/scroll/press/back, image listing, console capture, raw CDP, screenshots, screenshot vision, dialog response, `/browser`, and config/status `smoke-tested`
 - Telegram guided setup/management command surface now exists: `telegram setup`, `allow-user`, `remove-user`, `allow-chat`, `remove-chat`, `set-default-chat`, `sync-commands`, and `test` `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
@@ -288,7 +288,7 @@ What remains:
 State: architecturally supported, operationally partial.
 
 - provider routing supports non-hosted routes `smoke-tested`
-- `estacoda local setup/status/test` provides a Hermes-aligned custom endpoint flow for Ollama/local OpenAI-compatible servers `smoke-tested`
+- `estacoda local setup/status/test` provides a agent-runtime aligned custom endpoint flow for Ollama/local OpenAI-compatible servers `smoke-tested`
 - local setup defaults to `http://localhost:11434/v1`, requires no API key, probes `/models`, and auto-selects the model when exactly one is visible `smoke-tested`
 
 What remains:
@@ -324,14 +324,14 @@ What remains:
 
 ### 7. Voice and TTS
 
-State: Hermes-aligned voice foundation is smoke-tested for Telegram, hosted STT, and OpenAI-compatible TTS.
+State: agent-runtime aligned voice foundation is smoke-tested for Telegram, hosted STT, and OpenAI-compatible TTS.
 
-- Hermes-aligned `tts` and `stt` config sections exist with Edge TTS and local STT defaults `smoke-tested`
+- agent-runtime aligned `tts` and `stt` config sections exist with Edge TTS and local STT defaults `smoke-tested`
 - `estacoda voice status/setup` and `estacoda settings voice` exist `smoke-tested`
 - hosted TTS/STT provider key-env slots are represented for OpenAI, ElevenLabs, MiniMax, Mistral, Gemini, xAI, and Groq where applicable `smoke-tested`
 - `voice.speak` generates OpenAI-compatible TTS audio, saves it under the audio cache, and records an audio artifact `smoke-tested`
 - `voice.transcribe` sends OpenAI-compatible hosted STT requests for OpenAI/Groq-style providers and records transcript artifacts `smoke-tested`
-- local STT custom-command execution via `stt.local.command` / `HERMES_LOCAL_STT_COMMAND` is enabled `smoke-tested`
+- local STT custom-command execution via `stt.local.command` / `LOCAL_STT_COMMAND` is enabled `smoke-tested`
 - Telegram audio/voice attachments download into channel media and are automatically transcribed into the gateway message before the agent turn `smoke-tested`
 - audio/voice attachments suggest `voice.transcribe` in the assembled prompt `implemented`
 - Telegram audio artifacts are delivered with `sendAudio` when the generated file is available, with artifact-notice fallback `smoke-tested`
@@ -365,7 +365,7 @@ What remains:
 
 ### 9. Image Generation
 
-State: Hermes-aligned first foundation exists; Telegram image delivery is live-proven.
+State: agent-runtime aligned first foundation exists; Telegram image delivery is live-proven.
 
 - `image_gen` / `imageGen` config normalizes to FAL by default with `fal-ai/flux-2/klein/9b` `smoke-tested`
 - BytePlus/ModelArk Seedream backend is represented as an additional provider with `BYTEPLUS_ARK_API_KEY`, Seedream 5 as the default model, and version aliases for Seedream 5/4.5/4.0 `smoke-tested`
@@ -391,7 +391,7 @@ What remains:
 - broader live provider proof with FAL and additional BytePlus model versions
 - richer CLI image/audio artifact cards remain follow-up; generated artifact prompt paths are now safe `artifact://<id>` references with internal `localPath` delivery support
 - Telegram/channel protected credential capture and resume UX
-- richer model picker UX similar to Hermes' `hermes tools`
+- richer model picker UX similar to the built-in model picker
 - Nous gateway/proxy path
 - FAL Clarity upscaler policy
 - richer per-model capability filtering beyond the first FAL/Seedream payload mapping
@@ -431,7 +431,7 @@ What remains:
 - Phase 1: MCP client for stdio servers `done / smoke-tested`
 - Phase 2: trust/visibility refinement and richer resource/prompt ergonomics
 - Phase 3: ACP foundation `done`; base editor flow is `live-proven`, and next is live approval proof plus richer editor/tool parity
-- Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way Hermes does
+- Later: MCP server bridge if/when EstaCoda should expose messaging/approvals outward the way reference agent does
 
 ## Launch Readiness Read
 

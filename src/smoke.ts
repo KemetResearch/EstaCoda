@@ -129,7 +129,7 @@ const sessionDb = new InMemorySessionDB({
   id: sequenceId(),
   now: () => new Date("2026-04-16T00:00:00.000Z")
 });
-const sqlitePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-sessions-")), "sessions.sqlite");
+const sqlitePath = join(await mkdtemp(join(tmpdir(), "estacoda-sessions-")), "sessions.sqlite");
 const sqliteDb = new SQLiteSessionDB({
   path: sqlitePath,
   id: sequenceId(),
@@ -281,15 +281,15 @@ for (const skill of loadedSkills.skills) {
   skills.register(skill);
 }
 
-const personalSkillRoot = join(await mkdtemp(join(tmpdir(), "estacoda-v2-personal-skills-")), "skills");
-const skillEvolutionRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-evolution-"));
+const personalSkillRoot = join(await mkdtemp(join(tmpdir(), "estacoda-personal-skills-")), "skills");
+const skillEvolutionRoot = await mkdtemp(join(tmpdir(), "estacoda-skill-evolution-"));
 const skillEvolutionStore = new SkillEvolutionStore({
   usagePath: join(skillEvolutionRoot, "skill-usage.json"),
   evolutionRoot: join(skillEvolutionRoot, "skill-evolution")
 });
 await runCorruptSkillUsageSmoke();
-const configToolsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-workspace-"));
-const configToolsHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-home-"));
+const configToolsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-config-tools-workspace-"));
+const configToolsHome = await mkdtemp(join(tmpdir(), "estacoda-config-tools-home-"));
 for (const tool of builtinTools) {
   tools.register(tool);
 }
@@ -325,7 +325,7 @@ for (const tool of createWorkspaceTrustTools({
   workspaceRoot: process.cwd(),
   profileId: "smoke",
   trustStore: new WorkspaceTrustStore({
-    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-global-trust-")), "trust.json")
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-global-trust-")), "trust.json")
   })
 })) {
   tools.register(tool);
@@ -360,7 +360,7 @@ trajectory.record("user-input", {
   text: "Build a knowledge base from this YouTube URL."
 });
 
-const memorySaveDir = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-"));
+const memorySaveDir = await mkdtemp(join(tmpdir(), "estacoda-memory-"));
 await memory.saveToDirectory(memorySaveDir);
 const savedMemory = await readFile(join(memorySaveDir, "MEMORY.md"), "utf8");
 
@@ -459,8 +459,8 @@ await localMemoryProvider.recordSkillOutcome({
   tools: ["workflow.plan"]
 });
 const splitMemoryStore = new MemoryStore();
-const splitUserRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-user-"));
-const splitProjectRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-project-"));
+const splitUserRoot = await mkdtemp(join(tmpdir(), "estacoda-memory-user-"));
+const splitProjectRoot = await mkdtemp(join(tmpdir(), "estacoda-memory-project-"));
 const splitMemoryProvider = new LocalMemoryProvider({
   store: splitMemoryStore,
   saveRoots: {
@@ -547,9 +547,9 @@ const cursorPromotionResult = await resolveUserPreferencePromotion({
     }
   }
 });
-const configWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-workspace-"));
+const configWorkspace = await mkdtemp(join(tmpdir(), "estacoda-config-workspace-"));
 await mkdir(join(configWorkspace, ".estacoda"));
-const configHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-home-"));
+const configHome = await mkdtemp(join(tmpdir(), "estacoda-config-home-"));
 await mkdir(join(configHome, ".estacoda"));
 await writeFile(
   join(configHome, ".estacoda", "config.json"),
@@ -660,8 +660,8 @@ const loadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot: configWorkspace,
   homeDir: configHome
 });
-const catalogProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-catalog-provider-workspace-"));
-const catalogProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-catalog-provider-home-"));
+const catalogProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-catalog-provider-workspace-"));
+const catalogProviderHome = await mkdtemp(join(tmpdir(), "estacoda-catalog-provider-home-"));
 await mkdir(join(catalogProviderHome, ".estacoda"));
 await writeFile(
   join(catalogProviderHome, ".estacoda", "config.json"),
@@ -681,14 +681,14 @@ const catalogProviderConfig = await loadRuntimeConfig({
 });
 resetModelsDevRegistryForTest();
 const offlineModelsSnapshot = await resolveModelsDevSnapshot({
-  homeDir: await mkdtemp(join(tmpdir(), "estacoda-v2-models-dev-offline-home-")),
+  homeDir: await mkdtemp(join(tmpdir(), "estacoda-models-dev-offline-home-")),
   allowNetwork: false,
   fetchImpl: async () => {
     throw new Error("models.dev should not be fetched when allowNetwork is false");
   }
 });
 const offlineModelProfiles = modelsDevSnapshotToProfiles(offlineModelsSnapshot);
-const metadataHome = await mkdtemp(join(tmpdir(), "estacoda-v2-models-dev-home-"));
+const metadataHome = await mkdtemp(join(tmpdir(), "estacoda-models-dev-home-"));
 const metadataCachePath = join(metadataHome, "models-dev-cache.json");
 await writeFile(metadataCachePath, JSON.stringify({
   fetchedAt: "2026-04-30T01:00:00.000Z",
@@ -743,8 +743,8 @@ const emptyModelsSnapshot = await resolveModelsDevSnapshot({
   }
 });
 resetModelsDevRegistryForTest();
-const imageBaseUrlWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-workspace-"));
-const imageBaseUrlHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-home-"));
+const imageBaseUrlWorkspace = await mkdtemp(join(tmpdir(), "estacoda-image-base-url-workspace-"));
+const imageBaseUrlHome = await mkdtemp(join(tmpdir(), "estacoda-image-base-url-home-"));
 await mkdir(join(imageBaseUrlHome, ".estacoda"));
 await writeFile(
   join(imageBaseUrlHome, ".estacoda", "config.json"),
@@ -763,11 +763,11 @@ const imageBaseUrlConfig = await loadRuntimeConfig({
   homeDir: imageBaseUrlHome
 });
 const defaultImageBaseUrlConfig = await loadRuntimeConfig({
-  workspaceRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-default-image-workspace-")),
-  homeDir: await mkdtemp(join(tmpdir(), "estacoda-v2-default-image-home-"))
+  workspaceRoot: await mkdtemp(join(tmpdir(), "estacoda-default-image-workspace-")),
+  homeDir: await mkdtemp(join(tmpdir(), "estacoda-default-image-home-"))
 });
-const voiceConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-config-home-"));
-const voiceConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-config-workspace-"));
+const voiceConfigHome = await mkdtemp(join(tmpdir(), "estacoda-voice-config-home-"));
+const voiceConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-voice-config-workspace-"));
 await setupVoiceConfig({
   workspaceRoot: voiceConfigWorkspace,
   homeDir: voiceConfigHome,
@@ -793,8 +793,8 @@ const loadedVoiceConfig = await loadRuntimeConfig({
   workspaceRoot: voiceConfigWorkspace,
   homeDir: voiceConfigHome
 });
-const uiConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-ui-config-home-"));
-const uiConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-ui-config-workspace-"));
+const uiConfigHome = await mkdtemp(join(tmpdir(), "estacoda-ui-config-home-"));
+const uiConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-ui-config-workspace-"));
 await setupUiConfig({
   workspaceRoot: uiConfigWorkspace,
   homeDir: uiConfigHome,
@@ -829,8 +829,8 @@ const loadedExplicitUiConfig = await loadRuntimeConfig({
   workspaceRoot: uiConfigWorkspace,
   homeDir: uiConfigHome
 });
-const pairingScopeHome = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-scope-home-"));
-const pairingScopeWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-scope-workspace-"));
+const pairingScopeHome = await mkdtemp(join(tmpdir(), "estacoda-pairing-scope-home-"));
+const pairingScopeWorkspace = await mkdtemp(join(tmpdir(), "estacoda-pairing-scope-workspace-"));
 await mkdir(join(pairingScopeWorkspace, ".estacoda"));
 const pairingScopeUserPath = join(pairingScopeHome, ".estacoda", "config.json");
 const pairingScopeProjectPath = join(pairingScopeWorkspace, ".estacoda", "config.json");
@@ -874,8 +874,8 @@ const consumedCryptoPairingCode = await consumeTelegramPairingCode({
   userId: "111",
   chatId: "222"
 });
-const explicitImageSetupHome = await mkdtemp(join(tmpdir(), "estacoda-v2-explicit-image-home-"));
-const explicitImageSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-explicit-image-workspace-"));
+const explicitImageSetupHome = await mkdtemp(join(tmpdir(), "estacoda-explicit-image-home-"));
+const explicitImageSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-explicit-image-workspace-"));
 await setupImageGenerationConfig({
   workspaceRoot: explicitImageSetupWorkspace,
   homeDir: explicitImageSetupHome,
@@ -889,10 +889,10 @@ const explicitImageSetupConfig = await loadRuntimeConfig({
   workspaceRoot: explicitImageSetupWorkspace,
   homeDir: explicitImageSetupHome
 });
-const cliWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-workspace-"));
-const cliHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-home-"));
-const firstRunProjectConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-first-run-project-config-"));
-const firstRunProjectConfigHome = await mkdtemp(join(tmpdir(), "estacoda-v2-first-run-home-"));
+const cliWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-workspace-"));
+const cliHome = await mkdtemp(join(tmpdir(), "estacoda-cli-home-"));
+const firstRunProjectConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-first-run-project-config-"));
+const firstRunProjectConfigHome = await mkdtemp(join(tmpdir(), "estacoda-first-run-home-"));
 await mkdir(join(firstRunProjectConfigWorkspace, ".estacoda"));
 delete process.env.OPENAI_API_KEY;
 await writeFile(
@@ -928,8 +928,8 @@ const cliSetupPrompt = await runCliCommand({
   homeDir: cliHome,
   interactive: false
 });
-const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-workspace-"));
-const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
+const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-interactive-workspace-"));
+const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
 const cliInteractivePromptSecrets: boolean[] = [];
 const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "TEST_KIMI_SECRET", "", "", "", "", ""];
@@ -955,8 +955,8 @@ const cliInteractiveConfig = await loadRuntimeConfig({
 const cliInteractiveEnvPath = join(cliInteractiveHome, ".estacoda", ".env");
 const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
 const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
-const cliMissingWorkspaceHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-workspace-home-"));
-const cliMissingWorkspaceBase = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-workspace-base-"));
+const cliMissingWorkspaceHome = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-workspace-home-"));
+const cliMissingWorkspaceBase = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-workspace-base-"));
 const cliMissingWorkspace = join(cliMissingWorkspaceBase, "dogfood-workspace");
 const cliMissingWorkspaceAnswers = ["", "", "", cliMissingWorkspace, "", "2", "", "TEST_MISSING_WORKSPACE_KIMI_SECRET", "", "", "", "", ""];
 const cliMissingWorkspaceSetup = await runCliCommand({
@@ -993,8 +993,8 @@ const cliProjectOverrideConfig = await loadRuntimeConfig({
   workspaceRoot: firstRunProjectConfigWorkspace,
   homeDir: firstRunProjectConfigHome
 });
-const cliArabicInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-arabic-workspace-"));
-const cliArabicInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-arabic-home-"));
+const cliArabicInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-arabic-workspace-"));
+const cliArabicInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-cli-arabic-home-"));
 const cliArabicInteractivePrompts: string[] = [];
 const cliArabicInteractiveAnswers = ["", "2", "", "", "", "2", "", "TEST_ARABIC_KIMI_SECRET", "", "", "", ""];
 const cliArabicInteractiveSetup = await runCliCommand({
@@ -1016,8 +1016,8 @@ const cliArabicInteractiveConfig = await loadRuntimeConfig({
   workspaceRoot: cliArabicInteractiveWorkspace,
   homeDir: cliArabicInteractiveHome
 });
-const cliEmptySecretWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-empty-secret-workspace-"));
-const cliEmptySecretHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-empty-secret-home-"));
+const cliEmptySecretWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-empty-secret-workspace-"));
+const cliEmptySecretHome = await mkdtemp(join(tmpdir(), "estacoda-cli-empty-secret-home-"));
 const cliEmptySecretPrompts: string[] = [];
 const cliEmptySecretPromptSecrets: boolean[] = [];
 const cliEmptySecretAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET_RETRY", "", "", "", "", ""];
@@ -1036,8 +1036,8 @@ const cliEmptySecretSetup = await runCliCommand({
     }
   )
 });
-const cliOptionalDoneWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-optional-done-workspace-"));
-const cliOptionalDoneHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-optional-done-home-"));
+const cliOptionalDoneWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-optional-done-workspace-"));
+const cliOptionalDoneHome = await mkdtemp(join(tmpdir(), "estacoda-cli-optional-done-home-"));
 const cliOptionalDonePrompts: string[] = [];
 const cliOptionalDoneAnswers = ["", "", "", "", "", "2", "", "TEST_OPTIONAL_KIMI_SECRET", "", "", "", "5", "2", "", ""];
 const cliOptionalDoneSetup = await runCliCommand({
@@ -1104,8 +1104,8 @@ const cliSetup = await runCliCommand({
   workspaceRoot: cliWorkspace,
   homeDir: cliHome
 });
-const cliLocalWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-workspace-"));
-const cliLocalHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-home-"));
+const cliLocalWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-local-workspace-"));
+const cliLocalHome = await mkdtemp(join(tmpdir(), "estacoda-cli-local-home-"));
 const cliLocalSetup = await runCliCommand({
   argv: ["local", "setup"],
   workspaceRoot: cliLocalWorkspace,
@@ -1134,8 +1134,8 @@ const cliLocalTest = await runCliCommand({
     data: [{ id: "qwen2.5-coder:32b" }]
   })
 });
-const cliLocalBlockedWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-blocked-workspace-"));
-const cliLocalBlockedHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-local-blocked-home-"));
+const cliLocalBlockedWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-local-blocked-workspace-"));
+const cliLocalBlockedHome = await mkdtemp(join(tmpdir(), "estacoda-cli-local-blocked-home-"));
 const cliLocalBlockedSetup = await runCliCommand({
   argv: ["local", "setup", "--model", "llama3.1:8b"],
   workspaceRoot: cliLocalBlockedWorkspace,
@@ -1251,8 +1251,8 @@ const cliImageSettings = await runCliCommand({
 });
 const cliImageEnv = await readFile(join(cliHome, ".estacoda", ".env"), "utf8");
 delete process.env.ESTACODA_SMOKE_MISSING_KEY;
-const cliMissingProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-workspace-"));
-const cliMissingProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-provider-home-"));
+const cliMissingProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-provider-workspace-"));
+const cliMissingProviderHome = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-provider-home-"));
 const cliMissingProviderSetup = await runCliCommand({
   argv: ["setup", "--provider", "deepseek", "--model", "deepseek-chat", "--api-key-env", "ESTACODA_SMOKE_MISSING_KEY"],
   workspaceRoot: cliMissingProviderWorkspace,
@@ -1264,8 +1264,8 @@ const cliMissingProviderDoctor = await runCliCommand({
   homeDir: cliMissingProviderHome
 });
 process.env.ESTACODA_SMOKE_READY_KEY = "ready";
-const cliReadyProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-ready-provider-workspace-"));
-const cliReadyProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-ready-provider-home-"));
+const cliReadyProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-ready-provider-workspace-"));
+const cliReadyProviderHome = await mkdtemp(join(tmpdir(), "estacoda-cli-ready-provider-home-"));
 const cliReadyProviderSetup = await runCliCommand({
   argv: ["setup", "--provider", "deepseek", "--model", "deepseek-chat", "--api-key-env", "ESTACODA_SMOKE_READY_KEY"],
   workspaceRoot: cliReadyProviderWorkspace,
@@ -1386,7 +1386,7 @@ const cliReadyProviderLiveToolDoctor = await runCliCommand({
     }
   }
 });
-const securityConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-security-config-workspace-"));
+const securityConfigWorkspace = await mkdtemp(join(tmpdir(), "estacoda-security-config-workspace-"));
 const securitySetup = await setupSecurityConfig({
   workspaceRoot: securityConfigWorkspace,
   homeDir: cliHome,
@@ -1426,8 +1426,8 @@ const loadedSecurityConfig = await loadRuntimeConfig({
   workspaceRoot: securityConfigWorkspace,
   homeDir: cliHome
 });
-const arabicSecurityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-arabic-security-workspace-"));
-const arabicSecurityHome = await mkdtemp(join(tmpdir(), "estacoda-v2-arabic-security-home-"));
+const arabicSecurityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-arabic-security-workspace-"));
+const arabicSecurityHome = await mkdtemp(join(tmpdir(), "estacoda-arabic-security-home-"));
 await runCliCommand({
   argv: ["settings", "ui", "--language", "ar", "--flavor", "arabic-light", "--activity-labels", "ar"],
   workspaceRoot: arabicSecurityWorkspace,
@@ -1505,8 +1505,8 @@ const cliTelegramStatusReady = await runCliCommand({
   homeDir: cliHome
 });
 delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
-const telegramSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-workspace-"));
-const telegramSetupHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-setup-home-"));
+const telegramSetupWorkspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-setup-workspace-"));
+const telegramSetupHome = await mkdtemp(join(tmpdir(), "estacoda-telegram-setup-home-"));
 const telegramSetupPrompts: string[] = [];
 const telegramSetupPromptSecrets: boolean[] = [];
 const telegramSetupAnswers = ["TEST_TELEGRAM_SETUP_TOKEN", "", "4242", "-1004242", "-1004242", ""];
@@ -1578,15 +1578,15 @@ const cliTelegramTest = await runCliCommand({
     return fakeTelegramResponse({ message_id: 501 });
   }
 });
-const gatewayWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-workspace-"));
-const gatewayHome = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-home-"));
+const gatewayWorkspace = await mkdtemp(join(tmpdir(), "estacoda-gateway-workspace-"));
+const gatewayHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-home-"));
 const gatewaySetup = await runCliCommand({
   argv: ["telegram", "configure", "--bot-token-env", "ESTACODA_GATEWAY_TELEGRAM_TOKEN", "--allow-user", "1254738091"],
   workspaceRoot: gatewayWorkspace,
   homeDir: gatewayHome
 });
-const pairingWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-workspace-"));
-const pairingHome = await mkdtemp(join(tmpdir(), "estacoda-v2-pairing-home-"));
+const pairingWorkspace = await mkdtemp(join(tmpdir(), "estacoda-pairing-workspace-"));
+const pairingHome = await mkdtemp(join(tmpdir(), "estacoda-pairing-home-"));
 const pairingSetup = await runCliCommand({
   argv: ["telegram", "configure", "--bot-token-env", "ESTACODA_PAIRING_TELEGRAM_TOKEN"],
   workspaceRoot: pairingWorkspace,
@@ -1612,8 +1612,8 @@ const gatewayRequests: Array<{
   url: string;
   body: Record<string, unknown>;
 }> = [];
-const gatewayMediaWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-media-workspace-"));
-const gatewayMediaHome = await mkdtemp(join(tmpdir(), "estacoda-v2-gateway-media-home-"));
+const gatewayMediaWorkspace = await mkdtemp(join(tmpdir(), "estacoda-gateway-media-workspace-"));
+const gatewayMediaHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-media-home-"));
 const gatewayMediaSetup = await runCliCommand({
   argv: ["telegram", "configure", "--bot-token-env", "ESTACODA_GATEWAY_MEDIA_TELEGRAM_TOKEN", "--allow-user", "1254738091"],
   workspaceRoot: gatewayMediaWorkspace,
@@ -2614,10 +2614,10 @@ const pythonProbe = await runPythonWorker({
     reason: "smoke"
   }
 });
-const documentDir = await mkdtemp(join(tmpdir(), "estacoda-v2-doc-"));
+const documentDir = await mkdtemp(join(tmpdir(), "estacoda-doc-"));
 const documentPath = join(documentDir, "sample.txt");
 await writeFile(documentPath, "EstaCoda document probe sample\nThis is searchable document text.", "utf8");
-const contextWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-context-"));
+const contextWorkspace = await mkdtemp(join(tmpdir(), "estacoda-context-"));
 await mkdir(join(contextWorkspace, "src"));
 await writeFile(
   join(contextWorkspace, "ESTACODA.md"),
@@ -2710,7 +2710,7 @@ const directSession = await sessionDb.createSession({
   profileId: "smoke",
   title: "Direct smoke"
 });
-const mediaWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-media-"));
+const mediaWorkspace = await mkdtemp(join(tmpdir(), "estacoda-media-"));
 await mkdir(join(mediaWorkspace, "assets"));
 await writeFile(join(mediaWorkspace, "assets", "sample.mp4"), "fake media bytes", "utf8");
 const mediaArtifacts = new ArtifactStore({
@@ -2770,7 +2770,7 @@ const longArtifactSummary = await mediaExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
-const voiceWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-voice-"));
+const voiceWorkspace = await mkdtemp(join(tmpdir(), "estacoda-voice-"));
 const voiceArtifacts = new ArtifactStore({
   id: sequenceId(),
   now: () => new Date("2026-04-16T00:00:00.000Z")
@@ -2857,7 +2857,7 @@ const voiceTranscribe = await voiceExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
-const imageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-image-gen-"));
+const imageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-image-gen-"));
 const imageArtifacts = new ArtifactStore({
   id: sequenceId(),
   now: () => new Date("2026-04-16T00:00:00.000Z")
@@ -3308,8 +3308,8 @@ const onboardingStatusAfterConfig = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
-const onboardingWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-onboarding-workspace-"));
-const onboardingHome = await mkdtemp(join(tmpdir(), "estacoda-v2-onboarding-home-"));
+const onboardingWorkspace = await mkdtemp(join(tmpdir(), "estacoda-onboarding-workspace-"));
+const onboardingHome = await mkdtemp(join(tmpdir(), "estacoda-onboarding-home-"));
 const onboardingRegistry = new ToolRegistry();
 for (const tool of createOnboardingTools({
   workspaceRoot: onboardingWorkspace,
@@ -3510,10 +3510,10 @@ assert(
   loadedRuntimeConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi",
   "expected configured auxiliary provider override"
 );
-const externalSkillsHome = await mkdtemp(join(tmpdir(), "estacoda-v2-external-home-"));
-const externalSkillsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-external-workspace-"));
+const externalSkillsHome = await mkdtemp(join(tmpdir(), "estacoda-external-home-"));
+const externalSkillsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-external-workspace-"));
 const homeSharedSkills = join(externalSkillsHome, "shared-skills");
-const envSharedRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-external-env-"));
+const envSharedRoot = await mkdtemp(join(tmpdir(), "estacoda-external-env-"));
 const missingExternalRoot = join(externalSkillsWorkspace, "missing-skills");
 process.env.ESTACODA_SKILLS_REPO = envSharedRoot;
 await mkdir(join(homeSharedSkills, "shared-team-skill"), { recursive: true });
@@ -3603,7 +3603,7 @@ assert(sharedTeamSkill?.sourceKind === "local", "expected overridden skill to be
 assert(envExternalSkill?.sourceKind === "external", "expected env external skill to load as external");
 assert(renderSlashMenu(externalDirsRuntime).includes("/env-external-skill"), "expected external skill to appear in slash menu");
 const conflictRegistry = new SkillRegistry();
-const duplicateExternalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-duplicate-external-"));
+const duplicateExternalRoot = await mkdtemp(join(tmpdir(), "estacoda-duplicate-external-"));
 await mkdir(join(duplicateExternalRoot, "shared-team-skill"), { recursive: true });
 await writeFile(join(duplicateExternalRoot, "shared-team-skill", "SKILL.md"), `---
 name: shared-team-skill
@@ -3628,7 +3628,7 @@ assert(
   conflictRegistry.listConflicts().some((conflict) => conflict.name === "shared-team-skill" && conflict.reason === "duplicate-source"),
   "expected external duplicate to be recorded as a registry conflict"
 );
-const longSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-long-skill-"));
+const longSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-long-skill-"));
 const longInstructions = "A".repeat(25_000);
 await mkdir(join(longSkillRoot, "long-skill"), { recursive: true });
 await writeFile(join(longSkillRoot, "long-skill", "SKILL.md"), `---
@@ -3647,13 +3647,13 @@ const loadedLongSkill = (await loadSkillsFromDirectory(longSkillRoot, { sourceKi
 assert(loadedLongSkill?.instructions.length === longInstructions.length, "expected full long skill instructions to remain available locally");
 assert(loadedLongSkill.providerInstructions?.truncated === true, "expected long skill to expose truncated provider instructions");
 assert((loadedLongSkill.providerInstructions?.content.length ?? 0) <= 20_000, "expected provider-facing skill instructions to stay under context cap");
-const oversizedSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-oversized-skill-"));
+const oversizedSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-oversized-skill-"));
 await mkdir(join(oversizedSkillRoot, "oversized"), { recursive: true });
 await writeFile(join(oversizedSkillRoot, "oversized", "SKILL.md"), "x".repeat(MAX_SKILL_MD_BYTES + 1), "utf8");
 const oversizedSkillLoad = await loadSkillsFromDirectory(oversizedSkillRoot, { sourceKind: "local", sourceRoot: oversizedSkillRoot });
 assert(oversizedSkillLoad.skills.length === 0, "expected oversized SKILL.md to be rejected");
 assert(oversizedSkillLoad.errors.some((error) => error.message.includes("byte safety limit")), "expected oversized skill rejection to mention byte safety limit");
-const resourceLimitRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-resource-limit-"));
+const resourceLimitRoot = await mkdtemp(join(tmpdir(), "estacoda-resource-limit-"));
 await mkdir(join(resourceLimitRoot, "resource-skill", "references"), { recursive: true });
 await writeFile(join(resourceLimitRoot, "resource-skill", "SKILL.md"), `---
 name: resource-skill
@@ -3673,8 +3673,8 @@ for (let index = 0; index < MAX_SKILL_RESOURCE_FILES + 10; index += 1) {
 const resourceLimitSkill = (await loadSkillsFromDirectory(resourceLimitRoot, { sourceKind: "local", sourceRoot: resourceLimitRoot })).skills[0];
 assert((resourceLimitSkill?.resources?.length ?? 0) <= MAX_SKILL_RESOURCE_FILES, "expected skill resource scan to obey file count limit");
 await runBundledSkillSyncSmoke();
-const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-home-"));
-const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-workspace-"));
+const mcpHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-home-"));
+const mcpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-mcp-workspace-"));
 const mcpServerScript = join(mcpWorkspace, "fake-mcp-server.js");
 const mcpExitMarker = join(mcpWorkspace, "mcp-runtime-exit.txt");
 const mcpDirectExitMarker = join(mcpWorkspace, "mcp-direct-exit.txt");
@@ -3802,7 +3802,7 @@ const mcpSetupResult = await setupMcpConfig({
   homeDir: mcpHome,
   input: {
     name: "docs",
-    command: "/Users/ahnwy/.bun/bin/bun",
+    command: process.execPath,
     args: [mcpServerScript],
     includeTools: ["echo"],
     exposeResources: true,
@@ -3848,7 +3848,7 @@ await mcpRuntime.dispose();
 const directMcpServers = await loadMcpServers({
   servers: {
     direct: {
-      command: "/Users/ahnwy/.bun/bin/bun",
+      command: process.execPath,
       args: [mcpServerScript],
       includeTools: ["echo"],
       exposeResources: true,
@@ -3994,7 +3994,7 @@ const httpEchoResult = await httpEchoTool?.run({ text: "hello-http" });
 const httpResourceResult = await httpResourceReadTool?.run({ uri: "memo://http" });
 const httpPromptResult = await httpPromptGetTool?.run({ name: "http-draft" });
 await Promise.all(httpMcpServers.map((server) => server.stop()));
-const fakeNpxHome = await mkdtemp(join(tmpdir(), "estacoda-v2-mcp-npx-home-"));
+const fakeNpxHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-npx-home-"));
 const fakeNpxCacheRoot = join(fakeNpxHome, ".npm", "_npx", "cache-1", "node_modules");
 const fakeScopedPackageRoot = join(fakeNpxCacheRoot, "@scope", "demo-server");
 await mkdir(join(fakeNpxCacheRoot, ".bin"), { recursive: true });
@@ -4014,7 +4014,7 @@ if (previousSmokeHome === undefined) {
 } else {
   process.env.HOME = previousSmokeHome;
 }
-const acpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-workspace-"));
+const acpWorkspace = await mkdtemp(join(tmpdir(), "estacoda-acp-workspace-"));
 const acpInput = new PassThrough();
 const acpOutput = new PassThrough();
 acpOutput.setEncoding("utf8");
@@ -4124,7 +4124,7 @@ const acpLoad = await acpRpc.request("session/load", { sessionId: acpNewSession.
 await acpRpc.notify("session/cancel", { sessionId: acpNewSession.sessionId });
 
 let acpEditorReadPromptText = "";
-const acpEditorReadWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-editor-read-"));
+const acpEditorReadWorkspace = await mkdtemp(join(tmpdir(), "estacoda-acp-editor-read-"));
 const acpEditorReadInput = new PassThrough();
 const acpEditorReadOutput = new PassThrough();
 acpEditorReadOutput.setEncoding("utf8");
@@ -4218,7 +4218,7 @@ const acpEditorReadPrompt = await acpEditorReadPromptPromise;
 acpEditorReadInput.end();
 await acpEditorReadRunPromise;
 
-const acpPermissionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-acp-permission-"));
+const acpPermissionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-acp-permission-"));
 const acpPermissionTargetKey = "terminal.run:cmd=rm -rf /tmp/demo";
 const acpPermissionTool = {
   name: "terminal.run",
@@ -4663,7 +4663,7 @@ acpInput.end();
 await acpRunPromise;
 const mcpRuntimeExitMarker = await readFile(mcpExitMarker, "utf8");
 const mcpDirectExitMarkerContent = await readFile(mcpDirectExitMarker, "utf8");
-assert(mcpSetupResult.config.mcpServers?.docs?.command === "/Users/ahnwy/.bun/bin/bun", "expected MCP setup to persist the stdio command");
+assert(mcpSetupResult.config.mcpServers?.docs?.command === process.execPath, "expected MCP setup to persist the stdio command");
 assert(mcpSetupResult.config.mcpServers?.docs?.args?.[0] === mcpServerScript, "expected MCP setup to persist command args");
 assert(loadedMcpConfig.mcp.servers.docs?.includeTools?.[0] === "echo", "expected MCP config to persist includeTools");
 assert(loadedMcpConfig.mcp.servers.docs?.tools?.include?.[0] === "echo", "expected MCP config to persist Hermes-style nested tool include");
@@ -5002,7 +5002,7 @@ assert(
   "expected cron expression schedule parsing"
 );
 let cronNow = new Date("2026-04-16T00:00:00.000Z");
-const cronHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cron-home-"));
+const cronHome = await mkdtemp(join(tmpdir(), "estacoda-cron-home-"));
 const cronStore = new CronStore({
   homeDir: cronHome,
   now: () => cronNow,
@@ -5923,7 +5923,7 @@ const skillDeleteExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
-const importSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-import-skills-"));
+const importSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-import-skills-"));
 await mkdir(join(importSkillRoot, "imported"));
 await writeFile(
   join(importSkillRoot, "imported", "SKILL.md"),
@@ -6035,7 +6035,7 @@ await runLargeSkillReferenceSmoke({
   sessionId: directSession.id,
   personalSkillRoot
 });
-const skillExportDir = await mkdtemp(join(tmpdir(), "estacoda-v2-export-skills-"));
+const skillExportDir = await mkdtemp(join(tmpdir(), "estacoda-export-skills-"));
 const skillExportExecution = await toolExecutor.executeTool({
   tool: "skill.export",
   input: {
@@ -6152,7 +6152,7 @@ assert((await stat(skillDeleteSnapshotPath).catch(() => undefined))?.isDirectory
 const skillDeleteArchivePath = (skillDeleteExecution.result.metadata as { archivePath?: string } | undefined)?.archivePath;
 assert(skillDeleteArchivePath !== undefined, "expected skill.delete to record an archive path");
 assert((await stat(skillDeleteArchivePath).catch(() => undefined))?.isDirectory() === true, "expected skill.delete archive directory");
-const invalidYamlSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-invalid-yaml-skill-"));
+const invalidYamlSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-invalid-yaml-skill-"));
 await mkdir(join(invalidYamlSkillRoot, "bad-workflow"), { recursive: true });
 await writeFile(join(invalidYamlSkillRoot, "bad-workflow", "SKILL.md"), [
   "---",
@@ -6570,7 +6570,7 @@ assert(
   "expected youtube-knowledge-base to match prompt"
 );
 
-const liveSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-live-skill-"));
+const liveSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-live-skill-"));
 const liveSkillProjectSkillsRoot = join(liveSkillWorkspace, ".estacoda", "skills");
 await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof"), { recursive: true });
 await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "references"), { recursive: true });
@@ -6891,7 +6891,7 @@ assert(
   liveSkillResponse.text.includes("Provider-backed skill completed and verified runtime-skill-proof.md."),
   "expected provider-backed skill smoke final response"
 );
-const templateSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-template-skill-"));
+const templateSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-template-skill-"));
 const templateSkillRoot = join(templateSkillWorkspace, ".estacoda", "skills", "provider-template-proof");
 await mkdir(join(templateSkillRoot, "references"), { recursive: true });
 await mkdir(join(templateSkillRoot, "templates"), { recursive: true });
@@ -7129,7 +7129,7 @@ assert(
   "expected template smoke to write the filled template output"
 );
 
-const scriptSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-script-skill-"));
+const scriptSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-script-skill-"));
 const scriptSkillRoot = join(scriptSkillWorkspace, ".estacoda", "skills", "provider-script-proof");
 await mkdir(join(scriptSkillRoot, "scripts"), { recursive: true });
 await writeFile(join(scriptSkillRoot, "SKILL.md"), [
@@ -7334,9 +7334,9 @@ assert(
   "expected script smoke final response"
 );
 
-const composedSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-composed-skill-"));
+const composedSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-composed-skill-"));
 const composedSkillRoot = join(composedSkillWorkspace, ".estacoda", "skills", "provider-composed-proof");
-const composedCredentialRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-composed-creds-"));
+const composedCredentialRoot = await mkdtemp(join(tmpdir(), "estacoda-composed-creds-"));
 process.env.ESTACODA_COMPOSED_CRED_ROOT = composedCredentialRoot;
 await mkdir(join(composedSkillRoot, "references"), { recursive: true });
 await mkdir(join(composedSkillRoot, "templates"), { recursive: true });
@@ -7625,7 +7625,7 @@ assert(
   "expected composed skill smoke final response"
 );
 
-const packageRefreshWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-package-refresh-"));
+const packageRefreshWorkspace = await mkdtemp(join(tmpdir(), "estacoda-package-refresh-"));
 const packageRefreshSkillRoot = join(packageRefreshWorkspace, ".estacoda", "skills", "package-refresh-proof");
 await mkdir(join(packageRefreshSkillRoot, "templates"), { recursive: true });
 await writeFile(join(packageRefreshSkillRoot, "SKILL.md"), `---
@@ -7892,7 +7892,7 @@ assert(
 );
 assert(packedHistoryRegression.summary?.includes("older user request") === true, "expected older user context to compress into summary");
 
-const workspaceToolsDir = await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-tools-"));
+const workspaceToolsDir = await mkdtemp(join(tmpdir(), "estacoda-workspace-tools-"));
 const canonicalWorkspaceToolsDir = await realpath(workspaceToolsDir).catch(() => workspaceToolsDir);
 await mkdir(join(workspaceToolsDir, "src"));
 await writeFile(join(workspaceToolsDir, "src", "tooling.ts"), "export const toolName = 'EstaCoda';\n", "utf8");
@@ -8214,7 +8214,7 @@ const stoppedProcess = await processToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
-const secondWorkspaceDir = await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-tools-2-"));
+const secondWorkspaceDir = await mkdtemp(join(tmpdir(), "estacoda-workspace-tools-2-"));
 const secondWorkspaceTools = new ToolRegistry();
 for (const tool of createWorkspaceTools({ workspaceRoot: secondWorkspaceDir })) {
   secondWorkspaceTools.register(tool);
@@ -8284,7 +8284,7 @@ const runtime = await createRuntime({
   profileId: "smoke",
   workspaceRoot: contextWorkspace,
   localSkillsRoot: join(contextWorkspace, ".estacoda", "skills"),
-  trustStorePath: join(await mkdtemp(join(tmpdir(), "estacoda-v2-session-loop-trust-")), "trust.json"),
+  trustStorePath: join(await mkdtemp(join(tmpdir(), "estacoda-session-loop-trust-")), "trust.json"),
   enableWebNetwork: true,
   webFetch: async () => ({
     ok: false,
@@ -8422,7 +8422,7 @@ await runSessionLoop({
 });
 const renderedSessionLoop = sessionLoopOutput.join("");
 
-const imageSetupLoopHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-setup-loop-home-"));
+const imageSetupLoopHome = await mkdtemp(join(tmpdir(), "estacoda-image-setup-loop-home-"));
 const imageSetupLoopOutput: string[] = [];
 const imageSetupPromptSecrets: boolean[] = [];
 let imageSetupPromptIndex = 0;
@@ -8569,9 +8569,9 @@ await runSessionLoop({
 const renderedImageSetupLoop = imageSetupLoopOutput.join("");
 const imageSetupLoopEnv = await readFile(join(imageSetupLoopHome, ".estacoda", ".env"), "utf8");
 
-const resetSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-"));
+const resetSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-reset-session-"));
 const resetSkillProjectRoot = join(resetSkillWorkspace, ".estacoda", "skills", "reset-proof-skill");
-const resetTrustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-trust-")), "trust.json");
+const resetTrustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-reset-session-trust-")), "trust.json");
 let resetSessionCounter = 0;
 let resetLoopPromptIndex = 0;
 const resetLoopOutput: string[] = [];
@@ -8638,8 +8638,8 @@ This skill exists to prove Hermes-style session refresh semantics.
   close: () => {}
 });
 const renderedResetSessionLoop = resetLoopOutput.join("");
-const cliSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-cli-sessions-")), "cli-sessions.json");
-const cliSessionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-workspace-"));
+const cliSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-cli-sessions-")), "cli-sessions.json");
+const cliSessionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-workspace-"));
 const cliSessionStore = new PersistentCliSessionStore({
   path: cliSessionStorePath
 });
@@ -8652,8 +8652,8 @@ assert(
   await reopenedCliSessionStore.getSessionId(cliSessionWorkspace) === "cli-persisted-session",
   "expected CLI session store to persist active workspace session"
 );
-const promotionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-memory-promotion-"));
-const promotionUserMemoryRoot = join(await mkdtemp(join(tmpdir(), "estacoda-v2-memory-promotion-user-")), "memory");
+const promotionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-memory-promotion-"));
+const promotionUserMemoryRoot = join(await mkdtemp(join(tmpdir(), "estacoda-memory-promotion-user-")), "memory");
 const promotionProjectMemoryRoot = join(promotionWorkspace, ".estacoda", "memory");
 const preferenceRuntimeFactory = async (sessionId: string) => createRuntime({
   theme: kemetBlueTheme,
@@ -8727,7 +8727,7 @@ await projectFactRuntimeThree.handle({
 });
 const projectMemoryAfterRepeatedFacts = await readFile(join(promotionProjectMemoryRoot, "MEMORY.md"), "utf8");
 const projectFactPromotions = await projectFactRuntimeThree.inspectMemoryPromotions();
-const skillLearningWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-learning-"));
+const skillLearningWorkspace = await mkdtemp(join(tmpdir(), "estacoda-skill-learning-"));
 const skillLearningLocalRoot = join(skillLearningWorkspace, ".estacoda", "skills");
 const skillLearningStorePath = join(skillLearningWorkspace, ".estacoda", "skill-learning.json");
 const skillLearningSessionDb = new InMemorySessionDB({
@@ -9276,7 +9276,7 @@ assert(
   renderedResetSessionLoop.includes("/reset-proof-skill"),
   "expected refreshed session to expose the newly installed skill"
 );
-const visibilityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-visibility-"));
+const visibilityWorkspace = await mkdtemp(join(tmpdir(), "estacoda-skill-visibility-"));
 const visibilitySkillRoot = join(visibilityWorkspace, ".estacoda", "skills");
 await mkdir(join(visibilitySkillRoot, "linux-only-skill"), { recursive: true });
 await writeFile(join(visibilitySkillRoot, "linux-only-skill", "SKILL.md"), `---
@@ -9358,7 +9358,7 @@ Visible only before browser.navigate is configured.
 `, "utf8");
 const visibilityProviderRequests: ProviderRequest[] = [];
 const visibilityProviderRegistry = new ProviderRegistry();
-const visibilityHome = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-visibility-home-"));
+const visibilityHome = await mkdtemp(join(tmpdir(), "estacoda-skill-visibility-home-"));
 visibilityProviderRegistry.register({
   id: "deepseek",
   name: "Visibility smoke provider",
@@ -9733,7 +9733,7 @@ imageIntentProviderRegistry.register({
   }
 } satisfies ProviderAdapter);
 process.env.BYTEPLUS_ARK_API_KEY = "byteplus-smoke-key";
-const imageIntentHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-intent-home-"));
+const imageIntentHome = await mkdtemp(join(tmpdir(), "estacoda-image-intent-home-"));
 const imageIntentRuntime = await createRuntime({
   theme: kemetBlueTheme,
   sessionDb,
@@ -10136,7 +10136,7 @@ deferredRouteUsageRegistry.register({
     provider: "openai"
   })
 } satisfies ProviderAdapter);
-const deferredRouteUsageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-deferred-route-"));
+const deferredRouteUsageWorkspace = await mkdtemp(join(tmpdir(), "estacoda-deferred-route-"));
 await mkdir(join(deferredRouteUsageWorkspace, ".estacoda", "skills", "deferred-image-proof"), { recursive: true });
 await mkdir(join(deferredRouteUsageWorkspace, "media"), { recursive: true });
 await writeFile(join(deferredRouteUsageWorkspace, "media", "deferred-route.png"), "not a real png but enough for attachment routing smoke", "utf8");
@@ -10305,7 +10305,7 @@ assert(
   "expected provider workspace-write tool to emit risk escalation from read-only-local posture"
 );
 
-const workspaceRiskBaselineWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-risk-baseline-"));
+const workspaceRiskBaselineWorkspace = await mkdtemp(join(tmpdir(), "estacoda-risk-baseline-"));
 await mkdir(join(workspaceRiskBaselineWorkspace, ".estacoda", "skills", "risk-baseline"), { recursive: true });
 await writeFile(join(workspaceRiskBaselineWorkspace, ".estacoda", "skills", "risk-baseline", "SKILL.md"), `---
 {
@@ -11114,7 +11114,7 @@ assert(
   "expected unavailable tool recovery final answer"
 );
 
-const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
+const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-compression-"));
 await mkdir(join(compressionWorkspace, "src"));
 await writeFile(join(compressionWorkspace, "src", "large.txt"), "compress me\n".repeat(1200), "utf8");
 const compressionProviderRequests: ProviderRequest[] = [];
@@ -11178,8 +11178,8 @@ assert(
   "expected compressed marker in provider prompt"
 );
 
-const configuredProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-configured-provider-workspace-"));
-const configuredProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-configured-provider-home-"));
+const configuredProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-configured-provider-workspace-"));
+const configuredProviderHome = await mkdtemp(join(tmpdir(), "estacoda-configured-provider-home-"));
 const configuredProviderSetup = await setupProviderConfig({
   workspaceRoot: configuredProviderWorkspace,
   homeDir: configuredProviderHome,
@@ -11257,8 +11257,8 @@ assert(configuredProviderBody?.model === "deepseek-chat", "expected configured p
 assert(configuredProviderBody?.stream === true, "expected configured provider streaming body");
 assert(Array.isArray(configuredProviderBody?.tools), "expected configured provider tool schemas");
 
-const trustWorkspaceDir = await mkdtemp(join(tmpdir(), "estacoda-v2-trust-workspace-"));
-const trustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-trust-store-")), "trust.json");
+const trustWorkspaceDir = await mkdtemp(join(tmpdir(), "estacoda-trust-workspace-"));
+const trustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-trust-store-")), "trust.json");
 const trustStore = new WorkspaceTrustStore({
   path: trustStorePath,
   now: () => new Date("2026-04-16T00:00:00.000Z")
@@ -11349,7 +11349,7 @@ assert(
   trustStatusAfterRevoke.result.content.includes("not trusted"),
   "expected trust status to reflect revoke"
 );
-const workspaceApprovalStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-workspace-approvals-")), "approvals.json");
+const workspaceApprovalStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-workspace-approvals-")), "approvals.json");
 const workspaceApprovalController = new WorkspaceApprovalController({
   store: new WorkspaceApprovalStore({
     path: workspaceApprovalStorePath,
@@ -11419,7 +11419,7 @@ assert(yoloRuntimeDisabled?.enabled === false && yoloRuntimeDisabled.mode === "s
 const mockChannel = new MockChannelAdapter({ kind: "telegram" });
 const channelSessionStore = new InMemoryChannelSessionStore();
 const channelApprovalStore = new ChannelApprovalStore({
-  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-channel-approvals-")), "approvals.json"),
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-channel-approvals-")), "approvals.json"),
   idFactory: sequenceId()
 });
 const channelRuntimeRequests: Array<{
@@ -11637,7 +11637,7 @@ const cancelMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const cancelGateway = new ChannelGateway({
   adapters: [cancelMockChannel],
   approvalStore: new ChannelApprovalStore({
-    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-cancel-approvals-")), "approvals.json"),
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-cancel-approvals-")), "approvals.json"),
     idFactory: sequenceId()
   }),
   authPolicy: {
@@ -11696,7 +11696,7 @@ const stopMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const stopGateway = new ChannelGateway({
   adapters: [stopMockChannel],
   approvalStore: new ChannelApprovalStore({
-    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-stop-approvals-")), "approvals.json"),
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-stop-approvals-")), "approvals.json"),
     idFactory: sequenceId()
   }),
   authPolicy: {
@@ -11786,7 +11786,7 @@ assert(
 let approvalRuns = 0;
 const approvalMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const approvalStore = new ChannelApprovalStore({
-  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-approval-store-")), "approvals.json"),
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-approval-store-")), "approvals.json"),
   idFactory: sequenceId()
 });
 const destructiveTargetSummary = "rm -rf build-cache";
@@ -12086,7 +12086,7 @@ assert(
 assert(similarDifferentTarget.replyText.includes("needs approval"), "expected different target key to require fresh approval");
 assert(differentChat.replyText.includes("needs approval"), "expected different chat to require fresh approval");
 
-const persistedSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-channel-sessions-")), "sessions.json");
+const persistedSessionStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-channel-sessions-")), "sessions.json");
 const persistedRuntimeRequests: string[] = [];
 const createPersistentSessionGateway = () => new ChannelGateway({
   adapters: [new MockChannelAdapter({ kind: "telegram" })],
@@ -12249,7 +12249,7 @@ assert(dailySessionId !== dailySessionResetId, "expected daily reset policy to r
 
 const sessionApprovalMockChannel = new MockChannelAdapter({ kind: "telegram" });
 const sessionApprovalStore = new ChannelApprovalStore({
-  path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-session-approval-store-")), "approvals.json"),
+  path: join(await mkdtemp(join(tmpdir(), "estacoda-session-approval-store-")), "approvals.json"),
   idFactory: sequenceId()
 });
 const sessionApprovalGateway = new ChannelGateway({
@@ -12322,7 +12322,7 @@ const telegramRequests: Array<{
   url: string;
   body: Record<string, unknown>;
 }> = [];
-const telegramAudioArtifactDir = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-audio-artifact-"));
+const telegramAudioArtifactDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-audio-artifact-"));
 const telegramAudioArtifactPath = join(telegramAudioArtifactDir, "speech.mp3");
 const telegramVoiceArtifactPath = join(telegramAudioArtifactDir, "speech.ogg");
 const telegramImageArtifactPath = join(telegramAudioArtifactDir, "generated.png");
@@ -12331,7 +12331,7 @@ await writeFile(telegramVoiceArtifactPath, "fake opus audio");
 await writeFile(telegramImageArtifactPath, "fake image bytes");
 const telegramAdapter = new TelegramAdapter({
   botToken: "telegram-token",
-  mediaRoot: await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-media-")),
+  mediaRoot: await mkdtemp(join(tmpdir(), "estacoda-telegram-media-")),
   fetch: async (url, init) => {
     const rawBody = init?.body as unknown;
     const body = rawBody instanceof FormData
@@ -12731,8 +12731,8 @@ const telegramAttachmentSessionDb = new InMemorySessionDB({
   id: sequenceId(),
   now: () => new Date("2026-04-16T00:00:00.000Z")
 });
-const telegramAttachmentHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-home-"));
-const telegramAttachmentWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-workspace-"));
+const telegramAttachmentHome = await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-home-"));
+const telegramAttachmentWorkspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-workspace-"));
 const telegramAttachmentRequests: Array<{
   url: string;
   body: Record<string, unknown>;
@@ -13002,7 +13002,7 @@ const telegramAttachmentAdapter = new TelegramAdapter({
 const telegramAttachmentGateway = new ChannelGateway({
   adapters: [telegramAttachmentAdapter],
   approvalStore: new ChannelApprovalStore({
-    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-approvals-")), "approvals.json"),
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-approvals-")), "approvals.json"),
     idFactory: sequenceId()
   }),
   authPolicy: {
@@ -13105,7 +13105,7 @@ assert(
   "expected Telegram document prompt to expose attachment manifest and suggested document tools"
 );
 
-const nativeVisionPromptWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-native-vision-prompt-"));
+const nativeVisionPromptWorkspace = await mkdtemp(join(tmpdir(), "estacoda-native-vision-prompt-"));
 const nativeVisionImagePath = join(nativeVisionPromptWorkspace, "native-vision.png");
 await writeFile(nativeVisionImagePath, "native-vision-bytes");
 const nativeVisionPrompt = assembleProviderPrompt({
@@ -13209,8 +13209,8 @@ const telegramAttachmentFailureSessionDb = new InMemorySessionDB({
   id: sequenceId(),
   now: () => new Date("2026-04-25T00:00:00.000Z")
 });
-const telegramAttachmentFailureHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-home-"));
-const telegramAttachmentFailureWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-workspace-"));
+const telegramAttachmentFailureHome = await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-failure-home-"));
+const telegramAttachmentFailureWorkspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-failure-workspace-"));
 const telegramAttachmentFailureRequests: Array<{
   url: string;
   body: Record<string, unknown>;
@@ -13304,7 +13304,7 @@ const telegramAttachmentFailureAdapter = new TelegramAdapter({
 const telegramAttachmentFailureGateway = new ChannelGateway({
   adapters: [telegramAttachmentFailureAdapter],
   approvalStore: new ChannelApprovalStore({
-    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-approvals-")), "approvals.json"),
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-telegram-attachment-failure-approvals-")), "approvals.json"),
     idFactory: sequenceId()
   }),
   authPolicy: {
@@ -13424,7 +13424,7 @@ async function runSkillPathAndMutationRegressionSmoke(options: {
   personalSkillRoot: string;
 }): Promise<void> {
   const skillSymlinkTarget = join(options.personalSkillRoot, "sample-personal-skill", "references", "linked.md");
-  const skillSymlinkOutsideFile = join(await mkdtemp(join(tmpdir(), "estacoda-v2-skill-symlink-outside-")), "outside.md");
+  const skillSymlinkOutsideFile = join(await mkdtemp(join(tmpdir(), "estacoda-skill-symlink-outside-")), "outside.md");
   await writeFile(skillSymlinkOutsideFile, "outside skill root", "utf8");
   await symlink(skillSymlinkOutsideFile, skillSymlinkTarget);
   const skillWriteSymlinkExecution = await options.toolExecutor.executeTool({
@@ -13510,7 +13510,7 @@ async function runLargeSkillReferenceSmoke(options: {
 }
 
 async function runCorruptSkillUsageSmoke(): Promise<void> {
-  const corruptSkillUsageRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-corrupt-skill-usage-"));
+  const corruptSkillUsageRoot = await mkdtemp(join(tmpdir(), "estacoda-corrupt-skill-usage-"));
   const corruptSkillUsagePath = join(corruptSkillUsageRoot, ".usage.json");
   await writeFile(corruptSkillUsagePath, "{not-json", "utf8");
   const corruptSkillUsageStore = new SkillEvolutionStore({
@@ -13526,8 +13526,8 @@ async function runCorruptSkillUsageSmoke(): Promise<void> {
 }
 
 async function runBundledSkillSyncSmoke(): Promise<void> {
-  const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-sync-"));
-  const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-local-"));
+  const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-bundled-sync-"));
+  const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-bundled-local-"));
   const bundledNestedSkillDir = join(bundledSyncRoot, "media", "proof-skill");
   const bundledLocalSkillDir = join(bundledSyncLocalRoot, "media", "proof-skill");
   await mkdir(bundledNestedSkillDir, { recursive: true });
@@ -13602,8 +13602,8 @@ async function runBundledSkillSyncSmoke(): Promise<void> {
   });
   assert(restoreResult.ok, "expected bundled restore reset to succeed");
   assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v3."), "expected bundled restore to replace local copy with bundled baseline");
-  const ambiguousBundledRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-ambiguous-"));
-  const ambiguousLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-ambiguous-local-"));
+  const ambiguousBundledRoot = await mkdtemp(join(tmpdir(), "estacoda-bundled-ambiguous-"));
+  const ambiguousLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-bundled-ambiguous-local-"));
   for (const relativeDir of ["alpha/duplicate", "beta/duplicate"]) {
     const skillDir = join(ambiguousBundledRoot, relativeDir);
     await mkdir(skillDir, { recursive: true });

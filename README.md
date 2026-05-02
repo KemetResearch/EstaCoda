@@ -1,15 +1,15 @@
-# EstaCoda v2
+# EstaCoda
 
-EstaCoda v2 is a Hermes-aligned TypeScript agent runtime for local, channel, and editor-based agent work.
+EstaCoda is a TypeScript agent runtime for local terminal work, channel-based operation, editor integration, workflow learning, and media-capable agent tooling.
 
-The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, and artifact paths are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a broad public release.
+The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, and artifact paths are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
 
 ## Quick Start
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun install
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun install
+bun run dev
 ```
 
 On first launch, EstaCoda runs an interactive setup flow:
@@ -44,9 +44,9 @@ On first launch, EstaCoda runs an interactive setup flow:
 Run these before pushing changes:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run typecheck
-/Users/ahnwy/.bun/bin/bun run smoke
+cd /path/to/EstaCoda
+bun run typecheck
+bun run smoke
 ```
 
 For a clean first-run onboarding check:
@@ -54,7 +54,7 @@ For a clean first-run onboarding check:
 ```bash
 rm -rf /tmp/estacoda-e2e-home
 mkdir -p /tmp/estacoda-e2e-home
-HOME=/tmp/estacoda-e2e-home /Users/ahnwy/.bun/bin/bun run dev
+HOME=/tmp/estacoda-e2e-home bun run dev
 ```
 
 ## State
@@ -76,8 +76,8 @@ Project overlays live under `<workspace>/.estacoda/`.
 
 ## Docs
 
-- [Architecture](/Users/ahnwy/estacoda-v2/docs/ARCHITECTURE.md)
-- [Testing](/Users/ahnwy/estacoda-v2/docs/TESTING.md)
-- [Roadmap](/Users/ahnwy/estacoda-v2/docs/ROADMAP.md)
-- [Known Issues](/Users/ahnwy/estacoda-v2/docs/KNOWN_ISSUES.md)
-- [Handoff](/Users/ahnwy/estacoda-v2/docs/HANDOFF.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Testing](docs/TESTING.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Known Issues](docs/KNOWN_ISSUES.md)
+- [Handoff](docs/HANDOFF.md)

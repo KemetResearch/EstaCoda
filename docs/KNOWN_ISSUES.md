@@ -27,10 +27,10 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Telegram document analysis is live-proven; image understanding is now also live-proven with Kimi. broader provider coverage is still `implemented but not live-proven`
 - On non-vision providers, Telegram image analysis currently degrades to metadata-only behavior rather than semantic image understanding. `live-proven`
 - Native-vision routing is now preferred for simple image/OCR prompts on vision-capable main routes, but broader multi-provider live proof is still missing. `smoke-tested`
-- Telegram final formatting is improved but still not full Hermes parity. formatting improvements `smoke-tested`; full parity `intended but not implemented`
+- Telegram final formatting is improved but still not full feature parity. formatting improvements `smoke-tested`; full parity `intended but not implemented`
 - Profile/UI control now exists at the global config level, but channel-specific overrides and richer localized approval cards are still missing. `smoke-tested` / `intended but not implemented`
 - Gateway status reports readiness, not real background-process liveness. `live-proven`
-- Telegram gateway session context is now persisted and policy-driven, and basic session-admin UX now exists (`/sessions`, `/search`, `/switch`), but the full Hermes session-management surface is still missing. persistence/policy/admin basics `smoke-tested`; full parity `intended but not implemented`
+- Telegram gateway session context is now persisted and policy-driven, and basic session-admin UX now exists (`/sessions`, `/search`, `/switch`), but the full reference agent session-management surface is still missing. persistence/policy/admin basics `smoke-tested`; full parity `intended but not implemented`
 - CLI now resumes the active workspace session across launches, but still lacks richer lineage/history management beyond `/sessions`, `/search`, and `/switch`. resume `smoke-tested`; richer admin surface `intended but not implemented`
 - Gateway turns now rebuild runtimes from fresh config snapshots, which helps MCP reload semantics, but adapter-level settings are still established at gateway start. `implemented but not live-proven`
 
@@ -59,7 +59,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 - Skills Hub/distribution layer is not implemented.
 - Non-Telegram launch channels are not product-ready.
 - Packaging/distribution path is not decided.
-- Hermes/OpenClaw migration path is not designed.
+- legacy agent frameworks migration path is not designed.
 - Voice/TTS/STT foundation exists, but full TUI voice input and richer local backend detection remain follow-up work.
 - User-facing profiles/modes now exist as a first global config slice; profile effects beyond prompt guidance remain incomplete.
 - Update/install lifecycle for end users is not finalized.

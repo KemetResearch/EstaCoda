@@ -5,8 +5,8 @@ This file is for coding agents and operators setting up EstaCoda v2 locally. It 
 ## Install
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun install
+cd /path/to/EstaCoda
+bun install
 ```
 
 If Bun is not on the default path, use the absolute binary path above.
@@ -16,53 +16,53 @@ If Bun is not on the default path, use the absolute binary path above.
 Typecheck:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run typecheck
+cd /path/to/EstaCoda
+bun run typecheck
 ```
 
 Smoke tests:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run smoke
+cd /path/to/EstaCoda
+bun run smoke
 ```
 
 Interactive CLI:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev
+cd /path/to/EstaCoda
+bun run dev
 ```
 
 Live provider check:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
+cd /path/to/EstaCoda
 export KIMI_API_KEY='REDACTED'
-/Users/ahnwy/.bun/bin/bun run dev -- doctor --live
+bun run dev -- doctor --live
 ```
 
 Telegram status:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run dev -- telegram status
-/Users/ahnwy/.bun/bin/bun run dev -- gateway status
+cd /path/to/EstaCoda
+bun run dev -- telegram status
+bun run dev -- gateway status
 ```
 
 Telegram gateway:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
+cd /path/to/EstaCoda
 export ESTACODA_TELEGRAM_BOT_TOKEN='REDACTED'
-/Users/ahnwy/.bun/bin/bun run dev -- gateway start --telegram
+bun run dev -- gateway start --telegram
 ```
 
 Internal alpha harness:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run alpha:harness
+cd /path/to/EstaCoda
+bun run alpha:harness
 ```
 
 ## Required Environment Variables

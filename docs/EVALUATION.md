@@ -12,16 +12,16 @@ The current goal is to create a repeatable substrate for future self-improvement
 - baseline vs candidate comparison
 - enough discipline to support future skill/prompt evolution safely
 
-This is intentionally narrower than the Hermes self-evolution repo. It is a prerequisite, not the full loop.
+This is intentionally narrower than the reference agent self-evolution repo. It is a prerequisite, not the full loop.
 
 ## What Exists Now
 
-- Task definitions live in [evals/tasks](/Users/ahnwy/estacoda-v2/evals/tasks).
+- Task definitions live in [evals/tasks](evals/tasks).
 - A run scaffold can be generated with:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run eval:substrate
+cd /path/to/EstaCoda
+bun run eval:substrate
 ```
 
 - The scaffold creates:
@@ -37,8 +37,8 @@ cd /Users/ahnwy/estacoda-v2
 - A dedicated live provider batch can be run with:
 
 ```bash
-cd /Users/ahnwy/estacoda-v2
-/Users/ahnwy/.bun/bin/bun run provider:hardening
+cd /path/to/EstaCoda
+bun run provider:hardening
 ```
 
 That command rotates the project-level provider route across the current acceptance set, runs live diagnostics plus core prompt checks, captures results under `.estacoda/provider-hardening-runs/<timestamp>/`, and restores the original project config afterward.
