@@ -1,0 +1,26 @@
+# Default repository ownership.
+* @0xaly
+
+# Repository governance and automation.
+/.github/ @0xaly
+/README.md @0xaly
+/LICENSE @0xaly
+/NOTICE @0xaly
+/CONTRIBUTING.md @0xaly
+/SECURITY.md @0xaly
+/AGENTS.md @0xaly
+
+# Core runtime and tests.
+/src/ @0xaly
+/skills/ @0xaly
+/scripts/ @0xaly
+/evals/ @0xaly
+/assets/ @0xaly
+/workers/ @0xaly
+/acp_registry/ @0xaly
+
+# Documentation and package metadata.
+/docs/ @0xaly
+/package.json @0xaly
+/bun.lock @0xaly
+/tsconfig.json @0xaly
