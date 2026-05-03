@@ -4,27 +4,27 @@ import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { AcpServer } from "./acp/server.js";
-import { ArtifactStore } from "./artifacts/artifact-store.js";
-import { createLocalCdpBrowserBackend, createMockBrowserBackend, type CdpWebSocketEvent, type CdpWebSocketLike } from "./browser/browser-backend.js";
-import { ChannelApprovalStore } from "./channels/channel-approval-store.js";
-import { ChannelGateway, InMemoryChannelSessionStore } from "./channels/channel-gateway.js";
-import { PersistentChannelSessionStore } from "./channels/channel-session-store.js";
-import { MockChannelAdapter } from "./channels/mock-channel-adapter.js";
-import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-adapter.js";
-import { formatTelegramReply } from "./channels/telegram-format.js";
-import { injectVoiceTranscripts } from "./channels/voice-transcription.js";
-import { createConfigTools } from "./config/config-tools.js";
-import { runCliCommand } from "./cli/cli.js";
-import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
-import { ChangeManifestStore } from "./skills/change-manifest-store.js";
-import { loadGoldenFlow } from "./eval/golden-flow-loader.js";
-import { compareToGoldenFlow } from "./eval/golden-flow-compare.js";
-import { runOneShotPrompt } from "./cli/one-shot.js";
-import { renderSlashMenu } from "./cli/slash-menu.js";
-import { runSessionLoop } from "./cli/session-loop.js";
-import { ToolActivityRenderer } from "./cli/tool-activity-renderer.js";
-import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
+import { AcpServer } from "../acp/server.js";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
+import { createLocalCdpBrowserBackend, createMockBrowserBackend, type CdpWebSocketEvent, type CdpWebSocketLike } from "../browser/browser-backend.js";
+import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
+import { ChannelGateway, InMemoryChannelSessionStore } from "../channels/channel-gateway.js";
+import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
+import { MockChannelAdapter } from "../channels/mock-channel-adapter.js";
+import { TelegramAdapter, updateToChannelMessage } from "../channels/telegram-adapter.js";
+import { formatTelegramReply } from "../channels/telegram-format.js";
+import { injectVoiceTranscripts } from "../channels/voice-transcription.js";
+import { createConfigTools } from "../config/config-tools.js";
+import { runCliCommand } from "../cli/cli.js";
+import { PersistentCliSessionStore } from "../cli/cli-session-store.js";
+import { ChangeManifestStore } from "../skills/change-manifest-store.js";
+import { loadGoldenFlow } from "../eval/golden-flow-loader.js";
+import { compareToGoldenFlow } from "../eval/golden-flow-compare.js";
+import { runOneShotPrompt } from "../cli/one-shot.js";
+import { renderSlashMenu } from "../cli/slash-menu.js";
+import { runSessionLoop } from "../cli/session-loop.js";
+import { ToolActivityRenderer } from "../cli/tool-activity-renderer.js";
+import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
 import {
   createTelegramPairingCode,
   consumeTelegramPairingCode,
@@ -36,95 +36,97 @@ import {
   setupSecurityConfig,
   setupUiConfig,
   setupVoiceConfig
-} from "./config/runtime-config.js";
-import { ContextReferenceExpander } from "./context/context-reference-expander.js";
-import { ProjectContextLoader, renderProjectContext } from "./context/project-context-loader.js";
-import { createRuntimeCronRunner, tickCron } from "./cron/cron-runner.js";
-import { CronStore, computeNextRun } from "./cron/cron-store.js";
-import { DelegationManager } from "./delegation/delegation-manager.js";
-import { createDelegationTools } from "./delegation/delegation-tools.js";
-import { createMemoryTool } from "./memory/memory-tool.js";
-import { renderMemorySnapshot } from "./memory/memory-renderer.js";
-import { MemoryStore } from "./memory/memory-store.js";
-import { LocalMemoryProvider } from "./memory/local-memory-provider.js";
+} from "../config/runtime-config.js";
+import { ContextReferenceExpander } from "../context/context-reference-expander.js";
+import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
+import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { CronStore, computeNextRun } from "../cron/cron-store.js";
+import { DelegationManager } from "../delegation/delegation-manager.js";
+import { createDelegationTools } from "../delegation/delegation-tools.js";
+import { createMemoryTool } from "../memory/memory-tool.js";
+import { renderMemorySnapshot } from "../memory/memory-renderer.js";
+import { MemoryStore } from "../memory/memory-store.js";
+import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import {
   __detectForgetPreferenceForTest,
   __detectProjectFactForTest,
   __detectUserPreferenceForTest,
   resolveUserPreferencePromotion
-} from "./memory/memory-promotion.js";
-import { __resolveNpxCachedBinaryForTest } from "./mcp/mcp-client.js";
-import { loadMcpServers } from "./mcp/mcp-tools.js";
-import { createOnboardingTools } from "./onboarding/onboarding-tools.js";
-import { ProcessManager } from "./process/process-manager.js";
-import { createProcessTools } from "./process/process-tools.js";
-import type { ProviderAdapter, ProviderRequest, ProviderResponse, ProviderStreamEvent } from "./contracts/provider.js";
-import type { RuntimeEvent } from "./contracts/runtime-event.js";
-import { CredentialPool, CredentialPoolRegistry } from "./providers/credential-pool.js";
-import { AuxiliaryProviderRouter, summarizeAuxiliaryRoutes } from "./providers/auxiliary-provider-router.js";
+} from "../memory/memory-promotion.js";
+import { __resolveNpxCachedBinaryForTest } from "../mcp/mcp-client.js";
+import { loadMcpServers } from "../mcp/mcp-tools.js";
+import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
+import { ProcessManager } from "../process/process-manager.js";
+import { createProcessTools } from "../process/process-tools.js";
+import type { ProviderAdapter, ProviderRequest, ProviderResponse, ProviderStreamEvent } from "../contracts/provider.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
+import { AuxiliaryProviderRouter, summarizeAuxiliaryRoutes } from "../providers/auxiliary-provider-router.js";
 import {
   inferModelProfile,
   resolveModelProfileFromCatalog,
   resolveModelProfilesFromCatalog,
   resolveProviderModelsFromCatalog
-} from "./providers/model-catalog.js";
+} from "../providers/model-catalog.js";
 import {
   modelsDevSnapshotToProfiles,
   resetModelsDevRegistryForTest,
   resolveModelsDevSnapshot
-} from "./model-catalog/models-dev-registry.js";
+} from "../model-catalog/models-dev-registry.js";
 import {
   buildOpenAICompatibleRequest,
   classifyHttpError,
   createOpenAICompatibleProvider,
   normalizeOpenAICompatibleRequest,
   parseOpenAICompatibleResponse
-} from "./providers/openai-compatible-provider.js";
-import { ProviderExecutor } from "./providers/provider-executor.js";
-import { normalizeProviderMessagesStrict } from "./providers/provider-message-normalizer.js";
-import { ProviderRegistry } from "./providers/provider-registry.js";
-import { buildFallbackChain, routeProvider } from "./providers/provider-router.js";
-import { packSessionHistory } from "./prompt/history-packer.js";
-import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
-import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
-import { IntentRouter } from "./runtime/intent-router.js";
-import type { IntentRoute } from "./contracts/intent.js";
-import { assessCommandSafety } from "./security/command-safety.js";
-import { createSecurityPolicyForMode } from "./security/security-policy-factory.js";
-import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./security/workspace-approval-controller.js";
-import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
-import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
-import { InMemorySessionDB } from "./session/in-memory-session-db.js";
-import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
-import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
-import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_FILES } from "./skills/skill-limits.js";
-import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "./skills/skill-bundled-sync.js";
-import { SkillEvolutionStore } from "./skills/skill-evolution.js";
-import { SkillLearningManager } from "./skills/skill-learning.js";
-import { SkillRegistry } from "./skills/skill-registry.js";
-import { evaluateSkillVisibility } from "./skills/skill-visibility.js";
-import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "./skills/skill-workflow-planner.js";
-import { buildSkillFileContent, createSkillTools } from "./skills/skill-tools.js";
-import { createSkillRouteTelemetry } from "./skills/skill-usage-telemetry.js";
-import { kemetBlueTheme } from "./theme/kemet-blue.js";
-import { builtinTools } from "./tools/builtin-tools.js";
-import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
-import { createImageGenerationTools } from "./tools/image-generation-tools.js";
-import { createMediaTools } from "./tools/media-tools.js";
-import { createPythonTools } from "./tools/python-tools.js";
-import { createVoiceTools, transcribeAudioFile } from "./tools/voice-tools.js";
-import { ToolExecutor, type ToolExecutionRecord } from "./tools/tool-executor.js";
-import { ToolCallPlanner } from "./tools/tool-call-planner.js";
-import { ToolRegistry } from "./tools/tool-registry.js";
-import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
-import { createWebTools } from "./tools/web-tools.js";
-import { createWorkspaceTools } from "./tools/workspace-tools.js";
-import { TrajectoryRecorder } from "./trajectory/trajectory-recorder.js";
-import { runPythonWorker } from "./workers/python-worker.js";
-import { runEvalCases } from "./eval/eval-runner.js";
-import { defaultEvalFixtures } from "./eval/fixtures/index.js";
-import { assessSecurityPolicy, capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "./contracts/security.js";
+} from "../providers/openai-compatible-provider.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
+import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
+import { ProviderRegistry } from "../providers/provider-registry.js";
+import { buildFallbackChain, routeProvider } from "../providers/provider-router.js";
+import { packSessionHistory } from "../prompt/history-packer.js";
+import { assembleProviderPrompt } from "../prompt/prompt-assembly.js";
+import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
+import { IntentRouter } from "../runtime/intent-router.js";
+import type { IntentRoute } from "../contracts/intent.js";
+import { assessCommandSafety } from "../security/command-safety.js";
+import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
+import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_FILES } from "../skills/skill-limits.js";
+import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "../skills/skill-bundled-sync.js";
+import { SkillEvolutionStore } from "../skills/skill-evolution.js";
+import { SkillLearningManager } from "../skills/skill-learning.js";
+import { SkillRegistry } from "../skills/skill-registry.js";
+import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
+import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { buildSkillFileContent, createSkillTools } from "../skills/skill-tools.js";
+import { createSkillRouteTelemetry } from "../skills/skill-usage-telemetry.js";
+import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { builtinTools } from "../tools/builtin-tools.js";
+import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
+import { createImageGenerationTools } from "../tools/image-generation-tools.js";
+import { createMediaTools } from "../tools/media-tools.js";
+import { createPythonTools } from "../tools/python-tools.js";
+import { createVoiceTools, transcribeAudioFile } from "../tools/voice-tools.js";
+import { ToolExecutor, type ToolExecutionRecord } from "../tools/tool-executor.js";
+import { ToolCallPlanner } from "../tools/tool-call-planner.js";
+import { ToolRegistry } from "../tools/tool-registry.js";
+import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import { createWebTools } from "../tools/web-tools.js";
+import { createWorkspaceTools } from "../tools/workspace-tools.js";
+import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import { runPythonWorker } from "../workers/python-worker.js";
+import { runEvalCases } from "../eval/eval-runner.js";
+import { defaultEvalFixtures } from "../eval/fixtures/index.js";
+import { assessSecurityPolicy, capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "../contracts/security.js";
 
+
+export async function runLegacySmoke(): Promise<void> {
 const tools = new ToolRegistry();
 const skills = new SkillRegistry();
 const memory = new MemoryStore();
@@ -281,7 +283,7 @@ class FakeCdpWebSocket implements CdpWebSocketLike {
 }
 
 const loadedSkills = await loadSkillsFromDirectory(
-  new URL("../skills/official", import.meta.url).pathname
+  new URL("../../skills/official", import.meta.url).pathname
 );
 
 for (const skill of loadedSkills.skills) {
@@ -351,7 +353,7 @@ for (const tool of createOnboardingTools({
 }
 tools.register(createMemoryTool(memory));
 
-await memory.loadFromDirectory(new URL("../memory/default", import.meta.url).pathname);
+await memory.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
 memory.apply({
   kind: "append",
   file: "MEMORY.md",
@@ -13455,7 +13457,7 @@ const approved = await changeManifestStore.find(manifest.id);
 assert(approved?.status === "approved", "expected manifest status to be approved");
 assert(approved?.updatedAt !== undefined, "expected manifest to have updatedAt");
 
-const goldenFlowPath = (name: string) => fileURLToPath(new URL(`../evals/golden-flows/${name}`, import.meta.url));
+const goldenFlowPath = (name: string) => fileURLToPath(new URL(`../../evals/golden-flows/${name}`, import.meta.url));
 const goldenText = await loadGoldenFlow(goldenFlowPath("provider-text-response.json"));
 assert(goldenText.id === "golden-provider-text-response", "expected golden flow id to match");
 assert(goldenText.assertions.length > 0, "expected golden flow to have assertions");
@@ -14043,4 +14045,6 @@ function createJsonRpcHarness(input: PassThrough, output: PassThrough) {
       return [...notifications];
     }
   };
+}
+
 }
