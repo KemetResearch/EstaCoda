@@ -76,8 +76,8 @@ Project overlays live under `<workspace>/.estacoda/`.
 
 ## Docs
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Testing](docs/TESTING.md)
+- [Documentation Index](docs/README.md)
+- [Architecture](docs/architecture/)
+- [Subsystems](docs/subsystems/)
+- [Operations](docs/operations/)
 - [Roadmap](docs/ROADMAP.md)
-- [Known Issues](docs/KNOWN_ISSUES.md)
-- [Handoff](docs/HANDOFF.md)

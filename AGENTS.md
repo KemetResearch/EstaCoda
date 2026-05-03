@@ -76,18 +76,37 @@ The filesystem is the source of truth. This map is a guide, not a guarantee.
 ```text
 estacoda/
 ├── src/
-│   ├── cli/                 # CLI and onboarding flows
-│   ├── gateway/             # Gateway and remote interface surfaces
-│   ├── intent/              # Intent classification and routing
-│   ├── skills/              # Skill loading, skill tools, learning loop
-│   ├── security/            # Command policy, approvals, trust checks
-│   ├── memory/              # Memory stores and prompt packing
-│   ├── tools/               # Tool schemas and tool execution adapters
-│   └── config/              # Runtime config loading and defaults
-├── skills/                  # Built-in skills, if shipped in repo
-├── optional-skills/         # Heavier or niche skills, if used
-├── docs/                    # Architecture, review, workflow, security model
-├── tests/                   # Unit, integration, smoke, regression tests
+│   ├── acp/                   # ACP editor integration
+│   ├── artifacts/             # Artifact store and formatting
+│   ├── browser/               # Browser backend (CDP, Browserbase, etc.)
+│   ├── capabilities/          # Capability manifest and trust
+│   ├── channels/              # Telegram gateway and adapters
+│   ├── cli/                   # CLI, interactive session loop, onboarding
+│   ├── config/                # Runtime config loading and defaults
+│   ├── context/               # Context reference expansion, project context
+│   ├── contracts/             # Pure TypeScript types shared across layers
+│   ├── cron/                  # Scheduled task store and tools
+│   ├── delegation/            # Subagent delegation manager
+│   ├── mcp/                   # MCP server integration
+│   ├── memory/                # Memory stores, promotion, rendering
+│   ├── model-catalog/         # Offline model registry and profiles
+│   ├── onboarding/            # First-run setup flows
+│   ├── process/               # Process manager and tools
+│   ├── prompt/                # Prompt assembly, caching, history packing
+│   ├── providers/             # Provider registry, executor, adapters
+│   ├── runtime/               # AgentLoop, router, turn loop, tool runner, recorder
+│   ├── security/              # Command policy, approvals, trust checks
+│   ├── session/               # Session DB (SQLite + in-memory)
+│   ├── skills/                # Skill loading, registry, tools, learning, evolution
+│   ├── theme/                 # UI theme definitions
+│   ├── tools/                 # Tool schemas, registry, executor, planners
+│   ├── trajectory/            # Trajectory recorder (in-memory)
+│   ├── types/                 # Additional TypeScript declarations
+│   ├── ui/                    # UI labels and settings
+│   ├── utils/                 # Shared runtime utilities
+│   └── workers/               # Python worker process
+├── skills/                  # Built-in (official) skills shipped in repo
+├── docs/                    # Architecture, planning, subsystem docs
 ├── scripts/                 # Project scripts and local utilities
 ├── .github/                 # CI, issue templates, PR templates
 ├── README.md
@@ -125,13 +144,12 @@ Treat these as high scrutiny:
 ```text
 src/security/
 src/tools/
-src/gateway/
-src/intent/
+src/channels/
+src/runtime/
 src/skills/
 src/memory/
 src/config/
 skills/
-optional-skills/
 .github/workflows/
 install scripts
 release scripts
