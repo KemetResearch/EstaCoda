@@ -13480,6 +13480,12 @@ const evalReport = await runEvalCases(defaultEvalFixtures);
 assert(evalReport.failed === 0, `eval smoke failed: ${evalReport.results.filter((r) => !r.passed).map((r) => r.name).join(", ")}`);
 assert(evalReport.passed === defaultEvalFixtures.length, `expected ${defaultEvalFixtures.length} evals to pass, got ${evalReport.passed}`);
 
+// v0.6 Track A: Memory Trust Layer smoke checks
+assert(evalReport.results.some((r) => r.id === "memory-promotion-provenance" && r.passed), "expected memory promotion provenance eval to pass");
+assert(evalReport.results.some((r) => r.id === "memory-deactivate-suppresses" && r.passed), "expected memory deactivate suppresses eval to pass");
+assert(evalReport.results.some((r) => r.id === "memory-selective-renders" && r.passed), "expected memory selective renders eval to pass");
+assert(evalReport.results.some((r) => r.id === "memory-safety-files-protected" && r.passed), "expected memory safety files protected eval to pass");
+
 console.log("v2 smoke passed");
 
 async function runSkillPathAndMutationRegressionSmoke(options: {
