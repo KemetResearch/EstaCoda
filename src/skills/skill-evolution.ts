@@ -504,6 +504,14 @@ export class SkillEvolutionStore {
     return record;
   }
 
+  async listEvalRuns(filter?: { skillName?: string }): Promise<SkillEvalRunRecord[]> {
+    const runs = await this.#readJsonl<SkillEvalRunRecord>("eval-runs.jsonl");
+    if (filter?.skillName === undefined) {
+      return runs;
+    }
+    return runs.filter((r) => r.skillName === filter.skillName);
+  }
+
   async rejectProposal(id: string): Promise<SkillPatchProposal | undefined> {
     return await this.#rewriteProposal(id, (proposal) => ({
       ...proposal,

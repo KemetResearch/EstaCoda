@@ -13,6 +13,9 @@ import { knowledgeCacheInvalidatesCase } from "./knowledge-cache-invalidates.js"
 import { manifestCreationFromObservationCase } from "./manifest-creation-from-observation.js";
 import { skillProposalManifestBridgeCase } from "./skill-proposal-manifest-bridge.js";
 import { userCorrectionRecordingCase } from "./user-correction-recording.js";
+import { toolDescriptionProposalCase } from "./tool-description-proposal.js";
+import { routingMetadataProposalCase } from "./routing-metadata-proposal.js";
+import { evolutionExportShapeCase } from "./evolution-export-shape.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -29,5 +32,8 @@ export const defaultEvalFixtures = [
   knowledgeCacheInvalidatesCase,
   manifestCreationFromObservationCase,
   skillProposalManifestBridgeCase,
-  userCorrectionRecordingCase
+  userCorrectionRecordingCase,
+  toolDescriptionProposalCase,
+  routingMetadataProposalCase,
+  evolutionExportShapeCase
 ];

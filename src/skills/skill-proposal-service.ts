@@ -274,6 +274,65 @@ export class SkillProposalService {
     return { manifestId: manifest.id };
   }
 
+  async createManifestForToolDescription(options: {
+    toolName: string;
+    proposedDescription: string;
+    hypothesis: string;
+    predictedImpact: string;
+    evidenceTraceIds?: string[];
+  }): Promise<{ manifestId: string } | undefined> {
+    if (this.#options.changeManifestStore === undefined) {
+      return undefined;
+    }
+    const manifest = await this.#options.changeManifestStore.propose({
+      target: "tool_description",
+      filesChanged: [],
+      evidence: {
+        traces: options.evidenceTraceIds ?? [],
+        failures: [],
+        evalCases: [],
+        userCorrections: []
+      },
+      hypothesis: options.hypothesis,
+      predictedImpact: options.predictedImpact,
+      riskLevel: "low",
+      evalCommand: `bun run smoke`,
+      constraintGates: ["typecheck", "smoke"],
+      rollbackPlan: `Revert tool description to previous version via manifest store.`
+    });
+    return { manifestId: manifest.id };
+  }
+
+  async createManifestForRoutingMetadata(options: {
+    skillName: string;
+    proposedRoutingChange: string;
+    hypothesis: string;
+    predictedImpact: string;
+    evidenceTraceIds?: string[];
+  }): Promise<{ manifestId: string } | undefined> {
+    if (this.#options.changeManifestStore === undefined) {
+      return undefined;
+    }
+    const skill = this.#options.registry.get(options.skillName);
+    const manifest = await this.#options.changeManifestStore.propose({
+      target: "routing_metadata",
+      filesChanged: skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : [],
+      evidence: {
+        traces: options.evidenceTraceIds ?? [],
+        failures: [],
+        evalCases: [],
+        userCorrections: []
+      },
+      hypothesis: options.hypothesis,
+      predictedImpact: options.predictedImpact,
+      riskLevel: "medium",
+      evalCommand: `bun run smoke --tag skills`,
+      constraintGates: ["typecheck", "smoke"],
+      rollbackPlan: `Revert routing metadata to previous version via manifest store.`
+    });
+    return { manifestId: manifest.id };
+  }
+
   async listManifests(filter?: { status?: import("../contracts/evolution.js").EvolutionChangeManifest["status"] }): Promise<EvolutionChangeManifest[]> {
     if (this.#options.changeManifestStore === undefined) {
       return [];

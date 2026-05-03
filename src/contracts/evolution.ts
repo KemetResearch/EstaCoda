@@ -1,7 +1,7 @@
 export type EvolutionTarget =
   | "skill"
   | "tool_description"
-  | "system_prompt_section"
+  | "routing_metadata"
   | "middleware"
   | "memory_policy"
   | "workflow_policy"

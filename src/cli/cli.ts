@@ -65,6 +65,7 @@ import { proposalCommand } from "./proposal-commands.js";
 import { manifestCommand } from "./manifest-commands.js";
 import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
+import { evolutionCommand } from "./evolution-commands.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -144,6 +145,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return manifestCommand(options, args);
     case "curator":
       return curatorCommand(options, args);
+    case "evolution":
+      return evolutionCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
     case "help":
