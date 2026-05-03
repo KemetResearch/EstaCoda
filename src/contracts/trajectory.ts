@@ -12,6 +12,7 @@ export type TrajectoryEventKind =
   | "artifact-created"
   | "memory-write"
   | "memory-conclusion"
+  | "memory-promotion"
   | "delegation-started"
   | "delegation-finished"
   | "provider-completion"

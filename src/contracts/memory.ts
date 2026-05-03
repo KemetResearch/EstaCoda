@@ -59,6 +59,9 @@ export type MemoryConclusion = {
   source?: string;
   occurrences?: number;
   sourceSessionIds?: string[];
+  sourceTrajectoryId?: string;
+  sourceEventId?: string;
+  createdAt?: string;
 };
 
 export type MemoryPromotionRecord = {
@@ -74,6 +77,9 @@ export type MemoryPromotionRecord = {
   forgottenAt?: string;
   forgottenReason?: string;
   updatedAt: string;
+  createdAt?: string;
+  sourceTrajectoryId?: string;
+  sourceEventId?: string;
 };
 
 export type SkillOutcome = {

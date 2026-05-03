@@ -25,6 +25,8 @@ export class MemoryPromotionStore {
     occurrences: number;
     source: string;
     sourceSessionIds: string[];
+    sourceTrajectoryId?: string;
+    sourceEventId?: string;
   }): Promise<{
     action: "created" | "strengthened" | "replaced";
     record: MemoryPromotionRecord;
@@ -63,7 +65,10 @@ export class MemoryPromotionStore {
       occurrences: input.occurrences,
       source: input.source,
       sourceSessionIds: unique(input.sourceSessionIds),
-      updatedAt: now
+      updatedAt: now,
+      createdAt: now,
+      sourceTrajectoryId: input.sourceTrajectoryId,
+      sourceEventId: input.sourceEventId
     };
 
     if (conflicting !== undefined) {
@@ -98,6 +103,8 @@ export class MemoryPromotionStore {
     occurrences: number;
     source: string;
     sourceSessionIds: string[];
+    sourceTrajectoryId?: string;
+    sourceEventId?: string;
   }): Promise<{
     action: "created" | "strengthened";
     record: MemoryPromotionRecord;
@@ -133,7 +140,10 @@ export class MemoryPromotionStore {
       occurrences: input.occurrences,
       source: input.source,
       sourceSessionIds: unique(input.sourceSessionIds),
-      updatedAt: now
+      updatedAt: now,
+      createdAt: now,
+      sourceTrajectoryId: input.sourceTrajectoryId,
+      sourceEventId: input.sourceEventId
     };
     this.#records.set(key, record);
     await this.#flush();
@@ -160,6 +170,27 @@ export class MemoryPromotionStore {
     this.#records.set(normalizeContentKey(match.content), forgotten);
     await this.#flush();
     return forgotten;
+  }
+
+  async findById(id: string): Promise<MemoryPromotionRecord | undefined> {
+    await this.#ensureLoaded();
+    return [...this.#records.values()].find((record) => record.id === id);
+  }
+
+  async deactivateById(id: string): Promise<MemoryPromotionRecord | undefined> {
+    await this.#ensureLoaded();
+    const record = [...this.#records.values()].find((r) => r.id === id);
+    if (record === undefined) {
+      return undefined;
+    }
+    const deactivated: MemoryPromotionRecord = {
+      ...record,
+      active: false,
+      updatedAt: this.#now().toISOString()
+    };
+    this.#records.set(normalizeContentKey(record.content), deactivated);
+    await this.#flush();
+    return deactivated;
   }
 
   async list(): Promise<MemoryPromotionRecord[]> {

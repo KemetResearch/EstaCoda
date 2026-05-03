@@ -271,7 +271,7 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
-    this.#trajectoryRecorder.record("user-input", {
+    const userInputEvent = this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
       channel: input.channel,
       attachments: summarizeAttachments(attachments),
@@ -706,7 +706,7 @@ export class AgentLoop {
       text: response.text
     });
 
-    await this.#promoteRepeatedPreferences(effectiveText);
+    await this.#promoteRepeatedPreferences(effectiveText, userInputEvent.id);
 
     return response;
   }
@@ -715,7 +715,7 @@ export class AgentLoop {
 
 
 
-  async #promoteRepeatedPreferences(userText: string): Promise<void> {
+  async #promoteRepeatedPreferences(userText: string, userInputEventId: string): Promise<void> {
     if (this.#memoryProvider === undefined) {
       return;
     }
@@ -724,12 +724,22 @@ export class AgentLoop {
       profileId: this.#profileId,
       currentUserText: userText,
       sessionDb: this.#sessionDb,
-      memoryProvider: this.#memoryProvider
+      memoryProvider: this.#memoryProvider,
+      sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
+      sourceEventId: userInputEventId
     });
 
     if (preferenceResult?.kind === "conclusion") {
       const { conclusion } = preferenceResult;
+      const targetFile = "USER.md";
 
+      this.#trajectoryRecorder.record("memory-promotion", {
+        conclusionId: conclusion.id,
+        kind: conclusion.kind,
+        targetFile,
+        sourceTrajectoryId: conclusion.sourceTrajectoryId,
+        sourceEventId: conclusion.sourceEventId
+      });
       this.#trajectoryRecorder.record("memory-conclusion", {
         provider: this.#memoryProvider.id,
         conclusion
@@ -749,14 +759,24 @@ export class AgentLoop {
       profileId: this.#profileId,
       currentUserText: userText,
       sessionDb: this.#sessionDb,
-      memoryProvider: this.#memoryProvider
+      memoryProvider: this.#memoryProvider,
+      sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
+      sourceEventId: userInputEventId
     });
 
     if (projectFactResult?.kind !== "conclusion") {
       return;
     }
     const { conclusion } = projectFactResult;
+    const targetFile = "MEMORY.md";
 
+    this.#trajectoryRecorder.record("memory-promotion", {
+      conclusionId: conclusion.id,
+      kind: conclusion.kind,
+      targetFile,
+      sourceTrajectoryId: conclusion.sourceTrajectoryId,
+      sourceEventId: conclusion.sourceEventId
+    });
     this.#trajectoryRecorder.record("memory-conclusion", {
       provider: this.#memoryProvider.id,
       conclusion

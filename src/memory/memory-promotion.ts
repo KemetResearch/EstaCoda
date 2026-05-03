@@ -21,6 +21,8 @@ export async function resolveUserPreferencePromotion(options: {
   currentUserText: string;
   sessionDb: SessionDB;
   memoryProvider: MemoryProvider;
+  sourceTrajectoryId?: string;
+  sourceEventId?: string;
 }): Promise<UserPreferencePromotionResult | undefined> {
   const forgottenContent = detectForgetPreference(options.currentUserText);
   if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
@@ -67,7 +69,10 @@ export async function resolveUserPreferencePromotion(options: {
     confidence: Math.min(0.95, 0.55 + (matchingSessionIds.size - 2) * 0.15),
     source: "repeated-user-input",
     occurrences: matchingSessionIds.size,
-    sourceSessionIds: [...matchingSessionIds]
+    sourceSessionIds: [...matchingSessionIds],
+    sourceTrajectoryId: options.sourceTrajectoryId,
+    sourceEventId: options.sourceEventId,
+    createdAt: new Date().toISOString()
   };
 
   await options.memoryProvider.conclude(conclusion);
@@ -82,6 +87,8 @@ export async function resolveProjectFactPromotion(options: {
   currentUserText: string;
   sessionDb: SessionDB;
   memoryProvider: MemoryProvider;
+  sourceTrajectoryId?: string;
+  sourceEventId?: string;
 }): Promise<ProjectFactPromotionResult | undefined> {
   const currentFact = detectProjectFact(options.currentUserText);
 
@@ -117,7 +124,10 @@ export async function resolveProjectFactPromotion(options: {
     confidence: Math.min(0.95, 0.55 + (matchingSessionIds.size - 2) * 0.15),
     source: "repeated-user-input",
     occurrences: matchingSessionIds.size,
-    sourceSessionIds: [...matchingSessionIds]
+    sourceSessionIds: [...matchingSessionIds],
+    sourceTrajectoryId: options.sourceTrajectoryId,
+    sourceEventId: options.sourceEventId,
+    createdAt: new Date().toISOString()
   };
 
   await options.memoryProvider.conclude(conclusion);

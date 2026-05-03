@@ -8,7 +8,9 @@ import type {
   SkillOutcome
 } from "../contracts/memory.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
+import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
+import { MemoryInspector } from "./memory-inspector.js";
 import type { MemoryStore } from "./memory-store.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
@@ -16,6 +18,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #store: MemoryStore;
   readonly #saveRoots: Partial<Record<MemoryFileKind, string>>;
   readonly #promotionStore: MemoryPromotionStore | undefined;
+  readonly #inspector: MemoryInspector | undefined;
 
   constructor(options: {
     store: MemoryStore;
@@ -39,10 +42,31 @@ export class LocalMemoryProvider implements MemoryProvider {
       : new MemoryPromotionStore({
           path: options.promotionStorePath
         });
+    this.#inspector = this.#promotionStore === undefined
+      ? undefined
+      : new MemoryInspector({
+          promotionStore: this.#promotionStore,
+          memoryStore: this.#store
+        });
   }
 
-  context(): MemoryProviderContext {
-    const rendered = renderMemorySnapshot(this.#store.snapshot());
+  get inspector(): MemoryInspector | undefined {
+    return this.#inspector;
+  }
+
+  async context(options?: { query?: string }): Promise<MemoryProviderContext> {
+    const snapshot = this.#store.snapshot();
+
+    if (options?.query !== undefined && options.query.trim().length > 0 && this.#promotionStore !== undefined) {
+      const records = await this.#promotionStore.list();
+      const rendered = renderSelective(snapshot, records, { query: options.query });
+      return {
+        text: rendered.text,
+        usage: rendered.usage
+      };
+    }
+
+    const rendered = renderMemorySnapshot(snapshot);
 
     return {
       text: rendered.text,
@@ -85,7 +109,9 @@ export class LocalMemoryProvider implements MemoryProvider {
         confidence: conclusion.confidence,
         occurrences: conclusion.occurrences ?? 1,
         source: conclusion.source ?? "unknown",
-        sourceSessionIds: conclusion.sourceSessionIds ?? []
+        sourceSessionIds: conclusion.sourceSessionIds ?? [],
+        sourceTrajectoryId: conclusion.sourceTrajectoryId,
+        sourceEventId: conclusion.sourceEventId
       });
 
       if (applied.superseded !== undefined) {
@@ -104,7 +130,9 @@ export class LocalMemoryProvider implements MemoryProvider {
         confidence: conclusion.confidence,
         occurrences: conclusion.occurrences ?? 1,
         source: conclusion.source ?? "unknown",
-        sourceSessionIds: conclusion.sourceSessionIds ?? []
+        sourceSessionIds: conclusion.sourceSessionIds ?? [],
+        sourceTrajectoryId: conclusion.sourceTrajectoryId,
+        sourceEventId: conclusion.sourceEventId
       });
       if (applied.action === "created") {
         this.#appendDedupe(target, `- ${conclusion.content}`);

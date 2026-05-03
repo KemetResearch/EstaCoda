@@ -61,6 +61,7 @@ import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 import { trace } from "./trace-commands.js";
 import { evalCommand } from "./eval-commands.js";
+import { knowledge } from "./knowledge-commands.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -134,6 +135,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return trace(options, args);
     case "eval":
       return evalCommand(options, args);
+    case "knowledge":
+      return knowledge(options, args);
     case "help":
     case "--help":
     case "-h":
