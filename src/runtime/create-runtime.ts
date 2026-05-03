@@ -61,6 +61,12 @@ import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopInput, type AgentLoopResponse } from "./agent-loop.js";
 import { IntentRouter } from "./intent-router.js";
+import { RunRecorder } from "./run-recorder.js";
+import { RuntimeRouter } from "./runtime-router.js";
+import { ToolPlanRunner } from "./tool-plan-runner.js";
+import { ProviderTurnLoop } from "./provider-turn-loop.js";
+import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { NativeToolExecutor } from "./native-tool-executor.js";
 
 export type RuntimeOptions = {
   theme: ThemeDefinition;
@@ -496,7 +502,72 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     aliases: providerToolSchemaCatalog.aliases
   });
 
+  const runRecorder = new RunRecorder({
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    profileId,
+    skillEvolutionStore,
+    memoryProvider
+  });
+
+  const toolPlanRunner = new ToolPlanRunner({
+    toolCallPlanner,
+    toolExecutor,
+    runRecorder,
+    sessionId,
+    maxConcurrentSafeTools: 4
+  });
+
+  const providerTurnLoop = new ProviderTurnLoop({
+    providerExecutor,
+    model: options.model,
+    providerPreferences: {
+      providerOrder: [options.model.provider]
+    },
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    runRecorder,
+    toolPlanRunner,
+    soul: frozenMemorySnapshot.files.get("SOUL.md"),
+    frozenMemory: {
+      user: frozenMemorySnapshot.files.get("USER.md"),
+      memory: frozenMemorySnapshot.files.get("MEMORY.md")
+    },
+    skillsIndex: sessionSkillCatalog,
+    ui: options.ui,
+    agentProfile: options.agentProfile,
+    budgets: {
+      maxProviderIterations: 6,
+      maxProviderToolCalls: 20,
+      maxRepeatedToolFailures: 3,
+      maxProviderWallClockMs: 120_000
+    }
+  });
+
+  const skillWorkflowExecutor = new SkillWorkflowExecutor({
+    toolExecutor,
+    sessionId,
+    runRecorder
+  });
+
+  const nativeToolExecutor = new NativeToolExecutor({
+    toolExecutor,
+    runRecorder,
+    sessionId
+  });
+
   const agentLoop = new AgentLoop({
+    runRecorder,
+    runtimeRouter: new RuntimeRouter({
+      intentRouter,
+      skillConfig: options.skillConfig ?? {}
+    }),
+    toolPlanRunner,
+    providerTurnLoop,
+    skillWorkflowExecutor,
+    nativeToolExecutor,
     responseLabel: options.theme.branding.responseLabel,
     intentRouter,
     securityPolicy,

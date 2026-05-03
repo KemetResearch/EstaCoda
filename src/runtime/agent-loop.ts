@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
-import { isArtifactKind, type ArtifactRecord } from "../contracts/artifact.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -15,10 +13,7 @@ import type {
   LoadedSkill,
   SkillConfigField,
   SkillDefinition,
-  SkillCatalogEntry,
-  SkillWorkflowPlan,
-  SkillWorkflowPlanStep,
-  SkillWorkflowStep
+  SkillCatalogEntry
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
@@ -28,21 +23,24 @@ import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } 
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
-import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
-import {
-  assembleProviderContinuationPrompt,
-  assembleProviderPrompt
-} from "../prompt/prompt-assembly.js";
-import { packSessionHistory } from "../prompt/history-packer.js";
-import { PromptCache } from "../prompt/prompt-cache.js";
-import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
+import { ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { IntentRouter } from "./intent-router.js";
+import { RunRecorder } from "./run-recorder.js";
+import type { RuntimeRouter } from "./runtime-router.js";
+import { summarizeAttachments } from "./runtime-router.js";
+import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
+import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { NativeToolExecutor } from "./native-tool-executor.js";
+import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
+import { emit, isAborted } from "../utils/runtime-helpers.js";
+import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
+import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -71,6 +69,12 @@ export type AgentLoopResponse = {
 };
 
 export type AgentLoopOptions = {
+  runRecorder: RunRecorder;
+  runtimeRouter: RuntimeRouter;
+  toolPlanRunner: ToolPlanRunner;
+  providerTurnLoop: ProviderTurnLoop;
+  skillWorkflowExecutor: SkillWorkflowExecutor;
+  nativeToolExecutor: NativeToolExecutor;
   responseLabel: string;
   intentRouter: IntentRouter;
   securityPolicy: SecurityPolicy;
@@ -115,10 +119,9 @@ export type AgentLoopBudgets = {
   maxProviderToolCalls: number;
   maxRepeatedToolFailures: number;
   maxProviderWallClockMs: number;
-  maxConcurrentSafeTools: number;
 };
 
-type SkillSetupContext = {
+export type SkillSetupContext = {
   skillDirectory?: string;
   requiredEnvironmentVariables: Array<{
     name: string;
@@ -140,6 +143,9 @@ type SkillSetupContext = {
 
 export class AgentLoop {
   readonly #responseLabel: string;
+  readonly #runRecorder: RunRecorder;
+  readonly #runtimeRouter: RuntimeRouter;
+  readonly #toolPlanRunner: ToolPlanRunner;
   readonly #intentRouter: IntentRouter;
   readonly #securityPolicy: SecurityPolicy;
   readonly #trajectoryRecorder: TrajectoryRecorder;
@@ -156,7 +162,9 @@ export class AgentLoop {
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
-  readonly #promptCache: PromptCache;
+  readonly #providerTurnLoop: ProviderTurnLoop;
+  readonly #skillWorkflowExecutor: SkillWorkflowExecutor;
+  readonly #nativeToolExecutor: NativeToolExecutor;
   readonly #soul: string | undefined;
   readonly #frozenMemory: { user?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
@@ -169,6 +177,9 @@ export class AgentLoop {
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
+    this.#runRecorder = options.runRecorder;
+    this.#runtimeRouter = options.runtimeRouter;
+    this.#toolPlanRunner = options.toolPlanRunner;
     this.#intentRouter = options.intentRouter;
     this.#securityPolicy = options.securityPolicy;
     this.#trajectoryRecorder = options.trajectoryRecorder;
@@ -185,7 +196,9 @@ export class AgentLoop {
     this.#contextReferenceExpander = options.contextReferenceExpander;
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
-    this.#promptCache = new PromptCache();
+    this.#providerTurnLoop = options.providerTurnLoop;
+    this.#skillWorkflowExecutor = options.skillWorkflowExecutor;
+    this.#nativeToolExecutor = options.nativeToolExecutor;
     this.#soul = options.soul;
     this.#frozenMemory = options.frozenMemory;
     this.#skillsIndex = options.skillsIndex ?? [];
@@ -198,13 +211,12 @@ export class AgentLoop {
       maxProviderIterations: options.budgets?.maxProviderIterations ?? options.maxProviderIterations ?? 4,
       maxProviderToolCalls: options.budgets?.maxProviderToolCalls ?? 12,
       maxRepeatedToolFailures: options.budgets?.maxRepeatedToolFailures ?? 2,
-      maxProviderWallClockMs: options.budgets?.maxProviderWallClockMs ?? 180_000,
-      maxConcurrentSafeTools: options.budgets?.maxConcurrentSafeTools ?? 4
+      maxProviderWallClockMs: options.budgets?.maxProviderWallClockMs ?? 180_000
     };
   }
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
-    const latestResumeNote = await this.#latestResumeNote();
+    const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
       ? [
           input.text,
@@ -223,7 +235,7 @@ export class AgentLoop {
         stage: "startup",
         userText: effectiveText
       });
-      await this.#recordCancellation({
+      await this.#runRecorder.recordCancellation({
         reason: "cancelled before start",
         resumeNote
       }, input.onEvent);
@@ -238,7 +250,15 @@ export class AgentLoop {
       ? expandedContext
       : undefined;
     const routedText = context?.expandedText ?? effectiveText;
-    const attachments = normalizeAttachments(input.attachments);
+    const trustedWorkspace = input.trustedWorkspace ?? false;
+    const route = this.#runtimeRouter.route({
+      text: routedText,
+      attachments: input.attachments,
+      channel: input.channel,
+      model: this.#model,
+      trustedWorkspace
+    });
+    const attachments = route.attachments;
 
     await this.#sessionDb.appendMessage({
       sessionId: this.#sessionId,
@@ -282,8 +302,6 @@ export class AgentLoop {
       });
     }
 
-    const trustedWorkspace = input.trustedWorkspace ?? false;
-    const attachmentFailureResponse = buildAttachmentFailureResponse(attachments);
     if (isAborted(input.signal)) {
       const resumeNote = buildResumeNote({
         stage: "context expansion",
@@ -291,7 +309,7 @@ export class AgentLoop {
         context,
         projectContext: this.#projectContext
       });
-      await this.#recordCancellation({
+      await this.#runRecorder.recordCancellation({
         reason: "cancelled before routing",
         resumeNote
       }, input.onEvent);
@@ -301,19 +319,11 @@ export class AgentLoop {
         resumeNote
       });
     }
-    const intent = attachmentFailureResponse === undefined
-      ? this.#intentRouter.route(routedText, {
-        attachments,
-        channel: input.channel,
-        surface: input.channel,
-        model: this.#model,
-        trustedWorkspace
-      })
-      : directAttachmentFailureIntent();
-    if (attachmentFailureResponse !== undefined) {
+
+    if (route.attachmentFailureResponse !== undefined) {
       await this.#sessionDb.appendEvent(this.#sessionId, {
         kind: "intent-routed",
-        route: intent
+        route: route.intent
       });
       const attachmentFailureSecurityAssessment = await assessSecurityPolicy(capabilityFirstDefaults, {
         riskClass: "read-only-local",
@@ -334,13 +344,13 @@ export class AgentLoop {
       });
       this.#trajectoryRecorder.record("progress", {
         message: "attachment preflight failed",
-        labels: intent.labels,
-        confidence: intent.confidence
+        labels: route.intent.labels,
+        confidence: route.intent.confidence
       });
       this.#trajectoryRecorder.record("assistant-output", {
-        text: attachmentFailureResponse,
+        text: route.attachmentFailureResponse,
         matchedSkills: [],
-        intentLabels: intent.labels,
+        intentLabels: route.intent.labels,
         securityDecision: attachmentFailureSecurityAssessment.decision,
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         toolExecutions: [],
@@ -349,24 +359,24 @@ export class AgentLoop {
       await this.#sessionDb.appendMessage({
         sessionId: this.#sessionId,
         role: "agent",
-        content: attachmentFailureResponse,
+        content: route.attachmentFailureResponse,
         channel: input.channel,
         metadata: {
           matchedSkills: [],
-          intentLabels: intent.labels,
+          intentLabels: route.intent.labels,
           attachmentFailure: summarizeAttachments(attachments)
         }
       });
       await emit(input.onEvent, {
         kind: "agent-final",
-        text: attachmentFailureResponse
+        text: route.attachmentFailureResponse
       });
 
       return {
         label: this.#responseLabel,
-        text: attachmentFailureResponse,
+        text: route.attachmentFailureResponse,
         matchedSkills: [],
-        intent,
+        intent: route.intent,
         securityDecision: attachmentFailureSecurityAssessment.decision,
         toolExecutions: [],
         toolPlans: [],
@@ -382,21 +392,18 @@ export class AgentLoop {
         ]
       };
     }
+
     await emit(input.onEvent, {
       kind: "intent",
-      labels: intent.labels,
-      confidence: intent.confidence
+      labels: route.intent.labels,
+      confidence: route.intent.confidence
     });
-    const selectedSkill = intent.suggestedSkills[0];
-    const selectedSkillInstructions = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
-      ? undefined
-      : selectedSkill.providerInstructions?.content ?? selectedSkill.instructions;
-    const selectedSkillResources = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
-      ? undefined
-      : selectedSkill.resources;
-    const selectedSkillSetup = selectedSkill === undefined
-      ? undefined
-      : resolveSkillSetup(selectedSkill, this.#skillConfig[selectedSkill.name]);
+
+    const intent = route.intent;
+    const selectedSkill = route.selectedSkill;
+    const selectedSkillInstructions = route.selectedSkillInstructions;
+    const selectedSkillResources = route.selectedSkillResources;
+    const selectedSkillSetup = route.selectedSkillSetup;
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "intent-routed",
@@ -411,7 +418,7 @@ export class AgentLoop {
       confirmationRequired: intent.confirmationRequired,
       suggestedToolsets: intent.suggestedToolsets
     });
-    await this.#recordRouteUsage({
+    await this.#runRecorder.recordRouteUsage({
       intent,
       selectedSkill,
       channel: input.channel,
@@ -466,10 +473,10 @@ export class AgentLoop {
     });
 
     if (selectedSkill !== undefined && !intent.confirmationRequired) {
-      await this.#recordWorkflowPlan(compileSkillWorkflowPlan(selectedSkill));
+      await this.#runRecorder.recordWorkflowPlan(compileSkillWorkflowPlan(selectedSkill));
     }
 
-    const deterministicNativeTools = await this.#executeDeterministicNativeTools({
+    const deterministicNativeTools = await this.#nativeToolExecutor.executeDeterministicNativeTools({
       intent,
       text: effectiveText,
       trustedWorkspace,
@@ -480,7 +487,7 @@ export class AgentLoop {
       this.#model === undefined ||
       this.#model.provider === "unconfigured";
     const skillToolExecutions = useDeterministicSkillWorkflow
-      ? await this.#executeSkillWorkflow({
+      ? await this.#skillWorkflowExecutor.executeSkillWorkflow({
       selectedSkill,
       intent,
       trustedWorkspace,
@@ -494,7 +501,7 @@ export class AgentLoop {
       ...skillToolExecutions
     ];
     const recordedArtifactIds = new Set<string>();
-    const artifacts = await this.#recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
+    const artifacts = await this.#runRecorder.recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
     const toolPlans: ToolCallPlan[] = [...deterministicNativeTools.plans];
 
     const fallbackResponse = buildFallbackResponse({
@@ -512,7 +519,7 @@ export class AgentLoop {
     });
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
-    const providerLoop = await this.#runProviderLoop({
+    const providerLoop = await this.#providerTurnLoop.run({
       userText: effectiveText,
       routedText,
       selectedSkill,
@@ -537,9 +544,9 @@ export class AgentLoop {
     const effectiveProviderExecution = providerLoop.providerExecution;
 
     toolExecutions.push(...providerLoop.toolExecutions);
-    artifacts.push(...(await this.#recordArtifactsFromExecutions(providerLoop.toolExecutions, recordedArtifactIds)));
+    artifacts.push(...(await this.#runRecorder.recordArtifactsFromExecutions(providerLoop.toolExecutions, recordedArtifactIds)));
     if (isAborted(input.signal)) {
-      await this.#markPlannedToolPlansCancelled(toolPlans, "Cancelled by user before the turn completed.");
+      await this.#runRecorder.markPlannedToolPlansCancelled(toolPlans, "Cancelled by user before the turn completed.");
       const resumeNote = buildResumeNote({
         stage: "provider/tool loop",
         userText: effectiveText,
@@ -550,7 +557,7 @@ export class AgentLoop {
         context,
         projectContext: this.#projectContext
       });
-      await this.#recordCancellation({
+      await this.#runRecorder.recordCancellation({
         reason: "cancelled during provider/tool loop",
         resumeNote,
         activeSkill: selectedSkill?.name,
@@ -570,14 +577,14 @@ export class AgentLoop {
         projectContext: this.#projectContext,
         providerExecution: effectiveProviderExecution
       });
-      await this.#appendCancelledAssistantMessage({
+      await this.#runRecorder.appendCancelledAssistantMessage({
         response,
         channel: input.channel
       });
 
       return response;
     }
-    const skillOutcomes = await this.#recordSkillOutcomes({
+    const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
       selectedSkill,
       userText: effectiveText,
       toolExecutions,
@@ -704,512 +711,9 @@ export class AgentLoop {
     return response;
   }
 
-  async #executeSkillWorkflow(input: {
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    intent: IntentRoute;
-    trustedWorkspace: boolean;
-    text: string;
-    signal?: AbortSignal;
-    onEvent?: RuntimeEventSink;
-  }): Promise<ToolExecutionRecord[]> {
-    if (input.selectedSkill === undefined || input.intent.confirmationRequired) {
-      return [];
-    }
 
-    const executions: ToolExecutionRecord[] = [];
-    const previousResults: string[] = [];
-    const usedTools = new Set<string>();
-    const plan = compileSkillWorkflowPlan(input.selectedSkill);
-    const stepMap = new Map(plan.steps.map((step, index) => [step.id, { step, index }]));
-    const visited = new Set<string>();
-    let stepIndex = 0;
 
-    while (stepIndex < plan.steps.length && executions.length < 4) {
-      if (isAborted(input.signal)) {
-        break;
-      }
-      const step = plan.steps[stepIndex];
-      if (step === undefined || visited.has(step.id)) {
-        stepIndex += 1;
-        continue;
-      }
-      visited.add(step.id);
-      step.status = "running";
-      const execution = await this.#executeWorkflowStep({
-        skill: input.selectedSkill,
-        step,
-        intent: input.intent,
-        trustedWorkspace: input.trustedWorkspace,
-        previousResults,
-        usedTools,
-        text: input.intent.invocation?.args ?? input.text,
-        onEvent: input.onEvent
-      });
 
-      if (execution === undefined) {
-        step.status = "failed";
-        step.reason = "No available tool for this workflow step yet.";
-        const fallbackIndex = nextFallbackIndex(plan, step, stepMap);
-        if (fallbackIndex !== undefined) {
-          step.status = "fallback-used";
-          step.reason = `Falling back to ${plan.steps[fallbackIndex]?.id ?? "next fallback"}.`;
-          stepIndex = fallbackIndex;
-          continue;
-        }
-        stepIndex += 1;
-        continue;
-      }
-
-      executions.push(execution);
-      usedTools.add(execution.tool.name);
-      step.tool = execution.tool.name;
-      step.status = execution.decision === "allow" && execution.result?.ok !== false
-        ? "succeeded"
-        : execution.decision === "allow"
-          ? "failed"
-          : "blocked";
-
-      if (execution.result?.content !== undefined) {
-        previousResults.push(renderToolResultPacket(packetizeToolExecution({
-          execution,
-          maxChars: 600
-        })));
-      }
-
-      if (execution.decision !== "allow") {
-        break;
-      }
-      if (execution.result?.ok === false) {
-        const fallbackIndex = nextFallbackIndex(plan, step, stepMap);
-        if (fallbackIndex !== undefined) {
-          step.status = "fallback-used";
-          step.reason = `Falling back to ${plan.steps[fallbackIndex]?.id ?? "next fallback"}.`;
-          stepIndex = fallbackIndex;
-          continue;
-        }
-      }
-      stepIndex += 1;
-    }
-
-    return executions;
-  }
-
-  async #executeWorkflowStep(input: {
-    skill: LoadedSkill | SkillDefinition;
-    step: SkillWorkflowPlanStep;
-    intent: IntentRoute;
-    trustedWorkspace: boolean;
-    previousResults: string[];
-    usedTools: Set<string>;
-    text: string;
-    onEvent?: RuntimeEventSink;
-  }): Promise<ToolExecutionRecord | undefined> {
-    const toolsets = input.step.preferredToolsets;
-
-    for (const toolset of toolsets) {
-      const toolInput = {
-        skill: input.skill.name,
-        intent: input.intent.labels,
-        text: input.text,
-        url: extractFirstUrl(input.text),
-        firstStep: input.skill.workflow[0]?.description,
-        workflowStep: input.step.id,
-        stepDescription: input.step.description,
-        previousResults: input.previousResults.map((result) => truncate(result, 500))
-      };
-      const preferredTool = firstAvailablePreferredTool(input.step, toolset, input.usedTools);
-      let emittedStart = false;
-      if (preferredTool !== undefined && !input.usedTools.has(preferredTool)) {
-        await emit(input.onEvent, {
-          kind: "tool-start",
-          tool: preferredTool,
-          stepId: input.step.id
-        });
-        emittedStart = true;
-      }
-      const execution = preferredTool === undefined || input.usedTools.has(preferredTool)
-        ? await this.#toolExecutor.executeFirstAvailable({
-            toolset,
-            sessionId: this.#sessionId,
-            trustedWorkspace: input.trustedWorkspace,
-            excludedTools: [...input.usedTools],
-            input: toolInput
-          })
-        : await this.#toolExecutor.executeTool({
-            tool: preferredTool,
-            sessionId: this.#sessionId,
-            trustedWorkspace: input.trustedWorkspace,
-            input: toolInput
-          });
-
-      if (execution === undefined) {
-        continue;
-      }
-      if (!emittedStart) {
-        await emit(input.onEvent, {
-          kind: "tool-start",
-          tool: execution.tool.name,
-          stepId: input.step.id
-        });
-      }
-
-      await this.#recordWorkflowStep({
-        skill: input.skill.name,
-        step: input.step,
-        status: execution.decision === "allow" ? "tool-executed" : "blocked",
-        toolsets,
-        tool: execution.tool.name,
-        reason: execution.decision === "allow" ? undefined : `security decision: ${execution.decision}`
-      });
-      await emit(input.onEvent, {
-        kind: "tool-result",
-        tool: execution.tool.name,
-        decision: execution.decision,
-        riskClass: execution.riskClass,
-        ok: execution.result?.ok,
-        ...toolResultStats(execution)
-      });
-
-      return execution;
-    }
-
-    await this.#recordWorkflowStep({
-      skill: input.skill.name,
-      step: input.step,
-      status: "no-tool",
-      toolsets,
-      reason: "No available tool for this workflow step yet."
-    });
-
-    return undefined;
-  }
-
-  async #recordWorkflowStep(input: {
-    skill: string;
-    step: SkillWorkflowStep | SkillWorkflowPlanStep;
-    status: "tool-executed" | "no-tool" | "blocked" | "skipped";
-    toolsets: ToolsetName[];
-    tool?: string;
-    reason?: string;
-  }): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "skill-workflow-step",
-      skill: input.skill,
-      stepId: input.step.id,
-      description: input.step.description,
-      status: input.status,
-      toolsets: input.toolsets,
-      tool: input.tool,
-      reason: input.reason
-    });
-    this.#trajectoryRecorder.record("skill-workflow-step", {
-      skill: input.skill,
-      stepId: input.step.id,
-      description: input.step.description,
-      status: input.status,
-      toolsets: input.toolsets,
-      tool: input.tool,
-      reason: input.reason
-    });
-  }
-
-  async #recordWorkflowPlan(plan: SkillWorkflowPlan): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "skill-workflow-planned",
-      plan
-    });
-    this.#trajectoryRecorder.record("skill-workflow-planned", {
-      plan
-    });
-  }
-
-  async #recordArtifactsFromExecutions(
-    executions: ToolExecutionRecord[],
-    recordedIds: Set<string>
-  ): Promise<ArtifactRecord[]> {
-    const artifacts: ArtifactRecord[] = [];
-
-    for (const execution of executions) {
-      const artifact = artifactFromExecution(execution);
-      if (artifact === undefined || recordedIds.has(artifact.id)) {
-        continue;
-      }
-
-      recordedIds.add(artifact.id);
-      artifacts.push(artifact);
-      await this.#sessionDb.appendEvent(this.#sessionId, {
-        kind: "artifact-created",
-        artifact,
-        tool: execution.tool.name
-      });
-      this.#trajectoryRecorder.record("artifact-created", {
-        artifact,
-        tool: execution.tool.name
-      });
-    }
-
-    return artifacts;
-  }
-
-  async #executeDeterministicNativeTools(input: {
-    intent: IntentRoute;
-    text: string;
-    trustedWorkspace: boolean;
-    signal?: AbortSignal;
-    onEvent?: RuntimeEventSink;
-  }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
-    if (input.intent.nativeIntent !== "image-generation") {
-      return { executions: [], plans: [] };
-    }
-
-    const tool = this.#toolExecutor.getToolDefinition("image.generate");
-    if (tool === undefined) {
-      return { executions: [], plans: [] };
-    }
-
-    const plan: ToolCallPlan = {
-      id: `native-image-${Date.now()}`,
-      tool: "image.generate",
-      input: {
-        prompt: input.text,
-        aspectRatio: inferImageAspectRatio(input.text)
-      },
-      source: "internal",
-      status: "planned"
-    };
-    await this.#recordToolPlan(plan);
-    await emit(input.onEvent, {
-      kind: "tool-start",
-      tool: plan.tool
-    });
-
-    const execution = await this.#toolExecutor.executeTool({
-      tool: plan.tool,
-      input: plan.input,
-      trustedWorkspace: input.trustedWorkspace,
-      sessionId: this.#sessionId,
-      signal: input.signal
-    });
-
-    if (execution === undefined) {
-      plan.status = "unavailable";
-      plan.error = `Tool is unavailable: ${plan.tool}`;
-      await this.#recordToolPlan(plan);
-      return { executions: [], plans: [plan] };
-    }
-
-    plan.status = execution.decision === "allow" && execution.result?.ok !== false
-      ? "executed"
-      : execution.decision === "allow"
-        ? "invalid"
-        : "blocked";
-    plan.result = execution.result;
-    plan.error = execution.result?.ok === false ? execution.result.content : undefined;
-    await this.#recordToolPlan(plan);
-
-    return { executions: [execution], plans: [plan] };
-  }
-
-  async #executeProviderToolPlans(input: {
-    providerExecution: ProviderExecutionResult | undefined;
-    toolPlans: ToolCallPlan[];
-    trustedWorkspace: boolean;
-    remainingToolCalls: number;
-    riskBaseline: ToolRiskClass;
-    signal?: AbortSignal;
-    onEvent?: RuntimeEventSink;
-  }): Promise<{
-    executions: ToolExecutionRecord[];
-    maxObservedRisk: ToolRiskClass;
-  }> {
-    if (this.#toolCallPlanner === undefined || input.providerExecution === undefined) {
-      return {
-        executions: [],
-        maxObservedRisk: input.riskBaseline
-      };
-    }
-
-    const executions: ToolExecutionRecord[] = [];
-    const pending: Array<{
-      plan: ToolCallPlan;
-      definition: ToolDefinition | undefined;
-    }> = [];
-
-    for (const toolCall of input.providerExecution.toolCalls.slice(0, input.remainingToolCalls)) {
-      const plan = this.#toolCallPlanner.planFromProviderDelta(toolCall);
-
-      input.toolPlans.push(plan);
-      await this.#recordToolPlan(plan);
-
-      if (plan.status !== "planned") {
-        continue;
-      }
-
-      pending.push({
-        plan,
-        definition: this.#toolExecutor.getToolDefinition(plan.tool)
-      });
-    }
-
-    let maxObservedRisk: ToolRiskClass = input.riskBaseline;
-    for (const group of groupProviderToolPlans(pending, this.#budgets.maxConcurrentSafeTools)) {
-      const nextRisk = maxRiskClass(group.entries.map((entry) => entry.definition?.riskClass));
-      if (riskRank(nextRisk) > riskRank(maxObservedRisk)) {
-        await this.#recordSecurityRiskEscalation({
-          from: maxObservedRisk,
-          to: nextRisk,
-          onEvent: input.onEvent
-        });
-        maxObservedRisk = nextRisk;
-      }
-
-      if (group.concurrent) {
-        const groupExecutions = await Promise.all(group.entries.map(async ({ plan }) =>
-          this.#executeProviderToolPlan({
-            plan,
-            trustedWorkspace: input.trustedWorkspace,
-            signal: input.signal,
-            onEvent: input.onEvent
-          })
-        ));
-
-        executions.push(...groupExecutions.filter((execution) => execution !== undefined));
-        continue;
-      }
-
-      for (const { plan } of group.entries) {
-        const execution = await this.#executeProviderToolPlan({
-          plan,
-          trustedWorkspace: input.trustedWorkspace,
-          signal: input.signal,
-          onEvent: input.onEvent
-        });
-        if (execution !== undefined) {
-          executions.push(execution);
-        }
-      }
-    }
-
-    return {
-      executions,
-      maxObservedRisk
-    };
-  }
-
-  async #executeProviderToolPlan(input: {
-    plan: ToolCallPlan;
-    trustedWorkspace: boolean;
-    signal?: AbortSignal;
-    onEvent?: RuntimeEventSink;
-  }): Promise<ToolExecutionRecord | undefined> {
-    const plan = input.plan;
-
-    await emit(input.onEvent, {
-      kind: "tool-start",
-      tool: plan.tool
-    });
-
-    const execution = await this.#toolExecutor.executeTool({
-      tool: plan.tool,
-      input: plan.input,
-      trustedWorkspace: input.trustedWorkspace,
-      sessionId: this.#sessionId,
-      signal: input.signal
-    });
-
-    if (execution === undefined) {
-      plan.status = "unavailable";
-      plan.error = `Tool is unavailable: ${plan.tool}`;
-      await this.#recordToolPlan(plan);
-      return undefined;
-    }
-
-    plan.status = execution.decision === "allow" ? "executed" : "blocked";
-    plan.result = execution.result;
-    if (execution.decision !== "allow") {
-      plan.error = `security decision: ${execution.decision}`;
-    }
-    await this.#recordToolPlan(plan);
-    await emit(input.onEvent, {
-      kind: "tool-result",
-      tool: execution.tool.name,
-      decision: execution.decision,
-      riskClass: execution.riskClass,
-      ok: execution.result?.ok,
-      ...toolResultStats(execution)
-    });
-
-    return execution;
-  }
-
-  async #recordSkillOutcomes(input: {
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    userText: string;
-    toolExecutions: ToolExecutionRecord[];
-    toolPlans: ToolCallPlan[];
-  }): Promise<SkillOutcome[]> {
-    if (
-      input.selectedSkill === undefined ||
-      (input.toolExecutions.length === 0 && input.toolPlans.length === 0)
-    ) {
-      return [];
-    }
-
-    const succeeded = input.toolExecutions.filter((execution) => execution.result?.ok === true);
-    const failed = input.toolExecutions.filter((execution) => execution.result?.ok === false);
-    const blocked = input.toolExecutions.filter((execution) => execution.decision !== "allow");
-    const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
-    const blockedPlans = input.toolPlans.filter((plan) => plan.status === "blocked");
-    const failedPlans = input.toolPlans.filter((plan) => plan.status === "invalid" || plan.status === "unavailable");
-    const status: SkillOutcome["status"] =
-      blocked.length > 0 || blockedPlans.length > 0
-        ? "blocked"
-        : (failed.length > 0 || failedPlans.length > 0) && (succeeded.length > 0 || executedPlans.length > 0)
-          ? "partial"
-          : failed.length > 0 || failedPlans.length > 0
-            ? "failed"
-            : "succeeded";
-    const outcome: SkillOutcome = {
-      skill: input.selectedSkill.name,
-      summary: summarizeSkillOutcome(input.selectedSkill.name, input.toolExecutions, input.toolPlans),
-      status,
-      tools: [...new Set([
-        ...input.toolExecutions.map((execution) => execution.tool.name),
-        ...input.toolPlans.map((plan) => plan.tool).filter((tool) => tool.length > 0)
-      ])],
-      memoryTargets: ["MEMORY.md"],
-      metadata: {
-        plannedTools: input.toolPlans.map((plan) => ({
-          tool: plan.tool,
-          status: plan.status
-        }))
-      }
-    };
-
-    if (this.#memoryProvider !== undefined) {
-      await this.#memoryProvider.recordSkillOutcome(outcome);
-      this.#trajectoryRecorder.record("memory-write", {
-        provider: this.#memoryProvider.id,
-        outcome
-      });
-      await this.#sessionDb.appendEvent(this.#sessionId, {
-        kind: "memory-write",
-        provider: this.#memoryProvider.id,
-        outcome
-      });
-    }
-
-    await this.#skillEvolutionStore?.recordSkillOutcome({
-      skill: input.selectedSkill,
-      outcome,
-      sessionId: this.#sessionId,
-      promptSummary: truncate(input.userText, 240),
-      selectedWorkflowStep: input.selectedSkill.workflow[0]?.id,
-      toolExecutions: input.toolExecutions
-    }).catch(() => undefined);
-
-    return [outcome];
-  }
 
   async #promoteRepeatedPreferences(userText: string): Promise<void> {
     if (this.#memoryProvider === undefined) {
@@ -1264,711 +768,10 @@ export class AgentLoop {
     });
   }
 
-  async #recordToolPlan(plan: ToolCallPlan): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "tool-plan",
-      plan
-    });
-    this.#trajectoryRecorder.record("tool-plan", {
-      id: plan.id,
-      tool: plan.tool,
-      status: plan.status,
-      source: plan.source,
-      error: plan.error
-    });
-  }
 
-  async #runProviderLoop(input: {
-    userText: string;
-    routedText: string;
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    selectedSkillInstructions: string | undefined;
-    selectedSkillResources: LoadedSkill["resources"] | undefined;
-    selectedSkillSetup: SkillSetupContext | undefined;
-    intent: IntentRoute;
-    securityDecision: SecurityDecision;
-    toolExecutions: ToolExecutionRecord[];
-    context: ContextExpansionResult | undefined;
-    projectContext: ProjectContextSnapshot | undefined;
-    attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
-    providerTools: OpenAICompatibleToolSchema[];
-    fallbackText: string;
-    onEvent?: RuntimeEventSink;
-    toolPlans: ToolCallPlan[];
-    trustedWorkspace: boolean;
-    initialRiskClass: ToolRiskClass;
-    signal?: AbortSignal;
-  }): Promise<{
-    providerExecution: ProviderExecutionResult | undefined;
-    toolExecutions: ToolExecutionRecord[];
-    iterations: number;
-  }> {
-    const providerToolExecutions: ToolExecutionRecord[] = [];
-    let effectiveProviderExecution: ProviderExecutionResult | undefined;
-    let previousProviderExecution: ProviderExecutionResult | undefined;
-    let iterations = 0;
-    const loopStartedAt = Date.now();
-    const repeatedFailures = new Map<string, number>();
-    let maxObservedRisk = input.initialRiskClass;
 
-    for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
-      if (isAborted(input.signal)) {
-        await this.#recordProviderBudgetExhausted({
-          budget: "abort-signal",
-          limit: 1,
-          observed: 1,
-          reason: "Provider loop was cancelled before the next iteration."
-        }, input.onEvent);
-        break;
-      }
-      const elapsedMs = Date.now() - loopStartedAt;
-      if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
-        await this.#recordProviderBudgetExhausted({
-          budget: "provider-wall-clock-ms",
-          limit: this.#budgets.maxProviderWallClockMs,
-          observed: elapsedMs,
-          reason: "Provider loop exceeded its wall-clock budget."
-        }, input.onEvent);
-        break;
-      }
-      if (providerToolExecutions.length >= this.#budgets.maxProviderToolCalls) {
-        await this.#recordProviderBudgetExhausted({
-          budget: "provider-tool-calls",
-          limit: this.#budgets.maxProviderToolCalls,
-          observed: providerToolExecutions.length,
-          reason: "Provider loop reached its tool-call execution budget."
-        }, input.onEvent);
-        break;
-      }
-      const phase = iteration === 0 ? "initial" : "continuation";
-      const execution = phase === "initial"
-        ? await this.#completeWithProvider({
-            ...input,
-            iteration
-          })
-        : await this.#continueProviderAfterTools({
-            ...input,
-            toolExecutions: [
-              ...input.toolExecutions,
-              ...providerToolExecutions
-            ],
-            providerExecution: previousProviderExecution,
-            iteration
-          });
-
-      if (execution === undefined) {
-        break;
-      }
-
-      iterations += 1;
-      effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
-      previousProviderExecution = execution;
-
-      const beforeExecutions = providerToolExecutions.length;
-      const beforePlans = input.toolPlans.length;
-      const loopToolExecutionResult = await this.#executeProviderToolPlans({
-        providerExecution: execution,
-        toolPlans: input.toolPlans,
-        trustedWorkspace: input.trustedWorkspace,
-        remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
-        riskBaseline: maxObservedRisk,
-        signal: input.signal,
-        onEvent: input.onEvent
-      });
-      const loopToolExecutions = loopToolExecutionResult.executions;
-      maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
-      providerToolExecutions.push(...loopToolExecutions);
-      const currentPlans = input.toolPlans.slice(beforePlans);
-      const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
-      const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
-      if (repeatedFailureBudgetExceeded !== undefined) {
-        await this.#recordProviderBudgetExhausted({
-          budget: "repeated-tool-failures",
-          limit: this.#budgets.maxRepeatedToolFailures,
-          observed: repeatedFailureBudgetExceeded.count,
-          reason: `Tool ${repeatedFailureBudgetExceeded.tool} failed repeatedly with the same outcome.`
-        }, input.onEvent);
-      }
-      const exhausted = (
-        iteration + 1 >= this.#budgets.maxProviderIterations ||
-        providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
-        repeatedFailureBudgetExceeded !== undefined
-      ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
-
-      await this.#recordProviderIteration({
-        iteration,
-        phase,
-        ok: execution.ok,
-        toolCalls: execution.toolCalls.length,
-        executedTools: providerToolExecutions.length - beforeExecutions,
-        exhausted
-      });
-
-      if (
-        execution.ok !== true ||
-        execution.toolCalls.length === 0 ||
-        (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
-        exhausted
-      ) {
-        break;
-      }
-    }
-
-    return {
-      providerExecution: effectiveProviderExecution,
-      toolExecutions: providerToolExecutions,
-      iterations
-    };
-  }
-
-  #recordRepeatedToolFailures(
-    executions: ToolExecutionRecord[],
-    repeatedFailures: Map<string, number>
-  ): { tool: string; count: number } | undefined {
-    for (const execution of executions) {
-      if (execution.result?.ok !== false) {
-        continue;
-      }
-
-      const key = `${execution.tool.name}:${execution.result.content.slice(0, 160)}`;
-      const count = (repeatedFailures.get(key) ?? 0) + 1;
-      repeatedFailures.set(key, count);
-
-      if (count >= this.#budgets.maxRepeatedToolFailures) {
-        return {
-          tool: execution.tool.name,
-          count
-        };
-      }
-    }
-
-    return undefined;
-  }
-
-  async #recordProviderBudgetExhausted(input: {
-    budget: string;
-    limit: number;
-    observed: number;
-    reason: string;
-  }, sink: RuntimeEventSink | undefined): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "provider-budget-exhausted",
-      ...input
-    });
-    this.#trajectoryRecorder.record("provider-budget-exhausted", input);
-    await emit(sink, {
-      kind: "provider-budget-exhausted",
-      ...input
-    });
-  }
-
-  async #recordCancellation(input: {
-    reason: string;
-    resumeNote?: string;
-    activeSkill?: string;
-    activeToolPlans?: ToolCallPlan[];
-  }, sink: RuntimeEventSink | undefined): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "agent-cancelled",
-      reason: input.reason,
-      resumeNote: input.resumeNote,
-      activeSkill: input.activeSkill,
-      activeToolPlans: input.activeToolPlans?.map((plan) => ({
-        id: plan.id,
-        tool: plan.tool,
-        status: plan.status
-      }))
-    });
-    this.#trajectoryRecorder.record("agent-cancelled", {
-      reason: input.reason,
-      resumeNote: input.resumeNote,
-      activeSkill: input.activeSkill,
-      activeToolPlans: input.activeToolPlans?.map((plan) => ({
-        id: plan.id,
-        tool: plan.tool,
-        status: plan.status
-      }))
-    });
-    await emit(sink, {
-      kind: "agent-cancelled",
-      reason: input.reason,
-      resumeNote: input.resumeNote
-    });
-  }
-
-  async #latestResumeNote(): Promise<string | undefined> {
-    const events = await this.#sessionDb.listEvents(this.#sessionId);
-    const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
-
-    return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
-  }
-
-  async #markPlannedToolPlansCancelled(plans: ToolCallPlan[], reason: string): Promise<void> {
-    for (const plan of plans) {
-      if (plan.status !== "planned") {
-        continue;
-      }
-
-      plan.status = "cancelled";
-      plan.error = reason;
-      await this.#recordToolPlan(plan);
-    }
-  }
-
-  async #appendCancelledAssistantMessage(input: {
-    response: AgentLoopResponse;
-    channel: ChannelKind;
-  }): Promise<void> {
-    await this.#sessionDb.appendMessage({
-      sessionId: this.#sessionId,
-      role: "agent",
-      content: input.response.text,
-      channel: input.channel,
-      metadata: {
-        cancelled: true,
-        resumeNote: input.response.progress.find((entry) => entry.startsWith("resume:"))?.replace(/^resume:\s*/u, ""),
-        toolPlans: input.response.toolPlans.map((plan) => ({
-          id: plan.id,
-          tool: plan.tool,
-          status: plan.status,
-          error: plan.error
-        }))
-      }
-    });
-  }
-
-  async #recordProviderIteration(input: {
-    iteration: number;
-    phase: "initial" | "continuation";
-    ok: boolean;
-    toolCalls: number;
-    executedTools: number;
-    exhausted: boolean;
-  }): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "provider-iteration",
-      ...input
-    });
-    this.#trajectoryRecorder.record("provider-iteration", input);
-  }
-
-  async #recordRouteUsage(input: {
-    intent: IntentRoute;
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    channel: ChannelKind;
-    userText: string;
-    onEvent?: RuntimeEventSink;
-  }): Promise<void> {
-    const promptHash = hashSkillRoutePrompt(input.userText);
-    const timestamp = new Date().toISOString();
-    const routeTelemetry = input.intent.suggestedSkills.map((skill) => createSkillRouteTelemetry({
-      skillName: skill.name,
-      sourceKind: isLoadedSkill(skill) ? skill.sourceKind : "local",
-      selected: input.selectedSkill?.name === skill.name,
-      explicitInvocation: input.intent.invocation?.explicit === true,
-      confidence: input.intent.confidence,
-      labels: input.intent.labels,
-      evidence: input.intent.evidence.map((entry) => `${entry.kind}: ${entry.detail}`),
-      routeId: promptHash,
-      matchedAt: timestamp
-    }));
-    const event = {
-      kind: "skill-route-usage" as const,
-      timestamp,
-      skillName: input.selectedSkill?.name,
-      nativeIntent: input.intent.nativeIntent,
-      labels: input.intent.labels,
-      selected: input.selectedSkill !== undefined,
-      invoked: input.intent.invocation?.explicit === true,
-      deferred: input.intent.evidence.some((entry) => entry.kind === "skill-defer-rule"),
-      deferReason: input.intent.evidence.find((entry) => entry.kind === "skill-defer-rule")?.detail,
-      confidence: input.intent.confidence,
-      evidenceKinds: input.intent.evidence.map((entry) => entry.kind),
-      surface: input.channel
-    };
-    await this.#sessionDb.appendEvent(this.#sessionId, event);
-    this.#trajectoryRecorder.record("skill-route-usage", event);
-    for (const telemetry of routeTelemetry) {
-      await this.#skillEvolutionStore?.recordSkillRouteTelemetry(telemetry);
-    }
-    if (input.selectedSkill !== undefined) {
-      await this.#skillEvolutionStore?.recordSkillUsed({
-        skill: input.selectedSkill,
-        selectedAt: timestamp
-      });
-    }
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "skill-route-telemetry",
-      telemetry: {
-        promptHash,
-        labels: input.intent.labels,
-        confidence: input.intent.confidence,
-        selectedSkill: input.selectedSkill?.name,
-        explicitInvocation: input.intent.invocation?.explicit === true,
-        candidates: routeTelemetry
-      }
-    });
-    this.#trajectoryRecorder.record("skill-route-telemetry", {
-      promptHash,
-      labels: input.intent.labels,
-      confidence: input.intent.confidence,
-      selectedSkill: input.selectedSkill?.name,
-      explicitInvocation: input.intent.invocation?.explicit === true,
-      candidates: routeTelemetry
-    });
-    await emit(input.onEvent, {
-      kind: "skill-route-telemetry",
-      promptHash,
-      selectedSkill: input.selectedSkill?.name,
-      confidence: input.intent.confidence,
-      candidates: routeTelemetry.map((telemetry) => ({
-        skillName: telemetry.skillName,
-        selected: telemetry.selected,
-        explicitInvocation: telemetry.explicitInvocation,
-        confidence: telemetry.confidence,
-        sourceKind: telemetry.sourceKind
-      }))
-    });
-  }
-
-  async #recordSecurityRiskEscalation(input: {
-    from: ToolRiskClass;
-    to: ToolRiskClass;
-    onEvent?: RuntimeEventSink;
-  }): Promise<void> {
-    const reason = "provider proposed higher-risk tool call than initial turn posture";
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "security-risk-escalated",
-      from: input.from,
-      to: input.to,
-      reason
-    });
-    this.#trajectoryRecorder.record("security-risk-escalated", {
-      from: input.from,
-      to: input.to,
-      reason
-    });
-    await emit(input.onEvent, {
-      kind: "security-risk-escalated",
-      from: input.from,
-      to: input.to,
-      reason
-    });
-  }
-
-  async #completeWithProvider(input: {
-    userText: string;
-    routedText: string;
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    selectedSkillInstructions: string | undefined;
-    selectedSkillResources: LoadedSkill["resources"] | undefined;
-    selectedSkillSetup: SkillSetupContext | undefined;
-    intent: IntentRoute;
-    securityDecision: SecurityDecision;
-    toolExecutions: ToolExecutionRecord[];
-    context: ContextExpansionResult | undefined;
-    projectContext: ProjectContextSnapshot | undefined;
-    attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
-    providerTools: OpenAICompatibleToolSchema[];
-    fallbackText: string;
-    onEvent?: RuntimeEventSink;
-    toolPlans: ToolCallPlan[];
-    iteration: number;
-    signal?: AbortSignal;
-  }): Promise<ProviderExecutionResult | undefined> {
-    if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
-      return undefined;
-    }
-
-    const sessionHistory = await this.#providerSessionHistory();
-    const prompt = assembleProviderPrompt({
-      ...input,
-      model: this.#model,
-      cache: this.#promptCache,
-      sessionHistory,
-      soul: this.#soul,
-      frozenMemory: this.#frozenMemory,
-      skillsIndex: this.#skillsIndex,
-      selectedSkillResources: input.selectedSkillResources,
-      selectedSkillSetup: input.selectedSkillSetup,
-      attachments: input.attachments,
-      ui: this.#ui,
-      agentProfile: this.#agentProfile
-    });
-    await this.#recordPromptAssembly(prompt.budget);
-
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
-      provider: this.#model.provider,
-      model: this.#model.id,
-      messages: prompt.messages,
-      temperature: 0.2,
-      maxTokens: 1_200,
-      tools: this.#model.supportsTools && input.providerTools.length > 0
-        ? input.providerTools
-        : undefined
-    }), {
-      requireTools: input.providerTools.length > 0,
-      requireVision: false,
-      requireStructuredOutput: false,
-      providerOrder: [this.#model.provider],
-      ...this.#providerPreferences
-    }, {
-      sessionId: this.#sessionId,
-      stream: true,
-      signal: input.signal,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
-    });
-
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "provider-completion",
-      iteration: input.iteration,
-      ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
-      fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
-    });
-    this.#trajectoryRecorder.record("provider-completion", {
-      iteration: input.iteration,
-      ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
-      fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
-    });
-
-    return execution;
-  }
-
-  async #continueProviderAfterTools(input: {
-    userText: string;
-    routedText: string;
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    selectedSkillInstructions: string | undefined;
-    selectedSkillResources: LoadedSkill["resources"] | undefined;
-    selectedSkillSetup: SkillSetupContext | undefined;
-    intent: IntentRoute;
-    securityDecision: SecurityDecision;
-    toolExecutions: ToolExecutionRecord[];
-    context: ContextExpansionResult | undefined;
-    projectContext: ProjectContextSnapshot | undefined;
-    attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
-    providerTools: OpenAICompatibleToolSchema[];
-    providerExecution: ProviderExecutionResult | undefined;
-    toolPlans: ToolCallPlan[];
-    fallbackText: string;
-    onEvent?: RuntimeEventSink;
-    iteration: number;
-    signal?: AbortSignal;
-  }): Promise<ProviderExecutionResult | undefined> {
-    if (
-      this.#providerExecutor === undefined ||
-      this.#model === undefined ||
-      this.#model.provider === "unconfigured" ||
-      input.providerExecution?.ok !== true ||
-      input.providerExecution.toolCalls.length === 0 ||
-      !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
-    ) {
-      return undefined;
-    }
-
-    const sessionHistory = await this.#providerSessionHistory();
-    const prompt = assembleProviderContinuationPrompt({
-      ...input,
-      model: this.#model,
-      cache: this.#promptCache,
-      sessionHistory,
-      soul: this.#soul,
-      frozenMemory: this.#frozenMemory,
-      skillsIndex: this.#skillsIndex,
-      selectedSkillResources: input.selectedSkillResources,
-      selectedSkillSetup: input.selectedSkillSetup,
-      attachments: input.attachments,
-      ui: this.#ui,
-      agentProfile: this.#agentProfile
-    });
-    await this.#recordPromptAssembly(prompt.budget);
-
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
-      provider: this.#model.provider,
-      model: this.#model.id,
-      messages: prompt.messages,
-      temperature: 0.2,
-      maxTokens: 1_200,
-      tools: this.#model.supportsTools && input.providerTools.length > 0
-        ? input.providerTools
-        : undefined
-    }), {
-      requireTools: input.providerTools.length > 0,
-      requireVision: false,
-      requireStructuredOutput: false,
-      providerOrder: [this.#model.provider],
-      ...this.#providerPreferences
-    }, {
-      sessionId: this.#sessionId,
-      stream: true,
-      signal: input.signal,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
-    });
-
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "provider-continuation",
-      iteration: input.iteration,
-      ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
-      toolPlans: input.toolPlans.map((plan) => ({
-        id: plan.id,
-        tool: plan.tool,
-        status: plan.status
-      })),
-      usage: execution.response?.usage
-    });
-    this.#trajectoryRecorder.record("provider-continuation", {
-      iteration: input.iteration,
-      ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
-      toolPlans: input.toolPlans.map((plan) => ({
-        id: plan.id,
-        tool: plan.tool,
-        status: plan.status
-      })),
-      usage: execution.response?.usage
-    });
-
-    return execution;
-  }
-
-  async #recordPromptAssembly(budget: PromptBudgetReport): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
-      kind: "prompt-assembled",
-      budget
-    });
-    this.#trajectoryRecorder.record("prompt-assembled", {
-      budget
-    });
-  }
-
-  async #providerSessionHistory(): Promise<Array<Pick<ProviderMessage, "role" | "content">>> {
-    const messages = await this.#sessionDb.listMessages(this.#sessionId);
-    const packed = packSessionHistory(messages);
-
-    if (packed.sourceMessageCount > 0) {
-      await this.#sessionDb.appendEvent(this.#sessionId, {
-        kind: "session-history-packed",
-        sourceMessageCount: packed.sourceMessageCount,
-        summarizedMessageCount: packed.summarizedMessageCount,
-        protectedMessageCount: packed.protectedMessageCount,
-        protectedToolPairCount: packed.protectedToolPairCount,
-        estimatedTokens: packed.estimatedTokens,
-        summary: packed.summary
-      });
-      this.#trajectoryRecorder.record("session-history-packed", {
-        sourceMessageCount: packed.sourceMessageCount,
-        summarizedMessageCount: packed.summarizedMessageCount,
-        protectedMessageCount: packed.protectedMessageCount,
-        protectedToolPairCount: packed.protectedToolPairCount,
-        estimatedTokens: packed.estimatedTokens,
-        summary: packed.summary
-      });
-    }
-
-    return packed.messages;
-  }
 }
 
-function preferredToolsets(step: SkillWorkflowStep): ToolsetName[] {
-  const toolsets = step.toolsets ?? ["research"];
-
-  return toolsets.length === 0 ? ["research"] : toolsets;
-}
-
-function preferredToolForStep(
-  step: SkillWorkflowStep | SkillWorkflowPlanStep,
-  toolset: ToolsetName
-): string | undefined {
-  if (step.id.includes("extract") && toolset === "web") {
-    return "web.extract";
-  }
-
-  if (step.id.includes("browser") && toolset === "browser") {
-    return "browser.navigate";
-  }
-
-  return undefined;
-}
-
-function firstAvailablePreferredTool(
-  step: SkillWorkflowStep | SkillWorkflowPlanStep,
-  toolset: ToolsetName,
-  usedTools: Set<string>
-): string | undefined {
-  const candidates = [
-    step.preferredTool,
-    ...("toolCandidates" in step ? step.toolCandidates ?? [] : []),
-    preferredToolForStep(step, toolset)
-  ].filter((tool): tool is string => tool !== undefined && !usedTools.has(tool));
-
-  return candidates[0];
-}
-
-function nextFallbackIndex(
-  plan: SkillWorkflowPlan,
-  step: SkillWorkflowPlanStep,
-  stepMap: Map<string, { step: SkillWorkflowPlanStep; index: number }>
-): number | undefined {
-  for (const fallbackId of step.fallbackTo) {
-    const fallback = stepMap.get(fallbackId);
-    if (fallback !== undefined && fallback.step.status === "planned") {
-      return fallback.index;
-    }
-  }
-
-  return undefined;
-}
-
-function extractFirstUrl(text: string): string | undefined {
-  return /https?:\/\/[^\s<>"')]+/iu.exec(text)?.[0];
-}
-
-function inferImageAspectRatio(text: string): string {
-  const normalized = text.toLowerCase();
-  if (/\b(portrait|vertical|phone wallpaper|9:16|tall)\b/iu.test(normalized)) {
-    return "portrait";
-  }
-  if (/\b(landscape|wide|widescreen|16:9|banner|cinematic)\b/iu.test(normalized)) {
-    return "landscape";
-  }
-  return "square";
-}
 
 function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined) {
   if (skill === undefined) {
@@ -1986,729 +789,21 @@ function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined)
   return "workspace-write";
 }
 
-function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
-  return "instructions" in skill && "sourcePath" in skill;
-}
 
-function buildFallbackResponse(input: {
-  label: string;
-  selectedSkill: LoadedSkill | SkillDefinition | undefined;
-  intent: IntentRoute;
-  securityDecision: SecurityDecision;
-  toolExecutions: ToolExecutionRecord[];
-  toolPlans: ToolCallPlan[];
-  skillOutcomes: SkillOutcome[];
-  artifacts: ArtifactRecord[];
-  context: ContextExpansionResult | undefined;
-  projectContext: ProjectContextSnapshot | undefined;
-  memoryContext: MemoryProviderContext | undefined;
-}): AgentLoopResponse {
-  const contextProgress = [
-    ...(input.context === undefined
-      ? []
-      : [`context refs: ${input.context.blocks.filter((block) => block.content.length > 0).length}/${input.context.references.length}`]),
-    ...(input.projectContext === undefined || input.projectContext.files.length === 0
-      ? []
-      : [`project context: ${input.projectContext.files.map((file) => file.source).join(", ")}`])
-  ];
 
-  if (input.selectedSkill === undefined) {
-    return {
-      label: input.label,
-      text: "I did not find a matching skill yet. I would answer directly and record this interaction for future skill discovery.",
-      matchedSkills: [],
-      intent: input.intent,
-      securityDecision: input.securityDecision,
-      toolExecutions: input.toolExecutions,
-      toolPlans: input.toolPlans,
-      skillOutcomes: input.skillOutcomes,
-      artifacts: input.artifacts,
-      context: input.context,
-      projectContext: input.projectContext,
-      providerExecution: undefined,
-      progress: [
-        "received prompt",
-        ...contextProgress,
-        `intent: ${input.intent.labels.join(", ")}`,
-        "no skill selected",
-        "ready for direct response"
-      ]
-    };
-  }
-
-  const confirmationText = input.intent.confirmationRequired
-    ? "I matched it, but this route needs confirmation before I persist changes."
-    : `I matched the ${input.selectedSkill.name} skill and can begin its workflow without asking first.`;
-
-  return {
-    label: input.label,
-    text: confirmationText,
-    matchedSkills: input.intent.suggestedSkills.map((skill) => skill.name),
-    intent: input.intent,
-    securityDecision: input.securityDecision,
-      toolExecutions: input.toolExecutions,
-      toolPlans: input.toolPlans,
-      skillOutcomes: input.skillOutcomes,
-      artifacts: input.artifacts,
-      context: input.context,
-    projectContext: input.projectContext,
-    providerExecution: undefined,
-    progress: [
-      "received prompt",
-      ...contextProgress,
-      `intent: ${input.intent.labels.join(", ")}`,
-      `confidence: ${Math.round(input.intent.confidence * 100)}%`,
-      `selected skill: ${input.selectedSkill.name}`,
-      `security: ${input.securityDecision}`,
-      ...input.toolExecutions.map(
-        (execution) => `tool: ${execution.tool.name} (${execution.decision}${execution.result === undefined ? "" : `/${execution.result.ok ? "ok" : "error"}`})`
-      ),
-      ...renderArtifactProgress(input.artifacts),
-      `next: ${input.selectedSkill.workflow[0]?.description ?? "run skill workflow"}`
-    ]
-  };
-}
-
-function cancelledResponse(input: {
-  label: string;
-  resumeNote: string;
-  intent?: IntentRoute;
-  securityDecision?: SecurityDecision;
-  selectedSkill?: LoadedSkill | SkillDefinition;
-  toolExecutions?: ToolExecutionRecord[];
-  toolPlans?: ToolCallPlan[];
-  artifacts?: ArtifactRecord[];
-  context?: ContextExpansionResult;
-  projectContext?: ProjectContextSnapshot;
-  providerExecution?: ProviderExecutionResult;
-}): AgentLoopResponse {
-  return {
-    label: input.label,
-    text: [
-      "Cancelled this turn. The session is still available, and you can resume when ready.",
-      "",
-      input.resumeNote
-    ].join("\n"),
-    matchedSkills: input.selectedSkill === undefined ? [] : [input.selectedSkill.name],
-    intent: input.intent ?? {
-      nativeIntent: "general",
-      labels: ["general"],
-      confidence: 1,
-      suggestedSkills: [],
-      suggestedToolsets: [],
-      confirmationRequired: false,
-      evidence: [{
-        kind: "native-intent",
-        detail: "The active turn was cancelled before completion.",
-        weight: 1
-      }],
-      rationale: "The active turn was cancelled before completion."
-    },
-    securityDecision: input.securityDecision ?? "allow",
-    toolExecutions: input.toolExecutions ?? [],
-    toolPlans: input.toolPlans ?? [],
-    skillOutcomes: [],
-    artifacts: input.artifacts ?? [],
-    context: input.context,
-    projectContext: input.projectContext,
-    providerExecution: input.providerExecution,
-    progress: [
-      "received prompt",
-      "cancelled",
-      `resume: ${input.resumeNote}`
-    ]
-  };
-}
-
-function isAborted(signal: AbortSignal | undefined): boolean {
-  return signal !== undefined && signal.aborted;
-}
 
 function isResumeRequest(text: string): boolean {
   return /^(resume|resume that|continue|continue that|pick up where we left off)\b/iu.test(text.trim());
 }
 
-function buildResumeNote(input: {
-  stage: string;
-  userText: string;
-  selectedSkill?: LoadedSkill | SkillDefinition;
-  toolPlans?: ToolCallPlan[];
-  toolExecutions?: ToolExecutionRecord[];
-  providerExecution?: ProviderExecutionResult;
-  context?: ContextExpansionResult;
-  projectContext?: ProjectContextSnapshot;
-}): string {
-  const planned = input.toolPlans?.filter((plan) => plan.status === "planned" || plan.status === "cancelled") ?? [];
-  const executed = input.toolExecutions?.map((execution) => execution.tool.name) ?? [];
-  const provider = input.providerExecution?.response === undefined
-    ? undefined
-    : `${input.providerExecution.response.provider}/${input.providerExecution.response.model}`;
-  const lines = [
-    `Resume note: interrupted during ${input.stage}.`,
-    `Original request: ${truncate(input.userText, 220)}`,
-    input.selectedSkill === undefined ? undefined : `Skill: ${input.selectedSkill.name}`,
-    provider === undefined ? undefined : `Provider: ${provider}`,
-    executed.length === 0 ? undefined : `Tools completed: ${[...new Set(executed)].join(", ")}`,
-    planned.length === 0 ? undefined : `Tool plans to revisit: ${planned.map((plan) => plan.tool || "unknown").join(", ")}`,
-    input.context === undefined ? undefined : `Context refs loaded: ${input.context.blocks.filter((block) => block.content.length > 0).length}/${input.context.references.length}`,
-    input.projectContext === undefined || input.projectContext.files.length === 0
-      ? undefined
-      : `Project context: ${input.projectContext.files.map((file) => file.source).join(", ")}`,
-    "Send a follow-up like 'resume that' or restate the next step to continue from here."
-  ].filter((line) => line !== undefined);
 
-  return lines.join("\n");
-}
 
-function summarizeAttachments(attachments: ChannelAttachment[] | undefined): Array<Record<string, unknown>> {
-  return (attachments ?? []).map((attachment) => ({
-    id: attachment.id,
-    kind: attachment.kind,
-    status: attachment.status ?? inferAttachmentStatus(attachment),
-    name: attachment.originalName ?? attachment.name,
-    path: attachment.localPath ?? attachment.path,
-    remoteUrl: attachment.remoteUrl ?? attachment.url,
-    mimeType: attachment.mimeType,
-    bytes: attachment.bytes,
-    failureCode: attachment.failureCode,
-    failureMessage: attachment.failureMessage
-  }));
-}
 
-function normalizeAttachments(attachments: ChannelAttachment[] | undefined): ChannelAttachment[] | undefined {
-  if (attachments === undefined || attachments.length === 0) {
-    return attachments;
-  }
 
-  return attachments.map((attachment) => {
-    const inferredStatus = inferAttachmentStatus(attachment);
-    if (inferredStatus !== "ready") {
-      return {
-        ...attachment,
-        status: inferredStatus
-      };
-    }
 
-    const localPath = attachment.localPath ?? attachment.path;
-    if (typeof localPath === "string" && localPath.length > 0 && isAbsolute(localPath) && !existsSync(localPath)) {
-      return {
-        ...attachment,
-        status: "missing-file",
-        failureCode: attachment.failureCode ?? "attachment-missing-file",
-        failureMessage: attachment.failureMessage ?? "I couldn't access the downloaded attachment anymore. Please resend it and I'll inspect it again."
-      };
-    }
 
-    return {
-      ...attachment,
-      status: "ready"
-    };
-  });
-}
 
-function buildAttachmentFailureResponse(attachments: ChannelAttachment[] | undefined): string | undefined {
-  if (attachments === undefined || attachments.length === 0) {
-    return undefined;
-  }
-
-  const failed = attachments.filter((attachment) => inferAttachmentStatus(attachment) !== "ready");
-  const ready = attachments.filter((attachment) => inferAttachmentStatus(attachment) === "ready");
-  if (failed.length === 0 || ready.length > 0) {
-    return undefined;
-  }
-
-  const statuses = new Set(failed.map((attachment) => inferAttachmentStatus(attachment)));
-  if (statuses.size === 1) {
-    const status = failed[0] === undefined ? "download-failed" : inferAttachmentStatus(failed[0]);
-    if (status === "unsupported") {
-      return failed[0]?.failureMessage ?? "I can't inspect this attachment type yet. Try sending an image, PDF, or text-like document.";
-    }
-
-    if (status === "too-large") {
-      return failed[0]?.failureMessage ?? "That attachment is too large for this workflow right now. Please send a smaller file and try again.";
-    }
-
-    if (status === "missing-file") {
-      return "I couldn't access the downloaded attachment anymore. Please resend it and I'll inspect it again.";
-    }
-  }
-
-  return "I couldn't inspect the attachment. Please resend it as an image, PDF, or smaller supported document and I'll try again.";
-}
-
-function inferAttachmentStatus(attachment: ChannelAttachment): NonNullable<ChannelAttachment["status"]> {
-  return attachment.status ?? "ready";
-}
-
-function directAttachmentFailureIntent(): IntentRoute {
-  return {
-    nativeIntent: "general",
-    labels: ["general"],
-    confidence: 1,
-    suggestedToolsets: [],
-    suggestedSkills: [],
-    confirmationRequired: false,
-    evidence: [{
-      kind: "attachment",
-      detail: "Attachment preflight failed before routing.",
-      weight: 1
-    }],
-    rationale: "EstaCoda handled a channel attachment failure before provider/tool execution."
-  };
-}
-
-function truncate(value: string, maxChars: number): string {
-  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
-}
-
-function renderToolPlanProgress(plans: ToolCallPlan[]): string[] {
-  return plans.length === 0
-    ? []
-    : plans.map((plan) => `tool plan: ${plan.tool || "unknown"} (${plan.status})`);
-}
-
-function renderArtifactProgress(artifacts: ArtifactRecord[]): string[] {
-  return artifacts.map((artifact) => `artifact: ${artifactReference(artifact)} (${artifact.kind}, ${formatBytes(artifact.bytes)})`);
-}
-
-function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): string {
-  if (artifacts.length === 0) {
-    return text;
-  }
-
-  const lower = text.toLowerCase();
-  const missingArtifacts = artifacts.filter((artifact) => !lower.includes(artifactReference(artifact).toLowerCase()));
-  if (missingArtifacts.length === 0) {
-    return text;
-  }
-
-  return [
-    text.trimEnd(),
-    "",
-    "Artifacts:",
-    ...missingArtifacts.map((artifact) =>
-      `- ${artifactReference(artifact)} (${artifact.kind}, ${formatBytes(artifact.bytes)})${artifact.summary === undefined ? "" : ` - ${truncateSummary(artifact.summary)}`}`
-    )
-  ].join("\n");
-}
 
 function suppressImageGenerationTools(tools: OpenAICompatibleToolSchema[]): OpenAICompatibleToolSchema[] {
   return tools.filter((tool) => tool.function.name !== "image_generate" && tool.function.name !== "image.generate");
-}
-
-function maxRiskClass(values: Array<ToolRiskClass | undefined>): ToolRiskClass {
-  return values.reduce<ToolRiskClass>((max, value) =>
-    value === undefined || riskRank(value) <= riskRank(max) ? max : value, "read-only-local");
-}
-
-function riskRank(value: ToolRiskClass): number {
-  switch (value) {
-    case "read-only-local":
-      return 1;
-    case "read-only-network":
-      return 2;
-    case "workspace-write":
-      return 3;
-    case "shared-state-mutation":
-      return 4;
-    case "external-side-effect":
-      return 5;
-    case "credential-access":
-      return 6;
-    case "destructive-local":
-      return 7;
-    case "spend-money":
-      return 8;
-    case "sandbox-escape":
-      return 9;
-  }
-}
-
-function renderArtifactSummary(artifacts: ArtifactRecord[]): string {
-  if (artifacts.length === 0) {
-    return "No artifacts have been recorded yet.";
-  }
-
-  return artifacts
-    .map((artifact) => [
-      `- ${artifactReference(artifact)}`,
-      `  id: ${artifact.id}`,
-      `  kind: ${artifact.kind}`,
-      `  size: ${formatBytes(artifact.bytes)}`,
-      artifact.mimeType === undefined ? undefined : `  mime: ${artifact.mimeType}`,
-      artifact.summary === undefined ? undefined : `  summary: ${truncateSummary(artifact.summary)}`
-    ].filter((line) => line !== undefined).join("\n"))
-    .join("\n");
-}
-
-function artifactsFromExecutions(executions: ToolExecutionRecord[]): ArtifactRecord[] {
-  const seen = new Set<string>();
-  const artifacts: ArtifactRecord[] = [];
-
-  for (const execution of executions) {
-    const artifact = artifactFromExecution(execution);
-    if (artifact === undefined || seen.has(artifact.id)) {
-      continue;
-    }
-
-    seen.add(artifact.id);
-    artifacts.push(artifact);
-  }
-
-  return artifacts;
-}
-
-function artifactFromExecution(execution: ToolExecutionRecord): ArtifactRecord | undefined {
-  const metadata = execution.result?.metadata;
-
-  if (!isArtifactRecord(metadata)) {
-    return undefined;
-  }
-
-  return metadata;
-}
-
-function isArtifactRecord(value: unknown): value is ArtifactRecord {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Partial<ArtifactRecord>;
-  return typeof candidate.id === "string" &&
-    typeof candidate.path === "string" &&
-    isArtifactKind(candidate.kind) &&
-    typeof candidate.bytes === "number" &&
-    typeof candidate.createdAt === "string";
-}
-
-function artifactReference(artifact: ArtifactRecord): string {
-  return isAbsolute(artifact.path) ? `artifact://${artifact.id}` : artifact.path;
-}
-
-function truncateSummary(value: string, maxChars = 240): string {
-  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000) {
-    return `${(bytes / 1_000_000).toFixed(bytes >= 10_000_000 ? 0 : 1)} MB`;
-  }
-
-  if (bytes >= 1_000) {
-    return `${(bytes / 1_000).toFixed(bytes >= 10_000 ? 0 : 1)} KB`;
-  }
-
-  return `${bytes} B`;
-}
-
-function summarizeSkillOutcome(
-  skill: string,
-  executions: ToolExecutionRecord[],
-  plans: ToolCallPlan[]
-): string {
-  const successfulTools = executions
-    .filter((execution) => execution.result?.ok === true)
-    .map((execution) => execution.tool.name);
-  const executedPlannedTools = plans
-    .filter((plan) => plan.status === "executed")
-    .map((plan) => plan.tool);
-  const attemptedTools = plans
-    .map((plan) => plan.tool)
-    .filter((tool) => tool.length > 0);
-  const failedTools = plans
-    .filter((plan) => plan.status === "invalid" || plan.status === "unavailable" || plan.status === "blocked")
-    .map((plan) => plan.tool)
-    .filter((tool) => tool.length > 0);
-  const successful = [...new Set([...successfulTools, ...executedPlannedTools])];
-  const attempted = [...new Set([...attemptedTools, ...executions.map((execution) => execution.tool.name)])];
-  const failed = [...new Set(failedTools)];
-
-  return [
-    `${skill} completed with ${successful.length === 0 ? "no successful tools" : successful.join(", ")}.`,
-    attempted.length === 0 ? undefined : `Attempted: ${attempted.join(", ")}.`,
-    failed.length === 0 ? undefined : `Failed: ${failed.join(", ")}.`
-  ].filter((line) => line !== undefined).join(" ");
-}
-
-function toolResultStats(execution: ToolExecutionRecord): {
-  chars?: number;
-  sentChars?: number;
-  truncated?: boolean;
-} {
-  if (execution.result === undefined) {
-    return {};
-  }
-
-  const packet = packetizeToolExecution({
-    execution,
-    maxChars: 1_400
-  });
-
-  return {
-    chars: packet.chars,
-    sentChars: packet.sentChars,
-    truncated: packet.truncated
-  };
-}
-
-function mergeProviderExecutions(
-  initial: ProviderExecutionResult | undefined,
-  continuation: ProviderExecutionResult | undefined
-): ProviderExecutionResult | undefined {
-  if (initial === undefined) {
-    return continuation;
-  }
-
-  if (continuation === undefined) {
-    return initial;
-  }
-
-  return {
-    ok: continuation.ok,
-    response: continuation.response,
-    route: continuation.route ?? initial.route,
-    fallbackUsed: initial.fallbackUsed || continuation.fallbackUsed,
-    attempts: [
-      ...initial.attempts,
-      ...continuation.attempts
-    ],
-    toolCalls: [
-      ...initial.toolCalls,
-      ...continuation.toolCalls
-    ]
-  };
-}
-
-function isConcurrentSafeTool(tool: ToolDefinition | undefined): boolean {
-  if (tool === undefined) {
-    return false;
-  }
-
-  return (tool.riskClass === "read-only-local" || tool.riskClass === "read-only-network") &&
-    tool.name !== "terminal.run" &&
-    tool.name !== "process.start";
-}
-
-function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
-  return status === "invalid" || status === "unavailable" || status === "blocked";
-}
-
-type ProviderToolPlanEntry = {
-  plan: ToolCallPlan;
-  definition: ToolDefinition | undefined;
-};
-
-function groupProviderToolPlans(
-  entries: ProviderToolPlanEntry[],
-  maxConcurrentSafeTools: number
-): Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> {
-  const groups: Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> = [];
-  const safeSize = Math.max(1, maxConcurrentSafeTools);
-  let safeBatch: ProviderToolPlanEntry[] = [];
-
-  const flushSafeBatch = () => {
-    for (let index = 0; index < safeBatch.length; index += safeSize) {
-      groups.push({
-        concurrent: true,
-        entries: safeBatch.slice(index, index + safeSize)
-      });
-    }
-    safeBatch = [];
-  };
-
-  for (const entry of entries) {
-    if (isConcurrentSafeTool(entry.definition)) {
-      safeBatch.push(entry);
-      continue;
-    }
-
-    flushSafeBatch();
-    groups.push({
-      concurrent: false,
-      entries: [entry]
-    });
-  }
-
-  flushSafeBatch();
-
-  return groups;
-}
-
-function normalizeProviderRequest(request: Omit<ProviderRequest, "model"> & { model?: string }): Omit<ProviderRequest, "model"> & { model?: string } {
-  const normalized = normalizeProviderMessagesStrict(request.messages);
-
-  return {
-    ...request,
-    messages: normalized.messages
-  };
-}
-
-async function emit(sink: RuntimeEventSink | undefined, event: RuntimeEvent): Promise<void> {
-  await sink?.(event);
-}
-
-function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
-  switch (event.kind) {
-    case "provider-attempt-start":
-      return {
-        kind: "provider-attempt",
-        provider: event.provider,
-        model: event.model,
-        fallback: event.fallback
-      };
-    case "provider-token":
-      return {
-        kind: "provider-token",
-        provider: event.provider,
-        model: event.model,
-        text: event.text
-      };
-    case "provider-tool-call":
-      return {
-        kind: "provider-tool-call",
-        provider: event.provider,
-        model: event.model,
-        index: event.index,
-        id: event.id,
-        name: event.name,
-        argumentsText: event.argumentsText
-      };
-    case "provider-attempt-end":
-      return {
-        kind: "provider-result",
-        provider: event.provider,
-        model: event.model,
-        ok: event.ok,
-        fallback: event.fallback,
-        willFallback: event.willFallback,
-        errorClass: event.errorClass
-      };
-  }
-}
-
-function summarizeProviderFailure(execution: ProviderExecutionResult): string {
-  if (execution.attempts.length === 0) {
-    return "No configured provider route was available for this request.";
-  }
-
-  const last = execution.attempts[execution.attempts.length - 1];
-  const attempts = execution.attempts
-    .map((attempt) => `${attempt.provider}/${attempt.model} (${humanProviderIssue(attempt.errorClass)})`)
-    .join(", ");
-
-  return `The configured model path did not complete. Last issue: ${humanProviderIssue(last?.errorClass)}. Attempts: ${attempts}.`;
-}
-
-function humanProviderIssue(errorClass: string | undefined): string {
-  switch (errorClass) {
-    case "auth":
-      return "authentication needs attention";
-    case "rate-limit":
-      return "rate limited";
-    case "quota":
-      return "quota or billing limit";
-    case "network":
-      return "network issue";
-    case "server":
-      return "provider server issue";
-    case "model-unavailable":
-      return "model unavailable";
-    case "timeout":
-      return "timed out";
-    case undefined:
-      return "unknown provider issue";
-    default:
-      return errorClass;
-  }
-}
-
-function resolveSkillSetup(
-  skill: LoadedSkill | SkillDefinition,
-  configuredValues: Record<string, unknown> | undefined
-): SkillSetupContext {
-  return {
-    skillDirectory: isLoadedSkill(skill) ? dirname(skill.sourcePath) : undefined,
-    requiredEnvironmentVariables: (skill.requiredEnvironmentVariables ?? []).map((name) => ({
-      name,
-      present: typeof process.env[name] === "string" && process.env[name]!.length > 0
-    })),
-    requiredCredentialFiles: (skill.requiredCredentialFiles ?? []).map((path) => ({
-      path,
-      present: credentialFileExists(path),
-      resolvedPath: expandUserEnvPath(path)
-    })),
-    configFields: (skill.configFields ?? []).map((field) => {
-      const configuredValue = resolveConfiguredSkillValue(configuredValues, field.key);
-      if (configuredValue !== undefined) {
-        return {
-          key: field.key,
-          description: field.description,
-          required: field.required,
-          value: configuredValue,
-          source: "config" as const
-        };
-      }
-
-      if (field.defaultValue !== undefined) {
-        return {
-          key: field.key,
-          description: field.description,
-          required: field.required,
-          value: field.defaultValue,
-          source: "default" as const
-        };
-      }
-
-      return {
-        key: field.key,
-        description: field.description,
-        required: field.required,
-        source: "missing" as const
-      };
-    })
-  };
-}
-
-function credentialFileExists(path: string): boolean {
-  const resolved = expandUserEnvPath(path);
-  return existsSync(resolved);
-}
-
-function expandUserEnvPath(path: string): string {
-  const withHome = path.startsWith("~/")
-    ? `${process.env.HOME ?? ""}/${path.slice(2)}`
-    : path;
-
-  return withHome.replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");
-}
-
-function resolveConfiguredSkillValue(
-  configuredValues: Record<string, unknown> | undefined,
-  key: string
-): unknown {
-  if (configuredValues === undefined) {
-    return undefined;
-  }
-
-  const variants = new Set<string>([
-    key,
-    toSnakeCase(key),
-    toCamelCase(key)
-  ]);
-
-  for (const variant of variants) {
-    if (configuredValues[variant] !== undefined) {
-      return configuredValues[variant];
-    }
-  }
-
-  return undefined;
-}
-
-function toSnakeCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-function toCamelCase(value: string): string {
-  return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase());
 }
