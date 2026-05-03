@@ -16,6 +16,7 @@ import { injectVoiceTranscripts } from "./channels/voice-transcription.js";
 import { createConfigTools } from "./config/config-tools.js";
 import { runCliCommand } from "./cli/cli.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
+import { ChangeManifestStore } from "./skills/change-manifest-store.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
@@ -13418,6 +13419,38 @@ assert(
   ),
   "expected missing Telegram attachment metadata to be recorded in session state"
 );
+
+const changeManifestStore = new ChangeManifestStore({ root: await mkdtemp(join(tmpdir(), "estacoda-change-manifest-")) });
+const manifest = await changeManifestStore.propose({
+  target: "skill",
+  filesChanged: ["skills/test.md"],
+  evidence: { traces: ["traj-1"], failures: [], evalCases: [] },
+  hypothesis: "Test hypothesis",
+  predictedImpact: "Improves test reliability",
+  riskLevel: "low",
+  evalCommand: "bun run smoke",
+  constraintGates: ["typecheck", "smoke"],
+  rollbackPlan: "git revert"
+});
+assert(manifest.status === "proposed", "expected new manifest to have status proposed");
+assert(manifest.createdAt !== undefined, "expected manifest to have createdAt");
+
+const found = await changeManifestStore.find(manifest.id);
+assert(found !== undefined, "expected to find persisted manifest");
+assert(found?.hypothesis === "Test hypothesis", "expected manifest hypothesis to match");
+
+const listed = await changeManifestStore.list({ status: "proposed" });
+assert(listed.some((m) => m.id === manifest.id), "expected list to include proposed manifest");
+
+await changeManifestStore.linkEvidence(manifest.id, { traces: ["traj-2"], failures: ["fail-1"] });
+const linked = await changeManifestStore.find(manifest.id);
+assert(linked?.evidence.traces.includes("traj-2"), "expected linked trace to be present");
+assert(linked?.evidence.failures.includes("fail-1"), "expected linked failure to be present");
+
+await changeManifestStore.updateStatus(manifest.id, "approved", { promotedBy: "smoke-test" });
+const approved = await changeManifestStore.find(manifest.id);
+assert(approved?.status === "approved", "expected manifest status to be approved");
+assert(approved?.updatedAt !== undefined, "expected manifest to have updatedAt");
 
 const evalReport = await runEvalCases(defaultEvalFixtures);
 assert(evalReport.failed === 0, `eval smoke failed: ${evalReport.results.filter((r) => !r.passed).map((r) => r.name).join(", ")}`);

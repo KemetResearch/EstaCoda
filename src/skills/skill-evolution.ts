@@ -103,6 +103,7 @@ export type SkillPatchProposal = {
   approvedAt?: string;
   approvedBy?: string;
   promotionId?: string;
+  changeManifestId?: string;
 };
 
 export type SkillEvalRunRecord = {
