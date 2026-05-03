@@ -1,9 +1,11 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { MemoryInspector } from "../memory/memory-inspector.js";
+import { KnowledgeCache } from "../knowledge/knowledge-cache.js";
+import { forwardDeps, reverseDeps, affectedFiles, graphSummary } from "../knowledge/code-dependency-graph.js";
 
 export async function knowledge(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
@@ -12,11 +14,7 @@ export async function knowledge(options: CliOptions, args: string[]): Promise<Cl
     case "memory":
       return knowledgeMemory(options, restArgs);
     case "code":
-      return {
-        handled: true,
-        exitCode: 1,
-        output: "Knowledge code commands are not yet available. They will be introduced in Track B."
-      };
+      return knowledgeCode(options, restArgs);
     case undefined:
     case "help":
     case "--help":
@@ -262,4 +260,141 @@ function parseLimit(value: string | undefined): number | undefined {
   }
   const parsed = parseInt(value, 10);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+async function knowledgeCode(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [action, ...actionArgs] = args;
+
+  switch (action) {
+    case "deps":
+      return codeDeps(options, actionArgs);
+    case "rdeps":
+      return codeRdeps(options, actionArgs);
+    case "affected":
+      return codeAffected(options, actionArgs);
+    case "summary":
+      return codeSummary(options);
+    case "refresh":
+      return codeRefresh(options);
+    case undefined:
+    case "help":
+    case "--help":
+    case "-h":
+      return {
+        handled: true,
+        exitCode: 0,
+        output: knowledgeCodeHelp()
+      };
+    default:
+      return {
+        handled: true,
+        exitCode: 1,
+        output: `Unknown knowledge code action: ${action}\n\n${knowledgeCodeHelp()}`
+      };
+  }
+}
+
+function knowledgeCodeHelp(): string {
+  return [
+    "EstaCoda knowledge code commands",
+    "  estacoda knowledge code deps <file-path>      # forward dependencies",
+    "  estacoda knowledge code rdeps <file-path>     # reverse dependencies",
+    "  estacoda knowledge code affected <file-path>  # transitive affected files",
+    "  estacoda knowledge code summary               # graph summary",
+    "  estacoda knowledge code refresh               # force regeneration"
+  ].join("\n");
+}
+
+async function openKnowledgeCache(options: CliOptions): Promise<KnowledgeCache> {
+  return new KnowledgeCache({ workspaceRoot: options.workspaceRoot });
+}
+
+function resolveModuleId(workspaceRoot: string, filePath: string): string {
+  // If already relative from workspace root, use as-is
+  if (!filePath.startsWith("/")) {
+    return filePath;
+  }
+  return relative(workspaceRoot, filePath);
+}
+
+async function codeDeps(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const filePath = args[0];
+  if (filePath === undefined) {
+    return { handled: true, exitCode: 1, output: "Usage: estacoda knowledge code deps <file-path>" };
+  }
+  const cache = await openKnowledgeCache(options);
+  const graph = await cache.getGraph();
+  const moduleId = resolveModuleId(options.workspaceRoot, filePath);
+  const deps = forwardDeps(graph, moduleId);
+
+  if (deps.length === 0) {
+    return { handled: true, exitCode: 0, output: `No forward dependencies for ${moduleId}` };
+  }
+
+  const lines = deps.map((dep) => `  ${dep}`);
+  return { handled: true, exitCode: 0, output: [`Forward dependencies for ${moduleId}:`, ...lines].join("\n") };
+}
+
+async function codeRdeps(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const filePath = args[0];
+  if (filePath === undefined) {
+    return { handled: true, exitCode: 1, output: "Usage: estacoda knowledge code rdeps <file-path>" };
+  }
+  const cache = await openKnowledgeCache(options);
+  const graph = await cache.getGraph();
+  const moduleId = resolveModuleId(options.workspaceRoot, filePath);
+  const rdeps = reverseDeps(graph, moduleId);
+
+  if (rdeps.length === 0) {
+    return { handled: true, exitCode: 0, output: `No reverse dependencies for ${moduleId}` };
+  }
+
+  const lines = rdeps.map((dep) => `  ${dep}`);
+  return { handled: true, exitCode: 0, output: [`Reverse dependencies for ${moduleId}:`, ...lines].join("\n") };
+}
+
+async function codeAffected(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const filePath = args[0];
+  if (filePath === undefined) {
+    return { handled: true, exitCode: 1, output: "Usage: estacoda knowledge code affected <file-path>" };
+  }
+  const cache = await openKnowledgeCache(options);
+  const graph = await cache.getGraph();
+  const moduleId = resolveModuleId(options.workspaceRoot, filePath);
+  const affected = affectedFiles(graph, moduleId);
+
+  if (affected.length === 0) {
+    return { handled: true, exitCode: 0, output: `No affected files for ${moduleId}` };
+  }
+
+  const lines = affected.map((dep) => `  ${dep}`);
+  return { handled: true, exitCode: 0, output: [`Affected files for ${moduleId}:`, ...lines].join("\n") };
+}
+
+async function codeSummary(options: CliOptions): Promise<CliCommandResult> {
+  const cache = await openKnowledgeCache(options);
+  const graph = await cache.getGraph();
+  const summary = graphSummary(graph);
+
+  const lines = [
+    `Nodes: ${summary.nodeCount}`,
+    `Edges: ${summary.edgeCount}`,
+    `Isolated files: ${summary.isolatedFiles.length}`,
+    `Highly connected: ${summary.highlyConnected.length}`,
+    `External dependencies: ${summary.externalDependencies.length}`,
+    ...(summary.externalDependencies.length > 0 ? ["  " + summary.externalDependencies.join(", ")] : [])
+  ];
+
+  return { handled: true, exitCode: 0, output: lines.join("\n") };
+}
+
+async function codeRefresh(options: CliOptions): Promise<CliCommandResult> {
+  const cache = await openKnowledgeCache(options);
+  await cache.invalidate();
+  const graph = await cache.getGraph({ forceRefresh: true });
+  return {
+    handled: true,
+    exitCode: 0,
+    output: `Dependency graph refreshed. ${graph.nodes.size} nodes, ${graph.edges.length} edges. Generated at ${graph.generatedAt}`
+  };
 }

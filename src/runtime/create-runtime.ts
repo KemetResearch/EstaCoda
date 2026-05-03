@@ -16,6 +16,7 @@ import { DelegationManager } from "../delegation/delegation-manager.js";
 import { createDelegationTools } from "../delegation/delegation-tools.js";
 import { createMemoryTool } from "../memory/memory-tool.js";
 import { createKnowledgeMemoryTools } from "../memory/knowledge-memory-tools.js";
+import { createKnowledgeCodeTools } from "../knowledge/knowledge-code-tools.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
@@ -397,6 +398,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createKnowledgeMemoryTools(
     memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
   )) {
+    toolRegistry.register(tool);
+  }
+  for (const tool of createKnowledgeCodeTools(workspaceRoot)) {
     toolRegistry.register(tool);
   }
   const skillLearningManager = new SkillLearningManager({
