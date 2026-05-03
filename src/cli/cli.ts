@@ -61,6 +61,9 @@ import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 import { trace } from "./trace-commands.js";
 import { evalCommand } from "./eval-commands.js";
+import { proposalCommand } from "./proposal-commands.js";
+import { manifestCommand } from "./manifest-commands.js";
+import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import {
   formatSecurityMode,
@@ -135,6 +138,12 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return trace(options, args);
     case "eval":
       return evalCommand(options, args);
+    case "proposal":
+      return proposalCommand(options, args);
+    case "manifest":
+      return manifestCommand(options, args);
+    case "curator":
+      return curatorCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
     case "help":
