@@ -1,6 +1,6 @@
 ---
 title: "Evaluation Strategy"
-description: "Evaluation substrate, provider hardening, and future scoring direction."
+description: "Evaluation substrate, automated runner, golden flows, and future scoring direction."
 ---
 
 # Evaluation Strategy
@@ -21,7 +21,20 @@ This is intentionally narrower than full self-evolution. It is a prerequisite, n
 
 ### Eval Task Definitions
 
-Location: `evals/tasks/`
+Location: `evals/tasks/` (legacy manual runbooks)
+
+### Automated Eval Runner
+
+Location: `src/eval/eval-runner.ts`
+
+```bash
+estacoda eval [fixture-id]
+```
+
+Runs deterministic fixtures with pass/fail assertions:
+- `provider-text-response` — mock provider returns text without tool calls
+- `tool-security-block` — detects blocked `rm -rf /`
+- `missing-tool-failure` — handles unavailable tool gracefully
 
 ### Eval Substrate Scaffold
 
@@ -37,6 +50,16 @@ Creates under `.estacoda/eval-runs/<timestamp>/`:
 - `logs/`
 - `artifacts/`
 - `failures/`
+
+### Golden Flows
+
+Location: `evals/golden-flows/`
+
+Baseline trajectories with assertions:
+- `provider-text-response.json` — clean single-turn completion
+- `tool-security-block.json` — dangerous tool correctly gated
+
+Compare actual trajectories against golden flows with `compareToGoldenFlow()`.
 
 ### Provider Hardening Batch
 
@@ -60,13 +83,14 @@ For OpenRouter, the batch targets `qwen/qwen3.6-plus` rather than `openrouter/au
 
 ## What It Does Not Do Yet
 
-- It does not automatically execute all tasks.
-- It does not score candidates automatically.
+- It does not score candidates automatically against golden flows in CI.
 - It does not perform DSPy/GEPA-style optimization.
 - It does not generate PRs or evolve code.
+- It does not replay golden flows through the live runtime.
 
 **Truthful labels:**
-- Evaluation substrate: `implemented`
+- Evaluation runner + fixtures: `smoke-tested`
+- Golden flows: `smoke-tested`
 - Autonomous self-evolution loop: `intended but not implemented`
 
 ## Intended Next Steps

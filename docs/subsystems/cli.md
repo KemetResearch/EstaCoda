@@ -1,6 +1,6 @@
 ---
 title: "CLI & Onboarding"
-description: "CLI commands, interactive session loop, and first-run onboarding."
+description: "CLI commands, interactive session loop, trace/eval inspection, and first-run onboarding."
 ---
 
 # CLI & Onboarding
@@ -9,12 +9,14 @@ description: "CLI commands, interactive session loop, and first-run onboarding."
 
 | File | Lines | Role |
 |------|-------|------|
-| `src/cli/cli.ts` | 2,562 | CLI command surface and dispatch |
+| `src/cli/cli.ts` | ~2,600 | CLI command surface and dispatch |
 | `src/cli/session-loop.ts` | 906 | Interactive terminal loop |
 | `src/cli/cli-session-store.ts` | ~120 | Persisted active session pointer |
 | `src/cli/one-shot.ts` | ~140 | One-shot prompt execution |
 | `src/cli/slash-menu.ts` | ~180 | Slash command menu rendering |
 | `src/cli/tool-activity-renderer.ts` | ~160 | Tool activity display |
+| `src/cli/trace-commands.ts` | ~275 | `estacoda trace` commands |
+| `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
 | `src/onboarding/interactive-onboarding.ts` | 1,155 | First-run setup wizard |
 | `src/onboarding/onboarding-copy.ts` | 956 | Localized onboarding text |
 | `src/onboarding/onboarding-flow.ts` | ~280 | Onboarding state machine |
@@ -30,6 +32,38 @@ bun run dev -- doctor --live   # Live provider check
 bun run dev -- telegram setup  # Configure Telegram
 bun run dev -- gateway start --telegram  # Start gateway
 ```
+
+## Trace Commands
+
+```bash
+estacoda trace list [--session <id>] [--limit <n>]
+estacoda trace dump <trajectory-id> [--raw]
+estacoda trace timeline <trajectory-id> [--raw]
+estacoda trace failures <trajectory-id>
+```
+
+- `list` shows recent trajectories with session IDs and outcomes
+- `dump` outputs full JSON (redacted by default)
+- `timeline` outputs chronological human-readable events
+- `failures` lists classified failures for a trajectory
+- `--raw` bypasses redaction (use with care)
+
+**Evidence:** `smoke-tested`
+
+## Eval Commands
+
+```bash
+estacoda eval [fixture-id]
+```
+
+Runs deterministic eval fixtures:
+- `provider-text-response` — mock provider returns text without tool calls
+- `tool-security-block` — detects blocked `rm -rf /`
+- `missing-tool-failure` — handles unavailable tool gracefully
+
+Returns pass/fail per assertion with timing.
+
+**Evidence:** `smoke-tested`
 
 ## Interactive Session Loop
 

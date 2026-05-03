@@ -35,6 +35,11 @@ This directory is the **source of truth** for the EstaCoda codebase as it exists
 | `bun run alpha:harness` | Generate internal alpha run folder |
 | `bun run eval:substrate` | Generate eval run scaffold |
 | `bun run provider:hardening` | Live provider acceptance sweep |
+| `estacoda trace list` | List recent trajectories |
+| `estacoda trace dump <id>` | Inspect a trajectory (redacted) |
+| `estacoda trace timeline <id>` | Chronological event view |
+| `estacoda trace failures <id>` | List classified failures |
+| `estacoda eval [fixture-id]` | Run eval fixture |
 
 ---
 
