@@ -9,6 +9,7 @@ import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
 import type { SkillLifecycleState, SkillRouteTelemetry, SkillWorkflowPlan } from "./skill.js";
+import type { FailureRecord } from "./failure.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
 
@@ -302,4 +303,5 @@ export type SessionDB = {
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;
   search(query: string, options?: { profileId?: string; limit?: number }): Promise<SessionSearchResult[]>;
+  saveFailure?(record: FailureRecord): Promise<void>;
 };

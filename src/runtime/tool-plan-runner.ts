@@ -142,6 +142,10 @@ export class ToolPlanRunner {
       plan.status = "unavailable";
       plan.error = `Tool is unavailable: ${plan.tool}`;
       await this.#runRecorder.recordToolPlan(plan);
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "tool-plan", plan },
+        "tool-execution"
+      );
       return undefined;
     }
 
@@ -149,6 +153,15 @@ export class ToolPlanRunner {
     plan.result = execution.result;
     if (execution.decision !== "allow") {
       plan.error = `security decision: ${execution.decision}`;
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "tool-execution", execution },
+        "tool-execution"
+      );
+    } else if (execution.result?.ok === false) {
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "tool-execution", execution },
+        "tool-execution"
+      );
     }
     await this.#runRecorder.recordToolPlan(plan);
     await emit(input.onEvent, {

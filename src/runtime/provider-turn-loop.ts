@@ -134,6 +134,10 @@ export class ProviderTurnLoop {
           observed: 1,
           reason: "Provider loop was cancelled before the next iteration."
         }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "cancellation", reason: "abort signal before iteration" },
+          "provider-budget-exhausted"
+        );
         break;
       }
       const elapsedMs = Date.now() - loopStartedAt;
@@ -144,6 +148,10 @@ export class ProviderTurnLoop {
           observed: elapsedMs,
           reason: "Provider loop exceeded its wall-clock budget."
         }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget." },
+          "provider-budget-exhausted"
+        );
         break;
       }
       if (providerToolExecutions.length >= this.#budgets.maxProviderToolCalls) {
@@ -153,6 +161,10 @@ export class ProviderTurnLoop {
           observed: providerToolExecutions.length,
           reason: "Provider loop reached its tool-call execution budget."
         }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "budget", budget: "provider-tool-calls", limit: this.#budgets.maxProviderToolCalls, observed: providerToolExecutions.length, reason: "Provider loop reached its tool-call execution budget." },
+          "provider-budget-exhausted"
+        );
         break;
       }
       const phase = iteration === 0 ? "initial" : "continuation";
@@ -203,6 +215,10 @@ export class ProviderTurnLoop {
           observed: repeatedFailureBudgetExceeded.count,
           reason: `Tool ${repeatedFailureBudgetExceeded.tool} failed repeatedly with the same outcome.`
         }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "budget", budget: "repeated-tool-failures", limit: this.#budgets.maxRepeatedToolFailures, observed: repeatedFailureBudgetExceeded.count, reason: `Tool ${repeatedFailureBudgetExceeded.tool} failed repeatedly with the same outcome.` },
+          "provider-budget-exhausted"
+        );
       }
       const exhausted = (
         iteration + 1 >= this.#budgets.maxProviderIterations ||
@@ -225,6 +241,12 @@ export class ProviderTurnLoop {
         (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
         exhausted
       ) {
+        if (exhausted && execution.ok === true) {
+          await this.#runRecorder.recordClassifiedFailure(
+            { kind: "loop-exhausted", reason: "max iterations or tool calls reached with pending work", iterations: iteration + 1 },
+            "provider-iteration"
+          );
+        }
         break;
       }
     }
@@ -354,6 +376,13 @@ export class ProviderTurnLoop {
       usage: execution.response?.usage
     });
 
+    if (!execution.ok) {
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "provider", execution, iteration: input.iteration },
+        "provider-completion"
+      );
+    }
+
     return execution;
   }
 
@@ -466,6 +495,13 @@ export class ProviderTurnLoop {
       })),
       usage: execution.response?.usage
     });
+
+    if (!execution.ok) {
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "provider", execution, iteration: input.iteration },
+        "provider-continuation"
+      );
+    }
 
     return execution;
   }

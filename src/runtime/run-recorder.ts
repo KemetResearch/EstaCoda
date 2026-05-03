@@ -22,6 +22,7 @@ import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
+import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
 
 export type RunRecorderOptions = {
   sessionDb: SessionDB;
@@ -419,6 +420,20 @@ export class RunRecorder {
     const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
 
     return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
+  }
+
+  async recordClassifiedFailure(context: FailureContext, sourceEventKind: string): Promise<void> {
+    if (this.#sessionDb.saveFailure === undefined) {
+      return;
+    }
+
+    const record = buildFailureRecord(context, {
+      sessionId: this.#sessionId,
+      trajectoryId: this.#trajectoryRecorder.trajectoryId,
+      sourceEventKind
+    });
+
+    await this.#sessionDb.saveFailure(record);
   }
 }
 

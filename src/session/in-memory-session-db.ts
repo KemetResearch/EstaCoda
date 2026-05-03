@@ -7,6 +7,7 @@ import type {
   SessionRecord,
   SessionSearchResult
 } from "../contracts/session.js";
+import type { FailureRecord } from "../contracts/failure.js";
 
 export class InMemorySessionDB implements SessionDB {
   readonly #sessions = new Map<string, SessionRecord>();
@@ -125,6 +126,10 @@ export class InMemorySessionDB implements SessionDB {
     }
 
     return results.sort((left, right) => right.score - left.score).slice(0, options.limit ?? 10);
+  }
+
+  async saveFailure(_record: FailureRecord): Promise<void> {
+    // In-memory store does not persist failures
   }
 
   #touch(sessionId: string): void {

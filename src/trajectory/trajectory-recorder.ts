@@ -57,6 +57,10 @@ export class TrajectoryRecorder {
     };
   }
 
+  get trajectoryId(): string {
+    return this.#trajectory.id;
+  }
+
   compress(): CompressedTrajectory {
     const trajectory = this.snapshot();
     const preservedEventIds = trajectory.events

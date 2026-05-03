@@ -10,6 +10,9 @@ import type {
   SessionSearchResult
 } from "../contracts/session.js";
 import type { ChannelKind } from "../contracts/channel.js";
+import type { Trajectory, CompressedTrajectory } from "../contracts/trajectory.js";
+import type { FailureRecord } from "../contracts/failure.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 
 type SessionRow = {
   id: string;
@@ -45,7 +48,31 @@ type SearchRow = MessageRow & {
   rank: number;
 };
 
-export class SQLiteSessionDB implements SessionDB {
+type TrajectoryRow = {
+  id: string;
+  session_id: string;
+  profile_id: string;
+  model_id: string;
+  created_at: string;
+  completed_at: string | null;
+  event_count: number;
+  events_json: string;
+  outcome_json: string | null;
+  compressed_json: string | null;
+};
+
+type FailureRow = {
+  id: string;
+  trajectory_id: string;
+  session_id: string;
+  timestamp: string;
+  class: string;
+  message: string;
+  recoverable: number;
+  context_json: string | null;
+};
+
+export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   readonly #db: Database;
   readonly #now: () => Date;
   readonly #id: () => string;
@@ -252,6 +279,127 @@ export class SQLiteSessionDB implements SessionDB {
     }));
   }
 
+  // ── Trajectory persistence ────────────────────────────────────────────────
+
+  async saveTrajectory(trajectory: Trajectory): Promise<void> {
+    this.#db
+      .query(
+        `insert into trajectories (
+          id, session_id, profile_id, model_id, created_at, completed_at,
+          event_count, events_json, outcome_json, compressed_json
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          completed_at = excluded.completed_at,
+          event_count = excluded.event_count,
+          events_json = excluded.events_json,
+          outcome_json = excluded.outcome_json,
+          compressed_json = excluded.compressed_json`
+      )
+      .run(
+        trajectory.id,
+        trajectory.sessionId,
+        trajectory.profileId,
+        trajectory.modelId,
+        trajectory.events[0]?.timestamp ?? this.#now().toISOString(),
+        trajectory.outcome !== undefined ? this.#now().toISOString() : null,
+        trajectory.events.length,
+        JSON.stringify(trajectory.events),
+        trajectory.outcome !== undefined ? JSON.stringify(trajectory.outcome) : null,
+        null
+      );
+  }
+
+  async loadTrajectory(id: string): Promise<Trajectory | undefined> {
+    const row = this.#db.query<TrajectoryRow>("select * from trajectories where id = ?").get(id);
+    return row === null ? undefined : rowToTrajectory(row);
+  }
+
+  async listTrajectoriesForSession(sessionId: string): Promise<Trajectory[]> {
+    const rows = this.#db
+      .query<TrajectoryRow>("select * from trajectories where session_id = ? order by created_at asc")
+      .all(sessionId);
+    return rows.map(rowToTrajectory);
+  }
+
+  async listTrajectoriesForProfile(
+    profileId: string,
+    options: { limit?: number; after?: string } = {}
+  ): Promise<Trajectory[]> {
+    const limit = options.limit ?? 50;
+    const rows =
+      options.after === undefined
+        ? this.#db
+            .query<TrajectoryRow>(
+              "select * from trajectories where profile_id = ? order by created_at desc limit ?"
+            )
+            .all(profileId, limit)
+        : this.#db
+            .query<TrajectoryRow>(
+              "select * from trajectories where profile_id = ? and created_at < ? order by created_at desc limit ?"
+            )
+            .all(profileId, options.after, limit);
+    return rows.map(rowToTrajectory);
+  }
+
+  // ── Failure classification persistence ────────────────────────────────────
+
+  async saveFailure(record: FailureRecord): Promise<void> {
+    this.#db
+      .query(
+        `insert into trajectory_failures (
+          id, trajectory_id, session_id, timestamp, class, message, recoverable, context_json
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        record.id,
+        record.trajectoryId ?? "",
+        record.sessionId,
+        record.timestamp,
+        record.class,
+        record.message,
+        record.recoverable ? 1 : 0,
+        record.context !== undefined ? JSON.stringify(record.context) : null
+      );
+  }
+
+  async listFailuresForTrajectory(trajectoryId: string): Promise<FailureRecord[]> {
+    const rows = this.#db
+      .query<FailureRow>(
+        "select * from trajectory_failures where trajectory_id = ? order by timestamp asc"
+      )
+      .all(trajectoryId);
+    return rows.map(rowToFailure);
+  }
+
+  async listFailuresForSession(sessionId: string): Promise<FailureRecord[]> {
+    const rows = this.#db
+      .query<FailureRow>(
+        "select * from trajectory_failures where session_id = ? order by timestamp asc"
+      )
+      .all(sessionId);
+    return rows.map(rowToFailure);
+  }
+
+  async listFailuresByClass(
+    failureClass: string,
+    options: { limit?: number; after?: string } = {}
+  ): Promise<FailureRecord[]> {
+    const limit = options.limit ?? 50;
+    const rows =
+      options.after === undefined
+        ? this.#db
+            .query<FailureRow>(
+              "select * from trajectory_failures where class = ? order by timestamp desc limit ?"
+            )
+            .all(failureClass, limit)
+        : this.#db
+            .query<FailureRow>(
+              "select * from trajectory_failures where class = ? and timestamp < ? order by timestamp desc limit ?"
+            )
+            .all(failureClass, options.after, limit);
+    return rows.map(rowToFailure);
+  }
+
   #migrate(): void {
     this.#db.exec(`
       pragma journal_mode = wal;
@@ -292,6 +440,35 @@ export class SQLiteSessionDB implements SessionDB {
       create index if not exists idx_sessions_profile_updated on sessions(profile_id, updated_at);
       create index if not exists idx_messages_session_created on messages(session_id, created_at);
       create index if not exists idx_events_session_created on session_events(session_id, created_at);
+
+      create table if not exists trajectories (
+        id text primary key,
+        session_id text not null references sessions(id) on delete cascade,
+        profile_id text not null,
+        model_id text not null,
+        created_at text not null,
+        completed_at text,
+        event_count integer not null default 0,
+        events_json text not null,
+        outcome_json text,
+        compressed_json text
+      );
+
+      create table if not exists trajectory_failures (
+        id text primary key,
+        trajectory_id text not null references trajectories(id) on delete cascade,
+        session_id text not null,
+        timestamp text not null,
+        class text not null,
+        message text not null,
+        recoverable integer not null default 0,
+        context_json text
+      );
+
+      create index if not exists idx_trajectories_session on trajectories(session_id, created_at);
+      create index if not exists idx_trajectories_profile on trajectories(profile_id, created_at);
+      create index if not exists idx_failures_class on trajectory_failures(class, timestamp);
+      create index if not exists idx_failures_trajectory on trajectory_failures(trajectory_id);
     `);
   }
 
@@ -341,5 +518,33 @@ function toFtsQuery(query: string): string {
     .filter((term) => term.length > 1)
     .map((term) => `"${term.replaceAll('"', '""')}"`)
     .join(" OR ");
+}
+
+function rowToTrajectory(row: TrajectoryRow): Trajectory {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    profileId: row.profile_id,
+    modelId: row.model_id,
+    events: JSON.parse(row.events_json) as Trajectory["events"],
+    outcome:
+      row.outcome_json === null
+        ? undefined
+        : (JSON.parse(row.outcome_json) as Trajectory["outcome"])
+  };
+}
+
+function rowToFailure(row: FailureRow): FailureRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    trajectoryId: row.trajectory_id,
+    timestamp: row.timestamp,
+    class: row.class as FailureRecord["class"],
+    sourceEventKind: "",      // not stored separately; recovered from context if needed
+    message: row.message,
+    recoverable: row.recoverable === 1,
+    context: row.context_json === null ? undefined : (JSON.parse(row.context_json) as Record<string, unknown>)
+  };
 }
 

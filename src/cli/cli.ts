@@ -59,6 +59,8 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
+import { trace } from "./trace-commands.js";
+import { evalCommand } from "./eval-commands.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -128,6 +130,10 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return settings(options, args);
     case "profile":
       return profile(options, args);
+    case "trace":
+      return trace(options, args);
+    case "eval":
+      return evalCommand(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -2557,6 +2563,9 @@ function help(): string {
     "  estacoda tools   Show available tools by toolset",
     "  estacoda doctor  Check setup health",
     "  estacoda doctor --live  Make a tiny live provider call",
-    "  estacoda doctor --live-tools  Verify live provider tool-calling"
+    "  estacoda doctor --live-tools  Verify live provider tool-calling",
+    "  estacoda trace   List, inspect, and timeline trajectories",
+    "  estacoda eval    Run deterministic eval fixtures",
+    "  estacoda eval <fixture-id>  Run a single fixture"
   ].join("\n");
 }
