@@ -26,7 +26,7 @@ bun run smoke
 ## Smoke Tests
 
 **File:** `src/smoke.ts`
-**Size:** 13,969 lines
+**Size:** ~14,000 lines
 **Imports:** 89
 
 ### What Smoke Covers
@@ -46,6 +46,11 @@ bun run smoke
 - Context expansion and prompt packing
 - Artifact handling
 - Onboarding copy and settings
+- Trajectory persistence and failure classification
+- Trace CLI commands
+- Eval runner and fixtures
+- Golden flow comparison
+- Change manifest state transitions
 
 ### What Smoke Does Not Cover
 
@@ -57,10 +62,26 @@ bun run smoke
 
 ### Smoke Limitations
 
-- All tests in one 14k-line file
+- All tests in one ~14k-line file
 - No formal test framework
 - No granular failure isolation
 - Adding a test means editing a monolith
+- `// @ts-nocheck` applied due to TypeScript control-flow analysis limits
+
+## Diagnostic CLI Tools
+
+```bash
+# Inspect execution history
+estacoda trace list [--session <id>] [--limit <n>]
+estacoda trace dump <trajectory-id> [--raw]
+estacoda trace timeline <trajectory-id> [--raw]
+estacoda trace failures <trajectory-id>
+
+# Run eval fixtures
+estacoda eval [fixture-id]
+```
+
+These are runtime inspection and validation tools, not a replacement for unit tests.
 
 ## Recommended Test Practices
 
@@ -71,9 +92,10 @@ bun run smoke
 
 ## Future Testing
 
-**Target:** v0.4–v0.5
+**Target:** Post-v0.6
 
-- Introduce Vitest (Bun-compatible)
+- Introduce Vitest (Bun-compatible) — deferred from v0.4–v0.5 to avoid blocking feature delivery
 - Extract unit tests for Router, Planner, Executor, Recorder
 - Keep smoke.ts as integration layer only
 - Add per-subsystem test suites
+- Expand eval fixture corpus for regression detection

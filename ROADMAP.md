@@ -21,8 +21,8 @@
 
 ### What is unstable or incomplete
 
-- Agent loop is a monolith (~2,700 lines). It is difficult to test independently and blocks clean extension.
-- Run recording is in-memory only. There is no persisted execution history.
+- Agent loop decomposition is complete (809 lines, down from ~2,700). Six components extracted and testable independently.
+- Run recording persists to SQLite via `SQLiteSessionDB`. CLI inspection (`estacoda trace`) is available.
 - The only automated safety net is a 14,000-line smoke file. There are no focused unit tests.
 - The runtime requires Bun (`bun:sqlite` prevents Node execution).
 - Memory rendering is not ranked or freshness-aware.
@@ -32,7 +32,7 @@
 - ACP editor integration lacks terminal/process rendering polish.
 - Telegram is the only product-ready channel.
 - Runtime CLI Arabic localization is incomplete beyond onboarding.
-- Evaluation substrate exists but is not an automated scored benchmark.
+- Evaluation substrate runs automated fixtures with pass/fail scoring (`estacoda eval`). Focused benchmarks (golden flows, regression detection) exist but the corpus is small.
 - Packaging, distribution, and update lifecycle are undecided.
 
 ## 2. MVP Definition

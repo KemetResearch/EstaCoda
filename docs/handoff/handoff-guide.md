@@ -9,7 +9,7 @@ description: "Project handoff for incoming coding agents and operators."
 
 - **Current branch:** `main`
 - **Git status:** Clean before this documentation refresh.
-- **Version:** v0.3 (post-v0.3, pre-v0.4)
+- **Version:** v0.5 (evidence substrate complete; next: v0.6 memory + knowledge graph)
 
 ## Product Goal
 
@@ -21,6 +21,8 @@ EstaCoda v2 is intended to become a production-grade autonomous agent platform w
 - Capability-first security and approvals
 - Multi-channel delivery (Telegram first)
 - Runtime that learns over time without drifting from deterministic operator control
+- Inspectable, eval-backed execution history
+- Governed skill evolution with evidence and review gates
 
 ## Current Milestone
 
@@ -41,6 +43,12 @@ Confirmed working:
 | Cron foundation | `smoke-tested` |
 | Browser automation (local CDP) | `smoke-tested` |
 | First-run onboarding (EN/AR) | `live-proven` |
+| Trajectory persistence (SQLite) | `smoke-tested` |
+| Trace CLI (`estacoda trace`) | `smoke-tested` |
+| Failure classification (13 classes) | `smoke-tested` |
+| Eval runner + 3 fixtures | `smoke-tested` |
+| Redaction engine | `smoke-tested` |
+| Change manifest store | `smoke-tested` |
 
 ## Architecture Overview
 
@@ -50,7 +58,7 @@ Confirmed working:
 |--------|-----------|------|
 | Boot | `src/index.ts` | Config, onboarding, dispatch |
 | Runtime | `src/runtime/create-runtime.ts` | Composition root |
-| Agent Loop | `src/runtime/agent-loop.ts` | Core turn orchestration |
+| Agent Loop | `src/runtime/agent-loop.ts` | Core turn orchestration (809 lines) |
 | CLI | `src/cli/cli.ts` | Command surface |
 | Gateway | `src/channels/gateway-runner.ts` | Telegram gateway |
 
@@ -60,10 +68,9 @@ See [Subsystems](../subsystems/) for deep dives.
 
 ### Critical Debt
 
-1. **AgentLoop monolith** — 2,714 lines. v0.4 target.
-2. **No unit tests** — 14k-line smoke.ts only.
-3. **Bun lock-in** — `bun:sqlite` prevents Node execution.
-4. **Trajectory/Artifact skeletons** — in-memory only.
+1. **No unit tests** — 14k-line `smoke.ts` only. Vitest extraction deferred to post-v0.6.
+2. **Bun lock-in** — `bun:sqlite` prevents Node execution.
+3. **Artifact persistence** — `ArtifactStore` is still in-memory only.
 
 ## Evidence Labels
 
@@ -100,8 +107,6 @@ release scripts
 
 ## Next Engineering Priority
 
-**v0.4: Agent-Loop Decomposition**
+**v0.6: Memory, Dependency Graph, and Knowledge Graph**
 
-This is the highest-risk, highest-priority run. Without it, v0.5–v0.10 cannot proceed safely.
-
-See [Decomposition Targets](../architecture/decomposition-targets.md) for the plan.
+v0.4 (agent-loop decomposition) and v0.5 (evidence substrate) are complete. The next priority is governed memory with provenance, scope separation, and knowledge graph integration.

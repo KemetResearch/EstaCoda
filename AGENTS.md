@@ -79,7 +79,7 @@ estacoda/
 │   ├── acp/                   # ACP editor integration
 │   ├── artifacts/             # Artifact store and formatting
 │   ├── browser/               # Browser backend (CDP, Browserbase, etc.)
-│   ├── capabilities/          # Capability manifest and trust
+│   ├── capabilities/          # Capability manifest and trust (stub: capability-setup.ts only)
 │   ├── channels/              # Telegram gateway and adapters
 │   ├── cli/                   # CLI, interactive session loop, onboarding
 │   ├── config/                # Runtime config loading and defaults
@@ -100,7 +100,7 @@ estacoda/
 │   ├── skills/                # Skill loading, registry, tools, learning, evolution
 │   ├── theme/                 # UI theme definitions
 │   ├── tools/                 # Tool schemas, registry, executor, planners
-│   ├── trajectory/            # Trajectory recorder (in-memory)
+│   ├── trajectory/            # Trajectory recorder and persistence
 │   ├── types/                 # Additional TypeScript declarations
 │   ├── ui/                    # UI labels and settings
 │   ├── utils/                 # Shared runtime utilities
@@ -232,7 +232,7 @@ Expected pattern:
 
 ```text
 ~/.estacoda/
-├── config.yaml
+├── config.json
 ├── .env
 ├── memory/
 ├── sessions/
@@ -295,7 +295,7 @@ Examples of technical tokens that should remain stable:
 ```text
 KIMI_API_KEY
 Telegram
-~/.estacoda/config.yaml
+~/.estacoda/config.json
 bun run smoke
 kimi-k2
 GPT-5.5

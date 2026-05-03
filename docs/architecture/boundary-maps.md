@@ -87,8 +87,13 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  TrajectoryRecorder (97 lines, in-memory)                  │
-│  ArtifactStore (56 lines, in-memory)                       │
+│  TrajectoryRecorder (101 lines, in-memory per session)     │
+│  SQLiteSessionDB (persistent trajectories + failures)      │
+│  FailureClassifier (325 lines, 13 classes)                 │
+│  RedactionEngine (130 lines, safe-by-default)              │
+│  EvalRunner (118 lines, 3 deterministic fixtures)          │
+│  GoldenFlowCompare (65 lines, baseline assertion)          │
+│  ChangeManifestStore (137 lines, JSONL proposals)          │
 │  ───────────────────────────────────────────────────────  │
 │  Events captured:                                          │
 │    - session-start, user-input, context-expanded           │
@@ -98,11 +103,12 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 │    - provider-completion, provider-continuation            │
 │    - security-risk-escalated, agent-cancelled              │
 │    - assistant-output, session-end                         │
+│  CLI inspection:                                           │
+│    - estacoda trace list|dump|timeline|failures            │
+│    - estacoda eval [fixture-id]                            │
 └───────────────────────────────────────────────────────┘
 ```
 
-**Current state:** Contracts define 32 event kinds. Implementation is a 97-line in-memory recorder with no persistence.
+**Current state:** Contracts define 32 event kinds. Trajectories persist to SQLite. Failures are classified. Traces are inspectable via CLI. Eval fixtures run automatically. Golden flows provide baselines. Change manifests prepare for v0.7 evolution.
 
-**Gap:** No run replay, no structured trace export, no eval dataset generation, no evidence corpus for self-evolution.
-
-**v0.5 target:** Persistent trajectory store, structured trace schema, tool-call timeline, decision/event log, and basic eval runner.
+**Remaining gap:** No visual dashboard. No real-time streaming. No automated regression detection across runs. No self-evolution pipeline (candidate generation, evaluation, promotion).

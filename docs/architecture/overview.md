@@ -225,9 +225,11 @@ Capability-first security boundary.
 
 ### Trajectory persistence
 
-- `TrajectoryRecorder` records runtime events in memory only
-- No persistence layer exists yet
-- `implemented but not live-proven`
+- Trajectories are persisted to `~/.estacoda/sessions.sqlite` via `SQLiteSessionDB`
+- Table `trajectories` stores event arrays, outcomes, and metadata
+- Table `trajectory_failures` stores classified failure records
+- `TrajectoryRecorder` remains in-memory for the active session; persistence happens at completion
+- `smoke-tested`
 
 ## Data Flow Summary
 

@@ -14,7 +14,7 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 | `src/skills/skill-loader.ts` | 916 | Load skills from official, personal, project, and external roots |
 | `src/skills/skill-registry.ts` | ~180 | Hold loaded skills, filter visibility |
 | `src/skills/skill-tools.ts` | 2,292 | Agent-facing skill CRUD tools |
-| `src/skills/skill-evolution.ts` | ~290 | Propose, review, approve, reject, promote patches |
+| `src/skills/skill-evolution.ts` | ~666 | Propose, review, approve, reject, promote patches |
 | `src/skills/skill-learning.ts` | ~240 | Observe workflows and create project skills |
 | `src/skills/skill-workflow-planner.ts` | ~140 | Compile skill workflow plans |
 | `src/skills/skill-usage-telemetry.ts` | ~120 | Usage tracking and route telemetry |
