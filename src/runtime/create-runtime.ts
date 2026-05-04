@@ -140,6 +140,7 @@ export type RuntimeOptions = {
   approvalController?: WorkspaceApprovalController;
   cronStore?: CronStore;
   disableCronTools?: boolean;
+  disabledToolsets?: ToolsetName[];
   workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
@@ -537,8 +538,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
   }));
   const providerToolAvailability = await toolRegistry.snapshot();
+
+  // Remove tools from disabled toolsets (e.g. cron recursion guard)
+  if (options.disabledToolsets !== undefined && options.disabledToolsets.length > 0) {
+    for (const tool of providerToolAvailability.available) {
+      if (tool.toolsets?.some((ts) => options.disabledToolsets!.includes(ts))) {
+        toolRegistry.unregister(tool.name);
+      }
+    }
+  }
+
   const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
     tools: providerToolAvailability.available
+      .filter((t) => !options.disabledToolsets?.some((dt) => t.toolsets?.includes(dt)))
   });
   const toolCallPlanner = new ToolCallPlanner({
     registry: toolRegistry,

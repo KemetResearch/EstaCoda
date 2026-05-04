@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, open, realpath, rm } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -76,6 +76,9 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
           const record = await input.executionStore.create({ jobId: job.id, scheduledAt });
           executionId = record.id;
         }
+
+        // Advance nextRunAt under lock before execution to prevent duplicate runs
+        await input.store.advanceNextRun(job.id, input.now);
 
         try {
           const result = await input.runner.runJob(job, executionId);
@@ -250,26 +253,77 @@ export function originFromSessionKey(sessionKey: ChannelSessionKey, channel: str
   };
 }
 
-async function withCronTickLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+async function withCronTickLock<T>(path: string, fn: () => Promise<T>, staleTimeoutMs = 300_000): Promise<T> {
   await mkdirSafe(dirname(path));
+
+  async function tryAcquire(): Promise<Awaited<ReturnType<typeof open>>> {
+    try {
+      return await open(path, "wx");
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
+      if (code === "EEXIST") {
+        // Check if stale (only reclaim if we can parse it and prove it's stale)
+        const lockedAt = await readTickLockTimestamp(path);
+        if (lockedAt !== undefined) {
+          const elapsed = Date.now() - lockedAt.getTime();
+          if (elapsed > staleTimeoutMs) {
+            await rm(path, { force: true });
+            return await open(path, "wx");
+          }
+        }
+        // Lock exists and is either fresh or unreadable - skip tick
+        throw new TickLockInUseError();
+      }
+      throw error;
+    }
+  }
+
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    handle = await open(path, "wx");
+    handle = await tryAcquire();
   } catch (error) {
-    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    if (code === "EEXIST") {
+    if (error instanceof TickLockInUseError) {
       return [] as unknown as T;
     }
     throw error;
   }
 
   try {
-    await handle.writeFile(new Date().toISOString(), "utf8");
+    const content = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() });
+    await handle.writeFile(content, "utf8");
     return await fn();
   } finally {
     await handle.close();
     await rm(path, { force: true });
   }
+}
+
+class TickLockInUseError extends Error {
+  constructor() {
+    super("Cron tick lock is already held");
+    this.name = "TickLockInUseError";
+  }
+}
+
+async function readTickLockTimestamp(path: string): Promise<Date | undefined> {
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as { startedAt?: string };
+    if (typeof parsed.startedAt === "string") {
+      const d = Date.parse(parsed.startedAt);
+      if (!Number.isNaN(d)) return new Date(d);
+    }
+  } catch {
+    // Not valid JSON - try raw ISO string fallback below
+  }
+  try {
+    const raw = await readFile(path, "utf8");
+    const d = Date.parse(raw.trim());
+    if (!Number.isNaN(d)) return new Date(d);
+  } catch {
+    // ignore
+  }
+  return undefined;
 }
 
 async function mkdirSafe(path: string): Promise<void> {

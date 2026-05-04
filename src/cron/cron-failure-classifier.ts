@@ -4,6 +4,8 @@ export type CronFailureClass =
   | "delivery_error"
   | "lock_error"
   | "config_error"
+  | "runtime_error"
+  | "provider_error"
   | "unknown_error";
 
 export type ClassifiedCronFailure = {
@@ -22,8 +24,10 @@ export function classifyCronFailure(input: {
   configError?: string;
   runtimeError?: string;
   runtimeErrorMessage?: string;
+  providerError?: string;
+  providerErrorMessage?: string;
 }): ClassifiedCronFailure {
-  // Priority order matters: config > lock > script > timeout > delivery > unknown
+  // Priority order matters: config > lock > script > timeout > delivery > provider > runtime > unknown
 
   if (input.configError !== undefined) {
     return {
@@ -65,11 +69,18 @@ export function classifyCronFailure(input: {
     };
   }
 
-  if (input.runtimeError !== undefined) {
-    const message = input.runtimeErrorMessage ?? input.runtimeError;
+  if (input.providerError !== undefined) {
     return {
-      class: "unknown_error",
-      message,
+      class: "provider_error",
+      message: input.providerErrorMessage ?? input.providerError,
+      recoverable: true
+    };
+  }
+
+  if (input.runtimeError !== undefined) {
+    return {
+      class: "runtime_error",
+      message: input.runtimeErrorMessage ?? input.runtimeError,
       recoverable: true
     };
   }

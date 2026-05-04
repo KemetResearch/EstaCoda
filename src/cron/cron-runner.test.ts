@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CronStore } from "./cron-store.js";
@@ -265,7 +266,7 @@ describe("tickCron with execution store and job lock", () => {
     expect(history[0].failureClass).toBe("timeout");
   });
 
-  it("handles runner exceptions with unknown_error classification", async () => {
+  it("handles runner exceptions with runtime_error classification", async () => {
     await store.create({
       name: "Exploding job",
       schedule: "* * * * *",
@@ -292,7 +293,127 @@ describe("tickCron with execution store and job lock", () => {
 
     const history = await executionStore.list();
     expect(history[0].status).toBe("failed");
-    expect(history[0].failureClass).toBe("unknown_error");
+    expect(history[0].failureClass).toBe("runtime_error");
+  });
+
+  it("advances nextRunAt under lock before execution to prevent duplicates", async () => {
+    await store.create({
+      name: "Advance job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+
+    let callCount = 0;
+    const runner: CronRunner = {
+      runJob: async (job) => {
+        callCount++;
+        return mockOk(job);
+      }
+    };
+
+    const jobLock = createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 });
+    const now = new Date("2030-01-01T00:00:00Z");
+
+    // First tick - job runs and nextRunAt is advanced before execution
+    const results1 = await tickCron({ store, runner, executionStore, jobLock, now });
+    expect(results1.length).toBe(1);
+    expect(callCount).toBe(1);
+
+    // Second tick at same time - job should NOT be due because nextRunAt was advanced
+    const results2 = await tickCron({ store, runner, executionStore, jobLock, now });
+    expect(results2.length).toBe(0);
+    expect(callCount).toBe(1); // no additional call
+  });
+
+  it("recovers stale global tick lock so crashes cannot block all future ticks", async () => {
+    await store.create({
+      name: "Tick lock job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+
+    const runner: CronRunner = { runJob: async (job) => mockOk(job) };
+    const tickLockPath = join(lockDir, "stale-tick.lock");
+
+    // Write a stale tick lock file (old format, past timeout)
+    await mkdir(lockDir, { recursive: true });
+    await writeFile(tickLockPath, "2020-01-01T00:00:00.000Z", "utf8");
+
+    const now = new Date("2030-01-01T00:00:00Z");
+    const results = await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      lockPath: tickLockPath,
+      now
+    });
+
+    expect(results.length).toBe(1);
+    expect(results[0].ok).toBe(true);
+  });
+
+  it("respects fresh global tick lock and skips tick", async () => {
+    await store.create({
+      name: "Fresh tick lock job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+
+    let callCount = 0;
+    const runner: CronRunner = {
+      runJob: async (job) => {
+        callCount++;
+        return mockOk(job);
+      }
+    };
+    const tickLockPath = join(lockDir, "fresh-tick.lock");
+
+    // Write a fresh tick lock file (new format, within timeout)
+    await mkdir(lockDir, { recursive: true });
+    const content = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() });
+    await writeFile(tickLockPath, content, "utf8");
+
+    const now = new Date("2030-01-01T00:00:00Z");
+    const results = await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      lockPath: tickLockPath,
+      now
+    });
+
+    expect(results.length).toBe(0);
+    expect(callCount).toBe(0);
+  });
+
+  it("classifies provider_error failures", async () => {
+    await store.create({
+      name: "Provider job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+
+    const runner: CronRunner = {
+      runJob: async (job) => mockFail(job, "provider_error", "Provider rate limit")
+    };
+
+    const now = new Date("2030-01-01T00:00:00Z");
+    const results = await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      now
+    });
+
+    const history = await executionStore.list();
+    expect(history[0].failureClass).toBe("provider_error");
   });
 
   it("works without executionStore and jobLock (backward compat)", async () => {

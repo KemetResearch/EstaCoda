@@ -19,7 +19,22 @@ export type CronJobLock = {
   staleSince(jobId: string): Promise<Date | undefined>;
 };
 
-const DEFAULT_STALE_TIMEOUT_MS = 600_000; // 10 minutes
+const DEFAULT_STALE_TIMEOUT_MS = 300_000; // 5 minutes
+
+type LockFileContent = {
+  pid: number;
+  startedAt: string;
+};
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    if (err.code === "EPERM") return true;
+    return false;
+  }
+}
 
 export function createFileCronJobLock(options: CronJobLockOptions): CronJobLock {
   const staleTimeoutMs = options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
@@ -30,12 +45,36 @@ export function createFileCronJobLock(options: CronJobLockOptions): CronJobLock 
     return join(options.lockDir, `${safeJobId(jobId)}.lock`);
   }
 
-  async function readLockTimestamp(path: string): Promise<Date | undefined> {
+  async function readLock(path: string): Promise<{ content: LockFileContent; lockedAt: Date } | undefined> {
     try {
       const raw = await readFile(path, "utf8");
-      const parsed = Date.parse(raw.trim());
-      return Number.isNaN(parsed) ? undefined : new Date(parsed);
+      const trimmed = raw.trim();
+      // Try JSON format first
+      const parsed = JSON.parse(trimmed) as Partial<LockFileContent>;
+      if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string") {
+        const lockedAt = Date.parse(parsed.startedAt);
+        if (!Number.isNaN(lockedAt)) {
+          return { content: { pid: parsed.pid, startedAt: parsed.startedAt }, lockedAt: new Date(lockedAt) };
+        }
+      }
+      // Fallback: raw ISO string (old format)
+      const lockedAt = Date.parse(trimmed);
+      if (!Number.isNaN(lockedAt)) {
+        return { content: { pid: -1, startedAt: trimmed }, lockedAt: new Date(lockedAt) };
+      }
+      return undefined;
     } catch {
+      // JSON.parse failed - try raw ISO string
+      try {
+        const raw = await readFile(path, "utf8");
+        const trimmed = raw.trim();
+        const lockedAt = Date.parse(trimmed);
+        if (!Number.isNaN(lockedAt)) {
+          return { content: { pid: -1, startedAt: trimmed }, lockedAt: new Date(lockedAt) };
+        }
+      } catch {
+        // ignore
+      }
       return undefined;
     }
   }
@@ -47,7 +86,8 @@ export function createFileCronJobLock(options: CronJobLockOptions): CronJobLock 
       try {
         // Try to create the lock file exclusively (atomic)
         const handle = await open(path, "wx");
-        await handle.writeFile(now().toISOString(), "utf8");
+        const content: LockFileContent = { pid: process.pid, startedAt: now().toISOString() };
+        await handle.writeFile(JSON.stringify(content), "utf8");
         await handle.close();
         return { acquired: true, stale: false };
       } catch (error) {
@@ -57,22 +97,26 @@ export function createFileCronJobLock(options: CronJobLockOptions): CronJobLock 
         }
 
         // Lock exists - check if stale
-        const lockedAt = await readLockTimestamp(path);
-        if (lockedAt === undefined) {
+        const lock = await readLock(path);
+        if (lock === undefined) {
           // Corrupt lock file - treat as stale and reclaim
           await rm(path, { force: true });
           const handle = await open(path, "wx");
-          await handle.writeFile(now().toISOString(), "utf8");
+          const content: LockFileContent = { pid: process.pid, startedAt: now().toISOString() };
+          await handle.writeFile(JSON.stringify(content), "utf8");
           await handle.close();
           return { acquired: true, stale: true };
         }
 
-        const elapsed = now().getTime() - lockedAt.getTime();
-        if (elapsed > staleTimeoutMs) {
+        const elapsed = now().getTime() - lock.lockedAt.getTime();
+        const pidDead = !isPidAlive(lock.content.pid);
+
+        if (elapsed > staleTimeoutMs || pidDead) {
           // Stale lock - reclaim
           await rm(path, { force: true });
           const handle = await open(path, "wx");
-          await handle.writeFile(now().toISOString(), "utf8");
+          const content: LockFileContent = { pid: process.pid, startedAt: now().toISOString() };
+          await handle.writeFile(JSON.stringify(content), "utf8");
           await handle.close();
           return { acquired: true, stale: true };
         }
@@ -99,11 +143,11 @@ export function createFileCronJobLock(options: CronJobLockOptions): CronJobLock 
 
     async staleSince(jobId) {
       const path = await lockPath(jobId);
-      const lockedAt = await readLockTimestamp(path);
-      if (lockedAt === undefined) return undefined;
-      const elapsed = now().getTime() - lockedAt.getTime();
+      const lock = await readLock(path);
+      if (lock === undefined) return undefined;
+      const elapsed = now().getTime() - lock.lockedAt.getTime();
       if (elapsed > staleTimeoutMs) {
-        return lockedAt;
+        return lock.lockedAt;
       }
       return undefined;
     }

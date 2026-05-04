@@ -174,17 +174,38 @@ export class CronStore {
     return removed;
   }
 
-  async markRunResult(id: string, input: { ok: boolean; output: string }): Promise<CronJob | undefined> {
-    const now = this.#now();
+  async advanceNextRun(id: string, now = this.#now()): Promise<CronJob | undefined> {
     let updated: CronJob | undefined;
+    await this.#mutate((jobs) => jobs.map((job) => {
+      if (job.id !== id) return job;
+      const exhausted = job.repeat !== undefined && job.runCount >= job.repeat;
+      const next = exhausted || job.scheduleKind === "once"
+        ? undefined
+        : computeNextRun(job.schedule, now)?.toISOString();
+      updated = {
+        ...job,
+        nextRunAt: next,
+        runRequested: false,
+        updatedAt: now.toISOString()
+      };
+      return updated;
+    }));
+    return updated === undefined ? undefined : structuredClone(updated);
+  }
+
+  async markRunResult(id: string, input: { ok: boolean; output: string }, now = this.#now()): Promise<CronJob | undefined> {
     await this.writeOutput(id, now, input.output);
+    let updated: CronJob | undefined;
     await this.#mutate((jobs) => jobs.map((job) => {
       if (job.id !== id) return job;
       const runCount = job.runCount + 1;
       const exhausted = job.repeat !== undefined && runCount >= job.repeat;
+      // Preserve already-advanced nextRunAt if it is still in the future.
+      const currentNext = job.nextRunAt !== undefined ? new Date(job.nextRunAt) : undefined;
+      const alreadyAdvanced = currentNext !== undefined && currentNext.getTime() > now.getTime();
       const next = exhausted || job.scheduleKind === "once"
         ? undefined
-        : computeNextRun(job.schedule, now)?.toISOString();
+        : (alreadyAdvanced ? job.nextRunAt : computeNextRun(job.schedule, now)?.toISOString());
       updated = {
         ...job,
         runCount,

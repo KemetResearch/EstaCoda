@@ -352,7 +352,12 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
               telegramReady: latestConfig.channels.telegram.ready,
               enableWebNetwork: latestConfig.web.enableNetwork,
               webMaxContentChars: latestConfig.web.maxContentChars,
-              disableCronTools: true
+              disableCronTools: true,
+              // Cron recursion guard: disable toolsets that could trigger nested
+              // scheduling or outbound messaging. "cron" disables the cronjob tool.
+              // "messaging" and "clarify" toolsets are guarded here for future
+              // compatibility; they do not exist in EstaCoda yet (Phase 4 work).
+              disabledToolsets: ["cron", "messaging", "clarify"]
             });
           }
         })
