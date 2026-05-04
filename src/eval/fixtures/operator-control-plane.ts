@@ -429,6 +429,11 @@ export const operatorControlPlaneCase: EvalCase = {
         const interrupted = await store.getFlow(intFlow.id);
         assertions.push(assertEqual("interrupt-status", interrupted?.status, "interrupted"));
         assertions.push(assertEqual("interrupt-procs", (r.data as any)?.terminatedProcesses, 1));
+        // Verify cleanup audit events were recorded
+        const flowEvents = await store.listFlowEvents(intFlow.id);
+        const cleanupEvents = flowEvents.filter((e) => e.data?.reason === "interrupt-cleanup");
+        assertions.push(assertTrue("interrupt-cleanup-events", cleanupEvents.length > 0));
+        assertions.push(assertTrue("interrupt-cleanup-success", cleanupEvents.every((e) => e.data?.success === true)));
       }
     }
 

@@ -156,20 +156,51 @@ export class OperatorCommandDispatcher {
 
   async #handleInterrupt(flowId: FlowId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
-      // Clean up active processes first
+      // Clean up active processes first, recording each attempt
       const processes = await this.#processRegistry.listByFlow(flowId);
-      for (const proc of processes) {
-        if (proc.status === "running") {
-          await this.#processRegistry.terminate(proc.id, { signal: "SIGTERM", timeoutMs: 5000 });
-        }
+      const running = processes.filter((p) => p.status === "running");
+      const cleanupResults: { processId: string; ok: boolean }[] = [];
+
+      for (const proc of running) {
+        const result = await this.#processRegistry.terminate(proc.id, { signal: "SIGTERM", timeoutMs: 5000 });
+        cleanupResults.push({ processId: proc.id, ok: result.ok });
       }
 
+      // Record cleanup audit trail atomically
+      await this.#store.atomicTransition(flowId, async (tx) => {
+        for (const cr of cleanupResults) {
+          const proc = processes.find((p) => p.id === cr.processId);
+          if (!proc) continue;
+          await tx.appendFlowEvent({
+            id: crypto.randomUUID(),
+            flowId,
+            stepId: proc.stepId,
+            kind: cr.ok ? "process-exited" : "process-orphaned",
+            data: {
+              processId: cr.processId,
+              processManagerId: proc.processManagerId,
+              reason: "interrupt-cleanup",
+              signal: "SIGTERM",
+              success: cr.ok
+            },
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
       const flow = await this.#engine.interruptFlow(flowId, reason, operator);
-      const procCount = processes.filter((p) => p.status === "running").length;
+      const terminated = cleanupResults.filter((r) => r.ok).length;
+      const failed = cleanupResults.filter((r) => !r.ok).length;
+
       return {
         ok: true,
-        message: `Flow ${flowId} interrupted. ${procCount} process(es) terminated.`,
-        data: { flowStatus: flow.status, terminatedProcesses: procCount }
+        message: `Flow ${flowId} interrupted. ${terminated} process(es) terminated, ${failed} failed.`,
+        data: {
+          flowStatus: flow.status,
+          terminatedProcesses: terminated,
+          failedProcesses: failed,
+          cleanupDetails: cleanupResults
+        }
       };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
