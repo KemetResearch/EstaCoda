@@ -16,6 +16,12 @@ import { userCorrectionRecordingCase } from "./user-correction-recording.js";
 import { toolDescriptionProposalCase } from "./tool-description-proposal.js";
 import { routingMetadataProposalCase } from "./routing-metadata-proposal.js";
 import { evolutionExportShapeCase } from "./evolution-export-shape.js";
+import { taskflowStateTransitionsCase } from "./taskflow-state-transitions.js";
+import { taskflowLockingCase } from "./taskflow-locking.js";
+import { taskflowMigrationCase } from "./taskflow-migration.js";
+import { taskflowAtomicityCase } from "./taskflow-atomicity.js";
+import { taskflowEngineLifecycleCase } from "./taskflow-engine-lifecycle.js";
+import { taskflowRestartRecoveryCase } from "./taskflow-restart-recovery.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -35,5 +41,11 @@ export const defaultEvalFixtures = [
   userCorrectionRecordingCase,
   toolDescriptionProposalCase,
   routingMetadataProposalCase,
-  evolutionExportShapeCase
+  evolutionExportShapeCase,
+  taskflowStateTransitionsCase,
+  taskflowLockingCase,
+  taskflowMigrationCase,
+  taskflowAtomicityCase,
+  taskflowEngineLifecycleCase,
+  taskflowRestartRecoveryCase
 ];

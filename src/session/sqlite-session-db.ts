@@ -76,12 +76,18 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   readonly #db: Database;
   readonly #now: () => Date;
   readonly #id: () => string;
+  readonly #path: string;
 
   constructor(options: { path: string; now?: () => Date; id?: () => string }) {
+    this.#path = options.path;
     this.#db = new Database(options.path, { create: true, readwrite: true });
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
     this.#migrate();
+  }
+
+  get db(): Database {
+    return this.#db;
   }
 
   close(): void {
@@ -401,9 +407,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrate(): void {
-    this.#db.exec(`
-      pragma journal_mode = wal;
+    this.#db.exec(`pragma journal_mode = wal;`);
 
+    // ─── Baseline: legacy tables (idempotent, always safe) ───
+    this.#db.exec(`
       create table if not exists sessions (
         id text primary key,
         profile_id text not null,
@@ -469,6 +476,202 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       create index if not exists idx_trajectories_profile on trajectories(profile_id, created_at);
       create index if not exists idx_failures_class on trajectory_failures(class, timestamp);
       create index if not exists idx_failures_trajectory on trajectory_failures(trajectory_id);
+    `);
+
+    // ─── Schema versioning (new in v0.8) ───
+    this.#db.exec(`
+      create table if not exists schema_version (
+        version integer primary key
+      );
+    `);
+
+    const versionRow = this.#db
+      .query<{ version: number }>("select version from schema_version limit 1")
+      .get();
+
+    const currentVersion = versionRow?.version ?? 0;
+
+    if (currentVersion < 1) {
+      this.#backupDbBeforeMigration("v0.8-schema-v1");
+      this.#migrateV1();
+      this.#db.query("insert into schema_version (version) values (1) on conflict(version) do update set version = 1").run();
+    }
+  }
+
+  #backupDbBeforeMigration(label: string): void {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = `${this.#path}.backup.${label}.${timestamp}`;
+      this.#db.exec(`vacuum into '${backupPath.replace(/'/g, "''")}'`);
+    } catch {
+      // Backup is best-effort; do not block migration
+    }
+  }
+
+  #migrateV1(): void {
+    // TaskFlow durable execution schema (v0.8)
+    this.#db.exec(`
+      create table if not exists flows (
+        id text primary key,
+        session_id text not null,
+        status text not null default 'pending',
+        intent_json text not null,
+        selected_skill text,
+        current_step_id text,
+        created_at text not null,
+        updated_at text not null,
+        completed_at text,
+        cancelled_at text,
+        failed_at text,
+        pause_requested_at text,
+        pause_reason text,
+        interrupt_reason text,
+        cancel_reason text,
+        wait_reason_json text,
+        operator_summary text,
+        compacted_at text,
+        checkpoint_count integer not null default 0,
+        step_count integer not null default 0,
+        retry_count integer not null default 0,
+        metadata_json text
+      );
+
+      create table if not exists flow_steps (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        step_index integer not null,
+        status text not null default 'pending',
+        name text not null,
+        description text not null,
+        tool_plans_json text,
+        executions_json text,
+        retry_policy_json text not null,
+        retry_count integer not null default 0,
+        max_retries integer not null default 1,
+        idempotent integer not null default 0,
+        safe_to_retry integer not null default 0,
+        failure_policy_json text not null,
+        wait_reason_json text,
+        pause_reason text,
+        interrupt_reason text,
+        skip_reason text,
+        retry_of_step_id text,
+        attempt_number integer not null default 1,
+        started_at text,
+        completed_at text,
+        failed_at text,
+        cancelled_at text,
+        paused_at text,
+        resumed_at text,
+        wait_started_at text,
+        wait_ended_at text,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create table if not exists flow_events (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        step_id text,
+        kind text not null,
+        data_json text not null,
+        timestamp text not null
+      );
+
+      create table if not exists operator_events (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        step_id text,
+        kind text not null,
+        operator text not null,
+        command text not null,
+        effect text not null,
+        previous_state text not null,
+        new_state text not null,
+        metadata_json text,
+        timestamp text not null
+      );
+
+      create table if not exists checkpoints (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        step_id text,
+        name text not null,
+        description text,
+        snapshot_json text not null,
+        created_at text not null,
+        created_by text not null
+      );
+
+      create table if not exists approval_gates (
+        id text primary key,
+        step_id text not null references flow_steps(id) on delete cascade,
+        flow_id text not null references flows(id) on delete cascade,
+        status text not null default 'pending',
+        requested_at text not null,
+        resolved_at text,
+        resolved_by text,
+        reason text not null,
+        risk_class text not null,
+        tool_name text,
+        target_key text,
+        target_summary text,
+        scope text,
+        controller_grant_id text,
+        tool_executor_decision text not null,
+        deterministic_rule text
+      );
+
+      create table if not exists flow_locks (
+        flow_id text primary key,
+        owner_id text not null,
+        locked_at text not null,
+        heartbeat_at text not null,
+        expires_at text not null
+      );
+
+      create table if not exists flow_processes (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        step_id text not null,
+        process_manager_id text not null,
+        process_type text not null,
+        command_summary text,
+        started_at text not null,
+        expected_exit_at text,
+        status text not null default 'running'
+      );
+
+      create table if not exists flow_artifacts (
+        artifact_id text not null,
+        step_id text not null,
+        flow_id text not null references flows(id) on delete cascade,
+        kind text not null,
+        linked_at text not null,
+        primary key (artifact_id, step_id, flow_id)
+      );
+
+      create table if not exists flow_run_links (
+        run_id text not null,
+        step_id text not null,
+        flow_id text not null references flows(id) on delete cascade,
+        turn_index integer not null,
+        linked_at text not null,
+        primary key (run_id, step_id, flow_id)
+      );
+
+      create index if not exists idx_flows_session on flows(session_id, created_at);
+      create index if not exists idx_flows_status on flows(status);
+      create index if not exists idx_flow_steps_flow on flow_steps(flow_id, step_index);
+      create index if not exists idx_flow_steps_status on flow_steps(status);
+      create index if not exists idx_flow_events_flow on flow_events(flow_id, timestamp);
+      create index if not exists idx_flow_events_step on flow_events(flow_id, step_id, timestamp);
+      create index if not exists idx_operator_events_flow on operator_events(flow_id, timestamp);
+      create index if not exists idx_checkpoints_flow on checkpoints(flow_id, created_at);
+      create index if not exists idx_approval_gates_flow on approval_gates(flow_id, status);
+      create index if not exists idx_approval_gates_step on approval_gates(step_id, status);
+      create index if not exists idx_flow_processes_flow on flow_processes(flow_id, step_id);
+      create index if not exists idx_flow_locks_expires on flow_locks(expires_at);
     `);
   }
 
