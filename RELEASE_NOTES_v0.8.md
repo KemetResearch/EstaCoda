@@ -62,7 +62,8 @@ v0.8 introduces durable, operator-controllable multi-step execution through Task
 - Auto-compaction is disabled by default.
 - No automatic retry without operator `/retry`.
 - No visual workflow builder or marketplace.
-- No channels beyond Telegram.
+- No channel integrations in v0.8.
+- Telegram/channel integrations are out of scope for v0.8.
 - No background automation without explicit cron scheduling.
 
 ## Files Changed in v0.8
