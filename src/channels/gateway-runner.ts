@@ -12,6 +12,7 @@ import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "./channel-gateway.js";
 import { PersistentChannelSessionStore } from "./channel-session-store.js";
+import { DeliveryRouter } from "./delivery-router.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
 import { injectVoiceTranscripts } from "./voice-transcription.js";
 
@@ -192,6 +193,9 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     activityLabelsLocale: config.ui.activityLabels,
     fetch: options.telegramFetch
   });
+  const router = new DeliveryRouter({ homeDir: options.homeDir });
+  router.registerAdapter(adapter);
+
   const gateway = new ChannelGateway({
     adapters: [adapter],
     securityMode: config.security.approvalMode,
@@ -280,25 +284,23 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         store: cronStore,
         runner: createRuntimeCronRunner({
           deliver: async (job, content) => {
-            if (job.delivery === "origin" && job.origin?.channel === "telegram" && job.origin.chatId !== undefined) {
-              await adapter.delivery.sendText({
-                platform: "telegram",
-                chatId: job.origin.chatId,
-                userId: job.origin.userId,
-                threadId: job.origin.threadId
-              }, content);
-              return true;
-            }
+            const originKey = job.origin?.channel === "telegram" && job.origin.chatId !== undefined
+              ? {
+                  platform: "telegram" as const,
+                  chatId: job.origin.chatId,
+                  userId: job.origin.userId,
+                  threadId: job.origin.threadId
+                }
+              : undefined;
 
-            if (job.delivery.startsWith("telegram:")) {
-              await adapter.delivery.sendText({
-                platform: "telegram",
-                chatId: job.delivery.slice("telegram:".length)
-              }, content);
-              return true;
-            }
-
-            return false;
+            const fallbackSessionKey = originKey ?? {
+              platform: "telegram" as const,
+              chatId: job.origin?.chatId ?? "cron"
+            };
+            const target = job.delivery ?? "local";
+            const targets = router.parseTarget(target, fallbackSessionKey);
+            const results = await router.deliverText(targets, content);
+            return Array.from(results.values()).some((r) => r.success);
           },
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
