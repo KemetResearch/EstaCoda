@@ -5,7 +5,7 @@ description: "High-level system map, entrypoints, runtime composition, and data 
 
 # Architecture Overview
 
-EstaCoda is a TypeScript-first agent runtime built on Bun. It executes provider-backed agent sessions through CLI and Telegram, with skills, tools, memory, and security policy as first-class surfaces.
+EstaCoda is a TypeScript-first agent runtime built on Bun. It executes provider-backed agent sessions through CLI and multiple channels (Telegram, Discord, Email, WhatsApp), with skills, tools, memory, and security policy as first-class surfaces.
 
 ## Entrypoints
 
@@ -16,6 +16,9 @@ EstaCoda is a TypeScript-first agent runtime built on Bun. It executes provider-
 | `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/reset`. | `smoke-tested` |
 | `src/cli/cli-session-store.ts` | Persisted active CLI session pointer keyed by workspace root. | `smoke-tested` |
 | `src/channels/gateway-runner.ts` | Telegram gateway runtime wrapper. | `live-proven` |
+| `src/channels/discord-adapter.ts` | Discord adapter. Receives messages, sends replies, handles attachments. | `implemented but not live-proven` |
+| `src/channels/email-adapter.ts` | Email adapter. IMAP receive, SMTP send, reply-in-thread. | `implemented but not live-proven` |
+| `src/channels/whatsapp-adapter.ts` | WhatsApp adapter (Baileys linked-device). Gated behind `experimental: true`. | `experimental` |
 
 ## Runtime Composition
 
@@ -154,42 +157,152 @@ Skill operations: list, view, inspect, create, patch, edit, delete, write_file, 
 
 Execution: provider-backed by default; deterministic fallback path exists for no-provider sessions. Resources (`references/`, `templates/`, `scripts/`, compatible `assets/`) are indexed and loaded on demand.
 
-## Channel Architecture
+## Channel Architecture (v0.9)
 
 `ChannelGateway` is the generic adapter bridge. Responsibilities:
 
 - Auth / allowlist / pairing
 - Session mapping with normalized session-key policy
 - Session auto-reset policy
-- Session-admin commands (`/sessions`, `/search`, `/switch`)
+- Session-admin commands (`/sessions`, `/search`, `/switch`, `/attach`, `/detach`)
 - Runtime construction from fresh config snapshot per turn
 - Progress delivery
 - Approval prompt delivery
 - Command handling
 
-Telegram-specific behavior lives in `TelegramAdapter`:
+### Adapters
 
+| Adapter | Status | Key File |
+|---------|--------|----------|
+| Telegram | `live-proven` | `src/channels/telegram-adapter.ts` |
+| Discord | `implemented but not live-proven` | `src/channels/discord-adapter.ts` |
+| Email | `implemented but not live-proven` | `src/channels/email-adapter.ts` |
+| WhatsApp | `experimental` | `src/channels/whatsapp-adapter.ts` |
+
+Telegram-specific behavior:
 - Polling
 - Attachment download
 - Callback query handling
 - Progress message editing
-- Final reply formatting
+- Final reply formatting (Telegram-safe HTML)
 
-Telegram UX choices:
+Discord-specific behavior:
+- Gateway client via `discord.js`
+- DM, guild channel, and thread support
+- Attachment download
+- Text delivery with chunking
+- Slash commands deferred to v0.9.1
 
-- One evolving progress message per active turn
-- Inline approval buttons map back to `/approve` and `/deny`
-- Final replies formatted in Telegram-safe HTML layer
-- Activity labels localized through shared label map (`en`, `ar`)
-- Group sessions per-user by default; thread sessions shared by default
-- Active chat → session mapping persists across gateway restarts
+Email-specific behavior:
+- IMAP poll for incoming mail
+- SMTP send for replies
+- Reply-in-thread via `In-Reply-To` / `References` headers
+- Attachment ingestion
+- Allowed sender filtering
+- Home address configuration
+
+WhatsApp-specific behavior (experimental):
+- Baileys linked-device model
+- QR code and pairing-code login
+- DM-first (no group support)
+- Media download/upload
+- Message chunking
+- Gated behind `channels.whatsapp.experimental: true`
+
+### DeliveryRouter
+
+`DeliveryRouter` is the normalized delivery path for all channels. It replaces hardcoded per-channel delivery in cron and gateway.
+
+Supported targets:
+- `local` — write to local file
+- `origin` — deliver to the channel that triggered the action
+- `silent` — no delivery
+- `telegram:<chatId>` — Telegram DM or channel
+- `discord:<channelId>` — Discord channel
+- `whatsapp:<number>` — WhatsApp DM
+- `email:<address>` — Email address
+
+Behavior:
+- Multi-target delivery: one message can be delivered to multiple targets.
+- Truncation: long text is truncated with ellipsis when channel limits apply.
+- Error persistence: delivery failures are recorded and visible via `estacoda gateway status`.
+- Progress/artifact routing: `deliverProgress` and `deliverArtifact` variants exist.
+
+### Session Identity Policy
+
+Channel session identity includes explicit chat/thread policy:
+
+| Context | Default |
+|---------|---------|
+| DM | Per-user |
+| Group | Per-user |
+| Thread | Shared |
+
+Configurable via runtime config.
+
+### Cross-Surface Sessions
+
+Sessions are **separate by default**. A CLI session and a Telegram session for the same user do not share context automatically.
+
+Explicit attach/detach is required:
+- `estacoda sessions attach <surface> <surface-id> <session-id>`
+- `estacoda sessions detach <surface> <surface-id>`
+- `/attach <code>` in Telegram (redeems a handoff code)
+- `/detach` in Telegram (creates a new independent session)
+
+Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-pointers.json`). Each pointer records:
+- `sessionId`: the SQLite session
+- `attachedAt`: ISO timestamp
+- `homeDelivery`: optional delivery target (e.g., `local`, `telegram:<chatId>`)
+
+### CLI ↔ Telegram Handoff
+
+Handoff uses short-lived, single-use codes:
+1. Operator runs `estacoda handoff telegram` → generates a 6-character code (Crockford base-32, `crypto.randomInt`).
+2. Code is written to `~/.estacoda/handoff-codes.json` with TTL (default 10 minutes).
+3. User sends `/attach <code>` in Telegram.
+4. `HandoffStore.redeem()` validates: code exists, not used, not expired, surface type matches.
+5. On success, the Telegram surface pointer is updated to point to the CLI session.
+6. On failure, generic safe messages are returned (no session ID leakage).
+
+Security properties:
+- Cryptographically secure randomness.
+- 32^6 keyspace (~1.07 billion combinations).
+- Atomic file writes with `0o600` permissions.
+- No rate limiter in v0.9; mitigation relies on short TTL + single-use + keyspace + gateway allowlist.
+
+## Cron Architecture (v0.9)
+
+### Stores
+
+| Store | Persistence | Role |
+|-------|-------------|------|
+| `CronStore` | `~/.estacoda/cron/jobs.json` | Job definitions, schedule, status, next run |
+| `CronExecutionStore` | SQLite (`sessions.sqlite`) | Execution records: start, end, status, output summary, failure class/message |
+
+### Runner
+
+`tickCron` in `src/cron/cron-runner.ts`:
+- Acquires `.tick.lock` to prevent concurrent ticks.
+- Computes due jobs.
+- Per-job execution: acquires job-level lock, advances `nextRunAt` before execution, creates fresh session, runs script or prompt.
+- PID/stale-lock recovery: on startup, checks for stale locks from crashed processes.
+- Recursion guard: `disableCronTools: true` in cron runtime prevents cron jobs from scheduling more cron jobs.
+- Delivery: uses `DeliveryRouter` for all channel delivery.
+
+### Failure Handling
+
+- Failure class: `timeout`, `script-failed`, `delivery-failed`, `unknown`.
+- Failure message: captured from script stderr or exception.
+- Execution status: `success`, `failed`, `cancelled`.
+- Recent failures visible via `estacoda gateway status` and `estacoda cron history`.
 
 ## Security Model
 
 Capability-first security boundary.
 
 - Approval modes: `strict`, `adaptive`, `open`
-- `adaptive` is default; uses deterministic triage first, then optional auxiliary security assessor
+- `adaptive` is default; uses deterministic triage first, then optional auxiliary assessor
 - `open` preserves a hard dangerous-command floor
 - `/yolo` is a session-scoped CLI/gateway toggle for `open` mode; cannot bypass the hard floor
 - Tool risk classes drive gating: `safe`, `caution`, `external-side-effect`, `irreversible`
@@ -200,6 +313,44 @@ Capability-first security boundary.
 - CLI approvals: same scope model through runtime-backed grants
 - Hard floor covers: broad recursive deletes, destructive disk operations, shutdown/reboot, fork-bomb/kill-all, secret reads, pipe-to-interpreter installs, git force-pushes
 
+### Channel Security
+
+- **Telegram:** allowlist by `userId` and `chatId`; optional pairing codes for unlisted users.
+- **Discord:** allowlist by `userId`, `guildId`, and `channelId`.
+- **Email:** allowlist by sender address (`allowedSenders`); `allowAllUsers` bypasses sender filtering. Uses global security policy — no email-specific approval friction.
+- **WhatsApp:** allowlist by `userId` (phone number/JID). Experimental gate (`experimental: true`) must be open for the adapter to initialize.
+- **Global policy:** all channels share the same runtime security policy. There is no channel-specific approval escalation.
+
+## Operator Surface (v0.9)
+
+### Gateway
+
+- `estacoda gateway status` — process, channels, DeliveryRouter platforms, surface pointers, pending approvals, cron summary, recent failures, delivery errors, missing config.
+- `estacoda gateway diagnose` — per-channel readiness checks, cron directory permissions, missing credentials. Returns exit 1 if warnings exist.
+
+### Channels
+
+- `estacoda channels list` — compact table of all configured channels.
+- `estacoda channels status [channel]` — detailed per-channel status with surface pointers.
+
+### Cron
+
+- `estacoda cron list` — all jobs with schedule, status, next run.
+- `estacoda cron show <job-id>` — job detail with recent executions.
+- `estacoda cron history [job-id]` — execution history.
+- `estacoda cron run <job-id>` — request a run (sets `runRequested`).
+- `estacoda cron pause <job-id>` — pause job.
+- `estacoda cron resume <job-id>` — resume job.
+- `estacoda cron remove <job-id>` — delete job.
+
+### Sessions
+
+- `estacoda sessions list` — recent sessions with attached surfaces.
+- `estacoda sessions show <session-id>` — session detail with surface pointers.
+- `estacoda sessions current` — current runtime session (when present).
+- `estacoda sessions attach <surface> <surface-id> <session-id>` — explicit attach.
+- `estacoda sessions detach <surface> <surface-id>` — explicit detach.
+
 ## Persistence Model
 
 ### Session persistence
@@ -207,7 +358,8 @@ Capability-first security boundary.
 - Interactive/session state written to session DB
 - SQLite for gateway path; in-memory for smoke/scaffolding
 - CLI session context persisted in `.estacoda/cli-sessions.json`
-- Channel session context persisted in `.estacoda/channel-sessions.json`
+- Channel session context persisted in `channel-sessions.json` via `ChannelSessionStore`
+- Cross-surface pointers in `.estacoda/surface-pointers.json`
 - Channel session identity includes explicit chat/thread policy
 
 ### Memory persistence
@@ -235,7 +387,7 @@ Capability-first security boundary.
 
 The primary end-to-end path:
 
-1. Input arrives from CLI or Telegram
+1. Input arrives from CLI or a channel (Telegram, Discord, Email, WhatsApp)
 2. Runtime normalizes message + attachments
 3. Prompt assembly builds a layered provider request
 4. Provider responds with text and/or tool calls
@@ -249,8 +401,8 @@ The primary end-to-end path:
 1. **AgentLoop monolith** — Was 2,714 lines, now 809 lines. Core orchestration remains but provider loop, tool execution, skill workflows, and native intents are extracted. Remaining coupling: prompt assembly, memory context injection, cross-component coordination.
 2. **create-runtime.ts god factory** — 901 lines, 69 imports, 36 constructor calls, no DI boundary. Assessment in `docs/planning/v0.4-builder-assessment.md` recommends deferring a builder pattern.
 3. **Trajectory/Artifact skeletons** — 97 and 56 lines, in-memory only.
-4. **No unit tests** — 13,969-line smoke.ts is the only safety net. Deferred to v0.5.
-5. **Bun lock-in** — `bun:sqlite` prevents Node execution.
-6. **Telegram-only channels** — no other real launch channel.
-7. **Gateway liveness** — readiness-focused, not daemon-tracking.
-8. **Remaining cross-component state** — `AgentLoop` constructor still receives 20+ dependencies. Some (e.g., `memoryContext`, `projectContext`) are only used for prompt assembly and could move to a dedicated `PromptAssembler`.
+4. **Bun lock-in** — `bun:sqlite` prevents Node execution.
+5. **Gateway liveness** — readiness-focused, not daemon-tracking.
+6. **Remaining cross-component state** — `AgentLoop` constructor still receives 20+ dependencies. Some (e.g., `memoryContext`, `projectContext`) are only used for prompt assembly and could move to a dedicated `PromptAssembler`.
+7. **Discord slash commands** — deferred to v0.9.1.
+8. **WhatsApp experimental** — Baileys is an unofficial API; Meta may suspend accounts using it.

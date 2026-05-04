@@ -2,7 +2,7 @@
 
 EstaCoda is a TypeScript agent runtime for local terminal work, channel-based operation, editor integration, workflow learning, and media-capable agent tooling.
 
-The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, artifact paths, and **durable TaskFlow execution** are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
+The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, multi-channel gateway, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron with execution history, skills, memory, artifact paths, and **durable TaskFlow execution** are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ On first launch, EstaCoda runs an interactive setup flow:
 - store hosted-provider keys locally in `~/.estacoda/.env` with `0600` permissions
 - choose security mode: `strict`, `adaptive`, or `open`
 - choose workflow-learning mode: `none`, `suggest`, `proactive`, or `autonomous`
-- optionally configure Telegram, voice, vision/image generation, and browser support
+- optionally configure Telegram, Discord, Email, WhatsApp, voice, vision/image generation, and browser support
 - verify readiness, then start the first agent session
 
 ## Core Capabilities
@@ -30,15 +30,22 @@ On first launch, EstaCoda runs an interactive setup flow:
 - Local and project config overlays with local secret storage.
 - Bounded memory through `MEMORY.md`, `USER.md`, `SOUL.md`, and `AGENTS.md`.
 - Skill system with visibility, usage telemetry, evolution overlays, gated proposals, snapshots, rollback, and scored eval fixtures.
-- Telegram gateway with allowlists, approvals, sessions, attachments, voice transcription hooks, and generated-image delivery.
+- **Multi-channel gateway (v0.9):**
+  - **Telegram** — live-proven: allowlists, approvals, sessions, attachments, voice transcription hooks, generated-image delivery, pairing codes.
+  - **Discord** — implemented: DM/channel/thread support, allowlists, attachments, text delivery. Slash commands deferred to v0.9.1.
+  - **Email** — implemented: IMAP receive, SMTP send, reply-in-thread, attachments, allowed senders, home address. Uses global security policy; no email-specific approval friction.
+  - **WhatsApp** — experimental: Baileys linked-device adapter, QR/pairing-code login, DM-first, media, chunking. Gated behind `experimental: true`. See security docs for unofficial-API risk.
+- **DeliveryRouter** — normalized delivery path for all channels: local, origin, Telegram, Discord, WhatsApp, Email, silent.
 - MCP client for stdio and HTTP servers, including reload semantics.
 - ACP stdio server foundation for editor clients.
 - Browser automation through a local Chrome DevTools Protocol backend.
-- Cron jobs with prompt scanning, script-backed jobs, tick locking, and local outputs.
+- **Cron jobs (v0.9 hardened)** — persistent store, prompt scanning, script-backed jobs, tick locking, per-job duplicate prevention, execution history in SQLite, failure classification, delivery routing, recursion guard.
 - Voice/TTS/STT configuration foundation and audio artifacts.
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.
 - English and Arabic first-run onboarding, with localized setup labels and supported status copy.
 - **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
+- **Operator surface (v0.9):** CLI commands for gateway status/diagnose, channels list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
+- **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
 
 ## TaskFlow (v0.8)
 
@@ -62,7 +69,7 @@ Run these before pushing changes:
 cd /path/to/EstaCoda
 bun run typecheck
 bun run smoke
-bun run scripts/run-eval.ts
+bun run scripts/run-eval-fixtures.ts
 ```
 
 For a clean first-run onboarding check:
@@ -117,8 +124,8 @@ The setup flow walks through:
 5. Protected API key capture into `~/.estacoda/.env`.
 6. Security mode (`strict`, `adaptive`, or `open`).
 7. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
-8. Optional capabilities: Telegram, voice, vision, image generation, browser automation.
-9. Readiness check before the first agent session.
+8. Optional capabilities: Telegram, Discord, Email, WhatsApp, voice, vision, image generation, browser automation.
+9. Readiness check before the first agent agent session.
 
 Credentials are stored locally with restrictive permissions. Advanced users can point EstaCoda at existing environment variables instead of pasting keys during setup.
 

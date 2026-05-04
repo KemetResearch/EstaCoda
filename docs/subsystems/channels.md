@@ -1,11 +1,11 @@
 ---
 title: "Channels"
-description: "Channel architecture: gateway, adapters, session management, and Telegram."
+description: "Channel architecture: gateway, adapters, session management, and multi-channel delivery."
 ---
 
 # Channels
 
-Channels are the surfaces through which users interact with EstaCoda. Today, Telegram is the only live-proven channel.
+Channels are the surfaces through which users interact with EstaCoda. v0.9 supports four channels: Telegram, Discord, Email, and WhatsApp (experimental).
 
 ## Files
 
@@ -13,8 +13,14 @@ Channels are the surfaces through which users interact with EstaCoda. Today, Tel
 |------|-------|------|
 | `src/channels/channel-gateway.ts` | 1,408 | Generic adapter bridge |
 | `src/channels/telegram-adapter.ts` | 847 | Telegram-specific adapter |
+| `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
+| `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
+| `src/channels/whatsapp-adapter.ts` | ~500 | WhatsApp-specific adapter (Baileys) |
+| `src/channels/delivery-router.ts` | ~200 | Normalized delivery path |
 | `src/channels/channel-session-store.ts` | ~240 | Persisted session mapping |
 | `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
+| `src/channels/surface-pointer-store.ts` | ~120 | Cross-surface session pointers |
+| `src/channels/handoff-store.ts` | ~150 | Short-lived handoff codes |
 | `src/channels/telegram-format.ts` | ~200 | Telegram-safe HTML formatting |
 | `src/channels/activity-labels.ts` | ~80 | Localized activity labels |
 
@@ -25,7 +31,7 @@ Responsibilities:
 - Auth / allowlist / pairing
 - Session mapping with normalized session-key policy
 - Session auto-reset policy
-- Session-admin commands (`/sessions`, `/search`, `/switch`)
+- Session-admin commands (`/sessions`, `/search`, `/switch`, `/attach`, `/detach`)
 - Runtime construction from fresh config snapshot per turn
 - Progress delivery
 - Approval prompt delivery
@@ -45,6 +51,8 @@ Responsibilities:
 | Inline approvals | `smoke-tested` |
 | Session persistence | `smoke-tested` |
 | Attachment download | `smoke-tested` |
+| Pairing codes | `smoke-tested` |
+| Handoff codes | `smoke-tested` |
 
 **UX choices:**
 
@@ -55,6 +63,123 @@ Responsibilities:
 - Group sessions per-user by default
 - Thread sessions shared by default
 - Active chat → session mapping persists across gateway restarts
+
+**Setup:**
+
+```bash
+estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
+estacoda gateway start --telegram
+```
+
+## Discord Adapter
+
+**Implemented capabilities:**
+
+| Capability | Evidence |
+|------------|----------|
+| Text replies | `implemented but not live-proven` |
+| DM support | `implemented but not live-proven` |
+| Guild channel support | `implemented but not live-proven` |
+| Thread support | `implemented but not live-proven` |
+| Attachment download | `implemented but not live-proven` |
+| Allowlists (users/guilds/channels) | `implemented but not live-proven` |
+| Progress delivery | `implemented but not live-proven` |
+
+**Limitations:**
+
+- Slash commands are deferred to v0.9.1. Prefix-style text commands work.
+- Live credential smoke is optional/manual.
+
+**Setup:**
+
+```bash
+estacoda discord configure --bot-token-env ESTACODA_DISCORD_TOKEN --allow-user 123456789
+estacoda gateway start --discord
+```
+
+## Email Adapter
+
+**Implemented capabilities:**
+
+| Capability | Evidence |
+|------------|----------|
+| IMAP receive | `implemented but not live-proven` |
+| SMTP send | `implemented but not live-proven` |
+| Reply-in-thread | `implemented but not live-proven` |
+| Attachment ingestion | `implemented but not live-proven` |
+| Allowed sender filtering | `implemented but not live-proven` |
+| Home address | `implemented but not live-proven` |
+
+**Behavior:**
+
+- Polls IMAP inbox at configured interval.
+- Maps email threads to sessions via `In-Reply-To` / `References` headers.
+- New subject lines create new sessions.
+- Replies are sent via SMTP with threading headers.
+- Uses global security policy — no email-specific approval friction.
+- `allowAllUsers: true` bypasses sender filtering.
+
+**Setup:**
+
+```bash
+estacoda email configure \
+  --imap-host imap.example.com \
+  --smtp-host smtp.example.com \
+  --username bot@example.com \
+  --password-env EMAIL_PASSWORD \
+  --home-address operator@example.com
+```
+
+## WhatsApp Adapter (Experimental)
+
+**Implemented capabilities:**
+
+| Capability | Evidence |
+|------------|----------|
+| Baileys linked-device login | `experimental` |
+| QR code login | `experimental` |
+| Pairing-code login | `experimental` |
+| DM text delivery | `experimental` |
+| Media download/upload | `experimental` |
+| Message chunking | `experimental` |
+
+**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The adapter uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
+
+**Limitations:**
+
+- DM-first; no group support.
+- Live credential smoke is optional/manual.
+- Baileys availability is checked at runtime; adapter fails gracefully if missing.
+
+**Setup:**
+
+```bash
+estacoda whatsapp configure --allowed-user 1234567890
+# Set channels.whatsapp.experimental: true in config
+```
+
+## DeliveryRouter
+
+`DeliveryRouter` is the normalized delivery path for all channels.
+
+**Targets:**
+
+| Target | Syntax | Example |
+|--------|--------|---------|
+| Local file | `local` | `local` |
+| Origin channel | `origin` | `origin` |
+| Silent | `silent` | `silent` |
+| Telegram | `telegram:<chatId>` | `telegram:123456789` |
+| Discord | `discord:<channelId>` | `discord:123456789` |
+| WhatsApp | `whatsapp:<number>` | `whatsapp:1234567890` |
+| Email | `email:<address>` | `email:operator@example.com` |
+
+**Behavior:**
+
+- Multi-target: one message can be delivered to multiple targets.
+- Truncation: long text is truncated with ellipsis when channel limits apply.
+- Error persistence: delivery failures are recorded and visible via `estacoda gateway status`.
+- Progress/artifact variants: `deliverProgress`, `deliverArtifact`.
 
 ## Session Identity Policy
 
@@ -68,20 +193,56 @@ Channel session identity includes explicit chat/thread policy:
 
 Configurable via runtime config.
 
+## Cross-Surface Sessions
+
+Sessions are **separate by default**. A CLI session and a channel session for the same user do not share context automatically.
+
+Explicit attach/detach is required:
+- `estacoda sessions attach <surface> <surface-id> <session-id>`
+- `estacoda sessions detach <surface> <surface-id>`
+- `/attach <code>` in Telegram (redeems a handoff code)
+- `/detach` in Telegram (creates a new independent session)
+
+Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-pointers.json`).
+
 ## Gateway Runtime
 
 Gateway turns rebuild runtimes from fresh config snapshots. This helps MCP reload semantics but means adapter-level settings are established at gateway start.
 
 ```bash
 # Start gateway
-bun run dev -- gateway start --telegram
+estacoda gateway start --telegram
+estacoda gateway start --discord
 
 # Check status
-bun run dev -- gateway status
+estacoda gateway status
+estacoda gateway diagnose
+
+# List channels
+estacoda channels list
+estacoda channels status telegram
 ```
+
+## Operator Commands
+
+Channel-specific commands available in gateway:
+
+- `/status` — show current session and channel status
+- `/sessions` — list recent sessions
+- `/switch <session-id>` — switch to a different session
+- `/attach <code>` — attach to a CLI session via handoff code
+- `/detach` — detach from current session and create a new one
+- `/new` — create a new session
+- `/reset` — reset current session
+- `/cron` — list cron jobs
+- `/approvals` — show pending approvals
+- `/stop` — stop the gateway
 
 ## Limitations
 
-- Telegram is the only real launch channel.
+- Telegram is the only live-proven channel.
+- Discord slash commands are deferred to v0.9.1.
+- WhatsApp is experimental and uses an unofficial API with account-risk implications.
+- Email live smoke is optional/manual.
 - Gateway status reports readiness, not background-process liveness.
-- Channel-specific safety rules are partial — general safety policy applies.
+- Channel-specific safety rules are partial — general safety policy applies to all channels equally.

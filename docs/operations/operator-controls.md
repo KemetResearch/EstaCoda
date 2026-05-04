@@ -1,11 +1,13 @@
 ---
 title: "Operator Controls"
-description: "Slash commands and CLI commands for controlling TaskFlow execution."
+description: "Slash commands and CLI commands for controlling TaskFlow, gateway, cron, sessions, and channels."
 ---
 
 # Operator Controls
 
-## In-Session Slash Commands
+## TaskFlow Commands
+
+### In-Session Slash Commands
 
 Available when TaskFlow is wired (requires SQLite session persistence):
 
@@ -27,7 +29,7 @@ Available when TaskFlow is wired (requires SQLite session persistence):
 
 If `flowId` is omitted for `status` and `trace`, the active flow is used.
 
-## Top-Level CLI Commands
+### Top-Level CLI Commands
 
 ```bash
 estacoda flow list                          # List active flows
@@ -46,6 +48,102 @@ estacoda flow skip <stepId> [reason]        # Skip step
 estacoda flow checkpoint <flowId> <name>    # Create checkpoint
 estacoda flow compact <flowId>              # Compact events
 ```
+
+## Gateway Operator Commands
+
+### Status and Diagnostics
+
+```bash
+estacoda gateway status       # Full gateway status
+estacoda gateway diagnose     # Per-channel readiness check
+```
+
+`gateway status` surfaces:
+- Process state (CLI view)
+- All configured channels (Telegram, Discord, Email, WhatsApp) with ready/configured/disabled state
+- DeliveryRouter platforms
+- Active surface pointers
+- Pending approvals count
+- Cron job summary
+- Recent cron failures (last 5)
+- Recent delivery errors (last 5)
+- Missing config/env warnings
+
+`gateway diagnose` checks:
+- Telegram token presence, allowed users/chats
+- Discord token presence
+- Email IMAP/SMTP hosts, username, password, ownAddress, homeAddress
+- WhatsApp experimental gate, Baileys availability, auth dir writable
+- Cron directory permissions (jobs file readable, output/lock dirs writable)
+
+Returns exit code 1 if any warnings exist.
+
+### Channel Commands
+
+```bash
+estacoda channels list              # Compact table of all channels
+estacoda channels status telegram   # Detailed Telegram status
+estacoda channels status discord    # Detailed Discord status
+estacoda channels status email      # Detailed Email status
+estacoda channels status whatsapp   # Detailed WhatsApp status
+```
+
+Channel status shows:
+- Enabled/disabled state
+- Token/credential presence
+- Allowlist configuration
+- Surface pointers attached to the channel
+- WhatsApp experimental gate status (for WhatsApp)
+- Email home/default address (for Email)
+
+## Cron Operator Commands
+
+```bash
+estacoda cron list                    # List all jobs
+estacoda cron show <job-id>           # Job detail with recent executions
+estacoda cron history [job-id]        # Execution history
+estacoda cron run <job-id>            # Request a run
+estacoda cron pause <job-id>          # Pause job
+estacoda cron resume <job-id>         # Resume job
+estacoda cron remove <job-id>         # Delete job
+```
+
+`cron list` shows: id, schedule, status, next run, prompt summary.
+
+`cron show` shows: job config + last 5 executions with status and timestamps.
+
+`cron history` shows: execution records with status, failure class/message where applicable.
+
+`cron run` sets `runRequested=true` on the job. The next tick will execute it.
+
+## Session Operator Commands
+
+```bash
+estacoda sessions list                                # Recent sessions with attached surfaces
+estacoda sessions show <session-id>                   # Session detail + surface pointers
+estacoda sessions current                             # Current runtime session
+estacoda sessions attach <surface> <id> <session-id>  # Attach surface to session
+estacoda sessions detach <surface> <id>               # Detach surface from session
+```
+
+Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
+
+Sessions are **separate by default**. A CLI session and a channel session for the same user do not share context automatically. Explicit attach/detach is required.
+
+## Channel Slash Commands
+
+Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
+
+- `/status` — show current session and channel status
+- `/sessions` — list recent sessions
+- `/switch <session-id>` — switch to a different session
+- `/attach <code>` — attach to a CLI session via handoff code
+- `/detach` — detach from current session and create a new one
+- `/new` — create a new session
+- `/reset` — reset current session
+- `/cron` — list cron jobs
+- `/approvals` — show pending approvals
+- `/stop` — stop the gateway
 
 ## /steer Semantics
 
