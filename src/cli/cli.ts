@@ -47,6 +47,9 @@ import type { ModelProfile } from "../contracts/provider.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
+import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { createFileCronJobLock } from "../cron/cron-lock.js";
+import { Database } from "bun:sqlite";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive,
@@ -1285,12 +1288,15 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
 
 async function cron(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const store = new CronStore({ homeDir: options.homeDir });
+  const executionStore = tryCreateExecutionStore(options);
   const result = await runCronCommand({
     args,
     store,
+    executionStore: executionStore ?? undefined,
     tick: options.runtime === undefined
       ? undefined
       : async () => {
+        const lockDir = join(options.homeDir ?? ".estacoda", "cron", "locks");
         const results = await tickCron({
           store,
           runner: createRuntimeCronRunner({
@@ -1298,7 +1304,10 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
             wrapResponse: true,
             disposeRuntime: false,
             workspaceRoot: options.workspaceRoot
-          })
+          }),
+          executionStore: executionStore ?? undefined,
+          jobLock: createFileCronJobLock({ lockDir }),
+          now: new Date()
         });
         return results.length === 0
           ? "Cron tick complete. No due jobs."
@@ -1314,6 +1323,16 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
     exitCode: result.ok ? 0 : 1,
     output: result.output
   };
+}
+
+function tryCreateExecutionStore(options: CliOptions): CronExecutionStore | undefined {
+  try {
+    const dbPath = join(options.homeDir ?? ".estacoda", "sessions.sqlite");
+    const db = new Database(dbPath);
+    return new CronExecutionStore(db);
+  } catch {
+    return undefined;
+  }
 }
 
 async function telegram(options: CliOptions, args: string[]): Promise<CliCommandResult> {

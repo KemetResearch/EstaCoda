@@ -1,9 +1,11 @@
 import { CronStore, type CronJob } from "./cron-store.js";
+import type { CronExecutionStore } from "./cron-execution-store.js";
 import { renderCronJobs } from "./cron-tools.js";
 
 export async function runCronCommand(input: {
   args: string[];
   store: CronStore;
+  executionStore?: CronExecutionStore;
   tick?: () => Promise<string>;
   origin?: CronJob["origin"];
   defaultDelivery?: string;
@@ -18,6 +20,8 @@ export async function runCronCommand(input: {
         "  cron add <schedule> \"<prompt>\" [--name name] [--skill skill] [--delivery local] [--script path] [--script-arg arg]",
         "  cron edit <job-id> [--schedule expr] [--prompt text] [--script path] [--clear-script] [--skill skill] [--add-skill skill] [--remove-skill skill] [--clear-skills]",
         "  cron list",
+        "  cron show <job-id>",
+        "  cron history [job-id] [--limit N]",
         "  cron pause <job-id>",
         "  cron resume <job-id>",
         "  cron run <job-id>",
@@ -46,6 +50,30 @@ export async function runCronCommand(input: {
 
   if (command === "list" || command === "status") {
     return { ok: true, output: renderCronJobs(await input.store.list()) };
+  }
+
+  if (command === "show") {
+    const id = rest[0];
+    if (id === undefined) {
+      return { ok: false, output: "Usage: cron show <job-id>" };
+    }
+    const job = await input.store.get(id);
+    if (job === undefined) {
+      return { ok: false, output: `Cron job not found: ${id}` };
+    }
+    const executions = input.executionStore !== undefined
+      ? await input.executionStore.list({ jobId: id, limit: 5 })
+      : [];
+    return { ok: true, output: renderJobDetail(job, executions) };
+  }
+
+  if (command === "history") {
+    const limit = parseHistoryLimit(rest);
+    const jobId = rest.find((arg) => !arg.startsWith("--"));
+    const executions = input.executionStore !== undefined
+      ? await input.executionStore.list({ jobId, limit })
+      : [];
+    return { ok: true, output: renderExecutionHistory(executions, jobId) };
   }
 
   if (command === "tick") {
@@ -224,3 +252,83 @@ function renderMaybe(prefix: string, job: CronJob | undefined, id: string): { ok
     ? { ok: false, output: `Cron job not found: ${id}` }
     : { ok: true, output: `${prefix} cron job ${job.id}: ${job.name}` };
 }
+
+function renderJobDetail(job: CronJob, executions: Awaited<ReturnType<CronExecutionStore["list"]>>): string {
+  const lines = [
+    `Cron job: ${job.id}`,
+    `Name: ${job.name}`,
+    `Status: ${job.status}`,
+    `Schedule: ${job.schedule}`,
+    `Next run: ${job.nextRunAt ?? "none"}`,
+    `Last run: ${job.lastRunAt ?? "never"}`,
+    `Runs: ${job.runCount}`,
+    job.script === undefined ? undefined : `Script: ${job.script}`,
+    `Delivery: ${job.delivery}`,
+    job.skills.length === 0 ? undefined : `Skills: ${job.skills.join(", ")}`,
+    "",
+    `Recent executions (${executions.length} shown):`
+  ].filter((line) => line !== undefined);
+
+  if (executions.length === 0) {
+    lines.push("  No execution history recorded.");
+  } else {
+    for (const ex of executions) {
+      const duration = ex.completedAt !== undefined
+        ? ` (${Math.round((new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime()) / 1000)}s)`
+        : "";
+      lines.push(`  ${ex.id} [${ex.status}] ${ex.startedAt}${duration}`);
+      if (ex.failureClass !== undefined) {
+        lines.push(`    failure: ${ex.failureClass} — ${ex.failureMessage ?? ""}`);
+      }
+      if (ex.deliveryResults.size > 0) {
+        const targets = Array.from(ex.deliveryResults.entries())
+          .map(([target, result]) => `${target}:${result.success ? "ok" : "fail"}`)
+          .join(", ");
+        lines.push(`    delivery: ${targets}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function parseHistoryLimit(args: string[]): number {
+  const index = args.indexOf("--limit");
+  if (index === -1 || args[index + 1] === undefined) return 20;
+  const parsed = Number(args[index + 1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+}
+
+function renderExecutionHistory(
+  executions: Awaited<ReturnType<CronExecutionStore["list"]>>,
+  jobId?: string
+): string {
+  if (executions.length === 0) {
+    return jobId === undefined
+      ? "No cron execution history."
+      : `No execution history for job ${jobId}.`;
+  }
+
+  const lines = [
+    jobId === undefined ? "Cron execution history" : `Execution history for ${jobId}`,
+    ...executions.map((ex) => {
+      const duration = ex.completedAt !== undefined
+        ? ` (${Math.round((new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime()) / 1000)}s)`
+        : "";
+      const base = `${ex.id} [${ex.status}] ${ex.startedAt}${duration}`;
+      if (ex.failureClass !== undefined) {
+        return `${base}\n  failure: ${ex.failureClass} — ${ex.failureMessage ?? ""}`;
+      }
+      if (ex.deliveryResults.size > 0) {
+        const targets = Array.from(ex.deliveryResults.entries())
+          .map(([target, result]) => `${target}:${result.success ? "ok" : "fail"}`)
+          .join(", ");
+        return `${base}\n  delivery: ${targets}`;
+      }
+      return base;
+    })
+  ];
+
+  return lines.join("\n");
+}
+

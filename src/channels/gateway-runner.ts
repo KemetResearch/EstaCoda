@@ -5,6 +5,8 @@ import { consumeTelegramPairingCode, loadRuntimeConfig } from "../config/runtime
 import type { ChannelAuthPolicy } from "../contracts/channel.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
+import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -176,6 +178,11 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const cronStore = new CronStore({ homeDir: options.homeDir });
   await mkdir(dirname(sessionDbPath), { recursive: true });
   const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+  const cronExecutionStore = new CronExecutionStore(sessionDb.db);
+  const cronJobLock = createFileCronJobLock({
+    lockDir: join(diagnostics.stateRoot, "cron", "locks"),
+    staleTimeoutMs: 600_000
+  });
   const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
   const sessionPolicy = {
     groupSessionsPerUser: telegram.groupSessionsPerUser ?? true,
@@ -282,6 +289,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     do {
       await tickCron({
         store: cronStore,
+        executionStore: cronExecutionStore,
+        jobLock: cronJobLock,
         runner: createRuntimeCronRunner({
           deliver: async (job, content) => {
             const originKey = job.origin?.channel === "telegram" && job.origin.chatId !== undefined
@@ -300,7 +309,10 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
             const target = job.delivery ?? "local";
             const targets = router.parseTarget(target, fallbackSessionKey);
             const results = await router.deliverText(targets, content);
-            return Array.from(results.values()).some((r) => r.success);
+            return {
+              success: Array.from(results.values()).some((r) => r.success),
+              perTarget: results
+            };
           },
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,

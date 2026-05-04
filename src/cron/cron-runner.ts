@@ -3,18 +3,31 @@ import { mkdir, open, realpath, rm } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import type { CronExecutionStore } from "./cron-execution-store.js";
+import { classifyCronFailure, classifyCronScriptFailure } from "./cron-failure-classifier.js";
+import type { CronJobLock } from "./cron-lock.js";
 import type { CronJob } from "./cron-store.js";
 import { CronStore } from "./cron-store.js";
+
+export type CronDeliveryResult = {
+  success: boolean;
+  perTarget: Map<string, { success: boolean; error?: string }>;
+};
 
 export type CronRunResult = {
   job: CronJob;
   ok: boolean;
   output: string;
   delivered: boolean;
+  deliveryResults: Map<string, { success: boolean; error?: string }>;
+  failureClass?: string;
+  executionId?: string;
+  skipped?: boolean;
+  lockStale?: boolean;
 };
 
 export type CronRunner = {
-  runJob(job: CronJob): Promise<CronRunResult>;
+  runJob(job: CronJob, executionId?: string): Promise<CronRunResult>;
 };
 
 type CronScriptResult = {
@@ -23,25 +36,105 @@ type CronScriptResult = {
   stdout: string;
   stderr: string;
   exitCode?: number;
+  timedOut: boolean;
 };
 
-export async function tickCron(input: {
+export type TickCronInput = {
   store: CronStore;
   runner: CronRunner;
   now?: Date;
   lockPath?: string;
-}): Promise<CronRunResult[]> {
+  executionStore?: CronExecutionStore;
+  jobLock?: CronJobLock;
+};
+
+export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
   return withCronTickLock(input.lockPath ?? defaultLockPath(input.store), async () => {
     const due = await input.store.due(input.now);
     const results: CronRunResult[] = [];
 
     for (const job of due) {
-      const result = await input.runner.runJob(job);
-      await input.store.markRunResult(job.id, {
-        ok: result.ok,
-        output: result.output
-      });
-      results.push(result);
+      // Per-job locking
+      if (input.jobLock !== undefined) {
+        const lockResult = await input.jobLock.acquire(job.id);
+        if (!lockResult.acquired) {
+          results.push({
+            job,
+            ok: false,
+            output: "Job skipped: another execution is already in progress.",
+            delivered: false,
+            deliveryResults: new Map(),
+            skipped: true
+          });
+          continue;
+        }
+
+        // Create execution record
+        let executionId: string | undefined;
+        if (input.executionStore !== undefined) {
+          const scheduledAt = job.nextRunAt !== undefined ? new Date(job.nextRunAt) : undefined;
+          const record = await input.executionStore.create({ jobId: job.id, scheduledAt });
+          executionId = record.id;
+        }
+
+        try {
+          const result = await input.runner.runJob(job, executionId);
+          const enriched: CronRunResult = { ...result, executionId, lockStale: lockResult.stale };
+
+          // Complete execution record
+          if (input.executionStore !== undefined && executionId !== undefined) {
+            await input.executionStore.complete(executionId, {
+              status: enriched.ok ? "success" : "failed",
+              outputSummary: enriched.output.slice(0, 2000),
+              deliveryResults: enriched.deliveryResults,
+              failureClass: enriched.failureClass,
+              failureMessage: enriched.failureClass !== undefined ? enriched.output.slice(0, 2000) : undefined
+            });
+          }
+
+          await input.store.markRunResult(job.id, {
+            ok: enriched.ok,
+            output: enriched.output
+          });
+          results.push(enriched);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const failure = classifyCronFailure({ runtimeError: message });
+
+          if (input.executionStore !== undefined && executionId !== undefined) {
+            await input.executionStore.complete(executionId, {
+              status: "failed",
+              outputSummary: message,
+              failureClass: failure.class,
+              failureMessage: failure.message
+            });
+          }
+
+          await input.store.markRunResult(job.id, {
+            ok: false,
+            output: message
+          });
+          results.push({
+            job,
+            ok: false,
+            output: message,
+            delivered: false,
+            deliveryResults: new Map(),
+            failureClass: failure.class,
+            executionId
+          });
+        } finally {
+          await input.jobLock.release(job.id);
+        }
+      } else {
+        // Legacy path: no per-job locking or execution recording
+        const result = await input.runner.runJob(job);
+        await input.store.markRunResult(job.id, {
+          ok: result.ok,
+          output: result.output
+        });
+        results.push(result);
+      }
     }
 
     return results;
@@ -50,25 +143,32 @@ export async function tickCron(input: {
 
 export function createRuntimeCronRunner(input: {
   runtimeFactory: (job: CronJob) => Promise<Runtime>;
-  deliver?: (job: CronJob, content: string) => Promise<boolean>;
+  deliver?: (job: CronJob, content: string) => Promise<CronDeliveryResult>;
   wrapResponse?: boolean;
   disposeRuntime?: boolean;
   workspaceRoot?: string;
 }): CronRunner {
   return {
-    async runJob(job) {
+    async runJob(job, executionId) {
       const scriptResult = job.script === undefined
         ? undefined
         : await runCronScript(job, input.workspaceRoot);
 
       if (scriptResult !== undefined && !scriptResult.ok) {
+        const classified = classifyCronScriptFailure(scriptResult.summary, scriptResult.timedOut);
         const content = formatCronOutput(job, `Cron script failed: ${scriptResult.summary}\n\n${renderScriptResult(scriptResult)}`, input.wrapResponse ?? true);
-        const delivered = await input.deliver?.(job, content) ?? false;
+        const rawDelivery = await input.deliver?.(job, content);
+        const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
+          ? { success: rawDelivery, perTarget: new Map() }
+          : (rawDelivery ?? { success: false, perTarget: new Map() });
         return {
           job,
           ok: false,
           output: content,
-          delivered
+          delivered: deliveryResult.success,
+          deliveryResults: deliveryResult.perTarget,
+          failureClass: classified.class,
+          executionId
         };
       }
 
@@ -81,22 +181,34 @@ export function createRuntimeCronRunner(input: {
         });
         const content = formatCronOutput(job, response.text, input.wrapResponse ?? true);
         const silent = response.text.trimStart().startsWith("[SILENT]");
-        const delivered = !silent && (await input.deliver?.(job, content) ?? false);
+        const rawDelivery = silent ? undefined : await input.deliver?.(job, content);
+        const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
+          ? { success: rawDelivery, perTarget: new Map() }
+          : (silent ? { success: true, perTarget: new Map<string, { success: boolean; error?: string }>() } : (rawDelivery ?? { success: false, perTarget: new Map() }));
         return {
           job,
           ok: true,
           output: content,
-          delivered
+          delivered: deliveryResult.success,
+          deliveryResults: deliveryResult.perTarget,
+          executionId
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const failure = classifyCronFailure({ runtimeError: message });
         const content = formatCronOutput(job, `Cron job failed: ${message}`, input.wrapResponse ?? true);
-        const delivered = await input.deliver?.(job, content) ?? false;
+        const rawDelivery = await input.deliver?.(job, content);
+        const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
+          ? { success: rawDelivery, perTarget: new Map() }
+          : (rawDelivery ?? { success: false, perTarget: new Map() });
         return {
           job,
           ok: false,
           output: content,
-          delivered
+          delivered: deliveryResult.success,
+          deliveryResults: deliveryResult.perTarget,
+          failureClass: failure.class,
+          executionId
         };
       } finally {
         if (input.disposeRuntime !== false) {
@@ -247,7 +359,8 @@ function spawnCronScript(input: {
         ok: false,
         summary: error.message,
         stdout,
-        stderr
+        stderr,
+        timedOut: false
       });
     });
     child.on("close", (code) => {
@@ -257,7 +370,8 @@ function spawnCronScript(input: {
           ok: false,
           summary: `script timed out after ${input.timeoutMs}ms`,
           stdout,
-          stderr
+          stderr,
+          timedOut: true
         });
         return;
       }
@@ -266,7 +380,8 @@ function spawnCronScript(input: {
         summary: code === 0 ? "script completed successfully" : `script exited with code ${code ?? "unknown"}`,
         stdout,
         stderr,
-        exitCode: code ?? undefined
+        exitCode: code ?? undefined,
+        timedOut: false
       });
     });
   });
@@ -277,7 +392,8 @@ function failedScript(summary: string): CronScriptResult {
     ok: false,
     summary,
     stdout: "",
-    stderr: ""
+    stderr: "",
+    timedOut: false
   };
 }
 

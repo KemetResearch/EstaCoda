@@ -508,6 +508,36 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#migrateV3();
       this.#db.query("insert into schema_version (version) values (3) on conflict(version) do update set version = 3").run();
     }
+
+    if (currentVersion < 4) {
+      this.#backupDbBeforeMigration("v0.9-schema-v4-cron-executions");
+      this.#migrateV4();
+      this.#db.query("insert into schema_version (version) values (4) on conflict(version) do update set version = 4").run();
+    }
+  }
+
+  #migrateV4(): void {
+    this.#db.exec(`
+      create table if not exists cron_executions (
+        id text primary key,
+        job_id text not null,
+        session_id text,
+        trajectory_id text,
+        scheduled_at text,
+        started_at text not null,
+        completed_at text,
+        status text not null,
+        output_summary text,
+        delivery_results_json text,
+        failure_class text,
+        failure_message text,
+        created_at text not null
+      );
+
+      create index if not exists idx_cron_executions_job on cron_executions(job_id, started_at desc);
+      create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
+      create index if not exists idx_cron_executions_session on cron_executions(session_id);
+    `);
   }
 
   #migrateV3(): void {
