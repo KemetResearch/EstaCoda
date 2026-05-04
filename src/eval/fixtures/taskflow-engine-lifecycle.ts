@@ -160,165 +160,234 @@ export const taskflowEngineLifecycleCase: EvalCase = {
     const stepE = (await store.listSteps(flow4.id))[0];
     assertions.push(assertEqual("step interrupted", stepE.status, "interrupted"));
 
-    // ─── Skip ───
+    // ─── Skip — only pending steps may be skipped ───
+    // Auto-skip via #advanceToNextStepOrComplete: step 0 completes → step 1 (pending, allowSkip) → skipped → step 2 running
     const flow5 = await engine.createFlow({
       sessionId: "session-5",
       intent: makeIntent(),
       plan: {
-        name: "Skip Plan",
-        description: "A plan to skip",
+        name: "Auto-skip Plan",
+        description: "A plan with auto-skip",
         steps: [
-          { name: "Step F", description: "Skippable step", skippable: true },
-          { name: "Step G", description: "Next step" }
+          { name: "Step F", description: "First step" },
+          { name: "Step G", description: "Auto-skipped step", skippable: true },
+          { name: "Step H", description: "Third step" }
         ]
       }
     });
     await engine.startFlow(flow5.id);
-    const stepF = (await store.listSteps(flow5.id))[0];
-    await engine.skipStep(stepF.id, "Skip reason", "operator-1");
-    const stepFSkipped = await store.getStep(stepF.id);
-    assertions.push(assertEqual("step skipped", stepFSkipped?.status, "skipped"));
-    const stepGRunning = await store.getStep((await store.listSteps(flow5.id))[1].id);
-    assertions.push(assertEqual("next step running after skip", stepGRunning?.status, "running"));
+    const steps5 = await store.listSteps(flow5.id);
+    await engine.completeStep(steps5[0].id);
+    const stepGSkipped = await store.getStep(steps5[1].id);
+    assertions.push(assertEqual("auto-skip step skipped", stepGSkipped?.status, "skipped"));
+    const stepHRunning = await store.getStep(steps5[2].id);
+    assertions.push(assertEqual("next step running after auto-skip", stepHRunning?.status, "running"));
 
-    // Skip non-skippable should fail
+    // Running step cannot be skipped — skip means "never executed"
     const flow6 = await engine.createFlow({
       sessionId: "session-6",
       intent: makeIntent(),
       plan: {
-        name: "Non-skip Plan",
-        description: "A plan that cannot skip",
-        steps: [{ name: "Step H", description: "Non-skippable step" }]
+        name: "Running-skip Plan",
+        description: "A plan to test running→skipped forbidden",
+        steps: [{ name: "Step I", description: "Running step", skippable: true }]
       }
     });
     await engine.startFlow(flow6.id);
-    const stepH = (await store.listSteps(flow6.id))[0];
+    const stepI = (await store.listSteps(flow6.id))[0];
     try {
-      await engine.skipStep(stepH.id, "Should fail");
-      assertions.push(assertEqual("skip non-skippable threw", "no-throw", "throw"));
+      await engine.skipStep(stepI.id, "Should fail");
+      assertions.push(assertEqual("skip running step threw", "no-throw", "throw"));
     } catch {
-      assertions.push(assertEqual("skip non-skippable threw", "throw", "throw"));
+      assertions.push(assertEqual("skip running step threw", "throw", "throw"));
     }
 
-    // ─── Retry ───
+    // Non-skippable pending step throws
     const flow7 = await engine.createFlow({
       sessionId: "session-7",
       intent: makeIntent(),
       plan: {
-        name: "Retry Plan",
-        description: "A plan to retry",
-        steps: [{ name: "Step I", description: "Retryable step", idempotent: true, maxRetries: 2 }]
+        name: "Non-skip Plan",
+        description: "A plan that cannot skip",
+        steps: [
+          { name: "Step J", description: "Non-skippable" },
+          { name: "Step K", description: "Next" }
+        ]
       }
     });
-    await engine.startFlow(flow7.id);
-    const stepI = (await store.listSteps(flow7.id))[0];
-    await engine.failStep(stepI.id, "Temporary error");
-    const stepIFailed = await store.getStep(stepI.id);
-    assertions.push(assertEqual("step I failed", stepIFailed?.status, "failed"));
+    const steps7 = await store.listSteps(flow7.id);
+    try {
+      await engine.skipStep(steps7[0].id, "Should throw");
+      assertions.push(assertEqual("skip non-skippable pending threw", "no-throw", "throw"));
+    } catch {
+      assertions.push(assertEqual("skip non-skippable pending threw", "throw", "throw"));
+    }
 
-    const retryStep = await engine.retryStep(stepI.id, "operator-1");
-    assertions.push(assertEqual("retry step created", retryStep.status, "running"));
-    assertions.push(assertEqual("retry step has retryOfStepId", retryStep.retryOfStepId, stepI.id));
-    assertions.push(assertEqual("retry step attempt", retryStep.attemptNumber, 2));
+    // Paused step cannot be skipped (execution already started)
+    const flow7b = await engine.createFlow({
+      sessionId: "session-7b",
+      intent: makeIntent(),
+      plan: {
+        name: "Paused-skip Plan",
+        description: "A plan to test paused→skipped forbidden",
+        steps: [{ name: "Step J2", description: "Paused step", skippable: true }]
+      }
+    });
+    await engine.startFlow(flow7b.id);
+    await engine.requestPause(flow7b.id, "Test pause", "operator-1");
+    await engine.applyPauseAtBoundary(flow7b.id);
+    const stepJ2 = (await store.listSteps(flow7b.id))[0];
+    try {
+      await engine.skipStep(stepJ2.id, "Should fail");
+      assertions.push(assertEqual("skip paused step threw", "no-throw", "throw"));
+    } catch {
+      assertions.push(assertEqual("skip paused step threw", "throw", "throw"));
+    }
 
-    const flow7AfterRetry = await store.getFlow(flow7.id);
-    assertions.push(assertEqual("flow current step is retry", flow7AfterRetry?.currentStepId, retryStep.id));
+    // Waiting-for-approval step cannot be skipped (execution already started)
+    const flow7c = await engine.createFlow({
+      sessionId: "session-7c",
+      intent: makeIntent(),
+      plan: {
+        name: "Waiting-skip Plan",
+        description: "A plan to test waiting→skipped forbidden",
+        steps: [{ name: "Step J3", description: "Waiting step", skippable: true }]
+      }
+    });
+    await engine.startFlow(flow7c.id);
+    const stepJ3 = (await store.listSteps(flow7c.id))[0];
+    await engine.waitForApproval(stepJ3.id, {
+      reason: "Risky",
+      riskClass: "destructive-local" as ToolRiskClass,
+      toolName: "terminal",
+      toolExecutorDecision: "ask"
+    });
+    try {
+      await engine.skipStep(stepJ3.id, "Should fail");
+      assertions.push(assertEqual("skip waiting step threw", "no-throw", "throw"));
+    } catch {
+      assertions.push(assertEqual("skip waiting step threw", "throw", "throw"));
+    }
 
-    // Retry non-idempotent should fail
+    // ─── Retry ───
     const flow8 = await engine.createFlow({
       sessionId: "session-8",
       intent: makeIntent(),
       plan: {
-        name: "No-retry Plan",
-        description: "A plan that cannot retry",
-        steps: [{ name: "Step J", description: "Non-retryable step" }]
+        name: "Retry Plan",
+        description: "A plan to retry",
+        steps: [{ name: "Step L", description: "Retryable step", idempotent: true, maxRetries: 2 }]
       }
     });
     await engine.startFlow(flow8.id);
-    const stepJ = (await store.listSteps(flow8.id))[0];
-    await engine.failStep(stepJ.id, "Error");
+    const stepL = (await store.listSteps(flow8.id))[0];
+    await engine.failStep(stepL.id, "Temporary error");
+    const stepLFailed = await store.getStep(stepL.id);
+    assertions.push(assertEqual("step L failed", stepLFailed?.status, "failed"));
+
+    const retryStep = await engine.retryStep(stepL.id, "operator-1");
+    assertions.push(assertEqual("retry step created", retryStep.status, "running"));
+    assertions.push(assertEqual("retry step has retryOfStepId", retryStep.retryOfStepId, stepL.id));
+    assertions.push(assertEqual("retry step attempt", retryStep.attemptNumber, 2));
+
+    const flow8AfterRetry = await store.getFlow(flow8.id);
+    assertions.push(assertEqual("flow current step is retry", flow8AfterRetry?.currentStepId, retryStep.id));
+
+    // Retry non-idempotent should fail
+    const flow9 = await engine.createFlow({
+      sessionId: "session-9",
+      intent: makeIntent(),
+      plan: {
+        name: "No-retry Plan",
+        description: "A plan that cannot retry",
+        steps: [{ name: "Step M", description: "Non-retryable step" }]
+      }
+    });
+    await engine.startFlow(flow9.id);
+    const stepM = (await store.listSteps(flow9.id))[0];
+    await engine.failStep(stepM.id, "Error");
     try {
-      await engine.retryStep(stepJ.id);
+      await engine.retryStep(stepM.id);
       assertions.push(assertEqual("retry non-idempotent threw", "no-throw", "throw"));
     } catch {
       assertions.push(assertEqual("retry non-idempotent threw", "throw", "throw"));
     }
 
     // ─── Checkpoint ───
-    const flow9 = await engine.createFlow({
-      sessionId: "session-9",
+    const flow10 = await engine.createFlow({
+      sessionId: "session-10",
       intent: makeIntent(),
       plan: {
         name: "Checkpoint Plan",
         description: "A plan to checkpoint",
         steps: [
-          { name: "Step K", description: "First" },
-          { name: "Step L", description: "Second" }
+          { name: "Step N", description: "First" },
+          { name: "Step O", description: "Second" }
         ]
       }
     });
-    await engine.startFlow(flow9.id);
-    const checkpoint = await engine.createCheckpoint(flow9.id, "before-step-l", "Taken before step L", "operator-1");
-    assertions.push(assertEqual("checkpoint name", checkpoint.name, "before-step-l"));
+    await engine.startFlow(flow10.id);
+    const checkpoint = await engine.createCheckpoint(flow10.id, "before-step-o", "Taken before step O", "operator-1");
+    assertions.push(assertEqual("checkpoint name", checkpoint.name, "before-step-o"));
     assertions.push(assertEqual("checkpoint flow state", checkpoint.snapshot.flowState, "running"));
 
-    const checkpoints = await store.listCheckpoints(flow9.id);
+    const checkpoints = await store.listCheckpoints(flow10.id);
     assertions.push(assertEqual("1 checkpoint", checkpoints.length, 1));
 
-    const flow9AfterCheckpoint = await store.getFlow(flow9.id);
-    assertions.push(assertEqual("checkpoint count updated", flow9AfterCheckpoint?.checkpointCount, 1));
+    const flow10AfterCheckpoint = await store.getFlow(flow10.id);
+    assertions.push(assertEqual("checkpoint count updated", flow10AfterCheckpoint?.checkpointCount, 1));
 
     // ─── Approval gate ───
-    const flow10 = await engine.createFlow({
-      sessionId: "session-10",
+    const flow11 = await engine.createFlow({
+      sessionId: "session-11",
       intent: makeIntent(),
       plan: {
         name: "Approval Plan",
         description: "A plan needing approval",
-        steps: [{ name: "Step M", description: "Risky step" }]
+        steps: [{ name: "Step P", description: "Risky step" }]
       }
     });
-    await engine.startFlow(flow10.id);
-    const stepM = (await store.listSteps(flow10.id))[0];
-    await engine.waitForApproval(stepM.id, {
+    await engine.startFlow(flow11.id);
+    const stepP = (await store.listSteps(flow11.id))[0];
+    await engine.waitForApproval(stepP.id, {
       reason: "High-risk action",
       riskClass: "destructive-local" as ToolRiskClass,
       toolName: "terminal",
       toolExecutorDecision: "ask"
     });
-    const stepMAfterWait = await store.getStep(stepM.id);
-    assertions.push(assertEqual("step waiting for approval", stepMAfterWait?.status, "waiting_for_approval"));
+    const stepPAfterWait = await store.getStep(stepP.id);
+    assertions.push(assertEqual("step waiting for approval", stepPAfterWait?.status, "waiting_for_approval"));
 
-    await engine.approveStep(stepM.id, "operator-1", "grant-1");
-    const stepMAfterApprove = await store.getStep(stepM.id);
-    assertions.push(assertEqual("step running after approve", stepMAfterApprove?.status, "running"));
+    await engine.approveStep(stepP.id, "operator-1", "grant-1");
+    const stepPAfterApprove = await store.getStep(stepP.id);
+    assertions.push(assertEqual("step running after approve", stepPAfterApprove?.status, "running"));
 
-    const gatesAfterApprove = await store.listApprovalGates(flow10.id, { status: "approved" });
+    const gatesAfterApprove = await store.listApprovalGates(flow11.id, { status: "approved" });
     assertions.push(assertEqual("1 approved gate", gatesAfterApprove.length, 1));
 
     // Reject approval
-    const flow11 = await engine.createFlow({
-      sessionId: "session-11",
+    const flow12 = await engine.createFlow({
+      sessionId: "session-12",
       intent: makeIntent(),
       plan: {
         name: "Reject Plan",
         description: "A plan to reject",
-        steps: [{ name: "Step N", description: "Another risky step" }]
+        steps: [{ name: "Step Q", description: "Another risky step" }]
       }
     });
-    await engine.startFlow(flow11.id);
-    const stepN = (await store.listSteps(flow11.id))[0];
-    await engine.waitForApproval(stepN.id, {
+    await engine.startFlow(flow12.id);
+    const stepQ = (await store.listSteps(flow12.id))[0];
+    await engine.waitForApproval(stepQ.id, {
       reason: "Another high-risk action",
       riskClass: "destructive-local" as ToolRiskClass,
       toolName: "terminal",
       toolExecutorDecision: "ask"
     });
-    await engine.rejectStep(stepN.id, "operator-1", "Too risky");
-    const stepNAfterReject = await store.getStep(stepN.id);
-    assertions.push(assertEqual("step failed after reject", stepNAfterReject?.status, "failed"));
-    const flow11AfterReject = await store.getFlow(flow11.id);
-    assertions.push(assertEqual("flow failed after reject", flow11AfterReject?.status, "failed"));
+    await engine.rejectStep(stepQ.id, "operator-1", "Too risky");
+    const stepQAfterReject = await store.getStep(stepQ.id);
+    assertions.push(assertEqual("step failed after reject", stepQAfterReject?.status, "failed"));
+    const flow12AfterReject = await store.getFlow(flow12.id);
+    assertions.push(assertEqual("flow failed after reject", flow12AfterReject?.status, "failed"));
 
     return buildResult("taskflow-engine-lifecycle", "TaskFlowEngine flow and step lifecycle methods", assertions, Date.now() - startedAt);
   }

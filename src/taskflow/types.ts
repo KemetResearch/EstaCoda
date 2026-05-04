@@ -349,8 +349,8 @@ const LEGAL_FLOW_TRANSITIONS: Record<FlowState, FlowState[]> = {
 
 const LEGAL_STEP_TRANSITIONS: Record<StepState, StepState[]> = {
   pending: ["running", "cancelled", "skipped", "failed"],
-  running: ["paused", "interrupted", "cancelled", "skipped", "waiting_for_approval", "waiting_for_input", "completed", "failed"],
-  paused: ["running", "interrupted", "cancelled", "skipped"],
+  running: ["paused", "interrupted", "cancelled", "waiting_for_approval", "waiting_for_input", "completed", "failed"],
+  paused: ["running", "interrupted", "cancelled"],
   waiting_for_approval: ["running", "interrupted", "cancelled", "failed"],
   waiting_for_input: ["running", "interrupted", "cancelled"],
   interrupted: ["running", "cancelled", "failed"],

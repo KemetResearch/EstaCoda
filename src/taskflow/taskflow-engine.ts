@@ -267,7 +267,14 @@ export class TaskFlowEngine {
     // Advance to next step or complete flow
     const steps = await this.#store.listSteps(flowId);
     const currentIndex = steps.findIndex((s) => s.id === stepId);
-    const nextStep = steps[currentIndex + 1];
+    let nextStep = steps[currentIndex + 1];
+
+    // Auto-skip consecutive skippable pending steps
+    while (nextStep && nextStep.status === "pending" && nextStep.failurePolicy.allowSkipIfSkippable) {
+      await this.#transitionStep(nextStep.id, "skipped", { from: "pending", reason: "Auto-skip by policy" });
+      const nextIndex = steps.findIndex((s) => s.id === nextStep!.id) + 1;
+      nextStep = steps[nextIndex];
+    }
 
     if (nextStep && nextStep.status === "pending") {
       await this.#transitionStep(nextStep.id, "running", { from: "pending" });
@@ -324,6 +331,12 @@ export class TaskFlowEngine {
 
     if (!step.failurePolicy.allowSkipIfSkippable) {
       throw new Error("Step is not skippable");
+    }
+
+    // Skip means "never executed". A step that has already started execution
+    // cannot be skipped — it must be interrupted or cancelled.
+    if (step.startedAt) {
+      throw new IllegalTransitionError("step", step.status, "skipped");
     }
 
     const flowId = step.flowId;
