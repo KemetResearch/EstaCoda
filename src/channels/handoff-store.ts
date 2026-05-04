@@ -1,6 +1,20 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+/**
+ * Handoff code store for cross-surface session attachment.
+ *
+ * Security notes (v0.9):
+ * - Codes use cryptographically secure randomness (crypto.randomInt).
+ * - Codes are short-lived (TTL configurable, default 10 minutes) and single-use.
+ * - There is no built-in rate limiter on redemption. Brute-force mitigation
+ *   relies on: (1) short TTL, (2) single-use, (3) 32^6 keyspace, and
+ *   (4) Telegram gateway allowlist / local trust context.
+ * - Failed redemption attempts do not reveal session IDs or other internals.
+ * - Files are written atomically (temp + rename) with restrictive permissions
+ *   (0o600). chmod fallback is provided for Windows compatibility.
+ */
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { randomInt } from "node:crypto";
 
 export type HandoffCode = {
   code: string;
@@ -40,7 +54,7 @@ function generateCode(length = 6): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+    result += chars[randomInt(chars.length)];
   }
   return result;
 }
@@ -182,8 +196,15 @@ export class FileHandoffStore implements HandoffStore {
       version: 1,
       codes: [...this.#codes.values()]
     };
+    const tempPath = `${this.#path}.tmp`;
     await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(tempPath, this.#path);
+    try {
+      await chmod(this.#path, 0o600);
+    } catch {
+      // Platform may not support chmod (e.g. Windows); atomic write already succeeded.
+    }
   }
 }
 

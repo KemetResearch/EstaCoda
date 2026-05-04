@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { SurfacePointerRecord, SurfaceType } from "./surface-pointer.js";
@@ -87,8 +87,15 @@ export class FileSurfacePointerStore implements SurfacePointerStore {
       version: 1,
       pointers: Object.fromEntries(this.#pointers)
     };
+    const tempPath = `${this.#path}.tmp`;
     await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(tempPath, this.#path);
+    try {
+      await chmod(this.#path, 0o600);
+    } catch {
+      // Platform may not support chmod (e.g. Windows); atomic write already succeeded.
+    }
   }
 }
 
