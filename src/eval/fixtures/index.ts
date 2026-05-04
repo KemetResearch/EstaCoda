@@ -23,6 +23,7 @@ import { taskflowAtomicityCase } from "./taskflow-atomicity.js";
 import { taskflowEngineLifecycleCase } from "./taskflow-engine-lifecycle.js";
 import { taskflowRestartRecoveryCase } from "./taskflow-restart-recovery.js";
 import { operatorControlPlaneCase } from "./operator-control-plane.js";
+import { flowCompactionCase } from "./flow-compaction.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -49,5 +50,6 @@ export const defaultEvalFixtures = [
   taskflowAtomicityCase,
   taskflowEngineLifecycleCase,
   taskflowRestartRecoveryCase,
-  operatorControlPlaneCase
+  operatorControlPlaneCase,
+  flowCompactionCase
 ];

@@ -240,7 +240,7 @@ export class TaskFlowEngine {
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       await tx.createStep(step);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-created", { stepId: step.id, stepName: name, stepIndex: index }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-created", { stepId: step.id, stepName: name, stepIndex: index }, step.id));
     });
 
     return step;
@@ -438,7 +438,7 @@ export class TaskFlowEngine {
           step.resumedAt = this.#now().toISOString();
           step.updatedAt = this.#now().toISOString();
           await tx.updateStep(step);
-          await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-started", { stepId: step.id, resumed: true }));
+          await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-started", { stepId: step.id, resumed: true }, step.id));
         }
       }
 
@@ -500,7 +500,7 @@ export class TaskFlowEngine {
     await this.#store.atomicTransition(flowId, async (tx) => {
       await tx.createApprovalGate(fullGate);
       await this.#transitionStepInTx(tx, stepId, "waiting_for_approval", { from: step.status });
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-requested", { stepId, gateId: fullGate.id }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-requested", { stepId, gateId: fullGate.id }, stepId));
     });
 
     return (await this.#store.getStep(stepId))!;
@@ -520,7 +520,7 @@ export class TaskFlowEngine {
       s.waitStartedAt = this.#now().toISOString();
       s.updatedAt = this.#now().toISOString();
       await tx.updateStep(s);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-started", { stepId, kind: waitReason.kind, description: waitReason.description }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-started", { stepId, kind: waitReason.kind, description: waitReason.description }, stepId));
     });
 
     // Transition flow to waiting
@@ -551,7 +551,7 @@ export class TaskFlowEngine {
       s.waitEndedAt = this.#now().toISOString();
       s.updatedAt = this.#now().toISOString();
       await tx.updateStep(s);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-ended", { stepId, previousStatus: fromStatus }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
 
       // If flow was waiting, resume it
       const flow = await tx.getFlow(flowId);
@@ -580,7 +580,7 @@ export class TaskFlowEngine {
       gate.resolvedBy = operator;
       gate.controllerGrantId = grantId;
       await tx.updateApprovalGate(gate);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-granted", { stepId, gateId: gate.id, operator }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-granted", { stepId, gateId: gate.id, operator }, stepId));
       await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-approved", operator, "/approve", "Approval granted", "waiting_for_approval", "running", { gateId: gate.id }));
       await this.#resolveWaitInTx(tx, stepId);
     });
@@ -604,7 +604,7 @@ export class TaskFlowEngine {
       gate.resolvedAt = now;
       gate.resolvedBy = operator;
       await tx.updateApprovalGate(gate);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-denied", { stepId, gateId: gate.id, operator, reason: rejectionReason }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-denied", { stepId, gateId: gate.id, operator, reason: rejectionReason }, stepId));
       await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-rejected", operator, "/reject", "Approval denied", "waiting_for_approval", "failed", { gateId: gate.id, reason: rejectionReason }));
 
       // Apply failure policy
@@ -614,7 +614,7 @@ export class TaskFlowEngine {
         updatedStep.failedAt = now;
         updatedStep.updatedAt = now;
         await tx.updateStep(updatedStep);
-        await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-failed", { stepId, reason: rejectionReason ?? "Approval denied by operator" }));
+        await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-failed", { stepId, reason: rejectionReason ?? "Approval denied by operator" }, stepId));
 
         if (updatedStep.failurePolicy.defaultAction === "stop") {
           const flow = await tx.getFlow(flowId);
@@ -670,7 +670,7 @@ export class TaskFlowEngine {
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       await tx.createStep(retryStep);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-retried", { originalStepId: stepId, retryStepId: retryStep.id, attempt: retryStep.attemptNumber }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-retried", { originalStepId: stepId, retryStepId: retryStep.id, attempt: retryStep.attemptNumber }, stepId));
       if (operator) {
         await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-retried", operator, "/retry", "Step retried", "failed", "pending", { retryStepId: retryStep.id }));
       }
@@ -744,7 +744,7 @@ export class TaskFlowEngine {
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       await tx.createCheckpoint(checkpoint);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "checkpoint-created", { checkpointId: checkpoint.id, name }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "checkpoint-created", { checkpointId: checkpoint.id, name }, flow.currentStepId));
       if (operator) {
         await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-checkpointed", operator, "/checkpoint", "Checkpoint created", flow.status, flow.status, { checkpointId: checkpoint.id, name }));
       }
@@ -776,7 +776,7 @@ export class TaskFlowEngine {
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       await tx.registerProcess(fullProcess);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "process-registered", { stepId, processId: fullProcess.id, processType: process.processType }));
+      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "process-registered", { stepId, processId: fullProcess.id, processType: process.processType }, stepId));
     });
 
     return fullProcess;
@@ -875,7 +875,7 @@ export class TaskFlowEngine {
       : to === "interrupted" ? "step-interrupted"
       : to === "skipped" ? "step-skipped"
       : "step-started";
-    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, eventKind, { stepId, from: options.from, to, reason: options.reason }));
+    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, eventKind, { stepId, from: options.from, to, reason: options.reason }, stepId));
   }
 
   async #cancelStepInTx(tx: TaskFlowStore, stepId: StepId, reason?: string): Promise<void> {
@@ -894,7 +894,7 @@ export class TaskFlowEngine {
     step.waitEndedAt = this.#now().toISOString();
     step.updatedAt = this.#now().toISOString();
     await tx.updateStep(step);
-    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, "wait-ended", { stepId, previousStatus: fromStatus }));
+    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
 
     const flow = await tx.getFlow(step.flowId);
     if (flow && flow.status === "waiting") {
@@ -902,10 +902,11 @@ export class TaskFlowEngine {
     }
   }
 
-  #makeFlowEvent(flowId: FlowId, kind: FlowEvent["kind"], data?: Record<string, unknown>): FlowEvent {
+  #makeFlowEvent(flowId: FlowId, kind: FlowEvent["kind"], data?: Record<string, unknown>, stepId?: StepId): FlowEvent {
     return {
       id: this.#id(),
       flowId,
+      stepId,
       kind,
       data: data ?? {},
       timestamp: this.#now().toISOString()

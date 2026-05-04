@@ -7,6 +7,10 @@ import {
   OperatorCommandDispatcher,
   type OperatorCommand,
 } from "../../taskflow/operator-command-dispatcher.js";
+import {
+  FlowCompactionService,
+  DEFAULT_COMPACTION_CONFIG,
+} from "../../taskflow/flow-compaction-service.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
 
@@ -54,10 +58,16 @@ export const operatorControlPlaneCase: EvalCase = {
       now: makeNow(),
     });
     const processRegistry = new FlowProcessRegistry({ store });
+    const compactionService = new FlowCompactionService({
+      store,
+      config: { ...DEFAULT_COMPACTION_CONFIG, enabled: false },
+      now: makeNow(),
+    });
     const dispatcher = new OperatorCommandDispatcher({
       engine,
       store,
       processRegistry,
+      compactionService,
     });
 
     // ─── Create and start a flow ───

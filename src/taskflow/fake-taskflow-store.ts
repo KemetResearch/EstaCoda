@@ -13,7 +13,8 @@ import type {
   ArtifactLink,
   RunLink,
   FlowProcess,
-  FlowLock
+  FlowLock,
+  CompactSummary
 } from "./types.js";
 import type { TaskFlowStore } from "./taskflow-store.js";
 
@@ -28,6 +29,7 @@ export class FakeTaskFlowStore implements TaskFlowStore {
   readonly approvalGates: ApprovalGate[] = [];
   readonly locks = new Map<FlowId, FlowLock>();
   readonly processes: FlowProcess[] = [];
+  readonly compactSummaries: CompactSummary[] = [];
   readonly #now: () => Date;
 
   constructor(options?: { now?: () => Date }) {
@@ -98,9 +100,10 @@ export class FakeTaskFlowStore implements TaskFlowStore {
     return result.map((e) => structuredClone(e));
   }
 
-  async listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; limit?: number }): Promise<OperatorEvent[]> {
+  async listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<OperatorEvent[]> {
     let result = this.operatorEvents.filter((e) => e.flowId === flowId);
     if (options?.stepId) result = result.filter((e) => e.stepId === options.stepId);
+    if (options?.kind) result = result.filter((e) => e.kind === options.kind);
     result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     if (options?.limit) result = result.slice(0, options.limit);
     return result.map((e) => structuredClone(e));
@@ -231,6 +234,17 @@ export class FakeTaskFlowStore implements TaskFlowStore {
     let result = this.processes.filter((p) => p.flowId === flowId);
     if (stepId) result = result.filter((p) => p.stepId === stepId);
     return result.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((p) => structuredClone(p));
+  }
+
+  async saveCompactSummary(summary: CompactSummary): Promise<void> {
+    this.compactSummaries.push(structuredClone(summary));
+  }
+
+  async listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]> {
+    return this.compactSummaries
+      .filter((c) => c.flowId === flowId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((c) => structuredClone(c));
   }
 
   async atomicTransition<T>(

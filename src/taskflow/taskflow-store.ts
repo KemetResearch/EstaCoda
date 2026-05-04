@@ -13,7 +13,8 @@ import type {
   ArtifactLink,
   RunLink,
   FlowProcess,
-  FlowLock
+  FlowLock,
+  CompactSummary
 } from "./types.js";
 
 export type AtomicTransitionResult = {
@@ -41,7 +42,7 @@ export interface TaskFlowStore {
   appendFlowEvent(event: FlowEvent): Promise<void>;
   appendOperatorEvent(event: OperatorEvent): Promise<void>;
   listFlowEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<FlowEvent[]>;
-  listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; limit?: number }): Promise<OperatorEvent[]>;
+  listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<OperatorEvent[]>;
 
   // ─── Linkage ───
   linkArtifact(link: ArtifactLink): Promise<void>;
@@ -72,6 +73,10 @@ export interface TaskFlowStore {
   updateProcess(process: FlowProcess): Promise<void>;
   getProcess(id: string): Promise<FlowProcess | null>;
   listProcesses(flowId: FlowId, stepId?: StepId): Promise<FlowProcess[]>;
+
+  // ─── Compact summaries ───
+  saveCompactSummary(summary: CompactSummary): Promise<void>;
+  listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]>;
 
   // ─── Atomic transition ───
   atomicTransition<T>(

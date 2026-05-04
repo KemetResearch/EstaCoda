@@ -496,6 +496,28 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#migrateV1();
       this.#db.query("insert into schema_version (version) values (1) on conflict(version) do update set version = 1").run();
     }
+
+    if (currentVersion < 2) {
+      this.#backupDbBeforeMigration("v0.8-schema-v2");
+      this.#migrateV2();
+      this.#db.query("insert into schema_version (version) values (2) on conflict(version) do update set version = 2").run();
+    }
+  }
+
+  #migrateV2(): void {
+    this.#db.exec(`
+      create table if not exists compact_summaries (
+        id text primary key,
+        flow_id text not null references flows(id) on delete cascade,
+        from_event_id text not null,
+        to_event_id text not null,
+        turn_summaries_json text not null,
+        tool_outcome_summaries_json text not null,
+        operator_action_summaries_json text not null,
+        created_at text not null
+      );
+      create index if not exists idx_compact_summaries_flow on compact_summaries(flow_id, created_at);
+    `);
   }
 
   #backupDbBeforeMigration(label: string): void {

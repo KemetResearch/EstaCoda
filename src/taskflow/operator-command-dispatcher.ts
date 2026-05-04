@@ -6,11 +6,13 @@ import type {
   FlowId,
   FlowEvent,
   OperatorEvent,
-  StepId
+  StepId,
+  CompactSummary
 } from "./types.js";
 import type { TaskFlowEngine } from "./taskflow-engine.js";
 import type { TaskFlowStore } from "./taskflow-store.js";
 import type { FlowProcessRegistry } from "./flow-process-registry.js";
+import type { FlowCompactionService } from "./flow-compaction-service.js";
 import { isFlowStateTerminal } from "./types.js";
 
 export type OperatorCommand =
@@ -25,6 +27,7 @@ export type OperatorCommand =
   | { command: "/retry"; stepId: StepId; operator: string }
   | { command: "/skip"; stepId: StepId; reason?: string; operator: string }
   | { command: "/checkpoint"; flowId: FlowId; name: string; description?: string; operator: string }
+  | { command: "/compact"; flowId: FlowId; operator: string }
   | { command: "/trace"; flowId: FlowId; limit?: number };
 
 export type CommandResult =
@@ -56,11 +59,13 @@ export class OperatorCommandDispatcher {
   readonly #engine: TaskFlowEngine;
   readonly #store: TaskFlowStore;
   readonly #processRegistry: FlowProcessRegistry;
+  readonly #compactionService: FlowCompactionService;
 
-  constructor(options: { engine: TaskFlowEngine; store: TaskFlowStore; processRegistry: FlowProcessRegistry }) {
+  constructor(options: { engine: TaskFlowEngine; store: TaskFlowStore; processRegistry: FlowProcessRegistry; compactionService: FlowCompactionService }) {
     this.#engine = options.engine;
     this.#store = options.store;
     this.#processRegistry = options.processRegistry;
+    this.#compactionService = options.compactionService;
   }
 
   async dispatch(cmd: OperatorCommand): Promise<CommandResult> {
@@ -87,6 +92,8 @@ export class OperatorCommandDispatcher {
         return this.#handleSkip(cmd.stepId, cmd.reason, cmd.operator);
       case "/checkpoint":
         return this.#handleCheckpoint(cmd.flowId, cmd.name, cmd.description, cmd.operator);
+      case "/compact":
+        return this.#handleCompact(cmd.flowId, cmd.operator);
       case "/trace":
         return this.#handleTrace(cmd.flowId, cmd.limit);
       default:
@@ -310,6 +317,7 @@ export class OperatorCommandDispatcher {
 
     const flowEvents = await this.#store.listFlowEvents(flowId);
     const opEvents = await this.#store.listOperatorEvents(flowId);
+    const compactSummaries = await this.#store.listCompactSummaries(flowId);
 
     const timeline: TimelineEntry[] = [
       ...flowEvents.map((e) => ({ timestamp: e.timestamp, kind: "flow" as const, event: e })),
@@ -322,8 +330,8 @@ export class OperatorCommandDispatcher {
 
     return {
       ok: true,
-      message: this.#formatTimeline(limited),
-      data: { timeline: limited, totalEvents: timeline.length }
+      message: this.#formatTimeline(limited, compactSummaries),
+      data: { timeline: limited, totalEvents: timeline.length, compactSummaries }
     };
   }
 
@@ -357,15 +365,52 @@ export class OperatorCommandDispatcher {
     return `${seconds}s`;
   }
 
-  #formatTimeline(timeline: TimelineEntry[]): string {
-    if (timeline.length === 0) return "No events recorded.";
-    return timeline
+  #formatTimeline(timeline: TimelineEntry[], compactSummaries?: CompactSummary[]): string {
+    if (timeline.length === 0 && (!compactSummaries || compactSummaries.length === 0)) return "No events recorded.";
+    const lines = timeline
       .map((entry) => {
         const prefix = entry.kind === "operator" ? "[OP]" : "[FL]";
         const e = entry.event;
         const label = "kind" in e ? e.kind : "event";
-        return `${prefix} ${entry.timestamp} ${label}`;
-      })
-      .join("\n");
+        let detail = "";
+        if (e.kind === "compacted" && e.data && typeof e.data.compactSummaryId === "string") {
+          detail = ` (summary: ${e.data.compactSummaryId})`;
+        }
+        return `${prefix} ${entry.timestamp} ${label}${detail}`;
+      });
+    if (compactSummaries && compactSummaries.length > 0) {
+      lines.push("");
+      lines.push("--- Compact Summaries ---");
+      for (const cs of compactSummaries) {
+        lines.push(`Summary ${cs.id}: ${cs.turnSummaries.length} turns, ${cs.toolOutcomeSummaries.length} tools, ${cs.operatorActionSummaries.length} ops`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  // ─── /compact ───
+
+  async #handleCompact(flowId: FlowId, operator: string): Promise<CommandResult> {
+    try {
+      const result = await this.#compactionService.compact(flowId, operator);
+      if (!result.ok) {
+        return { ok: false, error: result.error ?? "Compaction failed" };
+      }
+      return {
+        ok: true,
+        message: `Compaction completed (${result.mode}). Preserved ${result.preservedSteps} steps, ${result.preservedProcesses} processes, ${result.preservedApprovals} approvals.`,
+        data: {
+          compactSummaryId: result.summary?.id,
+          mode: result.mode,
+          trigger: result.trigger,
+          beforeEventCount: result.beforeEventCount,
+          preservedSteps: result.preservedSteps,
+          preservedProcesses: result.preservedProcesses,
+          preservedApprovals: result.preservedApprovals
+        }
+      };
+    } catch (err) {
+      return { ok: false, error: `Compaction error: ${(err as Error).message}` };
+    }
   }
 }

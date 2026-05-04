@@ -14,7 +14,8 @@ import type {
   ArtifactLink,
   RunLink,
   FlowProcess,
-  FlowLock
+  FlowLock,
+  CompactSummary
 } from "./types.js";
 import type { TaskFlowStore } from "./taskflow-store.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -289,12 +290,16 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
     return rows.map(rowToFlowEvent);
   }
 
-  async listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; limit?: number }): Promise<OperatorEvent[]> {
+  async listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<OperatorEvent[]> {
     let sql = "select * from operator_events where flow_id = ?";
     const params: (string | number)[] = [flowId];
     if (options?.stepId) {
       sql += " and step_id = ?";
       params.push(options.stepId);
+    }
+    if (options?.kind) {
+      sql += " and kind = ?";
+      params.push(options.kind);
     }
     sql += " order by timestamp desc";
     if (options?.limit) {
@@ -539,6 +544,35 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
     return rows.map(rowToFlowProcess);
   }
 
+  // ─── Compact summaries ───
+
+  async saveCompactSummary(summary: CompactSummary): Promise<void> {
+    this.#db
+      .query(
+        `insert into compact_summaries (
+          id, flow_id, from_event_id, to_event_id,
+          turn_summaries_json, tool_outcome_summaries_json, operator_action_summaries_json, created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        summary.id,
+        summary.flowId,
+        summary.compactedRange.fromEventId,
+        summary.compactedRange.toEventId,
+        JSON.stringify(summary.turnSummaries),
+        JSON.stringify(summary.toolOutcomeSummaries),
+        JSON.stringify(summary.operatorActionSummaries),
+        summary.createdAt
+      );
+  }
+
+  async listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]> {
+    const rows = this.#db
+      .query<CompactSummaryRow>("select * from compact_summaries where flow_id = ? order by created_at desc")
+      .all(flowId);
+    return rows.map(rowToCompactSummary);
+  }
+
   // ─── Atomic transition ───
 
   async atomicTransition<T>(
@@ -711,6 +745,17 @@ type RunLinkRow = {
   linked_at: string;
 };
 
+type CompactSummaryRow = {
+  id: string;
+  flow_id: string;
+  from_event_id: string;
+  to_event_id: string;
+  turn_summaries_json: string;
+  tool_outcome_summaries_json: string;
+  operator_action_summaries_json: string;
+  created_at: string;
+};
+
 // ─── Row mappers ───
 
 function rowToFlow(row: FlowRow): Flow {
@@ -877,5 +922,17 @@ function rowToRunLink(row: RunLinkRow): RunLink {
     flowId: row.flow_id,
     turnIndex: row.turn_index,
     linkedAt: row.linked_at
+  };
+}
+
+function rowToCompactSummary(row: CompactSummaryRow): CompactSummary {
+  return {
+    id: row.id,
+    flowId: row.flow_id,
+    compactedRange: { fromEventId: row.from_event_id, toEventId: row.to_event_id },
+    turnSummaries: JSON.parse(row.turn_summaries_json) as string[],
+    toolOutcomeSummaries: JSON.parse(row.tool_outcome_summaries_json) as string[],
+    operatorActionSummaries: JSON.parse(row.operator_action_summaries_json) as string[],
+    createdAt: row.created_at
   };
 }
