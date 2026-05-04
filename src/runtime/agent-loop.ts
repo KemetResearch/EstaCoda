@@ -50,6 +50,7 @@ export type AgentLoopInput = {
   workspaceRoot?: string;
   onEvent?: RuntimeEventSink;
   signal?: AbortSignal;
+  inputMetadata?: Record<string, unknown>;
 };
 
 export type AgentLoopResponse = {
@@ -270,6 +271,7 @@ export class AgentLoop {
       content: effectiveText,
       channel: input.channel,
       metadata: {
+        ...input.inputMetadata,
         attachments: summarizeAttachments(attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []

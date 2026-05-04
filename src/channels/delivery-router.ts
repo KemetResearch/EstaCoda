@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
@@ -202,7 +202,12 @@ export class DeliveryRouter {
       return;
     }
 
-    await adapter.delivery.sendProgress(sessionKey, event);
+    try {
+      await adapter.delivery.sendProgress(sessionKey, event);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.#recordDeliveryError(this.#targetToString(target), `progress: ${message}`);
+    }
   }
 
   async deliverArtifact(
@@ -234,7 +239,12 @@ export class DeliveryRouter {
       return;
     }
 
-    await adapter.delivery.sendArtifact(sessionKey, artifact);
+    try {
+      await adapter.delivery.sendArtifact(sessionKey, artifact);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.#recordDeliveryError(this.#targetToString(target), `artifact: ${message}`);
+    }
   }
 
   #truncate(text: string, platform: ChannelKind): { text: string; wasTruncated: boolean; fullPath?: string } {
@@ -283,5 +293,26 @@ export class DeliveryRouter {
 
   getRegisteredPlatforms(): ChannelKind[] {
     return Array.from(this.#adapters.keys());
+  }
+
+  async getRecentErrors(limit = 20): Promise<DeliveryErrorRecord[]> {
+    const path = join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
+    try {
+      const content = await readFile(path, "utf8");
+      const lines = content.trim().split("\n").filter(Boolean);
+      const records = lines
+        .slice(-limit)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as DeliveryErrorRecord;
+          } catch {
+            return undefined;
+          }
+        })
+        .filter((r): r is DeliveryErrorRecord => r !== undefined);
+      return records;
+    } catch {
+      return [];
+    }
   }
 }

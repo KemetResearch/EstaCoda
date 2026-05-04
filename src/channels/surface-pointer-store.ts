@@ -71,7 +71,11 @@ export class FileSurfacePointerStore implements SurfacePointerStore {
         for (const [key, value] of Object.entries(parsed.pointers)) {
           if (value !== null && typeof value === "object" &&
               typeof value.sessionId === "string" && typeof value.attachedAt === "string") {
-            this.#pointers.set(key, { sessionId: value.sessionId, attachedAt: value.attachedAt });
+            this.#pointers.set(key, {
+              sessionId: value.sessionId,
+              attachedAt: value.attachedAt,
+              homeDelivery: typeof value.homeDelivery === "string" ? value.homeDelivery : undefined
+            });
           }
         }
       }

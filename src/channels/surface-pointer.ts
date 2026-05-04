@@ -22,6 +22,7 @@ export type SurfacePointer = {
 export type SurfacePointerRecord = {
   sessionId: string;
   attachedAt: string;
+  homeDelivery?: string;
 };
 
 export type SurfacePointerFile = {

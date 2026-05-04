@@ -142,6 +142,7 @@ export type RuntimeOptions = {
   disableCronTools?: boolean;
   disabledToolsets?: ToolsetName[];
   workspaceFsAdapter?: WorkspaceFsAdapter;
+  sessionMetadata?: Record<string, unknown>;
 };
 
 export type Runtime = {
@@ -237,7 +238,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     await sessionDb.createSession({
       id: sessionId,
       profileId,
-      title: "EstaCoda v2 scaffold"
+      title: "EstaCoda v2 scaffold",
+      metadata: options.sessionMetadata
     });
   }
 

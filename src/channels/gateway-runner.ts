@@ -209,6 +209,39 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
 
   const gateway = new ChannelGateway({
     adapters: [adapter],
+    diagnostics: async () => {
+      const lines = [
+        "EstaCoda gateway diagnostics",
+        `Adapter: ${diagnostics.adapter}`,
+        `Enabled: ${diagnostics.enabled ? "yes" : "no"}`,
+        `Ready: ${diagnostics.ready ? "yes" : "no"}`,
+        `Status: ${diagnostics.statusLabel}`,
+        `Model: ${diagnostics.modelRoute}`,
+        `Security: ${diagnostics.securityLabel}`,
+        `Allowed users: ${renderIdList(diagnostics.allowedUserIds)}`,
+        `Allowed chats: ${renderIdList(diagnostics.allowedChatIds)}`,
+        `Bot token env: ${diagnostics.botTokenEnv ?? "unset"}`,
+        `Bot token present: ${diagnostics.botTokenPresent ? "yes" : "no"}`,
+        `Delivery platforms: ${router.getRegisteredPlatforms().join(", ") || "none"}`,
+      ];
+      const recentErrors = await router.getRecentErrors(5);
+      if (recentErrors.length > 0) {
+        lines.push("", "Recent delivery errors:");
+        for (const err of recentErrors) {
+          lines.push(`  ${err.timestamp} — ${err.target}: ${err.error}`);
+        }
+      } else {
+        lines.push("", "Recent delivery errors: none");
+      }
+      const pointers = await surfacePointerStore.listPointers();
+      if (pointers.length > 0) {
+        lines.push("", "Surface pointers:");
+        for (const p of pointers) {
+          lines.push(`  ${p.surfaceType}:${p.surfaceId} → ${p.record.sessionId}${p.record.homeDelivery ? ` (home: ${p.record.homeDelivery})` : ""}`);
+        }
+      }
+      return lines.join("\n");
+    },
     securityMode: config.security.approvalMode,
     securityAssessor: {
       ...config.security.assessor,
@@ -250,7 +283,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     onStopRequested: async () => {
       await adapter.stop();
     },
-    runtimeForSession: async ({ sessionId, securityPolicy }) => {
+    runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
       const latestConfig = await loadRuntimeConfig(options);
       return createRuntime({
         theme: kemetBlueTheme,
@@ -262,6 +295,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         sessionId,
         profileId: "default",
         sessionDb,
+        sessionMetadata: metadata,
         externalSkillRoots: latestConfig.skills.externalDirs,
         skillAutonomy: latestConfig.skills.autonomy,
         skillConfig: latestConfig.skills.config,

@@ -24,6 +24,7 @@ export type ChannelRuntimeFactory = (input: {
   sessionKey: ChannelSessionKey;
   channel: string;
   securityPolicy: SecurityPolicy;
+  metadata?: Record<string, unknown>;
 }) => Promise<Runtime>;
 
 export type ChannelSessionStore = {
@@ -47,6 +48,7 @@ export type ChannelGatewayOptions = {
   preprocessMessage?: (message: ChannelMessage) => Promise<ChannelMessage>;
   handoffStore?: HandoffStore;
   surfacePointerStore?: SurfacePointerStore;
+  diagnostics?: () => Promise<string>;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -155,6 +157,7 @@ export class ChannelGateway {
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
   readonly #handoffStore: HandoffStore | undefined;
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
+  readonly #diagnostics: (() => Promise<string>) | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -174,6 +177,7 @@ export class ChannelGateway {
     this.#preprocessMessage = options.preprocessMessage;
     this.#handoffStore = options.handoffStore;
     this.#surfacePointerStore = options.surfacePointerStore;
+    this.#diagnostics = options.diagnostics;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -253,7 +257,14 @@ export class ChannelGateway {
       sessionId,
       sessionKey: normalizedSessionKey,
       channel: message.channel,
-      securityPolicy
+      securityPolicy,
+      metadata: {
+        surfaceType: message.sessionKey.platform,
+        chatId: message.sessionKey.chatId,
+        userId: message.sender.id,
+        sessionId,
+        origin: message.text.startsWith("/") ? "command" : "message"
+      }
     });
     let progressCount = 0;
     const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
@@ -268,6 +279,12 @@ export class ChannelGateway {
       channel: processedMessage.channel,
       trustedWorkspace,
       signal: controller.signal,
+      inputMetadata: {
+        surfaceType: message.sessionKey.platform,
+        chatId: message.sessionKey.chatId,
+        userId: message.sender.id,
+        origin: message.text.startsWith("/") ? "command" : "message"
+      },
       onEvent: async (event) => {
         progressCount += 1;
         await adapter.delivery?.sendProgress?.(normalizedSessionKey, event);
@@ -360,6 +377,8 @@ export class ChannelGateway {
         "/revoke <approval-id> - revoke a persistent approval",
         "/attach <code> - attach this chat to a CLI session via handoff code",
         "/detach - detach this chat from the linked CLI session",
+        "/sethome [local|clear] - set default delivery target for this chat",
+        "/diagnostics - show gateway health and config",
         "/stop - stop the foreground gateway process"
       ].join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
@@ -383,8 +402,9 @@ export class ChannelGateway {
         `Chat: ${message.sessionKey.chatId}`,
         `Session: ${sessionId}`,
         pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
+        pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
         `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
-      ].join("\n");
+      ].filter((line) => line !== undefined).join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
 
       return {
@@ -515,6 +535,54 @@ export class ChannelGateway {
         artifactCount: 0,
         progressCount: 0
       };
+    }
+
+    if (command === "/sethome") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      if (this.#surfacePointerStore === undefined) {
+        const text = "Surface pointers are not configured on this gateway.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      const arg = message.text.trim().split(/\s+/u)[1];
+      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      const base = pointer ?? { sessionId, attachedAt: new Date().toISOString() };
+
+      if (arg === "clear") {
+        const { homeDelivery: _, ...rest } = base;
+        await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId, rest);
+        const text = "Cleared home delivery target for this chat.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      const homeDelivery = arg === "local" ? "local" : `${message.sessionKey.platform}:${message.sessionKey.chatId}`;
+      await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId, {
+        ...base,
+        homeDelivery
+      });
+      const text = `Set home delivery target for this chat to ${homeDelivery}.`;
+      await adapter.delivery?.sendText(message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command === "/diagnostics") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const text = this.#diagnostics !== undefined
+        ? await this.#diagnostics()
+        : [
+            "EstaCoda gateway diagnostics",
+            "No diagnostics provider configured.",
+            `Registered adapters: ${[...this.#adapters.keys()].join(", ") || "none"}`
+          ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     if (command === "/cron") {
@@ -1268,7 +1336,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -1296,7 +1364,9 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/approvals" ||
     token === "/revoke" ||
     token === "/attach" ||
-    token === "/detach"
+    token === "/detach" ||
+    token === "/sethome" ||
+    token === "/diagnostics"
   ) {
     return token;
   }
@@ -1391,6 +1461,10 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/approvals", description: "Show approval state for this chat" },
     { command: "/revoke", description: "Revoke a persistent approval" },
     { command: "/commands", description: "Show available Telegram commands" },
+    { command: "/attach", description: "Attach to a CLI session" },
+    { command: "/detach", description: "Detach from linked CLI session" },
+    { command: "/sethome", description: "Set default delivery target for this chat" },
+    { command: "/diagnostics", description: "Show gateway health and config" },
     { command: "/stop", description: "Stop the active turn or gateway" }
   ];
 }

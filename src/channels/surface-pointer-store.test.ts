@@ -75,4 +75,52 @@ describe("SurfacePointerStore", () => {
       expect(telegram1?.record.sessionId).toBe("sess-abc");
     });
   });
+
+  describe("homeDelivery", () => {
+    it("stores and retrieves homeDelivery", async () => {
+      const store = new InMemorySurfacePointerStore();
+      await store.setPointer("telegram", "123456", {
+        sessionId: "sess-abc",
+        attachedAt: "2024-01-01T00:00:00Z",
+        homeDelivery: "telegram:123456"
+      });
+
+      const pointer = await store.getPointer("telegram", "123456");
+      expect(pointer?.homeDelivery).toBe("telegram:123456");
+    });
+
+    it("preserves homeDelivery through update", async () => {
+      const store = new InMemorySurfacePointerStore();
+      await store.setPointer("telegram", "123456", {
+        sessionId: "sess-abc",
+        attachedAt: "2024-01-01T00:00:00Z",
+        homeDelivery: "local"
+      });
+      await store.setPointer("telegram", "123456", {
+        sessionId: "sess-def",
+        attachedAt: "2024-01-02T00:00:00Z",
+        homeDelivery: "telegram:789"
+      });
+
+      const pointer = await store.getPointer("telegram", "123456");
+      expect(pointer?.sessionId).toBe("sess-def");
+      expect(pointer?.homeDelivery).toBe("telegram:789");
+    });
+
+    it("allows clearing homeDelivery", async () => {
+      const store = new InMemorySurfacePointerStore();
+      await store.setPointer("telegram", "123456", {
+        sessionId: "sess-abc",
+        attachedAt: "2024-01-01T00:00:00Z",
+        homeDelivery: "local"
+      });
+      await store.setPointer("telegram", "123456", {
+        sessionId: "sess-abc",
+        attachedAt: "2024-01-01T00:00:00Z"
+      });
+
+      const pointer = await store.getPointer("telegram", "123456");
+      expect(pointer?.homeDelivery).toBeUndefined();
+    });
+  });
 });

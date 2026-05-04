@@ -308,5 +308,28 @@ describe("DeliveryRouter", () => {
       expect(record.error).toBe("telegram delivery failed");
       expect(record.retryCount).toBe(0);
     });
+
+    it("returns recent errors via getRecentErrors", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter({ shouldFailDelivery: true, failureMessage: "fail-1" }) as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverText(targets, "Hello 1");
+      await router.deliverText(targets, "Hello 2");
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const errors = await router.getRecentErrors(10);
+      expect(errors.length).toBe(2);
+      expect(errors[0].error).toBe("fail-1");
+      expect(errors[1].error).toBe("fail-1");
+    });
+
+    it("returns empty array for getRecentErrors when no errors exist", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const errors = await router.getRecentErrors(10);
+      expect(errors).toEqual([]);
+    });
   });
 });
