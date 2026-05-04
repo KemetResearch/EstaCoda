@@ -193,7 +193,8 @@ export type FlowEventKind =
   | "pause-took-effect"
   | "process-registered"
   | "process-exited"
-  | "process-orphaned";
+  | "process-orphaned"
+  | "run-link-unavailable";
 
 export type FlowEvent = {
   id: EventId;
@@ -232,6 +233,11 @@ export type OperatorEvent = {
   newState: FlowState | StepState;
   metadata?: Record<string, unknown>;
   timestamp: string;
+  // Steer consumption tracking (Track 5)
+  consumedAt?: string;
+  consumedByStepId?: StepId;
+  consumedByRunId?: RunId;
+  consumedByFlowEventId?: EventId;
 };
 
 // ─── ApprovalGate ───

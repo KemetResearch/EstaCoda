@@ -15,7 +15,9 @@ import type {
   RunLink,
   FlowProcess,
   FlowLock,
-  CompactSummary
+  CompactSummary,
+  RunId,
+  EventId
 } from "./types.js";
 import type { TaskFlowStore } from "./taskflow-store.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -252,8 +254,9 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
     this.#db
       .query(
         `insert into operator_events (
-          id, flow_id, step_id, kind, operator, command, effect, previous_state, new_state, metadata_json, timestamp
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          id, flow_id, step_id, kind, operator, command, effect, previous_state, new_state, metadata_json, timestamp,
+          consumed_at, consumed_by_step_id, consumed_by_run_id, consumed_by_flow_event_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         event.id,
@@ -266,7 +269,11 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
         event.previousState,
         event.newState,
         event.metadata ? JSON.stringify(event.metadata) : null,
-        event.timestamp
+        event.timestamp,
+        event.consumedAt ?? null,
+        event.consumedByStepId ?? null,
+        event.consumedByRunId ?? null,
+        event.consumedByFlowEventId ?? null
       );
   }
 
@@ -496,7 +503,7 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async recoverStaleLocks(before: string): Promise<number> {
-    const result = this.#db.query<{ changes: number }>("delete from flow_locks where expires_at < ? returning count(*) as changes").all(before);
+    const result = this.#db.query<{ flow_id: string }>("delete from flow_locks where expires_at < ? returning flow_id").all(before);
     return result.length;
   }
 
@@ -571,6 +578,41 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
       .query<CompactSummaryRow>("select * from compact_summaries where flow_id = ? order by created_at desc")
       .all(flowId);
     return rows.map(rowToCompactSummary);
+  }
+
+  // ─── Steer consumption ───
+
+  async listUnconsumedSteerEvents(flowId: FlowId): Promise<OperatorEvent[]> {
+    const rows = this.#db
+      .query<OpEventRow>(
+        `select * from operator_events
+         where flow_id = ? and kind = 'operator-steered' and consumed_at is null
+         order by timestamp asc`
+      )
+      .all(flowId);
+    return rows.map(rowToOperatorEvent);
+  }
+
+  async markSteerConsumed(
+    eventId: string,
+    consumption: { consumedByStepId?: StepId; consumedByRunId?: RunId; consumedByFlowEventId?: EventId }
+  ): Promise<void> {
+    this.#db
+      .query(
+        `update operator_events set
+          consumed_at = ?,
+          consumed_by_step_id = ?,
+          consumed_by_run_id = ?,
+          consumed_by_flow_event_id = ?
+        where id = ?`
+      )
+      .run(
+        this.#now().toISOString(),
+        consumption.consumedByStepId ?? null,
+        consumption.consumedByRunId ?? null,
+        consumption.consumedByFlowEventId ?? null,
+        eventId
+      );
   }
 
   // ─── Atomic transition ───
@@ -677,6 +719,10 @@ type OpEventRow = {
   new_state: string;
   metadata_json: string | null;
   timestamp: string;
+  consumed_at: string | null;
+  consumed_by_step_id: string | null;
+  consumed_by_run_id: string | null;
+  consumed_by_flow_event_id: string | null;
 };
 
 type CheckpointRow = {
@@ -843,7 +889,11 @@ function rowToOperatorEvent(row: OpEventRow): OperatorEvent {
     previousState: row.previous_state as Flow["status"] | FlowStep["status"],
     newState: row.new_state as Flow["status"] | FlowStep["status"],
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
-    timestamp: row.timestamp
+    timestamp: row.timestamp,
+    consumedAt: row.consumed_at ?? undefined,
+    consumedByStepId: row.consumed_by_step_id ?? undefined,
+    consumedByRunId: row.consumed_by_run_id ?? undefined,
+    consumedByFlowEventId: row.consumed_by_flow_event_id ?? undefined
   };
 }
 

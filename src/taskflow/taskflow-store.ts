@@ -14,7 +14,9 @@ import type {
   RunLink,
   FlowProcess,
   FlowLock,
-  CompactSummary
+  CompactSummary,
+  RunId,
+  EventId
 } from "./types.js";
 
 export type AtomicTransitionResult = {
@@ -77,6 +79,17 @@ export interface TaskFlowStore {
   // ─── Compact summaries ───
   saveCompactSummary(summary: CompactSummary): Promise<void>;
   listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]>;
+
+  // ─── Steer consumption ───
+  listUnconsumedSteerEvents(flowId: FlowId): Promise<OperatorEvent[]>;
+  markSteerConsumed(
+    eventId: EventId,
+    consumption: {
+      consumedByStepId?: StepId;
+      consumedByRunId?: RunId;
+      consumedByFlowEventId?: EventId;
+    }
+  ): Promise<void>;
 
   // ─── Atomic transition ───
   atomicTransition<T>(

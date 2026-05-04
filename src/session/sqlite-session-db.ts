@@ -502,6 +502,30 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#migrateV2();
       this.#db.query("insert into schema_version (version) values (2) on conflict(version) do update set version = 2").run();
     }
+
+    if (currentVersion < 3) {
+      this.#backupDbBeforeMigration("v0.8-schema-v3");
+      this.#migrateV3();
+      this.#db.query("insert into schema_version (version) values (3) on conflict(version) do update set version = 3").run();
+    }
+  }
+
+  #migrateV3(): void {
+    // Defensive: inspect operator_events columns before adding each
+    const rows = this.#db.query("pragma table_info(operator_events)").all() as Array<{ name: string }>;
+    const colNames = new Set(rows.map((r) => r.name));
+    if (!colNames.has("consumed_at")) {
+      this.#db.exec("alter table operator_events add column consumed_at text");
+    }
+    if (!colNames.has("consumed_by_step_id")) {
+      this.#db.exec("alter table operator_events add column consumed_by_step_id text");
+    }
+    if (!colNames.has("consumed_by_run_id")) {
+      this.#db.exec("alter table operator_events add column consumed_by_run_id text");
+    }
+    if (!colNames.has("consumed_by_flow_event_id")) {
+      this.#db.exec("alter table operator_events add column consumed_by_flow_event_id text");
+    }
   }
 
   #migrateV2(): void {

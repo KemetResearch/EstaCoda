@@ -14,7 +14,9 @@ import type {
   RunLink,
   FlowProcess,
   FlowLock,
-  CompactSummary
+  CompactSummary,
+  RunId,
+  EventId
 } from "./types.js";
 import type { TaskFlowStore } from "./taskflow-store.js";
 
@@ -245,6 +247,28 @@ export class FakeTaskFlowStore implements TaskFlowStore {
       .filter((c) => c.flowId === flowId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((c) => structuredClone(c));
+  }
+
+  async listUnconsumedSteerEvents(flowId: FlowId): Promise<OperatorEvent[]> {
+    return this.operatorEvents
+      .filter((e) => e.flowId === flowId && e.kind === "operator-steered" && e.consumedAt === undefined)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      .map((e) => structuredClone(e));
+  }
+
+  async markSteerConsumed(
+    eventId: string,
+    consumption: { consumedByStepId?: StepId; consumedByRunId?: RunId; consumedByFlowEventId?: EventId }
+  ): Promise<void> {
+    const idx = this.operatorEvents.findIndex((e) => e.id === eventId);
+    if (idx >= 0) {
+      const ev = this.operatorEvents[idx];
+      ev.consumedAt = this.#now().toISOString();
+      if (consumption.consumedByStepId) ev.consumedByStepId = consumption.consumedByStepId;
+      if (consumption.consumedByRunId) ev.consumedByRunId = consumption.consumedByRunId;
+      if (consumption.consumedByFlowEventId) ev.consumedByFlowEventId = consumption.consumedByFlowEventId;
+      this.operatorEvents[idx] = ev;
+    }
   }
 
   async atomicTransition<T>(

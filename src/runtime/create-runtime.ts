@@ -33,6 +33,7 @@ import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -47,6 +48,17 @@ import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learni
 import { syncBundledSkills } from "../skills/skill-bundled-sync.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
+
+// TaskFlow v0.8 imports
+import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
+import { FlowLockService } from "../taskflow/flow-lock-service.js";
+import { TaskFlowEngine } from "../taskflow/taskflow-engine.js";
+import { OperatorCommandDispatcher } from "../taskflow/operator-command-dispatcher.js";
+import { FlowProcessRegistry } from "../taskflow/flow-process-registry.js";
+import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/flow-compaction-service.js";
+import { FlowRestartRecovery } from "../taskflow/flow-restart-recovery.js";
+import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapter.js";
+
 import { builtinTools } from "../tools/builtin-tools.js";
 import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
 import { createPythonTools } from "../tools/python-tools.js";
@@ -173,6 +185,22 @@ export type Runtime = {
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
+
+  // TaskFlow v0.8 integration (available when SQLiteSessionDB is used)
+  taskflow?: {
+    engine: import("../taskflow/taskflow-engine.js").TaskFlowEngine;
+    store: import("../taskflow/taskflow-store.js").TaskFlowStore;
+    dispatcher: import("../taskflow/operator-command-dispatcher.js").OperatorCommandDispatcher;
+    processRegistry: import("../taskflow/flow-process-registry.js").FlowProcessRegistry;
+    compactionService: import("../taskflow/flow-compaction-service.js").FlowCompactionService;
+    adapter: import("../taskflow/taskflow-agent-loop-adapter.js").TaskFlowAgentLoopAdapter;
+    activeFlowId: string | null;
+    setActiveFlowId(flowId: string | null): void;
+    recoverFromRestart(): Promise<{
+      interruptedFlows: number;
+      recoveredLocks: number;
+    }>;
+  };
 };
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -615,6 +643,74 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     agentProfile: options.agentProfile
   });
 
+  // ─── TaskFlow v0.8 Integration ───
+  let taskflow: Runtime["taskflow"] | undefined;
+
+  // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
+  try {
+    if (sessionDb instanceof SQLiteSessionDB) {
+      const sqliteDb = (sessionDb as unknown as { db: import("bun:sqlite").Database }).db;
+      const taskflowStore = new SQLiteTaskFlowStore({ db: sqliteDb });
+      const lockService = new FlowLockService({ store: taskflowStore });
+      const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
+      const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
+      const compactionService = new FlowCompactionService({
+        store: taskflowStore,
+        config: DEFAULT_COMPACTION_CONFIG
+      });
+      const dispatcher = new OperatorCommandDispatcher({
+        engine: taskflowEngine,
+        store: taskflowStore,
+        processRegistry,
+        compactionService
+      });
+      const adapter = new TaskFlowAgentLoopAdapter({
+        agentLoop,
+        store: taskflowStore,
+        compactionService
+      });
+
+      // Run restart recovery on startup
+      const restartRecovery = new FlowRestartRecovery({
+        store: taskflowStore,
+        lockService,
+        now: () => new Date()
+      });
+
+      const recoveryResult = await restartRecovery.recover();
+      if (recoveryResult.interrupted > 0 || recoveryResult.staleLocksReleased > 0) {
+        // Non-critical diagnostic; do not write to stdout to avoid breaking CLI output contracts
+        // eslint-disable-next-line no-console
+        console.error(
+          `[TaskFlow] Restart recovery: ${recoveryResult.interrupted} flows interrupted, ${recoveryResult.staleLocksReleased} stale locks recovered.`
+        );
+      }
+
+      taskflow = {
+        engine: taskflowEngine,
+        store: taskflowStore,
+        dispatcher,
+        processRegistry,
+        compactionService,
+        adapter,
+        activeFlowId: null,
+        setActiveFlowId(flowId: string | null) {
+          this.activeFlowId = flowId;
+        },
+        async recoverFromRestart() {
+          const result = await restartRecovery.recover();
+          return {
+            interruptedFlows: result.interrupted,
+            recoveredLocks: result.staleLocksReleased
+          };
+        }
+      };
+    }
+  } catch {
+    // TaskFlow integration is best-effort for v0.8. Do not block runtime creation.
+    taskflow = undefined;
+  }
+
   return {
     sessionDb,
     sessionId,
@@ -639,6 +735,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot, { profileId });
       activeTrustedWorkspace = trustedWorkspace;
+
+      // If an active TaskFlow is set, route through the adapter
+      if (taskflow?.activeFlowId) {
+        const flow = await taskflow.store.getFlow(taskflow.activeFlowId);
+        if (flow && flow.status === "running") {
+          const steps = await taskflow.store.listSteps(flow.id);
+          const activeStep = steps.find((s) => s.status === "running");
+          const turnResult = await taskflow.adapter.runTurn({
+            flow,
+            step: activeStep,
+            text: input.text,
+            channel: input.channel,
+            signal: input.signal,
+            onEvent: input.onEvent
+          });
+          return turnResult.response;
+        }
+      }
 
       return agentLoop.handle({
         ...input,
@@ -733,9 +847,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `tools: ${toolRegistry.list().length}`,
         `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
+        taskflow ? `taskflow: active (SQLite)` : undefined,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
-    }
+    },
+    taskflow
   };
 }
 

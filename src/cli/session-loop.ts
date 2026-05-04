@@ -339,6 +339,11 @@ async function handleSlashCommand(input: {
     case "doctor":
       input.output.write(`${await renderRuntimeDoctor(input.runtime)}\n\n`);
       return false;
+    case "flow": {
+      const result = await handleTaskFlowCommand(input, args);
+      input.output.write(`${result}\n\n`);
+      return false;
+    }
     case "clear":
       input.output.write("\x1Bc");
       return false;
@@ -354,6 +359,209 @@ async function handleSlashCommand(input: {
 
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
+  }
+}
+
+async function handleTaskFlowCommand(input: {
+  runtime: Runtime;
+  output: NodeJS.WritableStream;
+}, args: string[]): Promise<string> {
+  if (input.runtime.taskflow === undefined) {
+    return "TaskFlow is not available. It requires SQLite session persistence.";
+  }
+
+  const { taskflow } = input.runtime;
+  const [subcommand = "", ...rest] = args;
+
+  switch (subcommand) {
+    case "":
+    case "help":
+      return [
+        "TaskFlow operator commands (v0.8)",
+        "  /flow status [flowId]           Show flow status (active flow if omitted)",
+        "  /flow pause <flowId> [reason]   Request pause at next safe boundary",
+        "  /flow resume <flowId>           Resume a paused/interrupted/waiting flow",
+        "  /flow interrupt <flowId> [r]    Interrupt a running flow",
+        "  /flow cancel <flowId> [reason]  Cancel a flow",
+        "  /flow steer <flowId> <text...>  Inject operator guidance into a flow",
+        "  /flow approve <stepId>          Approve a pending approval gate",
+        "  /flow reject <stepId> [reason]  Reject a pending approval gate",
+        "  /flow retry <stepId>            Retry a failed step",
+        "  /flow skip <stepId> [reason]    Skip a skippable step",
+        "  /flow checkpoint <flowId> <n>   Create a named checkpoint",
+        "  /flow trace [flowId] [limit]    Show flow trace",
+        "  /flow compact <flowId>          Compact flow events",
+        "  /flow set <flowId>              Set active flow for this session",
+        "  /flow unset                     Clear active flow"
+      ].join("\n");
+
+    case "status": {
+      const flowId = rest[0] ?? taskflow.activeFlowId ?? undefined;
+      if (flowId === undefined) return "No active flow. Use /flow set <flowId> or pass a flow ID.";
+      const result = await taskflow.dispatcher.dispatch({ command: "/status", flowId });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "pause": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow pause <flowId> [reason]";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/pause",
+        flowId,
+        reason: rest.slice(1).join(" ") || undefined,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "resume": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow resume <flowId>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/resume",
+        flowId,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "interrupt": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow interrupt <flowId> [reason]";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/interrupt",
+        flowId,
+        reason: rest.slice(1).join(" ") || undefined,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "cancel": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow cancel <flowId> [reason]";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/cancel",
+        flowId,
+        reason: rest.slice(1).join(" ") || undefined,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "steer": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow steer <flowId> <guidance>";
+      const guidance = rest.slice(1).join(" ");
+      if (guidance.length === 0) return "Usage: /flow steer <flowId> <guidance>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/steer",
+        flowId,
+        guidance,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "approve": {
+      const stepId = rest[0];
+      if (stepId === undefined) return "Usage: /flow approve <stepId>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/approve",
+        stepId,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "reject": {
+      const stepId = rest[0];
+      if (stepId === undefined) return "Usage: /flow reject <stepId> [reason]";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/reject",
+        stepId,
+        reason: rest.slice(1).join(" ") || undefined,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "retry": {
+      const stepId = rest[0];
+      if (stepId === undefined) return "Usage: /flow retry <stepId>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/retry",
+        stepId,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "skip": {
+      const stepId = rest[0];
+      if (stepId === undefined) return "Usage: /flow skip <stepId> [reason]";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/skip",
+        stepId,
+        reason: rest.slice(1).join(" ") || undefined,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "checkpoint": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow checkpoint <flowId> <name>";
+      const name = rest.slice(1).join(" ");
+      if (name.length === 0) return "Usage: /flow checkpoint <flowId> <name>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/checkpoint",
+        flowId,
+        name,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "trace": {
+      const flowId = rest[0] ?? taskflow.activeFlowId ?? undefined;
+      const limit = flowId !== undefined && rest[1] !== undefined ? parseInt(rest[1], 10) : undefined;
+      if (flowId === undefined) return "No active flow. Use /flow set <flowId> or pass a flow ID.";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/trace",
+        flowId,
+        limit: Number.isNaN(limit) ? undefined : limit
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "compact": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow compact <flowId>";
+      const result = await taskflow.dispatcher.dispatch({
+        command: "/compact",
+        flowId,
+        operator: "cli"
+      });
+      return result.ok ? result.message : `Error: ${result.error}`;
+    }
+
+    case "set": {
+      const flowId = rest[0];
+      if (flowId === undefined) return "Usage: /flow set <flowId>";
+      const flow = await taskflow.store.getFlow(flowId);
+      if (flow === null) return `Flow not found: ${flowId}`;
+      taskflow.setActiveFlowId(flowId);
+      return `Active flow set to ${flowId} (status: ${flow.status}).`;
+    }
+
+    case "unset": {
+      taskflow.setActiveFlowId(null);
+      return "Active flow cleared. Normal agent mode.";
+    }
+
+    default:
+      return `Unknown flow command: ${subcommand}\nUse /flow help for available commands.`;
   }
 }
 

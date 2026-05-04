@@ -24,6 +24,7 @@ import { taskflowEngineLifecycleCase } from "./taskflow-engine-lifecycle.js";
 import { taskflowRestartRecoveryCase } from "./taskflow-restart-recovery.js";
 import { operatorControlPlaneCase } from "./operator-control-plane.js";
 import { flowCompactionCase } from "./flow-compaction.js";
+import { track5IntegrationCase } from "./track5-integration.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -51,5 +52,6 @@ export const defaultEvalFixtures = [
   taskflowEngineLifecycleCase,
   taskflowRestartRecoveryCase,
   operatorControlPlaneCase,
-  flowCompactionCase
+  flowCompactionCase,
+  track5IntegrationCase
 ];

@@ -66,6 +66,7 @@ import { manifestCommand } from "./manifest-commands.js";
 import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import { evolutionCommand } from "./evolution-commands.js";
+import { flowCommand } from "./flow-commands.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -137,6 +138,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return profile(options, args);
     case "trace":
       return trace(options, args);
+    case "flow":
+      return flowCommand(options, args);
     case "eval":
       return evalCommand(options, args);
     case "proposal":

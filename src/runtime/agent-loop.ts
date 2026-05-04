@@ -215,6 +215,10 @@ export class AgentLoop {
     };
   }
 
+  get trajectoryId(): string | undefined {
+    return this.#trajectoryRecorder.trajectoryId;
+  }
+
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
