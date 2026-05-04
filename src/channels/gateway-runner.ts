@@ -18,6 +18,10 @@ import { DeliveryRouter } from "./delivery-router.js";
 import { FileHandoffStore } from "./handoff-store.js";
 import { FileSurfacePointerStore } from "./surface-pointer-store.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
+import { DiscordAdapter } from "./discord-adapter.js";
+import { EmailAdapter } from "./email-adapter.js";
+import { WhatsAppAdapter } from "./whatsapp-adapter.js";
+import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
 import { injectVoiceTranscripts } from "./voice-transcription.js";
 
 export type GatewayRunOptions = {
@@ -209,6 +213,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
 
   const gateway = new ChannelGateway({
     adapters: [adapter],
+    deliveryRouter: router,
     diagnostics: async () => {
       const lines = [
         "EstaCoda gateway diagnostics",
@@ -519,4 +524,257 @@ function formatBytes(value: number): string {
   }
 
   return `${value} B`;
+}
+
+export async function runDiscordGateway(options: GatewayRunOptions): Promise<GatewayRunResult> {
+  const config = await loadRuntimeConfig(options);
+  const discord = config.channels.discord;
+  if (discord.enabled !== true) {
+    return {
+      ok: false,
+      output: "Discord gateway is disabled.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  const botTokenEnv = discord.botTokenEnv;
+  const botToken = botTokenEnv === undefined ? undefined : process.env[botTokenEnv];
+  if (!botToken) {
+    return {
+      ok: false,
+      output: "Discord gateway is missing its bot token.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  const stateRoot = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda");
+  const sessionDbPath = join(stateRoot, "sessions.sqlite");
+  const mediaRoot = join(stateRoot, "channel-media");
+  const approvalStorePath = join(stateRoot, "channel-approvals.json");
+  const sessionContextPath = join(stateRoot, "channel-sessions.json");
+  await mkdir(dirname(sessionDbPath), { recursive: true });
+  const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+  const adapter = new DiscordAdapter({
+    botToken,
+    allowedUsers: discord.allowedUsers,
+    allowedGuilds: discord.allowedGuilds,
+    allowedChannels: discord.allowedChannels,
+    freeResponseChannels: discord.freeResponseChannels,
+    mediaRoot
+  });
+  const router = new DeliveryRouter({ homeDir: options.homeDir });
+  router.registerAdapter(adapter);
+  const gateway = new ChannelGateway({
+    adapters: [adapter],
+    deliveryRouter: router,
+    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath }),
+    approvalStore: new ChannelApprovalStore({ path: approvalStorePath }),
+    authPolicy: {
+      mode: "allowlist",
+      allowedUserIds: discord.allowedUsers ?? [],
+      allowedChatIds: discord.allowedChannels ?? []
+    },
+    runtimeForSession: async ({ sessionId }) => {
+      return createRuntime({
+        theme: kemetBlueTheme,
+        model: config.model,
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        sessionId,
+        profileId: "default",
+        sessionDb,
+        providerRegistry: config.providerRegistry,
+        credentialPools: config.credentialPools,
+        securityPolicy: { decide: () => "allow" }
+      });
+    }
+  });
+  try {
+    await gateway.start();
+    while (options.once !== true && adapter.running) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: message, polls: 0, processed: 0 };
+  } finally {
+    await gateway.stop();
+    sessionDb.close();
+  }
+  return { ok: true, output: "Discord gateway stopped.", polls: 0, processed: 0 };
+}
+
+export async function runEmailGateway(options: GatewayRunOptions): Promise<GatewayRunResult> {
+  const config = await loadRuntimeConfig(options);
+  const email = config.channels.email;
+  if (email.enabled !== true) {
+    return {
+      ok: false,
+      output: "Email gateway is disabled.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  const password = email.passwordEnv ? process.env[email.passwordEnv] : undefined;
+  if (!password) {
+    return {
+      ok: false,
+      output: "Email gateway is missing its password.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  if (!email.username) {
+    return {
+      ok: false,
+      output: "Email gateway is missing its username.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  const stateRoot = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda");
+  const sessionDbPath = join(stateRoot, "sessions.sqlite");
+  const mediaRoot = join(stateRoot, "channel-media");
+  const approvalStorePath = join(stateRoot, "channel-approvals.json");
+  const sessionContextPath = join(stateRoot, "channel-sessions.json");
+  await mkdir(dirname(sessionDbPath), { recursive: true });
+  const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+  const adapter = new EmailAdapter({
+    imapHost: email.imapHost ?? "imap.gmail.com",
+    imapPort: email.imapPort ?? 993,
+    smtpHost: email.smtpHost ?? "smtp.gmail.com",
+    smtpPort: email.smtpPort ?? 465,
+    username: email.username,
+    password,
+    ownAddress: email.ownAddress ?? email.username!,
+    homeAddress: email.homeAddress,
+    allowedSenders: email.allowedSenders,
+    allowAllUsers: email.allowAllUsers,
+    pollIntervalSeconds: email.pollIntervalSeconds ?? 60,
+    mediaRoot,
+    markAllSeenOnConnect: true
+  });
+  const router = new DeliveryRouter({ homeDir: options.homeDir });
+  router.registerAdapter(adapter);
+  const gateway = new ChannelGateway({
+    adapters: [adapter],
+    deliveryRouter: router,
+    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath }),
+    approvalStore: new ChannelApprovalStore({ path: approvalStorePath }),
+    authPolicy: {
+      mode: email.allowAllUsers === true ? "allow-all" : "allowlist",
+      allowedUserIds: email.allowedSenders ?? [],
+      allowedChatIds: []
+    },
+    runtimeForSession: async ({ sessionId }) => {
+      return createRuntime({
+        theme: kemetBlueTheme,
+        model: config.model,
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        sessionId,
+        profileId: "default",
+        sessionDb,
+        providerRegistry: config.providerRegistry,
+        credentialPools: config.credentialPools,
+        securityPolicy: { decide: () => "allow" }
+      });
+    }
+  });
+  try {
+    await gateway.start();
+    while (options.once !== true && adapter.running) {
+      await adapter.pollOnce();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: message, polls: 0, processed: 0 };
+  } finally {
+    await gateway.stop();
+    sessionDb.close();
+  }
+  return { ok: true, output: "Email gateway stopped.", polls: 0, processed: 0 };
+}
+
+export async function runWhatsAppGateway(options: GatewayRunOptions): Promise<GatewayRunResult> {
+  const config = await loadRuntimeConfig(options);
+  const whatsapp = config.channels.whatsapp;
+  const diagnostics = await getWhatsAppGatewayDiagnostics(options);
+  if (whatsapp.enabled !== true) {
+    return {
+      ok: false,
+      output: "WhatsApp gateway is disabled.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  if (whatsapp.experimental !== true) {
+    return {
+      ok: false,
+      output: "WhatsApp gateway is enabled but not marked experimental. Set channels.whatsapp.experimental to true.",
+      polls: 0,
+      processed: 0
+    };
+  }
+  const stateRoot = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda");
+  const sessionDbPath = join(stateRoot, "sessions.sqlite");
+  const mediaRoot = join(stateRoot, "channel-media");
+  const approvalStorePath = join(stateRoot, "channel-approvals.json");
+  const sessionContextPath = join(stateRoot, "channel-sessions.json");
+  const authDir = join(stateRoot, "whatsapp-auth");
+  await mkdir(dirname(sessionDbPath), { recursive: true });
+  const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+  const adapter = new WhatsAppAdapter({
+    authDir,
+    allowedUsers: whatsapp.allowedUsers,
+    pairingMode: whatsapp.pairingMode ?? "qr",
+    pairingCodePhoneNumber: whatsapp.pairingCodePhoneNumber,
+    mediaRoot
+  });
+  const router = new DeliveryRouter({ homeDir: options.homeDir });
+  router.registerAdapter(adapter);
+  const gateway = new ChannelGateway({
+    adapters: [adapter],
+    deliveryRouter: router,
+    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath }),
+    approvalStore: new ChannelApprovalStore({ path: approvalStorePath }),
+    authPolicy: {
+      mode: "allowlist",
+      allowedUserIds: whatsapp.allowedUsers ?? [],
+      allowedChatIds: []
+    },
+    runtimeForSession: async ({ sessionId }) => {
+      return createRuntime({
+        theme: kemetBlueTheme,
+        model: config.model,
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        sessionId,
+        profileId: "default",
+        sessionDb,
+        providerRegistry: config.providerRegistry,
+        credentialPools: config.credentialPools,
+        securityPolicy: { decide: () => "allow" }
+      });
+    }
+  });
+  try {
+    await gateway.start();
+    while (options.once !== true && adapter.running) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: message, polls: 0, processed: 0 };
+  } finally {
+    await gateway.stop();
+    sessionDb.close();
+  }
+  return { ok: true, output: "WhatsApp gateway stopped.", polls: 0, processed: 0 };
 }

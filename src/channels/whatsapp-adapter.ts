@@ -46,6 +46,10 @@ export type WhatsAppAdapterOptions = {
   };
   /** Inject a mock socket for testing */
   socketFactory?: (opts: { authDir: string; logger: unknown }) => Promise<WASocket>;
+  /** Inject a mock media downloader for testing */
+  downloadMediaMessage?: typeof downloadMediaMessage;
+  /** Enable experimental live WhatsApp adapter */
+  experimental?: boolean;
   now?: () => Date;
 };
 
@@ -57,6 +61,10 @@ type ConnectionStatus =
   | "close"
   | "error";
 
+/**
+ * Live WhatsApp adapter using Baileys.
+ * @experimental
+ */
 export class WhatsAppAdapter implements ChannelAdapter {
   kind = "whatsapp" as const;
   running = false;
@@ -74,7 +82,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
     this.options = options;
   }
 
+  /**
+   * Start the adapter and begin listening for messages.
+   * @experimental
+   */
   async start(handler: (message: ChannelMessage) => Promise<void>): Promise<void> {
+    if (this.options.experimental !== true) {
+      throw new Error("WhatsApp live adapter is experimental. Set experimental: true in config to enable.");
+    }
     if (this.running) return;
     this.handler = handler;
     this.running = true;
@@ -116,12 +131,20 @@ export class WhatsAppAdapter implements ChannelAdapter {
         if (!this.socket || this.connectionStatus !== "open") return;
         const caption = renderArtifactNotice(artifact);
         if (artifact.path) {
-          await this.socket.sendMessage(sessionKey.chatId, {
-            document: { url: artifact.path },
-            mimetype: artifact.mimeType ?? "application/octet-stream",
-            fileName: basename(artifact.path),
-            caption,
-          });
+          const isImage = artifact.kind === "image" || artifact.mimeType?.startsWith("image/");
+          if (isImage) {
+            await this.socket.sendMessage(sessionKey.chatId, {
+              image: { url: artifact.path },
+              caption,
+            });
+          } else {
+            await this.socket.sendMessage(sessionKey.chatId, {
+              document: { url: artifact.path },
+              mimetype: artifact.mimeType ?? "application/octet-stream",
+              fileName: basename(artifact.path),
+              caption,
+            });
+          }
         } else {
           await this.socket.sendMessage(sessionKey.chatId, { text: caption });
         }
@@ -129,6 +152,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
     };
   }
 
+  /**
+   * Establish the Baileys socket connection.
+   * @experimental
+   */
   private async connect(): Promise<void> {
     const authDir = this.options.authDir ?? join(process.cwd(), ".whatsapp-auth");
     await mkdir(authDir, { recursive: true });
@@ -224,7 +251,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
       const mediaRoot = this.options.mediaRoot;
       if (mediaRoot && hasMedia(msg)) {
         try {
-          const stream = await downloadMediaMessage(msg, "buffer", {}, this.options.logger as any);
+          const downloader = this.options.downloadMediaMessage ?? downloadMediaMessage;
+          const stream = await downloader(msg, "buffer", {}, this.options.logger as any);
           if (stream && Buffer.isBuffer(stream)) {
             const ext = guessExtensionFromMessage(msg);
             const fileName = `${randomUUID()}${ext}`;

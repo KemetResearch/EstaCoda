@@ -34,7 +34,7 @@ def decode_header_value(value):
     return "".join(result)
 
 def get_body_text(msg):
-    """Extract plain text body from email message, stripping HTML if needed."""
+    """Extract plain text body and HTML body from email message."""
     text_parts = []
     html_parts = []
     attachments = []
@@ -62,6 +62,18 @@ def get_body_text(msg):
                 if payload:
                     attachments.append({
                         "filename": filename or "unnamed",
+                        "mime_type": content_type,
+                        "size": len(payload),
+                        "data_b64": base64.b64encode(payload).decode("ascii")
+                    })
+                continue
+
+            # Inline images (Content-Disposition: inline)
+            if content_type.startswith("image/") and "inline" in content_disposition:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    attachments.append({
+                        "filename": filename or "inline-image",
                         "mime_type": content_type,
                         "size": len(payload),
                         "data_b64": base64.b64encode(payload).decode("ascii")
@@ -99,12 +111,9 @@ def get_body_text(msg):
             else:
                 text_parts.append(decoded)
 
-    if text_parts:
-        return "\n".join(text_parts), attachments
-    elif html_parts:
-        return strip_html(html_parts[0]), attachments
-    else:
-        return "", attachments
+    body_text = "\n".join(text_parts) if text_parts else (strip_html(html_parts[0]) if html_parts else "")
+    body_html = html_parts[0] if html_parts else None
+    return body_text, body_html, attachments
 
 def strip_html(html):
     """Very basic HTML tag stripping."""
@@ -154,8 +163,10 @@ def cmd_poll(args):
     password = args["password"]
     allowed_senders = [s.lower() for s in args.get("allowed_senders", [])]
     own_address = args.get("own_address", "").lower()
+    allow_all_users = args.get("allow_all_users", False)
     mark_seen = args.get("mark_seen", True)
     skip_attachments = args.get("skip_attachments", False)
+    mark_all_seen_only = args.get("mark_all_seen_only", False)
 
     context = ssl.create_default_context()
     mail = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=context)
@@ -164,6 +175,14 @@ def cmd_poll(args):
 
     _, data = mail.search(None, "UNSEEN")
     message_ids = data[0].split() if data and data[0] else []
+
+    if mark_all_seen_only:
+        for msg_id in message_ids:
+            if mark_seen:
+                mail.store(msg_id, "+FLAGS", "\\Seen")
+        mail.close()
+        mail.logout()
+        return {"ok": True, "messages": []}
 
     messages = []
     for msg_id in message_ids:
@@ -189,13 +208,13 @@ def cmd_poll(args):
                 mail.store(msg_id, "+FLAGS", "\\Seen")
             continue
 
-        if allowed_senders and from_addr.lower() not in allowed_senders:
+        if not allow_all_users and allowed_senders and from_addr.lower() not in allowed_senders:
             # Not allowed - still mark as seen so we don't reprocess
             if mark_seen:
                 mail.store(msg_id, "+FLAGS", "\\Seen")
             continue
 
-        body_text, attachments = get_body_text(msg)
+        body_text, body_html, attachments = get_body_text(msg)
         if skip_attachments:
             attachments = []
 
@@ -215,6 +234,7 @@ def cmd_poll(args):
             "cc": cc_addrs,
             "subject": subject,
             "body": body_text,
+            "body_html": body_html,
             "date": date,
             "in_reply_to": in_reply_to,
             "references": references,

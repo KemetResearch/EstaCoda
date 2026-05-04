@@ -12,12 +12,15 @@ import { CronStore } from "../cron/cron-store.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
+import type { DeliveryRouter } from "./delivery-router.js";
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -49,6 +52,7 @@ export type ChannelGatewayOptions = {
   handoffStore?: HandoffStore;
   surfacePointerStore?: SurfacePointerStore;
   diagnostics?: () => Promise<string>;
+  deliveryRouter?: DeliveryRouter;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -158,6 +162,7 @@ export class ChannelGateway {
   readonly #handoffStore: HandoffStore | undefined;
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
   readonly #diagnostics: (() => Promise<string>) | undefined;
+  readonly #deliveryRouter: DeliveryRouter | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -178,9 +183,47 @@ export class ChannelGateway {
     this.#handoffStore = options.handoffStore;
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
+    this.#deliveryRouter = options.deliveryRouter;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
+    }
+  }
+
+  async #deliverText(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey,
+    text: string,
+    options?: import("../contracts/channel.js").ChannelTextOptions
+  ): Promise<void> {
+    if (this.#deliveryRouter) {
+      await this.#deliveryRouter.deliverText([{ kind: "origin", originalSessionKey: sessionKey }], text, options);
+    } else {
+      await adapter.delivery?.sendText(sessionKey, text, options);
+    }
+  }
+
+  async #deliverProgress(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey,
+    event: RuntimeEvent
+  ): Promise<void> {
+    if (this.#deliveryRouter) {
+      await this.#deliveryRouter.deliverProgress({ kind: "origin", originalSessionKey: sessionKey }, event);
+    } else {
+      await adapter.delivery?.sendProgress?.(sessionKey, event);
+    }
+  }
+
+  async #deliverArtifact(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey,
+    artifact: ArtifactRecord
+  ): Promise<void> {
+    if (this.#deliveryRouter) {
+      await this.#deliveryRouter.deliverArtifact({ kind: "origin", originalSessionKey: sessionKey }, artifact);
+    } else {
+      await adapter.delivery?.sendArtifact?.(sessionKey, artifact);
     }
   }
 
@@ -206,7 +249,7 @@ export class ChannelGateway {
       const pairedMessage = await this.#pair?.(message);
 
       if (pairedMessage !== undefined) {
-        await adapter.delivery?.sendText(message.sessionKey, pairedMessage);
+        await this.#deliverText(adapter, message.sessionKey, pairedMessage);
         await adapter.send?.({
           conversationId: message.sessionKey.chatId,
           sessionKey: message.sessionKey,
@@ -221,7 +264,7 @@ export class ChannelGateway {
         };
       }
 
-      await adapter.delivery?.sendText(message.sessionKey, auth.message);
+      await this.#deliverText(adapter, message.sessionKey, auth.message);
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: message.sessionKey,
@@ -287,7 +330,7 @@ export class ChannelGateway {
       },
       onEvent: async (event) => {
         progressCount += 1;
-        await adapter.delivery?.sendProgress?.(normalizedSessionKey, event);
+        await this.#deliverProgress(adapter, normalizedSessionKey, event);
       }
     }).finally(() => {
       if (this.#activeTurns.get(activeTurnKey) === controller) {
@@ -303,7 +346,7 @@ export class ChannelGateway {
     }
 
     try {
-      await adapter.delivery?.sendText(normalizedSessionKey, response.text);
+      await this.#deliverText(adapter, normalizedSessionKey, response.text);
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
@@ -312,12 +355,12 @@ export class ChannelGateway {
       });
 
       for (const artifact of response.artifacts) {
-        await adapter.delivery?.sendArtifact?.(normalizedSessionKey, artifact);
+        await this.#deliverArtifact(adapter, normalizedSessionKey, artifact);
       }
 
       if (pendingApproval !== undefined) {
         const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
-        await adapter.delivery?.sendText(
+        await this.#deliverText(adapter, 
           normalizedSessionKey,
           approvalPrompt,
           adapter.kind === "telegram"
@@ -381,7 +424,7 @@ export class ChannelGateway {
         "/diagnostics - show gateway health and config",
         "/stop - stop the foreground gateway process"
       ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -405,7 +448,7 @@ export class ChannelGateway {
         pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
         `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
       ].filter((line) => line !== undefined).join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId,
@@ -421,7 +464,7 @@ export class ChannelGateway {
       const text = enabled
         ? "⚡ YOLO mode ON — EstaCoda will auto-approve eligible actions for this chat session. Hard safety blocks still apply."
         : `⚠ YOLO mode OFF — risky actions will use ${this.#securityMode} approval mode.`;
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId,
@@ -435,7 +478,7 @@ export class ChannelGateway {
       const code = message.text.trim().split(/\s+/u)[1];
       if (code === undefined || code.length === 0) {
         const text = "Usage: /attach <handoff-code>";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
           replyText: text,
@@ -446,7 +489,7 @@ export class ChannelGateway {
 
       if (this.#handoffStore === undefined || this.#surfacePointerStore === undefined) {
         const text = "Handoff is not configured on this gateway.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
           replyText: text,
@@ -463,7 +506,7 @@ export class ChannelGateway {
 
       if (!result.ok) {
         const text = `Attach failed: ${result.reason}`;
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
           replyText: text,
@@ -483,7 +526,7 @@ export class ChannelGateway {
         `Session: ${result.handoff.sessionId}`,
         "This chat now shares context with that session. Use /detach to return to an independent session."
       ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: result.handoff.sessionId,
@@ -496,7 +539,7 @@ export class ChannelGateway {
     if (command === "/detach") {
       if (this.#surfacePointerStore === undefined) {
         const text = "Handoff is not configured on this gateway.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
           replyText: text,
@@ -508,7 +551,7 @@ export class ChannelGateway {
       const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
       if (pointer === undefined) {
         const text = "This chat is not attached to any session.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
           replyText: text,
@@ -527,7 +570,7 @@ export class ChannelGateway {
         `Current session: ${newSessionId}`,
         "This chat now operates independently."
       ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: newSessionId,
@@ -541,7 +584,7 @@ export class ChannelGateway {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       if (this.#surfacePointerStore === undefined) {
         const text = "Surface pointers are not configured on this gateway.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -558,7 +601,7 @@ export class ChannelGateway {
         const { homeDelivery: _, ...rest } = base;
         await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId, rest);
         const text = "Cleared home delivery target for this chat.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
@@ -568,7 +611,7 @@ export class ChannelGateway {
         homeDelivery
       });
       const text = `Set home delivery target for this chat to ${homeDelivery}.`;
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -581,7 +624,7 @@ export class ChannelGateway {
             "No diagnostics provider configured.",
             `Registered adapters: ${[...this.#adapters.keys()].join(", ") || "none"}`
           ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -593,7 +636,7 @@ export class ChannelGateway {
         origin: originFromSessionKey(message.sessionKey, message.channel),
         defaultDelivery: "origin"
       });
-      await adapter.delivery?.sendText(message.sessionKey, result.output);
+      await this.#deliverText(adapter, message.sessionKey, result.output);
 
       return {
         sessionId,
@@ -619,7 +662,7 @@ export class ChannelGateway {
       try {
         await runtime.trustWorkspace();
         const text = "Workspace trusted. EstaCoda will proceed with normal local work here.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -647,7 +690,7 @@ export class ChannelGateway {
       try {
         await runtime.revokeWorkspaceTrust();
         const text = "Workspace trust revoked. EstaCoda will ask before workspace writes here.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -675,7 +718,7 @@ export class ChannelGateway {
       try {
         const trusted = await runtime.isWorkspaceTrusted();
         const text = `Workspace trust: ${trusted ? "trusted" : "not trusted"}`;
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -712,7 +755,7 @@ export class ChannelGateway {
                 return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
               })
             ].join("\n");
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -750,7 +793,7 @@ export class ChannelGateway {
                 `${index + 1}. ${session.id}${session.id === sessionId ? " (active)" : ""}${session.updatedAt ? ` — updated ${session.updatedAt}` : ""}`
               )
             ].join("\n");
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
 
         return {
           sessionId,
@@ -784,7 +827,7 @@ export class ChannelGateway {
               "Latest interrupted turn",
               resumeNote
             ].join("\n");
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
 
         return {
           sessionId,
@@ -806,7 +849,7 @@ export class ChannelGateway {
         "Started a fresh EstaCoda session for this chat.",
         `Session: ${sessionId}`
       ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId,
@@ -835,7 +878,7 @@ export class ChannelGateway {
         const text = snapshots.length === 0
           ? "Reloaded MCP configuration. No MCP servers are configured for this runtime."
           : `Reloaded MCP configuration. MCP servers ready: ${ready}/${snapshots.length}.`;
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
 
         return {
           sessionId,
@@ -853,7 +896,7 @@ export class ChannelGateway {
         "Telegram command menu",
         ...telegramGatewayCommands().map((entry) => `${entry.command} - ${entry.description}`)
       ].join("\n");
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -868,7 +911,7 @@ export class ChannelGateway {
       const currentSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       if (targetSessionId === undefined || targetSessionId.length === 0) {
         const text = "Usage: /switch <session-id>";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: currentSessionId,
           replyText: text,
@@ -892,7 +935,7 @@ export class ChannelGateway {
         const targetSession = await runtime.sessionDb.getSession(targetSessionId);
         if (targetSession === undefined) {
           const text = `Session not found: ${targetSessionId}`;
-          await adapter.delivery?.sendText(message.sessionKey, text);
+          await this.#deliverText(adapter, message.sessionKey, text);
           return {
             sessionId: currentSessionId,
             replyText: text,
@@ -909,7 +952,7 @@ export class ChannelGateway {
           "Switched this chat to an existing session.",
           `Session: ${targetSessionId}`
         ].join("\n");
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId: targetSessionId,
           replyText: text,
@@ -926,7 +969,7 @@ export class ChannelGateway {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       if (query.length === 0) {
         const text = "Usage: /search <query>";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -958,7 +1001,7 @@ export class ChannelGateway {
                 `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
               )
             ].join("\n");
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
           replyText: text,
@@ -989,7 +1032,7 @@ export class ChannelGateway {
             "EstaCoda will not run that action unless it is requested again."
           ].join("\n");
       this.#pendingApprovals.delete(key);
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: pending?.sessionId ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -1009,7 +1052,7 @@ export class ChannelGateway {
       if (activeTurn !== undefined) {
         activeTurn.abort("channel-stop");
         const text = "Cancelled the active EstaCoda turn for this chat.";
-        await adapter.delivery?.sendText(message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text);
 
         return {
           sessionId,
@@ -1020,7 +1063,7 @@ export class ChannelGateway {
       }
 
       const text = "Stopping the EstaCoda gateway after this update.";
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
       await this.#onStopRequested?.(message);
 
       return {
@@ -1041,7 +1084,7 @@ export class ChannelGateway {
 
     if (pending === undefined) {
       const text = "There is no pending approval request for this chat.";
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -1089,7 +1132,7 @@ export class ChannelGateway {
           `Scope: ${scope}`,
           "EstaCoda is resuming the blocked request now."
         ].join("\n");
-    await adapter.delivery?.sendText(message.sessionKey, approvalText);
+    await this.#deliverText(adapter, message.sessionKey, approvalText);
 
     const resumed = await this.receive({
       ...pending.originalMessage,
@@ -1132,7 +1175,7 @@ export class ChannelGateway {
       "",
       "Use /revoke <approval-id> to remove a persistent approval."
     ].join("\n");
-    await adapter.delivery?.sendText(message.sessionKey, text);
+    await this.#deliverText(adapter, message.sessionKey, text);
 
     return {
       sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -1147,7 +1190,7 @@ export class ChannelGateway {
 
     if (approvalId === undefined || approvalId.length === 0) {
       const text = "Usage: /revoke <approval-id>";
-      await adapter.delivery?.sendText(message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
         sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
@@ -1161,7 +1204,7 @@ export class ChannelGateway {
     const text = revoked
       ? `Revoked persistent approval ${approvalId}.`
       : `No persistent approval matched ${approvalId} for this chat.`;
-    await adapter.delivery?.sendText(message.sessionKey, text);
+    await this.#deliverText(adapter, message.sessionKey, text);
 
     return {
       sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),

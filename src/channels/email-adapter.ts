@@ -21,7 +21,9 @@ export type EmailAdapterOptions = {
   username: string;
   password: string;
   ownAddress: string;
+  homeAddress?: string;
   allowedSenders?: string[];
+  allowAllUsers?: boolean;
   pollIntervalSeconds?: number;
   mediaRoot?: string;
   activityLabelsLocale?: ActivityLabelLocale;
@@ -29,6 +31,7 @@ export type EmailAdapterOptions = {
   pythonBinary?: string;
   now?: () => Date;
   skipAttachments?: boolean;
+  markAllSeenOnConnect?: boolean;
 };
 
 type EmailWorkerPollResult = {
@@ -45,6 +48,7 @@ type EmailWorkerMessage = {
   cc: string[];
   subject: string;
   body: string;
+  body_html?: string;
   date: string;
   in_reply_to: string;
   references: string[];
@@ -80,7 +84,9 @@ export class EmailAdapter implements ChannelAdapter {
   readonly #username: string;
   readonly #password: string;
   readonly #ownAddress: string;
+  readonly #homeAddress: string | undefined;
   readonly #allowedSenders: string[];
+  readonly #allowAllUsers: boolean;
   readonly #pollIntervalSeconds: number;
   readonly #mediaRoot: string | undefined;
   readonly #activityLabelsLocale: ActivityLabelLocale;
@@ -88,6 +94,7 @@ export class EmailAdapter implements ChannelAdapter {
   readonly #pythonBinary: string;
   readonly #now: () => Date;
   readonly #skipAttachments: boolean;
+  readonly #markAllSeenOnConnect: boolean;
 
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #running = false;
@@ -119,7 +126,9 @@ export class EmailAdapter implements ChannelAdapter {
     this.#username = options.username;
     this.#password = options.password;
     this.#ownAddress = options.ownAddress;
+    this.#homeAddress = options.homeAddress;
     this.#allowedSenders = (options.allowedSenders ?? []).map((s) => s.toLowerCase());
+    this.#allowAllUsers = options.allowAllUsers ?? false;
     this.#pollIntervalSeconds = options.pollIntervalSeconds ?? 15;
     this.#mediaRoot = options.mediaRoot;
     this.#activityLabelsLocale = options.activityLabelsLocale ?? "en";
@@ -127,11 +136,32 @@ export class EmailAdapter implements ChannelAdapter {
     this.#pythonBinary = options.pythonBinary ?? "python3";
     this.#now = options.now ?? (() => new Date());
     this.#skipAttachments = options.skipAttachments ?? false;
+    this.#markAllSeenOnConnect = options.markAllSeenOnConnect ?? false;
   }
 
   async start(handler: (message: ChannelMessage) => Promise<void>): Promise<void> {
     this.#handler = handler;
     this.#running = true;
+    if (this.#markAllSeenOnConnect) {
+      try {
+        await this.#runWorker<EmailWorkerPollResult>({
+          command: "poll",
+          args: {
+            imap_host: this.#imapHost,
+            imap_port: this.#imapPort,
+            username: this.#username,
+            password: this.#password,
+            allowed_senders: this.#allowedSenders,
+            own_address: this.#ownAddress,
+            mark_seen: true,
+            skip_attachments: true,
+            mark_all_seen_only: true
+          }
+        });
+      } catch {
+        // ignore
+      }
+    }
     this.#pollTimer = setInterval(async () => {
       try {
         await this.pollOnce();
@@ -167,6 +197,7 @@ export class EmailAdapter implements ChannelAdapter {
         password: this.#password,
         allowed_senders: this.#allowedSenders,
         own_address: this.#ownAddress,
+        allow_all_users: this.#allowAllUsers,
         mark_seen: true,
         skip_attachments: this.#skipAttachments
       }
@@ -289,6 +320,21 @@ export class EmailAdapter implements ChannelAdapter {
   async #emailToChannelMessage(email: EmailWorkerMessage): Promise<ChannelMessage | undefined> {
     const senderEmail = email.from;
     const subject = email.subject;
+
+    // Self-message filter
+    if (senderEmail.toLowerCase() === this.#ownAddress.toLowerCase()) {
+      return undefined;
+    }
+
+    // Automated-sender filter
+    const automatedHeaders = ["auto-submitted", "x-autoreply", "precedence"];
+    const isAutomated = automatedHeaders.some((h) =>
+      (email as unknown as Record<string, string>)[h] !== undefined
+    );
+    if (isAutomated) {
+      return undefined;
+    }
+
     const isReply = subject.toLowerCase().startsWith("re:");
     const cleanSubject = isReply ? subject.slice(3).trim() : subject;
 
@@ -491,7 +537,13 @@ function formatEmailBody(email: EmailWorkerMessage, isReply: boolean): string {
   if (!isReply && email.subject) {
     lines.push(`[Subject: ${email.subject}]`);
   }
-  lines.push(email.body);
+  if (email.body_html !== undefined && email.body_html.length > 0) {
+    lines.push(email.body);
+    lines.push("");
+    lines.push("[HTML version available but not displayed]");
+  } else {
+    lines.push(email.body);
+  }
   return lines.join("\n");
 }
 

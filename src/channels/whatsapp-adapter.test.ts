@@ -36,6 +36,7 @@ describe("WhatsAppAdapter", () => {
       adapter: new WhatsAppAdapter({
         authDir: join(tmpDir, "auth"),
         mediaRoot,
+        experimental: true,
         ...opts,
         socketFactory: async () => mock.socket as WASocket,
       }),
@@ -43,6 +44,13 @@ describe("WhatsAppAdapter", () => {
       socket: mock.socket,
     };
   }
+
+  it("throws if experimental flag is not set", async () => {
+    const { adapter } = createAdapter({ experimental: false });
+    await expect(adapter.start(async () => {})).rejects.toThrow(
+      "WhatsApp live adapter is experimental. Set experimental: true in config to enable."
+    );
+  });
 
   it("starts and stops cleanly", async () => {
     const { adapter, events } = createAdapter();
@@ -300,6 +308,28 @@ describe("WhatsAppAdapter", () => {
     expect(sentMessages[0]!.content.fileName).toBe("report.pdf");
   });
 
+  it("delivery.sendArtifact sends image when artifact kind is image", async () => {
+    const { adapter, events, socket } = createAdapter();
+    const sentMessages: { jid: string; content: any }[] = [];
+    socket.sendMessage = async (jid: string, content: any) => {
+      sentMessages.push({ jid, content });
+    };
+
+    await adapter.start(async () => {});
+    events.emit("connection.update", { connection: "open" });
+
+    await adapter.delivery!.sendArtifact(
+      { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+      { id: "art-2", path: "/tmp/photo.png", mimeType: "image/png", kind: "image", bytes: 2048, createdAt: new Date().toISOString() }
+    );
+
+    await adapter.stop();
+
+    expect(sentMessages.length).toBe(1);
+    expect(sentMessages[0]!.content.image).toBeDefined();
+    expect(sentMessages[0]!.content.caption).toContain("art-2");
+  });
+
   it("converts markdown to WhatsApp formatting in delivery", async () => {
     const { adapter, events, socket } = createAdapter();
     const sentMessages: { jid: string; content: any }[] = [];
@@ -370,6 +400,135 @@ describe("WhatsAppAdapter", () => {
 
     expect(received.length).toBe(1);
     expect(received[0]!.text).toBe("Photo caption");
+  });
+
+  it("receives an image message with no caption", async () => {
+    const { adapter, events } = createAdapter({
+      downloadMediaMessage: (async () => Buffer.from("fake-image-data")) as any,
+    } as any);
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    events.emit("messages.upsert", {
+      messages: [
+        {
+          key: { id: "msg-img-1", remoteJid: "971501234567@s.whatsapp.net", fromMe: false },
+          message: {
+            imageMessage: { mimetype: "image/jpeg" },
+          },
+          messageTimestamp: 1234567890,
+          pushName: "Test User",
+        },
+      ],
+      type: "notify",
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    await adapter.stop();
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.text).toBe("");
+    expect(received[0]!.attachments).toBeDefined();
+    expect(received[0]!.attachments!.length).toBe(1);
+    expect(received[0]!.attachments![0]!.kind).toBe("image");
+  });
+
+  it("receives a document message", async () => {
+    const { adapter, events } = createAdapter({
+      downloadMediaMessage: (async () => Buffer.from("fake-doc-data")) as any,
+    } as any);
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    events.emit("messages.upsert", {
+      messages: [
+        {
+          key: { id: "msg-doc-1", remoteJid: "971501234567@s.whatsapp.net", fromMe: false },
+          message: {
+            documentMessage: { mimetype: "application/pdf", fileName: "report.pdf" },
+          },
+          messageTimestamp: 1234567890,
+          pushName: "Test User",
+        },
+      ],
+      type: "notify",
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    await adapter.stop();
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.attachments).toBeDefined();
+    expect(received[0]!.attachments!.length).toBe(1);
+    expect(received[0]!.attachments![0]!.kind).toBe("document");
+  });
+
+  it("receives a video message", async () => {
+    const { adapter, events } = createAdapter({
+      downloadMediaMessage: (async () => Buffer.from("fake-video-data")) as any,
+    } as any);
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    events.emit("messages.upsert", {
+      messages: [
+        {
+          key: { id: "msg-vid-1", remoteJid: "971501234567@s.whatsapp.net", fromMe: false },
+          message: {
+            videoMessage: { mimetype: "video/mp4" },
+          },
+          messageTimestamp: 1234567890,
+          pushName: "Test User",
+        },
+      ],
+      type: "notify",
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    await adapter.stop();
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.attachments).toBeDefined();
+    expect(received[0]!.attachments!.length).toBe(1);
+    expect(received[0]!.attachments![0]!.kind).toBe("video");
+  });
+
+  it("receives a voice message", async () => {
+    const { adapter, events } = createAdapter({
+      downloadMediaMessage: (async () => Buffer.from("fake-voice-data")) as any,
+    } as any);
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    events.emit("messages.upsert", {
+      messages: [
+        {
+          key: { id: "msg-voice-1", remoteJid: "971501234567@s.whatsapp.net", fromMe: false },
+          message: {
+            audioMessage: { mimetype: "audio/ogg; codecs=opus", ptt: true },
+          },
+          messageTimestamp: 1234567890,
+          pushName: "Test User",
+        },
+      ],
+      type: "notify",
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    await adapter.stop();
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.attachments).toBeDefined();
+    expect(received[0]!.attachments!.length).toBe(1);
+    expect(received[0]!.attachments![0]!.kind).toBe("voice");
   });
 
   it("records lastError on loggedOut disconnect", async () => {

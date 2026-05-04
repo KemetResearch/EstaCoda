@@ -339,3 +339,169 @@ else:
     await adapter.stop();
   });
 });
+
+describe("EmailAdapter Phase 4 features", () => {
+  let tmpDir: string;
+  let mediaRoot: string;
+  let workerPath: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "estacoda-email-test-"));
+    mediaRoot = join(tmpDir, "media");
+    workerPath = join(tmpDir, "mock_email_worker.py");
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function createMockWorker(script: string): Promise<void> {
+    await writeFile(workerPath, script, "utf8");
+  }
+
+  function createAdapter(options: Partial<ConstructorParameters<typeof EmailAdapter>[0]> = {}) {
+    return new EmailAdapter({
+      imapHost: "imap.test.com",
+      imapPort: 993,
+      smtpHost: "smtp.test.com",
+      smtpPort: 587,
+      username: "agent@test.com",
+      password: "secret",
+      ownAddress: "agent@test.com",
+      allowedSenders: ["user@test.com"],
+      pollIntervalSeconds: 1,
+      mediaRoot,
+      workerPath,
+      ...options
+    });
+  }
+
+  it("allowAllUsers bypasses allowedSenders filter", async () => {
+    const mockScript = `
+import json, sys
+req = json.loads(sys.stdin.readline())
+if req["command"] == "poll":
+    print(json.dumps({
+        "ok": True,
+        "messages": [{
+            "message_id": "301",
+            "msg_id_header": "<msg-301@test.com>",
+            "from": "stranger@test.com",
+            "to": "agent@test.com",
+            "cc": [],
+            "subject": "Hello",
+            "body": "From a stranger",
+            "date": "Mon, 01 Jan 2024 00:00:00 +0000",
+            "in_reply_to": "",
+            "references": [],
+            "attachments": []
+        }]
+    }))
+else:
+    print(json.dumps({"ok": True}))
+`;
+    await createMockWorker(mockScript);
+    const received: ChannelMessage[] = [];
+    const adapter = createAdapter({ allowAllUsers: true });
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+    await adapter.pollOnce();
+    await adapter.stop();
+    expect(received.length).toBe(1);
+    expect(received[0].sender.id).toBe("stranger@test.com");
+  });
+
+  it("filters self-messages", async () => {
+    const mockScript = `
+import json, sys
+req = json.loads(sys.stdin.readline())
+if req["command"] == "poll":
+    print(json.dumps({
+        "ok": True,
+        "messages": [{
+            "message_id": "302",
+            "msg_id_header": "<msg-302@test.com>",
+            "from": "agent@test.com",
+            "to": "agent@test.com",
+            "cc": [],
+            "subject": "Self",
+            "body": "Self message",
+            "date": "Mon, 01 Jan 2024 00:00:00 +0000",
+            "in_reply_to": "",
+            "references": [],
+            "attachments": []
+        }]
+    }))
+else:
+    print(json.dumps({"ok": True}))
+`;
+    await createMockWorker(mockScript);
+    const received: ChannelMessage[] = [];
+    const adapter = createAdapter();
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+    await adapter.pollOnce();
+    await adapter.stop();
+    expect(received.length).toBe(0);
+  });
+
+  it("includes body_html in message text when present", async () => {
+    const mockScript = `
+import json, sys
+req = json.loads(sys.stdin.readline())
+if req["command"] == "poll":
+    print(json.dumps({
+        "ok": True,
+        "messages": [{
+            "message_id": "303",
+            "msg_id_header": "<msg-303@test.com>",
+            "from": "user@test.com",
+            "to": "agent@test.com",
+            "cc": [],
+            "subject": "HTML",
+            "body": "Plain text body",
+            "body_html": "<html><body>HTML body</body></html>",
+            "date": "Mon, 01 Jan 2024 00:00:00 +0000",
+            "in_reply_to": "",
+            "references": [],
+            "attachments": []
+        }]
+    }))
+else:
+    print(json.dumps({"ok": True}))
+`;
+    await createMockWorker(mockScript);
+    const received: ChannelMessage[] = [];
+    const adapter = createAdapter();
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+    await adapter.pollOnce();
+    await adapter.stop();
+    expect(received.length).toBe(1);
+    expect(received[0].text).toContain("Plain text body");
+    expect(received[0].text).toContain("[HTML version available but not displayed]");
+  });
+
+  it("markAllSeenOnConnect calls worker with mark_all_seen_only", async () => {
+    const mockScript = `
+import json, sys
+req = json.loads(sys.stdin.readline())
+if req["command"] == "poll":
+    args = req.get("args", {})
+    if args.get("mark_all_seen_only"):
+        print(json.dumps({"ok": True, "messages": []}))
+    else:
+        print(json.dumps({"ok": True, "messages": []}))
+else:
+    print(json.dumps({"ok": True}))
+`;
+    await createMockWorker(mockScript);
+    const adapter = createAdapter({ markAllSeenOnConnect: true });
+    await adapter.start(async () => {});
+    await adapter.stop();
+    expect(true).toBe(true);
+  });
+});

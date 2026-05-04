@@ -257,6 +257,9 @@ export type EstaCodaConfig = {
   };
   channels?: {
     telegram?: TelegramChannelConfig;
+    discord?: DiscordChannelConfig;
+    email?: EmailChannelConfig;
+    whatsapp?: WhatsAppChannelConfig;
   };
 };
 
@@ -277,6 +280,40 @@ export type TelegramChannelConfig = {
     createdAt?: string;
     expiresAt?: string;
   };
+};
+
+export type DiscordChannelConfig = {
+  enabled?: boolean;
+  botTokenEnv?: string;
+  allowedUsers?: string[];
+  allowedGuilds?: string[];
+  allowedChannels?: string[];
+  freeResponseChannels?: string[];
+};
+
+export type EmailChannelConfig = {
+  enabled?: boolean;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+  username?: string;
+  passwordEnv?: string;
+  ownAddress?: string;
+  homeAddress?: string;
+  allowedSenders?: string[];
+  allowAllUsers?: boolean;
+  pollIntervalSeconds?: number;
+  maxAttachmentBytes?: number;
+};
+
+export type WhatsAppChannelConfig = {
+  enabled?: boolean;
+  experimental?: boolean;
+  authDir?: string;
+  allowedUsers?: string[];
+  pairingMode?: "qr" | "code";
+  pairingCodePhoneNumber?: string;
 };
 
 export type LoadedRuntimeConfig = {
@@ -327,6 +364,18 @@ export type LoadedRuntimeConfig = {
   };
   channels: {
     telegram: TelegramChannelConfig & {
+      ready: boolean;
+      missing?: string[];
+    };
+    discord: DiscordChannelConfig & {
+      ready: boolean;
+      missing?: string[];
+    };
+    email: EmailChannelConfig & {
+      ready: boolean;
+      missing?: string[];
+    };
+    whatsapp: WhatsAppChannelConfig & {
       ready: boolean;
       missing?: string[];
     };
@@ -534,6 +583,21 @@ export async function loadRuntimeConfig(options: {
         ...telegram,
         ready: telegram.enabled === true && telegram.botTokenEnv !== undefined && telegramMissing.length === 0,
         missing: telegramMissing.length === 0 ? undefined : telegramMissing
+      },
+      discord: {
+        ...(config.channels?.discord ?? {}),
+        ready: false,
+        missing: []
+      },
+      email: {
+        ...(config.channels?.email ?? {}),
+        ready: false,
+        missing: []
+      },
+      whatsapp: {
+        ...(config.channels?.whatsapp ?? {}),
+        ready: false,
+        missing: []
       }
     }
   };
@@ -598,6 +662,18 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       telegram: {
         ...(merged.channels?.telegram ?? {}),
         ...(config.channels?.telegram ?? {})
+      },
+      discord: {
+        ...(merged.channels?.discord ?? {}),
+        ...(config.channels?.discord ?? {})
+      },
+      email: {
+        ...(merged.channels?.email ?? {}),
+        ...(config.channels?.email ?? {})
+      },
+      whatsapp: {
+        ...(merged.channels?.whatsapp ?? {}),
+        ...(config.channels?.whatsapp ?? {})
       }
     }
   }), {}));
