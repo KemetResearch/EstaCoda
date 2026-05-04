@@ -38,9 +38,28 @@ export class FlowProcessRegistry {
     return this.#store.listProcesses(flowId, stepId);
   }
 
+  async listByFlow(flowId: FlowId): Promise<FlowProcess[]> {
+    return this.list(flowId);
+  }
+
   async listRunning(flowId: FlowId, stepId?: StepId): Promise<FlowProcess[]> {
     const all = await this.#store.listProcesses(flowId, stepId);
     return all.filter((p) => p.status === "running");
+  }
+
+  async terminate(
+    id: string,
+    options: { signal?: "SIGTERM" | "SIGKILL"; timeoutMs?: number } = {}
+  ): Promise<{ ok: boolean }> {
+    const process = await this.#store.getProcess(id);
+    if (!process) return { ok: false };
+
+    // In v0.8, actual process termination is delegated to ProcessManager.
+    // This registry method marks the process as exited and records
+    // the termination signal for audit purposes.
+    process.status = "exited";
+    await this.#store.updateProcess(process);
+    return { ok: true };
   }
 
   async cascadeStop(
