@@ -1,8 +1,8 @@
-# EstaCoda v0.8 Release Notes
+# EstaCoda v0.0.3 Release Notes
 
 ## Summary
 
-v0.8 introduces durable, operator-controllable multi-step execution through TaskFlow. Agent work can now span multiple steps, survive process restarts, and be observed and steered by the operator at any point.
+v0.0.3 introduces durable, operator-controllable multi-step execution through TaskFlow. Agent work can now span multiple steps, survive process restarts, and be observed and steered by the operator at any point.
 
 ## What's New
 
@@ -44,7 +44,7 @@ v0.8 introduces durable, operator-controllable multi-step execution through Task
 ### Schema Migrations
 
 - `SQLiteSessionDB` now tracks schema versions.
-- v0.8 introduces migrations v1–v3 for TaskFlow tables and operator event consumption columns.
+- v0.0.3 introduces migrations v1–v3 for TaskFlow tables and operator event consumption columns.
 - Migrations are idempotent and include pre-migration backups.
 
 ## Validation
@@ -56,17 +56,17 @@ v0.8 introduces durable, operator-controllable multi-step execution through Task
 ## Known Limitations
 
 - TaskFlow requires SQLite session persistence; in-memory sessions do not support flows.
-- Checkpoints are recorded but not restorable in v0.8.
+- Checkpoints are recorded but not restorable in v0.0.3.
 - Flows are scoped to a single session; no cross-session resumption.
 - Lock service is single-process SQLite only.
 - Auto-compaction is disabled by default.
 - No automatic retry without operator `/retry`.
 - No visual workflow builder or marketplace.
-- No channel integrations in v0.8.
-- Telegram/channel integrations are out of scope for v0.8.
+- No channel integrations in v0.0.3.
+- Telegram/channel integrations are out of scope for v0.0.3.
 - No background automation without explicit cron scheduling.
 
-## Files Changed in v0.8
+## Files Changed in v0.0.3
 
 TaskFlow implementation spans 15+ files:
 
