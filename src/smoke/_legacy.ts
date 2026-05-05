@@ -8549,6 +8549,27 @@ const imageSetupLoopRuntime: Runtime = {
       telegramDelivery: "not-configured"
     };
   },
+  getStatus: () => ({
+    kind: "status" as const,
+    agentName: "EstaCoda",
+    model: { provider: "unconfigured", id: "smoke-model" },
+    securityMode: "adaptive",
+    skillCount: 0,
+    toolCount: 1,
+    mcp: { active: 0, total: 0 },
+    taskflowActive: false,
+    warnings: [],
+  }),
+  getModelInfo: () => ({
+    kind: "kv" as const,
+    title: "Model",
+    entries: [
+      { key: "provider", value: "unconfigured" },
+      { key: "model", value: "smoke-model" },
+      { key: "context window", value: "unknown" },
+      { key: "security mode", value: "adaptive" },
+    ],
+  }),
   trustWorkspace: async () => {},
   isWorkspaceTrusted: async () => true,
   revokeWorkspaceTrust: async () => true,

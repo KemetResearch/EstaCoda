@@ -82,6 +82,7 @@ import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop } from "./provider-turn-loop.js";
 import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
+import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel } from "../ui/view-models/builders.js";
 
 export type RuntimeOptions = {
   theme: ThemeDefinition;
@@ -147,6 +148,8 @@ export type RuntimeOptions = {
 
 export type Runtime = {
   describe(): string;
+  getStatus(): import("../contracts/view-model.js").StatusViewModel;
+  getModelInfo(): import("../contracts/view-model.js").KeyValueBlockViewModel;
   tools(): import("../contracts/tool.js").ToolDefinition[];
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
@@ -864,6 +867,33 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         taskflow ? `taskflow: active (SQLite)` : undefined,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
+    },
+    getStatus() {
+      return buildStatusViewModel({
+        agentName: options.theme.branding.responseLabel,
+        model: { provider: options.model.provider, id: options.model.id },
+        securityMode: `${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
+        skillCount: sessionSkillCatalog.length,
+        skillAutonomy: options.skillAutonomy ?? "suggest",
+        toolCount: toolRegistry.list().length,
+        mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
+        mcpTotal: loadedMcpServers.length,
+        taskflowActive: taskflow !== undefined,
+        warnings: skillLoadWarnings.map((message) =>
+          buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
+        ),
+      });
+    },
+    getModelInfo() {
+      return buildKeyValueBlockViewModel({
+        title: "Model",
+        entries: [
+          kv("provider", options.model.provider),
+          kv("model", options.model.id),
+          kv("context window", options.model.contextWindowTokens ?? "unknown"),
+          kv("security mode", activeSecurityMode),
+        ],
+      });
     },
     taskflow
   };

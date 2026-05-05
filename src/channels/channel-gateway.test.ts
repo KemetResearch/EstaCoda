@@ -25,6 +25,22 @@ function makeMessage(text: string, overrides?: Partial<ChannelMessage>): Channel
 function createMinimalRuntime(): Runtime {
   return {
     describe: () => "minimal",
+    getStatus: () => ({
+      kind: "status" as const,
+      agentName: "Test",
+      model: { provider: "test", id: "test" },
+      securityMode: "adaptive",
+      skillCount: 0,
+      toolCount: 0,
+      mcp: { active: 0, total: 0 },
+      taskflowActive: false,
+      warnings: [],
+    }),
+    getModelInfo: () => ({
+      kind: "kv" as const,
+      title: "Model",
+      entries: [{ key: "provider", value: "test" }],
+    }),
     tools: () => [],
     skills: () => [],
     latestResumeNote: async () => undefined,

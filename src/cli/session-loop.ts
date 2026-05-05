@@ -11,9 +11,11 @@ import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderSlashMenu, renderToolsMenu } from "./slash-menu.js";
+import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildToolsMenuViewModel } from "./slash-menu.js";
+import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
+import { createSessionRenderer } from "./session-renderer.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -29,6 +31,7 @@ export type SessionLoopOptions = {
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
+  const renderer = createSessionRenderer({ output });
   let runtime = options.runtime;
   let activityRenderer = new ToolActivityRenderer({
     tools: runtime.tools()
@@ -70,6 +73,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           text,
           runtime,
           output,
+          renderer,
           refreshRuntime: options.refreshRuntime,
           switchRuntime: options.switchRuntime,
           workspaceRoot: options.workspaceRoot
@@ -159,6 +163,7 @@ async function handleSlashCommand(input: {
   refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   output: NodeJS.WritableStream;
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   workspaceRoot?: string;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
@@ -167,18 +172,16 @@ async function handleSlashCommand(input: {
 
   switch (canonical) {
     case "":
-      input.output.write(`${renderSlashMenu(input.runtime)}\n\n`);
+      input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime))}\n\n`);
       return false;
     case "help":
-      input.output.write(`${renderSessionHelp()}\n\n`);
+      input.output.write(`${input.renderer.render(buildSessionHelpViewModel())}\n\n`);
       return false;
     case "status":
-      // TODO(phase-7): migrate to StatusViewModel + renderer
-      input.output.write(`${input.runtime.describe()}\n\n`);
+      input.output.write(`${input.renderer.render(input.runtime.getStatus())}\n\n`);
       return false;
     case "model":
-      // TODO(phase-7): migrate to ModelViewModel + renderer
-      input.output.write(`${input.runtime.describe()}\n\n`);
+      input.output.write(`${input.renderer.render(input.runtime.getModelInfo())}\n\n`);
       return false;
     case "reset":
       if (input.refreshRuntime === undefined) {
@@ -196,7 +199,7 @@ async function handleSlashCommand(input: {
         ].join("\n")
       };
     case "tools":
-      input.output.write(`${renderToolsMenu(input.runtime, args.join(" "))}\n\n`);
+      input.output.write(`${input.renderer.render(buildToolsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
     case "browser": {
       const result = await handleBrowserCommand(input, args);
@@ -210,7 +213,7 @@ async function handleSlashCommand(input: {
       input.output.write(`${await renderMemoryPromotions(input.runtime)}\n\n`);
       return false;
     case "skills":
-      input.output.write(`${renderSlashMenu(input.runtime, args.join(" "))}\n\n`);
+      input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
     case "reload-mcp":
       if (input.refreshRuntime === undefined) {
@@ -381,7 +384,7 @@ async function handleSlashCommand(input: {
       return true;
     default:
       if (renderSlashMenu(input.runtime, command).startsWith("No slash commands or skills match") === false) {
-        input.output.write(`${renderSlashMenu(input.runtime, command)}\n\n`);
+        input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime, command))}\n\n`);
         return false;
       }
 
@@ -591,14 +594,6 @@ async function handleTaskFlowCommand(input: {
     default:
       return `Unknown flow command: ${subcommand}\nUse /flow help for available commands.`;
   }
-}
-
-function renderSessionHelp(): string {
-  const commands = commandRegistry.list({ scope: "slash" });
-  return [
-    "EstaCoda session commands",
-    ...commands.map((command) => `/${command.name.padEnd(8)}${command.description}`),
-  ].join("\n");
 }
 
 async function renderSecurityAudit(runtime: Runtime, options: { debug: boolean }): Promise<string> {

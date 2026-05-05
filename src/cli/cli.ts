@@ -84,6 +84,14 @@ import {
   runChannelsList,
   runChannelsStatus
 } from "./gateway-commands.js";
+import {
+  renderSettingsOverview,
+  renderSkillsSettings,
+  renderSecuritySettings,
+  renderBrowserSettings,
+  renderTelegramSettings,
+  renderUiSettings,
+} from "./settings-view-models.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -334,33 +342,19 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
 
   if (category === "skills") {
     const locale = localeForConfig(config);
-    const current = formatSkillAutonomy(config.skills.autonomy, locale);
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        "EstaCoda settings: workflow learning",
-        `Mode: ${current.label} (${current.value})`,
-        `Description: ${current.description}`,
-        `External dirs: ${config.skills.externalDirs.join(", ") || "none"}`,
-        "Change with: estacoda settings skills --autonomy none|suggest|proactive|autonomous"
-      ].join("\n")
+      output: renderSkillsSettings(config, locale)
     };
   }
 
   if (category === "security") {
     const locale = localeForConfig(config);
-    const current = formatSecurityMode(config.security.approvalMode, locale);
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        "EstaCoda settings: security",
-        `Approval mode: ${current.label} (${current.value})`,
-        `Description: ${current.description}`,
-        `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
-        "Change with: estacoda security setup --mode strict|adaptive|open"
-      ].join("\n")
+      output: renderSecuritySettings(config, locale)
     };
   }
 
@@ -368,13 +362,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        "EstaCoda settings: browser",
-        `Backend: ${config.browser.backend}`,
-        config.browser.cdpUrl === undefined ? undefined : `CDP URL: ${config.browser.cdpUrl}`,
-        `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
-        "Change with: estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222"
-      ].filter((line) => line !== undefined).join("\n")
+      output: renderBrowserSettings(config.browser, config.web)
     };
   }
 
@@ -398,16 +386,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        "EstaCoda settings: telegram",
-        `Status: ${config.channels.telegram.ready ? "ready" : config.channels.telegram.enabled ? "configured, missing credentials" : "disabled"}`,
-        config.channels.telegram.botTokenEnv === undefined ? undefined : `Bot token env: ${config.channels.telegram.botTokenEnv}`,
-        `Allowed users: ${(config.channels.telegram.allowedUserIds ?? []).join(", ") || "none"}`,
-        `Allowed chats: ${(config.channels.telegram.allowedChatIds ?? []).join(", ") || "none"}`,
-        config.channels.telegram.ready
-          ? "Next: start the gateway with estacoda gateway run."
-          : "Change with: estacoda telegram setup"
-      ].filter((line) => line !== undefined).join("\n")
+      output: renderTelegramSettings(config.channels.telegram)
     };
   }
 
@@ -439,52 +418,14 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        "EstaCoda settings: ui",
-        `Language: ${config.ui.language}`,
-        `Flavor: ${config.ui.flavor}`,
-        `Activity labels: ${config.ui.activityLabels}`,
-        "Change with: estacoda settings ui --language ar --flavor arabic-light --activity-labels ar"
-      ].join("\n")
+      output: renderUiSettings(config.ui)
     };
   }
 
   return {
     handled: true,
     exitCode: 0,
-    output: [
-      "EstaCoda settings",
-      `Provider: ${config.model.provider}/${config.model.id}`,
-      `Security: ${config.security.approvalMode}`,
-      `Profile: ${config.profile.mode} (${config.profile.responseLanguage})`,
-      `UI: ${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`,
-      `Workflow learning: ${config.skills.autonomy}`,
-      `Voice: TTS ${config.tts.provider}, STT ${config.stt.provider}`,
-      `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
-      `Browser backend: ${config.browser.backend}`,
-      `MCP servers: ${Object.keys(config.mcp.servers).length}`,
-      `Config sources: ${config.sources.join(", ") || "none"}`,
-      "",
-      "Categories:",
-      "  estacoda settings provider",
-      "  estacoda settings security",
-      "  estacoda settings profile",
-      "  estacoda settings ui",
-      "  estacoda settings skills",
-      "  estacoda settings browser",
-      "  estacoda settings voice",
-      "  estacoda settings image",
-      "  estacoda settings telegram",
-      "",
-      "Common changes:",
-      "  estacoda setup --advanced --provider <provider> --model <model>",
-      "  estacoda local setup --base-url http://localhost:11434/v1 --model <model>",
-      "  estacoda voice setup --tts-provider edge --stt-provider local",
-      "  estacoda image setup --provider fal --api-key-env FAL_KEY",
-      "  estacoda security setup --mode adaptive",
-      "  estacoda settings skills --autonomy suggest",
-      "  estacoda verify"
-    ].join("\n")
+    output: renderSettingsOverview(config)
   };
 }
 
