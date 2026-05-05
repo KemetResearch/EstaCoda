@@ -1,6 +1,7 @@
 import { CronStore, type CronJob } from "./cron-store.js";
 import type { CronExecutionStore } from "./cron-execution-store.js";
 import { renderCronJobs } from "./cron-tools.js";
+import { commandRegistry } from "../cli/command-registry.js";
 
 export async function runCronCommand(input: {
   args: string[];
@@ -13,21 +14,17 @@ export async function runCronCommand(input: {
   const [command, ...rest] = input.args;
 
   if (command === undefined || command === "help") {
+    const subcommands = commandRegistry.list({ scope: "both" });
+    const cronCommands = subcommands.filter((cmd) => cmd.category === "Cron");
+    const maxWidth = Math.max(...cronCommands.map((c) => c.name.length), 6);
     return {
       ok: true,
       output: [
         "EstaCoda cron",
-        "  cron add <schedule> \"<prompt>\" [--name name] [--skill skill] [--delivery local] [--script path] [--script-arg arg]",
-        "  cron edit <job-id> [--schedule expr] [--prompt text] [--script path] [--clear-script] [--skill skill] [--add-skill skill] [--remove-skill skill] [--clear-skills]",
-        "  cron list",
-        "  cron show <job-id>",
-        "  cron history [job-id] [--limit N]",
-        "  cron pause <job-id>",
-        "  cron resume <job-id>",
-        "  cron run <job-id>",
-        "  cron remove <job-id>",
-        "  cron tick"
-      ].join("\n")
+        ...cronCommands.map(
+          (cmd) => `  cron ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
+        ),
+      ].join("\n"),
     };
   }
 

@@ -70,6 +70,7 @@ import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import { evolutionCommand } from "./evolution-commands.js";
 import { flowCommand } from "./flow-commands.js";
+import { commandRegistry } from "./command-registry.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -2788,34 +2789,12 @@ async function channels(options: CliOptions, args: string[]): Promise<CliCommand
 }
 
 function help(): string {
+  const commands = commandRegistry.list({ scope: "cli" });
+  const maxWidth = Math.max(...commands.map((c) => c.name.length), 8);
   return [
     "EstaCoda commands",
-    "  estacoda setup   Run the guided setup wizard",
-    "  estacoda setup --advanced --provider deepseek --model deepseek-chat",
-    "  estacoda verify  Check setup readiness",
-    "  estacoda settings View setup categories",
-    "  estacoda profile View or set agent profile",
-    "  estacoda web     Configure web extraction",
-    "  estacoda browser Configure browser backend",
-    "  estacoda local   Configure local Ollama/OpenAI-compatible models",
-    "  estacoda voice   Configure TTS/STT voice tools",
-    "  estacoda security View or configure approval mode",
-    "  estacoda cron    Manage scheduled tasks",
-    "  estacoda mcp     Configure MCP servers",
-    "  estacoda acp     Start the ACP stdio server",
-    "  estacoda telegram Configure Telegram channel",
-    "  estacoda telegram pair Pair a Telegram chat",
-    "  estacoda handoff telegram Generate a handoff code for Telegram",
-    "  estacoda gateway Start channel gateway",
-    "  estacoda channels List and inspect channels",
-    "  estacoda sessions List and manage sessions",
-    "  estacoda model   Show current model",
-    "  estacoda tools   Show available tools by toolset",
-    "  estacoda doctor  Check setup health",
-    "  estacoda doctor --live  Make a tiny live provider call",
-    "  estacoda doctor --live-tools  Verify live provider tool-calling",
-    "  estacoda trace   List, inspect, and timeline trajectories",
-    "  estacoda eval    Run deterministic eval fixtures",
-    "  estacoda eval <fixture-id>  Run a single fixture"
+    ...commands.map(
+      (cmd) => `  estacoda ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
+    ),
   ].join("\n");
 }

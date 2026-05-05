@@ -11,7 +11,8 @@ import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
+import { renderSlashMenu, renderToolsMenu } from "./slash-menu.js";
+import { commandRegistry } from "./command-registry.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
 export type SessionLoopOptions = {
@@ -591,9 +592,10 @@ async function handleTaskFlowCommand(input: {
 }
 
 function renderSessionHelp(): string {
+  const commands = commandRegistry.list({ scope: "slash" });
   return [
     "EstaCoda session commands",
-    ...SESSION_COMMANDS.map((command) => `/${command.name.padEnd(8)}${command.description}`)
+    ...commands.map((command) => `/${command.name.padEnd(8)}${command.description}`),
   ].join("\n");
 }
 
