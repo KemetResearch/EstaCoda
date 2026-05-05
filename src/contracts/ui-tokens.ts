@@ -69,6 +69,7 @@ export interface TokenBranding {
   helpHeader: string;
   taglinePrimary: string;
   taglineSecondary: string;
+  promptPrefix?: string;
 }
 
 export interface TokenBehavior {

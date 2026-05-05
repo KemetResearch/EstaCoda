@@ -22,6 +22,7 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import { createSessionRenderer } from "./session-renderer.js";
+import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 
 export type SessionLoopOptions = {
@@ -60,11 +61,21 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.once("SIGINT", onSigint);
 
   try {
-    output.write(`${runtime.describe()}\n\n`);
+    const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
+    const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
+    output.write(`${startupText}\n\n`);
     output.write("Type a message. Use /help for commands or /exit to leave.\n\n");
 
+    const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
+    const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
+    const useUnicode = renderer.capabilities.supportsUnicode;
+    const termWidth = renderer.capabilities.terminalWidth;
+
     while (true) {
-      const text = (await prompt("𓂀 > ")).trim();
+      const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+      output.write(`${topRule}\n`);
+      const text = (await prompt(colorPromptPrefix(promptPrefix, renderer.tokens, useColor))).trim();
+      output.write(`${topRule}\n`);
 
       if (text.length === 0) {
         continue;
@@ -1101,4 +1112,32 @@ function humanProviderIssue(errorClass: string | undefined): string {
     default:
       return errorClass;
   }
+}
+
+export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
+  const ruleChar = useUnicode ? "─" : "-";
+  const ruleLen = Math.max(0, width);
+  const rule = ruleChar.repeat(ruleLen);
+  if (!useColor) return rule;
+  return ansiColor(rule, tokens.contract.surface.borderSubtle);
+}
+
+export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useColor: boolean): string {
+  if (!useColor) return prefix;
+  return ansiColor(prefix, tokens.contract.palette.action);
+}
+
+function ansiColor(text: string, hex: string): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `\x1B[38;2;${r};${g};${b}m${text}\x1B[0m`;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  return {
+    r: (bigint >> 16) & 255,
+    g: (bigint >> 8) & 255,
+    b: bigint & 255,
+  };
 }

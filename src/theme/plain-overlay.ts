@@ -47,6 +47,7 @@ export const plainOverlay: TokenOverlay = {
     helpHeader: "Available Commands",
     taglinePrimary: "Kemet Research",
     taglineSecondary: "",
+    promptPrefix: "> ",
   },
   behavior: {
     allowEmoji: false,

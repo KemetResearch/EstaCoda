@@ -4,6 +4,7 @@
 
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
+import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { detectTerminalCapabilities } from "../ui/capabilities.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
@@ -11,6 +12,8 @@ import { resolveTokens } from "../theme/token-resolver.js";
 
 export interface SessionRenderer {
   render(viewModel: ViewModel): string;
+  tokens: ResolvedTokens;
+  capabilities: TerminalCapabilities;
 }
 
 export interface CreateSessionRendererOptions {
@@ -33,11 +36,12 @@ export function createSessionRenderer(options: CreateSessionRendererOptions = {}
     caps.isDumb ||
     !caps.supportsColor;
 
+  const tokens = resolveTokens(shouldUsePlain ? "plain" : "standard", options.theme ?? "dark", "kemetBlue");
+
   if (shouldUsePlain) {
-    return { render: renderPlain };
+    return { render: renderPlain, tokens, capabilities: caps };
   }
 
-  const tokens = resolveTokens("standard", options.theme ?? "dark", "kemetBlue");
   const renderer = new StandardRenderer({ tokens, capabilities: caps });
-  return { render: (vm) => renderer.render(vm) };
+  return { render: (vm) => renderer.render(vm), tokens, capabilities: caps };
 }

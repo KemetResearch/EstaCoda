@@ -82,7 +82,7 @@ import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop } from "./provider-turn-loop.js";
 import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
-import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel } from "../ui/view-models/builders.js";
+import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
 
 export type RuntimeOptions = {
   theme: ThemeDefinition;
@@ -150,6 +150,7 @@ export type Runtime = {
   describe(): string;
   getStatus(): import("../contracts/view-model.js").StatusViewModel;
   getModelInfo(): import("../contracts/view-model.js").KeyValueBlockViewModel;
+  getStartup(): import("../contracts/view-model.js").StartupViewModel;
   tools(): import("../contracts/tool.js").ToolDefinition[];
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
@@ -893,6 +894,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           kv("context window", options.model.contextWindowTokens ?? "unknown"),
           kv("security mode", activeSecurityMode),
         ],
+      });
+    },
+    getStartup() {
+      return buildStartupViewModel({
+        agentName: options.theme.branding.agentName,
+        taglines: [
+          options.theme.branding.taglinePrimary,
+          options.theme.branding.taglineSecondary,
+        ].filter((t) => t.length > 0),
+        model: { provider: options.model.provider, id: options.model.id },
+        readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => !s.snapshot.available)
+          ? "degraded"
+          : "ready",
+        warnings: skillLoadWarnings.map((message) =>
+          buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
+        ),
       });
     },
     taskflow

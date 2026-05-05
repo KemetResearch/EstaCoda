@@ -288,6 +288,90 @@ exports[`Session surfaces — /tools > renders in standard dark > tools-standard
 
 exports[`Session surfaces — /tools > renders in standard light > tools-standard light 1`] = `"• No tools match ""."`;
 
+exports[`Session surfaces — input rail-frame > renders horizontal rule in narrow width > rail-frame-narrow width 1`] = `"[38;2;42;42;42m────────────────────────────────────────[0m"`;
+
+exports[`Session surfaces — input rail-frame > renders horizontal rule in no Unicode > rail-frame-no Unicode 1`] = `"[38;2;42;42;42m--------------------------------------------------------------------------------[0m"`;
+
+exports[`Session surfaces — input rail-frame > renders horizontal rule in no color > rail-frame-no color 1`] = `"────────────────────────────────────────────────────────────────────────────────"`;
+
+exports[`Session surfaces — input rail-frame > renders horizontal rule in plain > rail-frame-plain 1`] = `"--------------------------------------------------------------------------------"`;
+
+exports[`Session surfaces — input rail-frame > renders horizontal rule in standard dark > rail-frame-standard dark 1`] = `"[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────[0m"`;
+
+exports[`Session surfaces — input rail-frame > renders horizontal rule in standard light > rail-frame-standard light 1`] = `"[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────[0m"`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in narrow width > prompt-prefix-narrow width 1`] = `"[38;2;64;224;208m𓂀 > [0m"`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in no Unicode > prompt-prefix-no Unicode 1`] = `"[38;2;64;224;208m𓂀 > [0m"`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in no color > prompt-prefix-no color 1`] = `"𓂀 > "`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in plain > prompt-prefix-plain 1`] = `"> "`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in standard dark > prompt-prefix-standard dark 1`] = `"[38;2;64;224;208m𓂀 > [0m"`;
+
+exports[`Session surfaces — input rail-frame > renders prompt prefix in standard light > prompt-prefix-standard light 1`] = `"[38;2;64;224;208m𓂀 > [0m"`;
+
+exports[`Session surfaces — picker > renders in narrow width > picker-narrow width 1`] = `
+"[1mSelect provider[0m
+   1) OpenRouter
+[2m     Multi-provider gateway[0m
+   2) Anthropic
+[2m     Direct Claude access[0m
+   3) OpenAI
+[2m     GPT models[0m"
+`;
+
+exports[`Session surfaces — picker > renders in no Unicode > picker-no Unicode 1`] = `
+"[1mSelect provider[0m
+   1) OpenRouter
+[2m     Multi-provider gateway[0m
+   2) Anthropic
+[2m     Direct Claude access[0m
+   3) OpenAI
+[2m     GPT models[0m"
+`;
+
+exports[`Session surfaces — picker > renders in no color > picker-no color 1`] = `
+"Select provider
+   1) OpenRouter
+     Multi-provider gateway
+   2) Anthropic
+     Direct Claude access
+   3) OpenAI
+     GPT models"
+`;
+
+exports[`Session surfaces — picker > renders in plain > picker-plain 1`] = `
+"Select provider
+   1) OpenRouter
+     Multi-provider gateway
+   2) Anthropic
+     Direct Claude access
+   3) OpenAI
+     GPT models"
+`;
+
+exports[`Session surfaces — picker > renders in standard dark > picker-standard dark 1`] = `
+"[1mSelect provider[0m
+   1) OpenRouter
+[2m     Multi-provider gateway[0m
+   2) Anthropic
+[2m     Direct Claude access[0m
+   3) OpenAI
+[2m     GPT models[0m"
+`;
+
+exports[`Session surfaces — picker > renders in standard light > picker-standard light 1`] = `
+"[1mSelect provider[0m
+   1) OpenRouter
+[2m     Multi-provider gateway[0m
+   2) Anthropic
+[2m     Direct Claude access[0m
+   3) OpenAI
+[2m     GPT models[0m"
+`;
+
 exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-narrow width 1`] = `
 "[38;2;76;175;80m[OK][0m [1m[0m
 
@@ -478,6 +562,69 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /handoff                 Generate a handoff code to share this session with Telegram           
 /clear                   Clear the terminal                                                    
 /exit                    End the session                                                       "
+`;
+
+exports[`Session surfaces — startup > renders in narrow width > startup-narrow width 1`] = `
+"
+[38;2;90;172;255m[1mEstaCoda[0m[0m
+
+[2mKemet Research[0m
+[2mالسيادة التكنولوجية العربية[0m
+
+│ model: [2mopenrouter/claude-sonnet-4[0m
+│ readiness: [38;2;76;175;80mready[0m"
+`;
+
+exports[`Session surfaces — startup > renders in no Unicode > startup-no Unicode 1`] = `
+"
+[38;2;90;172;255m[1mEstaCoda[0m[0m
+
+[2mKemet Research[0m
+[2mالسيادة التكنولوجية العربية[0m
+
+| model: [2mopenrouter/claude-sonnet-4[0m
+| readiness: [38;2;76;175;80mready[0m"
+`;
+
+exports[`Session surfaces — startup > renders in no color > startup-no color 1`] = `
+"
+EstaCoda
+
+Kemet Research
+السيادة التكنولوجية العربية
+
+│ model: openrouter/claude-sonnet-4
+│ readiness: ready"
+`;
+
+exports[`Session surfaces — startup > renders in plain > startup-plain 1`] = `
+"EstaCoda
+Kemet Research
+السيادة التكنولوجية العربية
+model: openrouter/claude-sonnet-4
+readiness: ready"
+`;
+
+exports[`Session surfaces — startup > renders in standard dark > startup-standard dark 1`] = `
+"
+[38;2;90;172;255m[1mEstaCoda[0m[0m
+
+[2mKemet Research[0m
+[2mالسيادة التكنولوجية العربية[0m
+
+│ model: [2mopenrouter/claude-sonnet-4[0m
+│ readiness: [38;2;76;175;80mready[0m"
+`;
+
+exports[`Session surfaces — startup > renders in standard light > startup-standard light 1`] = `
+"
+[38;2;0;87;217m[1mEstaCoda[0m[0m
+
+[2mKemet Research[0m
+[2mالسيادة التكنولوجية العربية[0m
+
+│ model: [2mopenrouter/claude-sonnet-4[0m
+│ readiness: [38;2;46;125;50mready[0m"
 `;
 
 exports[`Session surfaces — unknown-command fallback > renders in narrow width > unknown-command-narrow width 1`] = `"• No slash commands or skills match "/nonexistent"."`;

@@ -12,6 +12,8 @@ import { buildSessionHelpViewModel, renderSessionHelp } from "./session-help.js"
 import { createSessionRenderer } from "./session-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { buildStartupViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
+import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
 // ──────────────────────────────────────
 // Rendering context factories
@@ -307,4 +309,69 @@ describe("Backward-compatible string wrappers", () => {
     const output = renderSessionHelp();
     expect(typeof output).toBe("string");
   });
+});
+
+// ──────────────────────────────────────
+// Phase 9: Startup snapshots
+// ──────────────────────────────────────
+
+describe("Session surfaces — startup", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const vm = buildStartupViewModel({
+        agentName: "EstaCoda",
+        taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+        model: { provider: "openrouter", id: "claude-sonnet-4" },
+        readiness: "ready",
+      });
+      const output = ctx.renderer.render(vm);
+      expect(output).toMatchSnapshot(`startup-${ctx.name}`);
+    });
+  }
+});
+
+// ──────────────────────────────────────
+// Phase 9: Picker snapshots
+// ──────────────────────────────────────
+
+describe("Session surfaces — picker", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const vm = buildPickerViewModel({
+        title: "Select provider",
+        options: [
+          { id: "1", label: "OpenRouter", description: "Multi-provider gateway" },
+          { id: "2", label: "Anthropic", description: "Direct Claude access" },
+          { id: "3", label: "OpenAI", description: "GPT models" },
+        ],
+      });
+      const output = ctx.renderer.render(vm);
+      expect(output).toMatchSnapshot(`picker-${ctx.name}`);
+    });
+  }
+});
+
+// ──────────────────────────────────────
+// Phase 9: Input rail-frame snapshots
+// ──────────────────────────────────────
+
+describe("Session surfaces — input rail-frame", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders horizontal rule in ${ctx.name}`, () => {
+      const tokens = ctx.name === "plain" ? resolveTokens("plain", "light", "kemetBlue") : resolveTokens("standard", "dark", "kemetBlue");
+      const useColor = ctx.name !== "plain" && ctx.name !== "no color";
+      const useUnicode = ctx.name !== "plain" && ctx.name !== "no Unicode";
+      const width = ctx.name === "narrow width" ? 40 : 80;
+      const rule = renderHorizontalRule(tokens, useColor, useUnicode, width);
+      expect(rule).toMatchSnapshot(`rail-frame-${ctx.name}`);
+    });
+
+    it(`renders prompt prefix in ${ctx.name}`, () => {
+      const tokens = ctx.name === "plain" ? resolveTokens("plain", "light", "kemetBlue") : resolveTokens("standard", "dark", "kemetBlue");
+      const useColor = ctx.name !== "plain" && ctx.name !== "no color";
+      const prefix = tokens.contract.branding.promptPrefix ?? `${tokens.contract.glyph.prompt} `;
+      const colored = colorPromptPrefix(prefix, tokens, useColor);
+      expect(colored).toMatchSnapshot(`prompt-prefix-${ctx.name}`);
+    });
+  }
 });

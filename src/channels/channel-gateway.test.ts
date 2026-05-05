@@ -36,6 +36,14 @@ function createMinimalRuntime(): Runtime {
       taskflowActive: false,
       warnings: [],
     }),
+    getStartup: () => ({
+      kind: "startup" as const,
+      agentName: "Test",
+      taglines: [],
+      model: { provider: "test", id: "test" },
+      readiness: "ready" as const,
+      warnings: [],
+    }),
     getModelInfo: () => ({
       kind: "kv" as const,
       title: "Model",

@@ -37,5 +37,6 @@ export const kemetBlueSkin: TokenOverlay = {
     helpHeader: "𓂀 Available Commands",
     taglinePrimary: "☥ Kemet Research ☥",
     taglineSecondary: "السيادة التكنولوجية العربية",
+    promptPrefix: "𓂀 > ",
   },
 };
