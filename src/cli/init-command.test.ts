@@ -20,7 +20,7 @@ describe("bootstrapStateDirectories", () => {
     expect(existsSync(join(tempHome, ".estacoda", "memory"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "skills", "local"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "skills", ".evolution"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "capabilities"))).toBe(true);
+    expect(existsSync(join(tempHome, ".estacoda", "skills-packs"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "cron"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", ".backups"))).toBe(true);
   });

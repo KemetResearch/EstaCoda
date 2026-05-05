@@ -1,17 +1,17 @@
-import type { CapabilityManifest } from "../contracts/capability.js";
-import { validateCapabilityManifest } from "./capability-validator.js";
-import { validatePermissions } from "./permission-validator.js";
+import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+import { validateSkillsPackManifest } from "./skills-pack-validator.js";
+import { validateSkillsPackPermissions } from "./skills-pack-permission-validator.js";
 
-export type RiskClassification = {
+export type SkillsPackRiskClassification = {
   level: "low" | "medium" | "high" | "blocked";
   reasons: string[];
 };
 
-export function classifyRisk(manifest: CapabilityManifest): RiskClassification {
+export function classifySkillsPackRisk(manifest: SkillsPackManifest): SkillsPackRiskClassification {
   const reasons: string[] = [];
 
   // 1. Manifest validation
-  const validation = validateCapabilityManifest(manifest);
+  const validation = validateSkillsPackManifest(manifest);
   if (!validation.ok) {
     return {
       level: "blocked",
@@ -20,7 +20,7 @@ export function classifyRisk(manifest: CapabilityManifest): RiskClassification {
   }
 
   // 2. Permission findings
-  const permissionFindings = validatePermissions(manifest.permissions);
+  const permissionFindings = validateSkillsPackPermissions(manifest.permissions);
   if (permissionFindings.length > 0) {
     return {
       level: "blocked",
@@ -38,7 +38,7 @@ export function classifyRisk(manifest: CapabilityManifest): RiskClassification {
     if (hasShell || hasNetwork) {
       return {
         level: "blocked",
-        reasons: ["sandbox.defaultMode is \"allow\" with shell or network permissions requested"]
+        reasons: [`sandbox.defaultMode is "allow" with shell or network permissions requested`]
       };
     }
   }
@@ -65,13 +65,13 @@ export function classifyRisk(manifest: CapabilityManifest): RiskClassification {
     if (allowed.length === 0) {
       return {
         level: "blocked",
-        reasons: ["sandbox.shellMode is \"allow_list\" but permissions.shell.allowedCommands is empty"]
+        reasons: [`sandbox.shellMode is "allow_list" but permissions.shell.allowedCommands is empty`]
       };
     }
     if (allowed.includes("*")) {
       return {
         level: "blocked",
-        reasons: ["sandbox.shellMode is \"allow_list\" but permissions.shell.allowedCommands contains wildcard"]
+        reasons: [`sandbox.shellMode is "allow_list" but permissions.shell.allowedCommands contains wildcard`]
       };
     }
   }
@@ -82,13 +82,13 @@ export function classifyRisk(manifest: CapabilityManifest): RiskClassification {
     if (hosts.length === 0) {
       return {
         level: "blocked",
-        reasons: ["sandbox.networkMode is \"allow_list\" but permissions.network.allowedHosts is empty"]
+        reasons: [`sandbox.networkMode is "allow_list" but permissions.network.allowedHosts is empty`]
       };
     }
     if (hosts.includes("*")) {
       return {
         level: "blocked",
-        reasons: ["sandbox.networkMode is \"allow_list\" but permissions.network.allowedHosts contains wildcard"]
+        reasons: [`sandbox.networkMode is "allow_list" but permissions.network.allowedHosts contains wildcard`]
       };
     }
   }

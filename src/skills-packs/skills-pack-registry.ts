@@ -1,22 +1,22 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
-import type { CapabilityManifest, CapabilityStatus, InstalledCapability } from "../contracts/capability.js";
-import { validateCapabilityManifest } from "./capability-validator.js";
+import type { SkillsPackManifest, SkillsPackStatus, InstalledSkillsPack } from "../contracts/skills-pack.js";
+import { validateSkillsPackManifest } from "./skills-pack-validator.js";
 
-export type CapabilityRegistryOptions = {
+export type SkillsPackRegistryOptions = {
   homeDir: string;
 };
 
-export class CapabilityRegistry {
+export class SkillsPackRegistry {
   readonly #path: string;
 
-  constructor(options: CapabilityRegistryOptions) {
-    this.#path = join(options.homeDir, ".estacoda", "capabilities", "registry.jsonl");
+  constructor(options: SkillsPackRegistryOptions) {
+    this.#path = join(options.homeDir, ".estacoda", "skills-packs", "registry.jsonl");
   }
 
-  async install(manifest: CapabilityManifest, actor: string): Promise<{ ok: true; entry: InstalledCapability } | { ok: false; errors: string[] }> {
-    const validation = validateCapabilityManifest(manifest);
+  async install(manifest: SkillsPackManifest, actor: string): Promise<{ ok: true; entry: InstalledSkillsPack } | { ok: false; errors: string[] }> {
+    const validation = validateSkillsPackManifest(manifest);
     if (!validation.ok) {
       return { ok: false, errors: validation.errors };
     }
@@ -24,11 +24,11 @@ export class CapabilityRegistry {
     const entries = await this.#readEntries();
 
     if (entries.some((e) => e.manifest.id === manifest.id)) {
-      return { ok: false, errors: [`Capability "${manifest.id}" is already installed`] };
+      return { ok: false, errors: [`Skills pack "${manifest.id}" is already installed`] };
     }
 
     const status = this.#defaultStatus(manifest);
-    const entry: InstalledCapability = {
+    const entry: InstalledSkillsPack = {
       manifest,
       status,
       installedAt: new Date().toISOString(),
@@ -41,16 +41,16 @@ export class CapabilityRegistry {
     return { ok: true, entry };
   }
 
-  async list(): Promise<InstalledCapability[]> {
+  async list(): Promise<InstalledSkillsPack[]> {
     return this.#readEntries();
   }
 
-  async find(id: string): Promise<InstalledCapability | undefined> {
+  async find(id: string): Promise<InstalledSkillsPack | undefined> {
     const entries = await this.#readEntries();
     return entries.find((e) => e.manifest.id === id);
   }
 
-  async updateStatus(id: string, status: CapabilityStatus): Promise<boolean> {
+  async updateStatus(id: string, status: SkillsPackStatus): Promise<boolean> {
     const entries = await this.#readEntries();
     const entry = entries.find((e) => e.manifest.id === id);
     if (entry === undefined) {
@@ -80,7 +80,7 @@ export class CapabilityRegistry {
         result.push({ id: entry.manifest.id, errors: ["Status is error"] });
         continue;
       }
-      const validation = validateCapabilityManifest(entry.manifest);
+      const validation = validateSkillsPackManifest(entry.manifest);
       if (!validation.ok) {
         result.push({ id: entry.manifest.id, errors: validation.errors });
       }
@@ -89,25 +89,25 @@ export class CapabilityRegistry {
     return result;
   }
 
-  #defaultStatus(manifest: CapabilityManifest): CapabilityStatus {
+  #defaultStatus(manifest: SkillsPackManifest): SkillsPackStatus {
     if (manifest.provenance.origin === "external") {
       return "disabled";
     }
     return "enabled";
   }
 
-  async #readEntries(): Promise<InstalledCapability[]> {
+  async #readEntries(): Promise<InstalledSkillsPack[]> {
     if (!existsSync(this.#path)) {
       return [];
     }
 
     const text = await readFile(this.#path, "utf8");
     const lines = text.split("\n").filter((line) => line.trim().length > 0);
-    const entries: InstalledCapability[] = [];
+    const entries: InstalledSkillsPack[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       try {
-        const parsed = JSON.parse(lines[i]) as InstalledCapability;
+        const parsed = JSON.parse(lines[i]) as InstalledSkillsPack;
         entries.push(parsed);
       } catch {
         // eslint-disable-next-line no-console
@@ -118,7 +118,7 @@ export class CapabilityRegistry {
     return entries;
   }
 
-  async #writeEntries(entries: InstalledCapability[]): Promise<void> {
+  async #writeEntries(entries: InstalledSkillsPack[]): Promise<void> {
     await mkdir(dirname(this.#path), { recursive: true });
     const text = entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : "");
     const tempPath = `${this.#path}.tmp`;

@@ -1,6 +1,6 @@
-import type { PermissionManifest } from "../contracts/capability.js";
+import type { SkillsPackPermissionManifest } from "../contracts/skills-pack.js";
 
-export function validatePermissions(permissions: PermissionManifest): string[] {
+export function validateSkillsPackPermissions(permissions: SkillsPackPermissionManifest): string[] {
   const findings: string[] = [];
 
   // filesystem

@@ -63,9 +63,9 @@ import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
-import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
-import { CapabilityRegistry } from "../capabilities/capability-registry.js";
-import { validateCapabilityManifest } from "../capabilities/capability-validator.js";
+import { storeCapabilitySecret } from "../setup/capability-setup.js";
+import { SkillsPackRegistry } from "../skills-packs/skills-pack-registry.js";
+import { validateSkillsPackManifest } from "../skills-packs/skills-pack-validator.js";
 import { trace } from "./trace-commands.js";
 import { evalCommand } from "./eval-commands.js";
 import { proposalCommand } from "./proposal-commands.js";
@@ -308,24 +308,23 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
     extraWarnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
-  // Capability registry validation
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
-  const registry = new CapabilityRegistry({ homeDir });
-  const capabilities = await registry.list();
-  if (capabilities.length === 0) {
-    extraLines.push("Capability registry: not initialized");
+  // Skills pack registry validation
+  const registry = new SkillsPackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const skillsPacks = await registry.list();
+  if (skillsPacks.length === 0) {
+    extraLines.push("Skills pack registry: not initialized");
   } else {
     const validationErrors: string[] = [];
-    for (const entry of capabilities) {
-      const v = validateCapabilityManifest(entry.manifest);
+    for (const entry of skillsPacks) {
+      const v = validateSkillsPackManifest(entry.manifest);
       if (!v.ok) {
         validationErrors.push(`${entry.manifest.id} — ${v.errors.join(", ")}`);
       }
     }
     if (validationErrors.length > 0) {
-      extraWarnings.push(`Capability registry errors:\n${validationErrors.map((e) => `  - ${e}`).join("\n")}`);
+      extraWarnings.push(`Skills pack registry errors:\n${validationErrors.map((e) => `  - ${e}`).join("\n")}`);
     } else {
-      extraLines.push(`Capability registry: valid (${capabilities.length} installed)`);
+      extraLines.push(`Skills pack registry: valid (${skillsPacks.length} installed)`);
     }
   }
 
@@ -640,7 +639,8 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
         workspaceRoot: options.workspaceRoot
       })
     : undefined;
-  const warnings = [];
+  const warnings: string[] = [];
+  const notes: string[] = [];
 
   if (config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
     warnings.push("Configured model context window is below 64K tokens.");
@@ -668,21 +668,21 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
     warnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
-  // Capability registry health
-  const notes: string[] = [];
-  const capRegistry = new CapabilityRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
-  const capEntries = await capRegistry.list();
-  if (capEntries.length === 0) {
-    notes.push("Capability registry: no capabilities installed");
+  // Skills pack registry health
+  const spRegistry = new SkillsPackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const spEntries = await spRegistry.list();
+  if (spEntries.length === 0) {
+    notes.push("Skills pack registry: no skills packs installed");
   } else {
-    const errorCount = capEntries.filter((e) => e.status === "error").length;
-    const disabledCount = capEntries.filter((e) => e.status === "disabled").length;
-    notes.push(`Capability registry: ${capEntries.length} installed`);
+    notes.push(`Skills pack registry: ${spEntries.length} installed`);
+    const spErrors = await spRegistry.getErrors();
+    const errorCount = spErrors.length;
+    const disabledCount = spEntries.filter((e) => e.status === "disabled").length;
     if (errorCount > 0) {
-      warnings.push(`${errorCount} capability(ies) have status error`);
+      warnings.push(`${errorCount} skills pack(s) have status error`);
     }
     if (disabledCount > 0) {
-      notes.push(`${disabledCount} capability(ies) disabled`);
+      notes.push(`${disabledCount} skills pack(s) disabled`);
     }
   }
 

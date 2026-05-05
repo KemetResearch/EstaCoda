@@ -18,7 +18,7 @@ export const DEFAULT_STATE_DIRS = [
   "skills",
   "skills/local",
   "skills/.evolution",
-  "capabilities",
+  "skills-packs",
   "cron",
   ".backups"
 ];

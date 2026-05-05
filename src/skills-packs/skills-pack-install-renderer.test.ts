@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { renderCapabilityReview } from "./install-renderer.js";
-import type { CapabilityManifest } from "../contracts/capability.js";
-import type { RiskClassification } from "./risk-classifier.js";
+import { renderSkillsPackReview } from "./skills-pack-install-renderer.js";
+import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+import type { SkillsPackRiskClassification } from "./skills-pack-risk-classifier.js";
 
-function makeManifest(overrides?: Partial<CapabilityManifest>): CapabilityManifest {
+function makeManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManifest {
   return {
     id: "github-ops",
     name: "GitHub Operations",
     version: "0.1.0",
-    description: "GitHub operations capability",
-    capabilityType: "skill_pack",
+    description: "GitHub operations skills pack",
+    skillsPackType: "skill_pack",
     entrypoints: {},
     permissions: {
       filesystem: { read: ["project"], write: [".estacoda/artifacts"] },
@@ -33,13 +33,13 @@ function makeManifest(overrides?: Partial<CapabilityManifest>): CapabilityManife
   };
 }
 
-describe("renderCapabilityReview", () => {
+describe("renderSkillsPackReview", () => {
   it("matches the roadmap example format", () => {
     const manifest = makeManifest();
-    const risk: RiskClassification = { level: "medium", reasons: ["external reviewed provenance", "requests network access"] };
-    const output = renderCapabilityReview(manifest, risk);
+    const risk: SkillsPackRiskClassification = { level: "medium", reasons: ["external reviewed provenance", "requests network access"] };
+    const output = renderSkillsPackReview(manifest, risk);
 
-    expect(output).toContain("Capability: GitHub Operations");
+    expect(output).toContain("Skills pack: GitHub Operations");
     expect(output).toContain("Origin: external");
     expect(output).toContain("Version: 0.1.0");
     expect(output).toContain("Trust: unverified external");
@@ -65,8 +65,8 @@ describe("renderCapabilityReview", () => {
         secretsMode: "deny"
       }
     });
-    const risk: RiskClassification = { level: "low", reasons: ["read-only, bundled/local provenance, no secrets, no shell"] };
-    const output = renderCapabilityReview(manifest, risk);
+    const risk: SkillsPackRiskClassification = { level: "low", reasons: ["read-only, bundled/local provenance, no secrets, no shell"] };
+    const output = renderSkillsPackReview(manifest, risk);
 
     expect(output).toContain("Shell: denied");
     expect(output).toContain("Network: denied");
@@ -78,8 +78,8 @@ describe("renderCapabilityReview", () => {
     const manifest = makeManifest({
       provenance: { origin: "bundled", trustLevel: "first_party" }
     });
-    const risk: RiskClassification = { level: "low", reasons: [] };
-    const output = renderCapabilityReview(manifest, risk);
+    const risk: SkillsPackRiskClassification = { level: "low", reasons: [] };
+    const output = renderSkillsPackReview(manifest, risk);
 
     expect(output).toContain("Default status: enabled");
   });
