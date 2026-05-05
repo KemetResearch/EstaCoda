@@ -21,6 +21,7 @@ import {
   buildSecurityAuditViewModel,
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
+import { buildAssistantResponseViewModel } from "../ui/view-models/builders.js";
 import { createSessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
@@ -129,11 +130,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurn = undefined;
           });
 
-        output.write(`\n${response.label}: ${response.text}\n`);
-
-        if (response.progress.length > 0) {
-          output.write(`progress: ${response.progress.join(" -> ")}\n`);
-        }
+        const assistantVm = buildAssistantResponseViewModel({
+          label: response.label,
+          text: response.text,
+          matchedSkills: response.matchedSkills,
+          progress: response.progress,
+        });
+        output.write(renderer.render(assistantVm));
 
         const setupResolution = await maybeHandleSetupNeeded({
           runtime,

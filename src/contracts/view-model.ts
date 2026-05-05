@@ -209,6 +209,18 @@ export interface PlainFallbackViewModel {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Assistant Response
+// ─────────────────────────────────────────────────────────────
+
+export interface AssistantResponseViewModel {
+  readonly kind: "assistantResponse";
+  readonly label: string;
+  readonly text: string;
+  readonly matchedSkills?: readonly string[];
+  readonly progress?: readonly string[];
+}
+
+// ─────────────────────────────────────────────────────────────
 // Discriminated Union
 // ─────────────────────────────────────────────────────────────
 
@@ -224,4 +236,5 @@ export type ViewModel =
   | PickerViewModel
   | StartupViewModel
   | CommandResultViewModel
-  | PlainFallbackViewModel;
+  | PlainFallbackViewModel
+  | AssistantResponseViewModel;

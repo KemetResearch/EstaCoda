@@ -16,6 +16,7 @@ import type {
   TableViewModel,
   TimelineEvent,
   WarningErrorViewModel,
+  AssistantResponseViewModel,
   ViewModel,
 } from "../../contracts/view-model.js";
 
@@ -49,6 +50,8 @@ export function renderPlain(viewModel: ViewModel): string {
       return renderCommandResult(viewModel);
     case "plainFallback":
       return renderPlainFallback(viewModel);
+    case "assistantResponse":
+      return renderAssistantResponse(viewModel);
     default: {
       const _exhaustive: never = viewModel;
       return String(_exhaustive);
@@ -441,6 +444,29 @@ export function renderCommandResult(vm: CommandResultViewModel): string {
       lines.push("");
     }
     lines.pop(); // remove trailing blank line
+  }
+
+  return lines.join("\n");
+}
+
+// ──────────────────────────────────────
+// Assistant Response
+// ──────────────────────────────────────
+
+export function renderAssistantResponse(vm: AssistantResponseViewModel): string {
+  const plainLabel = /^[\x00-\x7F]+$/.test(vm.label) ? vm.label : "EstaCoda";
+  const lines: string[] = [
+    `${plainLabel}:`,
+    ...vm.text.split("\n"),
+  ];
+
+  if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
+    lines.push("");
+    lines.push(`skills: ${vm.matchedSkills.join(", ")}`);
+  }
+
+  if (vm.progress !== undefined && vm.progress.length > 0) {
+    lines.push(`progress: ${vm.progress.join(" -> ")}`);
   }
 
   return lines.join("\n");

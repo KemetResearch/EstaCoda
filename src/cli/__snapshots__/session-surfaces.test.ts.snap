@@ -288,6 +288,76 @@ exports[`Session surfaces — /tools > renders in standard dark > tools-standard
 
 exports[`Session surfaces — /tools > renders in standard light > tools-standard light 1`] = `"• No tools match ""."`;
 
+exports[`Session surfaces — assistant response > renders in narrow width > assistant-response-narrow width 1`] = `
+"
+╭─────────────────────────────────────
+│ [38;2;90;172;255m[1m𓂀 EstaCoda[0m[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+[2mskills: code-review, security-audit[0m
+[2mprogress: intent routed -> security assessed -> tools executed[0m"
+`;
+
+exports[`Session surfaces — assistant response > renders in no Unicode > assistant-response-no Unicode 1`] = `
+"
++-------------------------------------
+| [38;2;90;172;255m[1m𓂀 EstaCoda[0m[0m
+| Here is the analysis you requested.
+| 
+| The codebase is well-structured.
++-------------------------------------
+[2mskills: code-review, security-audit[0m
+[2mprogress: intent routed -> security assessed -> tools executed[0m"
+`;
+
+exports[`Session surfaces — assistant response > renders in no color > assistant-response-no color 1`] = `
+"
+╭─────────────────────────────────────
+│ 𓂀 EstaCoda
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+skills: code-review, security-audit
+progress: intent routed -> security assessed -> tools executed"
+`;
+
+exports[`Session surfaces — assistant response > renders in plain > assistant-response-plain 1`] = `
+"EstaCoda:
+Here is the analysis you requested.
+
+The codebase is well-structured.
+
+skills: code-review, security-audit
+progress: intent routed -> security assessed -> tools executed"
+`;
+
+exports[`Session surfaces — assistant response > renders in standard dark > assistant-response-standard dark 1`] = `
+"
+╭─────────────────────────────────────
+│ [38;2;90;172;255m[1m𓂀 EstaCoda[0m[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+[2mskills: code-review, security-audit[0m
+[2mprogress: intent routed -> security assessed -> tools executed[0m"
+`;
+
+exports[`Session surfaces — assistant response > renders in standard light > assistant-response-standard light 1`] = `
+"
+╭─────────────────────────────────────
+│ [38;2;0;87;217m[1m𓂀 EstaCoda[0m[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+[2mskills: code-review, security-audit[0m
+[2mprogress: intent routed -> security assessed -> tools executed[0m"
+`;
+
 exports[`Session surfaces — input rail-frame > renders horizontal rule in narrow width > rail-frame-narrow width 1`] = `"[38;2;42;42;42m────────────────────────────────────────[0m"`;
 
 exports[`Session surfaces — input rail-frame > renders horizontal rule in no Unicode > rail-frame-no Unicode 1`] = `"[38;2;42;42;42m--------------------------------------------------------------------------------[0m"`;

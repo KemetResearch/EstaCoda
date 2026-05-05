@@ -19,6 +19,7 @@ import type {
   ViewModel,
   ViewModelSeverity,
   WarningErrorViewModel,
+  AssistantResponseViewModel,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth } from "./layout.js";
@@ -86,6 +87,8 @@ export class StandardRenderer {
         return this.renderCommandResult(vm);
       case "plainFallback":
         return this.renderPlainFallback(vm);
+      case "assistantResponse":
+        return this.renderAssistantResponse(vm);
       default: {
         const _exhaustive: never = vm;
         return String(_exhaustive);
@@ -606,6 +609,43 @@ export class StandardRenderer {
         lines.push("");
       }
       lines.pop(); // remove trailing blank line
+    }
+
+    return lines.join("\n");
+  }
+
+  // ──────────────────────────────────────
+  // Assistant Response
+  // ──────────────────────────────────────
+
+  renderAssistantResponse(vm: AssistantResponseViewModel): string {
+    const horiz = this.#useUnicode ? "─" : "-";
+    const topLeft = this.#useUnicode ? "╭" : "+";
+    const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const vert = this.#useUnicode ? "│" : "|";
+    const width = Math.min(
+      this.#capabilities.terminalWidth,
+      Math.max(vm.label.length + 4, ...vm.text.split("\n").map((l) => measureTextWidth(l))) + 4
+    );
+
+    const top = `${topLeft}${horiz.repeat(width - 2)}`;
+    const bottom = `${bottomLeft}${horiz.repeat(width - 2)}`;
+
+    const lines: string[] = ["", top];
+    lines.push(`${vert} ${this.#brand(this.#bold(vm.label))}`);
+
+    for (const rawLine of vm.text.split("\n")) {
+      lines.push(`${vert} ${rawLine}`);
+    }
+
+    lines.push(bottom);
+
+    if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
+      lines.push(this.#dim(`skills: ${vm.matchedSkills.join(", ")}`));
+    }
+
+    if (vm.progress !== undefined && vm.progress.length > 0) {
+      lines.push(this.#dim(`progress: ${vm.progress.join(" -> ")}`));
     }
 
     return lines.join("\n");

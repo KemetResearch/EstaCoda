@@ -5,6 +5,7 @@ import type {
   ActivityTimelineViewModel,
   ApprovalAction,
   ApprovalSecurityViewModel,
+  AssistantResponseViewModel,
   CommandResultViewModel,
   KeyValueBlockViewModel,
   KeyValueEntry,
@@ -289,9 +290,32 @@ export function buildPlainFallbackViewModel(
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────
+// Assistant Response
+// ──────────────────────────────────────
+
+export interface BuildAssistantResponseInput {
+  readonly label: string;
+  readonly text: string;
+  readonly matchedSkills?: readonly string[];
+  readonly progress?: readonly string[];
+}
+
+export function buildAssistantResponseViewModel(
+  input: BuildAssistantResponseInput
+): AssistantResponseViewModel {
+  return {
+    kind: "assistantResponse",
+    label: input.label,
+    text: input.text,
+    matchedSkills: input.matchedSkills,
+    progress: input.progress,
+  };
+}
+
+// ──────────────────────────────────────
 // Convenience helpers (still pure, no rendering)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────
 
 export function kv(key: string, value: string | number | boolean, severity?: ViewModelSeverity): KeyValueEntry {
   return { key, value, severity };

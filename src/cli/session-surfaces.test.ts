@@ -12,7 +12,7 @@ import { buildSessionHelpViewModel, renderSessionHelp } from "./session-help.js"
 import { createSessionRenderer } from "./session-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { buildStartupViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
+import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel } from "../ui/view-models/builders.js";
 import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
 // ──────────────────────────────────────
@@ -372,6 +372,25 @@ describe("Session surfaces — input rail-frame", () => {
       const prefix = tokens.contract.branding.promptPrefix ?? `${tokens.contract.glyph.prompt} `;
       const colored = colorPromptPrefix(prefix, tokens, useColor);
       expect(colored).toMatchSnapshot(`prompt-prefix-${ctx.name}`);
+    });
+  }
+});
+
+// ────────────────────────────────────────
+// Phase 9.5: Assistant response snapshots
+// ────────────────────────────────────────
+
+describe("Session surfaces — assistant response", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const vm = buildAssistantResponseViewModel({
+        label: "𓂀 EstaCoda",
+        text: "Here is the analysis you requested.\n\nThe codebase is well-structured.",
+        matchedSkills: ["code-review", "security-audit"],
+        progress: ["intent routed", "security assessed", "tools executed"],
+      });
+      const output = ctx.renderer.render(vm);
+      expect(output).toMatchSnapshot(`assistant-response-${ctx.name}`);
     });
   }
 });
