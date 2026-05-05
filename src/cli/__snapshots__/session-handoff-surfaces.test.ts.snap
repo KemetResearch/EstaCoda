@@ -833,3 +833,837 @@ exports[`Session surfaces — usage error > renders in standard light > session-
 
 [38;2;239;108;0m[WARN][0m [1mUsage[0m: Usage: estacoda sessions show <session-id>"
 `;
+
+exports[`Session surfaces — help renders in plain: sessions-help-plain 1`] = `
+"[OK] EstaCoda sessions
+
+- estacoda sessions list                      List recent sessions
+- estacoda sessions show <session-id>         Show session details
+- estacoda sessions current                   Show current session
+- estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+- estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — help renders in standard dark: sessions-help-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda sessions\x1B[0m
+
+• estacoda sessions list                      List recent sessions
+• estacoda sessions show <session-id>         Show session details
+• estacoda sessions current                   Show current session
+• estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+• estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — help renders in standard light: sessions-help-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mEstaCoda sessions\x1B[0m
+
+• estacoda sessions list                      List recent sessions
+• estacoda sessions show <session-id>         Show session details
+• estacoda sessions current                   Show current session
+• estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+• estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — help renders in no color: sessions-help-no color 1`] = `
+"[OK] EstaCoda sessions
+
+• estacoda sessions list                      List recent sessions
+• estacoda sessions show <session-id>         Show session details
+• estacoda sessions current                   Show current session
+• estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+• estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — help renders in no Unicode: sessions-help-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda sessions\x1B[0m
+
+- estacoda sessions list                      List recent sessions
+- estacoda sessions show <session-id>         Show session details
+- estacoda sessions current                   Show current session
+- estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+- estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — help renders in narrow width: sessions-help-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda sessions\x1B[0m
+
+• estacoda sessions list                      List recent sessions
+• estacoda sessions show <session-id>         Show session details
+• estacoda sessions current                   Show current session
+• estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
+• estacoda sessions detach <surface> <id>     Detach surface from session"
+`;
+
+exports[`Session surfaces — list renders in plain: sessions-list-plain 1`] = `
+"[OK] Sessions: 2
+
+- sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+- sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — list renders in standard dark: sessions-list-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSessions: 2\x1B[0m
+
+• sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+• sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — list renders in standard light: sessions-list-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSessions: 2\x1B[0m
+
+• sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+• sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — list renders in no color: sessions-list-no color 1`] = `
+"[OK] Sessions: 2
+
+• sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+• sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — list renders in no Unicode: sessions-list-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSessions: 2\x1B[0m
+
+- sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+- sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — list renders in narrow width: sessions-list-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSessions: 2\x1B[0m
+
+• sess-1 — Test Session — updated 2024-01-02T00:00:00Z [telegram:chat-1]
+• sess-2 — (no title) — no activity"
+`;
+
+exports[`Session surfaces — show renders in plain: session-show-plain 1`] = `
+"[OK] Session detail
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+Surface pointers
+-   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show renders in standard dark: session-show-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show renders in standard light: session-show-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show renders in no color: session-show-no color 1`] = `
+"[OK] Session detail
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+Surface pointers
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show renders in no Unicode: session-show-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+\x1B[1mSurface pointers\x1B[0m
+-   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show renders in narrow width: session-show-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 5
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — show no pointers renders in plain: session-show-no-pointers-plain 1`] = `
+"[OK] Session detail
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+Surface pointers
+-   none"
+`;
+
+exports[`Session surfaces — show no pointers renders in standard dark: session-show-no-pointers-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — show no pointers renders in standard light: session-show-no-pointers-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — show no pointers renders in no color: session-show-no-pointers-no color 1`] = `
+"[OK] Session detail
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+Surface pointers
+•   none"
+`;
+
+exports[`Session surfaces — show no pointers renders in no Unicode: session-show-no-pointers-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+\x1B[1mSurface pointers\x1B[0m
+-   none"
+`;
+
+exports[`Session surfaces — show no pointers renders in narrow width: session-show-no-pointers-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSession detail\x1B[0m
+
+Session: sess-1
+Title: Test Session
+Profile: default
+Created: 2024-01-01T00:00:00Z
+Updated: 2024-01-02T00:00:00Z
+Messages: 0
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — current renders in plain: session-current-plain 1`] = `
+"[OK] Current session
+
+Current session: runtime-sess-1
+
+Surface pointers
+-   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current renders in standard dark: session-current-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current renders in standard light: session-current-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current renders in no color: session-current-no color 1`] = `
+"[OK] Current session
+
+Current session: runtime-sess-1
+
+Surface pointers
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current renders in no Unicode: session-current-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+-   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current renders in narrow width: session-current-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   telegram:chat-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Session surfaces — current no pointers renders in plain: session-current-no-pointers-plain 1`] = `
+"[OK] Current session
+
+Current session: runtime-sess-1
+
+Surface pointers
+-   none"
+`;
+
+exports[`Session surfaces — current no pointers renders in standard dark: session-current-no-pointers-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — current no pointers renders in standard light: session-current-no-pointers-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — current no pointers renders in no color: session-current-no-pointers-no color 1`] = `
+"[OK] Current session
+
+Current session: runtime-sess-1
+
+Surface pointers
+•   none"
+`;
+
+exports[`Session surfaces — current no pointers renders in no Unicode: session-current-no-pointers-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+-   none"
+`;
+
+exports[`Session surfaces — current no pointers renders in narrow width: session-current-no-pointers-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCurrent session\x1B[0m
+
+Current session: runtime-sess-1
+
+\x1B[1mSurface pointers\x1B[0m
+•   none"
+`;
+
+exports[`Session surfaces — attach renders in plain: session-attach-plain 1`] = `
+"[OK] Surface attached
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — attach renders in standard dark: session-attach-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface attached\x1B[0m
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — attach renders in standard light: session-attach-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSurface attached\x1B[0m
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — attach renders in no color: session-attach-no color 1`] = `
+"[OK] Surface attached
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — attach renders in no Unicode: session-attach-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface attached\x1B[0m
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — attach renders in narrow width: session-attach-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface attached\x1B[0m
+
+Attached telegram:chat-1 to session sess-1."
+`;
+
+exports[`Session surfaces — detach renders in plain: session-detach-plain 1`] = `
+"[OK] Surface detached
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — detach renders in standard dark: session-detach-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface detached\x1B[0m
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — detach renders in standard light: session-detach-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSurface detached\x1B[0m
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — detach renders in no color: session-detach-no color 1`] = `
+"[OK] Surface detached
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — detach renders in no Unicode: session-detach-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface detached\x1B[0m
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — detach renders in narrow width: session-detach-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSurface detached\x1B[0m
+
+Detached telegram:chat-1."
+`;
+
+exports[`Session surfaces — not found renders in plain: session-not-found-plain 1`] = `
+"[FAIL] Session not found
+
+[ERROR] Not found: Session not found: missing"
+`;
+
+exports[`Session surfaces — not found renders in standard dark: session-not-found-standard dark 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mSession not found\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Session not found: missing"
+`;
+
+exports[`Session surfaces — not found renders in standard light: session-not-found-standard light 1`] = `
+"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mSession not found\x1B[0m
+
+\x1B[38;2;198;40;40m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Session not found: missing"
+`;
+
+exports[`Session surfaces — not found renders in no color: session-not-found-no color 1`] = `
+"[FAIL] Session not found
+
+[ERROR] Not found: Session not found: missing"
+`;
+
+exports[`Session surfaces — not found renders in no Unicode: session-not-found-no Unicode 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mSession not found\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Session not found: missing"
+`;
+
+exports[`Session surfaces — not found renders in narrow width: session-not-found-narrow width 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mSession not found\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Session not found: missing"
+`;
+
+exports[`Session surfaces — no active session renders in plain: session-no-active-plain 1`] = `
+"[FAIL] No active session
+
+[WARN] No session: No active session in this shell."
+`;
+
+exports[`Session surfaces — no active session renders in standard dark: session-no-active-standard dark 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session in this shell."
+`;
+
+exports[`Session surfaces — no active session renders in standard light: session-no-active-standard light 1`] = `
+"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session in this shell."
+`;
+
+exports[`Session surfaces — no active session renders in no color: session-no-active-no color 1`] = `
+"[FAIL] No active session
+
+[WARN] No session: No active session in this shell."
+`;
+
+exports[`Session surfaces — no active session renders in no Unicode: session-no-active-no Unicode 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session in this shell."
+`;
+
+exports[`Session surfaces — no active session renders in narrow width: session-no-active-narrow width 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session in this shell."
+`;
+
+exports[`Session surfaces — invalid surface renders in plain: session-invalid-surface-plain 1`] = `
+"[FAIL] Invalid surface
+
+[ERROR] Invalid surface: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — invalid surface renders in standard dark: session-invalid-surface-standard dark 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mInvalid surface\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mInvalid surface\x1B[0m: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — invalid surface renders in standard light: session-invalid-surface-standard light 1`] = `
+"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mInvalid surface\x1B[0m
+
+\x1B[38;2;198;40;40m[ERROR]\x1B[0m \x1B[1mInvalid surface\x1B[0m: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — invalid surface renders in no color: session-invalid-surface-no color 1`] = `
+"[FAIL] Invalid surface
+
+[ERROR] Invalid surface: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — invalid surface renders in no Unicode: session-invalid-surface-no Unicode 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mInvalid surface\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mInvalid surface\x1B[0m: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — invalid surface renders in narrow width: session-invalid-surface-narrow width 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mInvalid surface\x1B[0m
+
+\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mInvalid surface\x1B[0m: Invalid surface: invalid. Valid: cli, telegram, discord"
+`;
+
+exports[`Session surfaces — usage error renders in plain: session-usage-error-plain 1`] = `
+"[FAIL] Usage error
+
+[WARN] Usage: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Session surfaces — usage error renders in standard dark: session-usage-error-standard dark 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Session surfaces — usage error renders in standard light: session-usage-error-standard light 1`] = `
+"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
+
+\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Session surfaces — usage error renders in no color: session-usage-error-no color 1`] = `
+"[FAIL] Usage error
+
+[WARN] Usage: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Session surfaces — usage error renders in no Unicode: session-usage-error-no Unicode 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Session surfaces — usage error renders in narrow width: session-usage-error-narrow width 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: estacoda sessions show <session-id>"
+`;
+
+exports[`Handoff surfaces — help renders in plain: handoff-help-plain 1`] = `
+"[OK] EstaCoda handoff
+
+- estacoda handoff telegram  Generate a handoff code for Telegram
+- estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — help renders in standard dark: handoff-help-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda handoff\x1B[0m
+
+• estacoda handoff telegram  Generate a handoff code for Telegram
+• estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — help renders in standard light: handoff-help-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mEstaCoda handoff\x1B[0m
+
+• estacoda handoff telegram  Generate a handoff code for Telegram
+• estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — help renders in no color: handoff-help-no color 1`] = `
+"[OK] EstaCoda handoff
+
+• estacoda handoff telegram  Generate a handoff code for Telegram
+• estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — help renders in no Unicode: handoff-help-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda handoff\x1B[0m
+
+- estacoda handoff telegram  Generate a handoff code for Telegram
+- estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — help renders in narrow width: handoff-help-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda handoff\x1B[0m
+
+• estacoda handoff telegram  Generate a handoff code for Telegram
+• estacoda handoff list      List active handoff codes"
+`;
+
+exports[`Handoff surfaces — telegram renders in plain: handoff-telegram-plain 1`] = `
+"[OK] Handoff code generated
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — telegram renders in standard dark: handoff-telegram-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff code generated\x1B[0m
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — telegram renders in standard light: handoff-telegram-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mHandoff code generated\x1B[0m
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — telegram renders in no color: handoff-telegram-no color 1`] = `
+"[OK] Handoff code generated
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — telegram renders in no Unicode: handoff-telegram-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff code generated\x1B[0m
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — telegram renders in narrow width: handoff-telegram-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff code generated\x1B[0m
+
+Handoff code for Telegram: ABC123
+Session: sess-1
+Expires: 2024-01-01T00:10:00Z
+
+
+To attach a Telegram chat to this session, send the following in Telegram:
+  /attach ABC123
+
+This code is single-use and expires in 10 minutes."
+`;
+
+exports[`Handoff surfaces — list renders in plain: handoff-list-plain 1`] = `
+"[OK] Active handoff codes: 2
+
+- ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+- DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list renders in standard dark: handoff-list-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mActive handoff codes: 2\x1B[0m
+
+• ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+• DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list renders in standard light: handoff-list-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mActive handoff codes: 2\x1B[0m
+
+• ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+• DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list renders in no color: handoff-list-no color 1`] = `
+"[OK] Active handoff codes: 2
+
+• ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+• DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list renders in no Unicode: handoff-list-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mActive handoff codes: 2\x1B[0m
+
+- ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+- DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list renders in narrow width: handoff-list-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mActive handoff codes: 2\x1B[0m
+
+• ABC123 → sess-1 (expires 2024-01-01T00:10:00Z)
+• DEF456 → sess-2 (expires 2024-01-01T00:10:00Z)"
+`;
+
+exports[`Handoff surfaces — list empty renders in plain: handoff-list-empty-plain 1`] = `
+"[OK] Handoff codes
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — list empty renders in standard dark: handoff-list-empty-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff codes\x1B[0m
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — list empty renders in standard light: handoff-list-empty-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mHandoff codes\x1B[0m
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — list empty renders in no color: handoff-list-empty-no color 1`] = `
+"[OK] Handoff codes
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — list empty renders in no Unicode: handoff-list-empty-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff codes\x1B[0m
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — list empty renders in narrow width: handoff-list-empty-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mHandoff codes\x1B[0m
+
+No active handoff codes."
+`;
+
+exports[`Handoff surfaces — no active session renders in plain: handoff-no-session-plain 1`] = `
+"[FAIL] No active session
+
+[WARN] No session: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;
+
+exports[`Handoff surfaces — no active session renders in standard dark: handoff-no-session-standard dark 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;
+
+exports[`Handoff surfaces — no active session renders in standard light: handoff-no-session-standard light 1`] = `
+"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;
+
+exports[`Handoff surfaces — no active session renders in no color: handoff-no-session-no color 1`] = `
+"[FAIL] No active session
+
+[WARN] No session: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;
+
+exports[`Handoff surfaces — no active session renders in no Unicode: handoff-no-session-no Unicode 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;
+
+exports[`Handoff surfaces — no active session renders in narrow width: handoff-no-session-narrow width 1`] = `
+"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mNo active session\x1B[0m
+
+\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mNo session\x1B[0m: No active session. Start an interactive session first, then run: estacoda handoff telegram"
+`;

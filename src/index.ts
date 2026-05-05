@@ -10,8 +10,18 @@ import { runSessionLoop } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
+import { launchInteractiveSession } from "./cli/interactive-launcher.js";
+import { getPackageVersion } from "./cli/version-command.js";
 
 const argv = process.argv.slice(2);
+
+// Handle --version / -v immediately, before any async init
+if (argv.includes("--version") || argv.includes("-v")) {
+  const version = await getPackageVersion();
+  console.log(`estacoda ${version}`);
+  process.exit(0);
+}
+
 let workspaceRoot = process.cwd();
 const cliSessionStore = new PersistentCliSessionStore();
 const cliApprovalController = new WorkspaceApprovalController();
@@ -19,37 +29,23 @@ let config: LoadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot
 });
 
+// Bare launch: use interactive launcher for onboarding/session routing
 if (argv.length === 0 && canRunInteractive()) {
-  const onboarding = await getOnboardingStatus({
-    workspaceRoot
-  });
+  const launchResult = await launchInteractiveSession({ workspaceRoot });
 
-  if (onboarding.needed) {
-    const prompt = createReadlinePrompt();
-    const answer = await prompt(`${onboarding.reason}\nRun setup now? [Y/n]: `);
-    prompt.close?.();
-    if (answer.trim().length > 0 && !["y", "yes"].includes(answer.trim().toLowerCase())) {
-      console.log("Setup skipped. Run `estacoda setup` when you are ready.");
-      process.exit(0);
+  if (!launchResult.launched) {
+    if (launchResult.output.length > 0) {
+      console.log(launchResult.output);
     }
-    const result = await runInteractiveOnboarding({
-      workspaceRoot,
-      theme: kemetBlueTheme,
-      continueToSession: true
-    });
-    console.log(result.output);
+    process.exit(launchResult.exitCode);
+  }
 
-    if (result.exitCode !== 0) {
-      process.exit(result.exitCode);
-    }
+  if (launchResult.workspaceRoot !== undefined) {
+    workspaceRoot = launchResult.workspaceRoot;
+  }
 
-    if (result.workspaceRoot !== undefined) {
-      workspaceRoot = result.workspaceRoot;
-    }
-
-    config = await loadRuntimeConfig({
-      workspaceRoot
-    });
+  if (launchResult.onboardingTriggered) {
+    config = await loadRuntimeConfig({ workspaceRoot });
   }
 }
 

@@ -95,6 +95,11 @@ import {
   renderUiSettings,
 } from "./settings-view-models.js";
 
+import { runVersionCommand } from "./version-command.js";
+import { runInitCommand } from "./init-command.js";
+import { runUpdateCommand } from "./update-command.js";
+import { isBackupReady } from "../lifecycle/state-preservation.js";
+
 export type CliCommandResult = {
   handled: boolean;
   exitCode: number;
@@ -178,6 +183,12 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return sessions(options, args);
     case "channels":
       return channels(options, args);
+    case "init":
+      return init(options, args);
+    case "update":
+      return update(options, args);
+    case "version":
+      return version();
     case "help":
     case "--help":
     case "-h":
@@ -275,9 +286,73 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
     runtime: options.runtime
   });
 
+  const extraLines: string[] = [];
+  const extraWarnings: string[] = [];
+
+  // Config syntax validity
+  try {
+    await loadRuntimeConfig(options);
+    extraLines.push("Config syntax: valid");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    extraWarnings.push(`Config syntax error: ${message}`);
+  }
+
+  // State directory backup readiness
+  const backupReady = await isBackupReady(options.homeDir ?? process.env.HOME ?? "");
+  if (backupReady.ok) {
+    extraLines.push("State backup: ready");
+  } else {
+    extraWarnings.push(`State backup not ready: ${backupReady.reason}`);
+  }
+
+  const ok = result.ok && extraWarnings.length === 0;
+  const output = [
+    result.output,
+    extraLines.length > 0 ? extraLines.join("\n") : undefined,
+    extraWarnings.length > 0 ? `Warnings:\n${extraWarnings.map((w) => `- ${w}`).join("\n")}` : undefined
+  ].filter((line): line is string => line !== undefined).join("\n");
+
   return {
     handled: true,
-    exitCode: result.ok ? 0 : 1,
+    exitCode: ok ? 0 : 1,
+    output
+  };
+}
+
+async function init(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const homeFlag = valueAfter(args, "--home");
+  const result = await runInitCommand({
+    homeDir: homeFlag ?? options.homeDir,
+    yes: hasFlag(args, "--yes", "-y")
+  });
+
+  return {
+    handled: true,
+    exitCode: result.exitCode,
+    output: result.output
+  };
+}
+
+async function update(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const result = await runUpdateCommand({
+    dryRun: hasFlag(args, "--dry-run") || (!hasFlag(args, "--apply")),
+    apply: hasFlag(args, "--apply"),
+    homeDir: options.homeDir
+  });
+
+  return {
+    handled: true,
+    exitCode: result.exitCode,
+    output: result.output
+  };
+}
+
+async function version(): Promise<CliCommandResult> {
+  const result = await runVersionCommand();
+  return {
+    handled: true,
+    exitCode: result.exitCode,
     output: result.output
   };
 }
@@ -556,6 +631,28 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
 
+  // Config syntax validity
+  try {
+    await loadRuntimeConfig(options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    warnings.push(`Config syntax error: ${message}`);
+  }
+
+  // State directory backup integrity
+  const backupReady = await isBackupReady(options.homeDir ?? process.env.HOME ?? "");
+  if (!backupReady.ok) {
+    warnings.push(`State backup not ready: ${backupReady.reason}`);
+  }
+
+  // Capability directory exists (created by Phase 1 init)
+  const notes: string[] = [];
+  const { existsSync } = await import("node:fs");
+  const capabilitiesDir = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "capabilities");
+  if (!existsSync(capabilitiesDir)) {
+    notes.push("Capability directory does not exist. Run `estacoda init` to create it.");
+  }
+
   return {
     handled: true,
     exitCode: warnings.length === 0 &&
@@ -577,7 +674,8 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       liveToolDiagnostic === undefined ? undefined : "",
       liveToolDiagnostic === undefined ? undefined : renderLiveToolDiagnostic(liveToolDiagnostic),
       "",
-      warnings.length === 0 ? "Status: ready" : `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`
+      warnings.length === 0 ? "Status: ready" : `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`,
+      notes.length === 0 ? undefined : `\nNotes:\n${notes.map((note) => `- ${note}`).join("\n")}`
     ].filter((line) => line !== undefined).join("\n")
   };
 }

@@ -326,6 +326,30 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
+    name: "init",
+    aliases: [],
+    category: "Setup",
+    description: "Bootstrap state directories and default config",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "update",
+    aliases: [],
+    category: "System",
+    description: "Check for updates and optionally apply them",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "version",
+    aliases: ["--version", "-v"],
+    category: "System",
+    description: "Show the installed version",
+    visibility: "public",
+    scope: "both",
+  });
+  commandRegistry.register({
     name: "web",
     aliases: [],
     category: "Setup",

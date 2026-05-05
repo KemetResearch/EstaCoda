@@ -708,3 +708,724 @@ exports[`Session surfaces — unknown-command fallback > renders in plain > unkn
 exports[`Session surfaces — unknown-command fallback > renders in standard dark > unknown-command-standard dark 1`] = `"• No slash commands or skills match "/nonexistent"."`;
 
 exports[`Session surfaces — unknown-command fallback > renders in standard light > unknown-command-standard light 1`] = `"• No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — /status renders in plain: status-plain 1`] = `
+"EstaCoda is ready
+model: unconfigured/smoke-model
+security: adaptive
+skills: 3 (suggest)
+tools: 12
+mcp: 1/2
+taskflow: inactive"
+`;
+
+exports[`Session surfaces — /status renders in standard dark: status-standard dark 1`] = `
+"\x1B[38;2;90;172;255mEstaCoda is ready\x1B[0m
+│ model: \x1B[2munconfigured/smoke-model\x1B[0m
+│ security: \x1B[38;2;76;175;80madaptive\x1B[0m
+│ skills: 3 (suggest)
+│ tools: 12
+│ mcp: 1/2
+│ taskflow: \x1B[2minactive\x1B[0m"
+`;
+
+exports[`Session surfaces — /status renders in standard light: status-standard light 1`] = `
+"\x1B[38;2;0;87;217mEstaCoda is ready\x1B[0m
+│ model: \x1B[2munconfigured/smoke-model\x1B[0m
+│ security: \x1B[38;2;46;125;50madaptive\x1B[0m
+│ skills: 3 (suggest)
+│ tools: 12
+│ mcp: 1/2
+│ taskflow: \x1B[2minactive\x1B[0m"
+`;
+
+exports[`Session surfaces — /status renders in no color: status-no color 1`] = `
+"EstaCoda is ready
+│ model: unconfigured/smoke-model
+│ security: adaptive
+│ skills: 3 (suggest)
+│ tools: 12
+│ mcp: 1/2
+│ taskflow: inactive"
+`;
+
+exports[`Session surfaces — /status renders in no Unicode: status-no Unicode 1`] = `
+"\x1B[38;2;90;172;255mEstaCoda is ready\x1B[0m
+| model: \x1B[2munconfigured/smoke-model\x1B[0m
+| security: \x1B[38;2;76;175;80madaptive\x1B[0m
+| skills: 3 (suggest)
+| tools: 12
+| mcp: 1/2
+| taskflow: \x1B[2minactive\x1B[0m"
+`;
+
+exports[`Session surfaces — /status renders in narrow width: status-narrow width 1`] = `
+"\x1B[38;2;90;172;255mEstaCoda is ready\x1B[0m
+│ model: \x1B[2munconfigured/smoke-model\x1B[0m
+│ security: \x1B[38;2;76;175;80madaptive\x1B[0m
+│ skills: 3 (suggest)
+│ tools: 12
+│ mcp: 1/2
+│ taskflow: \x1B[2minactive\x1B[0m"
+`;
+
+exports[`Session surfaces — /model renders in plain: model-plain 1`] = `
+"Model
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /model renders in standard dark: model-standard dark 1`] = `
+"\x1B[1mModel\x1B[0m
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /model renders in standard light: model-standard light 1`] = `
+"\x1B[1mModel\x1B[0m
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /model renders in no color: model-no color 1`] = `
+"Model
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /model renders in no Unicode: model-no Unicode 1`] = `
+"\x1B[1mModel\x1B[0m
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /model renders in narrow width: model-narrow width 1`] = `
+"\x1B[1mModel\x1B[0m
+provider: unconfigured
+model: smoke-model
+context window: unknown
+security mode: adaptive"
+`;
+
+exports[`Session surfaces — /help renders in plain: help-plain 1`] = `
+"EstaCoda session commands
+- /help: Show command help
+- /status: Show runtime, model, context, trust, memory, and skill status
+- /model: Show or switch the active model and provider
+- /switch: Switch to an existing session
+- /search: Search session history
+- /reset: Start a fresh session and refresh the skill/config snapshot
+- /memory: Inspect promoted memory conclusions
+- /tools: Browse available tools grouped by capability
+- /browser: Manage local browser/CDP connection
+- /skills: Browse commands and available skills
+- /reload-mcp: Reload MCP config and refresh MCP tools for this session
+- /resume: Show the latest interrupted-turn resume note
+- /approvals: Show current one-time, session, and persistent approvals
+- /revoke: Revoke a persistent approval by id
+- /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+- /cron: Manage scheduled tasks
+- /trust: Trust this workspace for proactive local work
+- /untrust: Revoke workspace trust
+- /workspace.trust.status: Show whether the current workspace is trusted
+- /doctor: Run a quick in-session health check
+- /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+- /handoff: Generate a handoff code to share this session with Telegram
+- /clear: Clear the terminal
+- /exit: End the session
+- /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /help renders in standard dark: help-standard dark 1`] = `
+"\x1B[1mEstaCoda session commands\x1B[0m
+• /help: Show command help
+• /status: Show runtime, model, context, trust, memory, and skill status
+• /model: Show or switch the active model and provider
+• /switch: Switch to an existing session
+• /search: Search session history
+• /reset: Start a fresh session and refresh the skill/config snapshot
+• /memory: Inspect promoted memory conclusions
+• /tools: Browse available tools grouped by capability
+• /browser: Manage local browser/CDP connection
+• /skills: Browse commands and available skills
+• /reload-mcp: Reload MCP config and refresh MCP tools for this session
+• /resume: Show the latest interrupted-turn resume note
+• /approvals: Show current one-time, session, and persistent approvals
+• /revoke: Revoke a persistent approval by id
+• /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+• /cron: Manage scheduled tasks
+• /trust: Trust this workspace for proactive local work
+• /untrust: Revoke workspace trust
+• /workspace.trust.status: Show whether the current workspace is trusted
+• /doctor: Run a quick in-session health check
+• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /handoff: Generate a handoff code to share this session with Telegram
+• /clear: Clear the terminal
+• /exit: End the session
+• /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /help renders in standard light: help-standard light 1`] = `
+"\x1B[1mEstaCoda session commands\x1B[0m
+• /help: Show command help
+• /status: Show runtime, model, context, trust, memory, and skill status
+• /model: Show or switch the active model and provider
+• /switch: Switch to an existing session
+• /search: Search session history
+• /reset: Start a fresh session and refresh the skill/config snapshot
+• /memory: Inspect promoted memory conclusions
+• /tools: Browse available tools grouped by capability
+• /browser: Manage local browser/CDP connection
+• /skills: Browse commands and available skills
+• /reload-mcp: Reload MCP config and refresh MCP tools for this session
+• /resume: Show the latest interrupted-turn resume note
+• /approvals: Show current one-time, session, and persistent approvals
+• /revoke: Revoke a persistent approval by id
+• /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+• /cron: Manage scheduled tasks
+• /trust: Trust this workspace for proactive local work
+• /untrust: Revoke workspace trust
+• /workspace.trust.status: Show whether the current workspace is trusted
+• /doctor: Run a quick in-session health check
+• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /handoff: Generate a handoff code to share this session with Telegram
+• /clear: Clear the terminal
+• /exit: End the session
+• /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /help renders in no color: help-no color 1`] = `
+"EstaCoda session commands
+• /help: Show command help
+• /status: Show runtime, model, context, trust, memory, and skill status
+• /model: Show or switch the active model and provider
+• /switch: Switch to an existing session
+• /search: Search session history
+• /reset: Start a fresh session and refresh the skill/config snapshot
+• /memory: Inspect promoted memory conclusions
+• /tools: Browse available tools grouped by capability
+• /browser: Manage local browser/CDP connection
+• /skills: Browse commands and available skills
+• /reload-mcp: Reload MCP config and refresh MCP tools for this session
+• /resume: Show the latest interrupted-turn resume note
+• /approvals: Show current one-time, session, and persistent approvals
+• /revoke: Revoke a persistent approval by id
+• /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+• /cron: Manage scheduled tasks
+• /trust: Trust this workspace for proactive local work
+• /untrust: Revoke workspace trust
+• /workspace.trust.status: Show whether the current workspace is trusted
+• /doctor: Run a quick in-session health check
+• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /handoff: Generate a handoff code to share this session with Telegram
+• /clear: Clear the terminal
+• /exit: End the session
+• /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /help renders in no Unicode: help-no Unicode 1`] = `
+"\x1B[1mEstaCoda session commands\x1B[0m
+- /help: Show command help
+- /status: Show runtime, model, context, trust, memory, and skill status
+- /model: Show or switch the active model and provider
+- /switch: Switch to an existing session
+- /search: Search session history
+- /reset: Start a fresh session and refresh the skill/config snapshot
+- /memory: Inspect promoted memory conclusions
+- /tools: Browse available tools grouped by capability
+- /browser: Manage local browser/CDP connection
+- /skills: Browse commands and available skills
+- /reload-mcp: Reload MCP config and refresh MCP tools for this session
+- /resume: Show the latest interrupted-turn resume note
+- /approvals: Show current one-time, session, and persistent approvals
+- /revoke: Revoke a persistent approval by id
+- /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+- /cron: Manage scheduled tasks
+- /trust: Trust this workspace for proactive local work
+- /untrust: Revoke workspace trust
+- /workspace.trust.status: Show whether the current workspace is trusted
+- /doctor: Run a quick in-session health check
+- /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+- /handoff: Generate a handoff code to share this session with Telegram
+- /clear: Clear the terminal
+- /exit: End the session
+- /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /help renders in narrow width: help-narrow width 1`] = `
+"\x1B[1mEstaCoda session commands\x1B[0m
+• /help: Show command help
+• /status: Show runtime, model, context, trust, memory, and skill status
+• /model: Show or switch the active model and provider
+• /switch: Switch to an existing session
+• /search: Search session history
+• /reset: Start a fresh session and refresh the skill/config snapshot
+• /memory: Inspect promoted memory conclusions
+• /tools: Browse available tools grouped by capability
+• /browser: Manage local browser/CDP connection
+• /skills: Browse commands and available skills
+• /reload-mcp: Reload MCP config and refresh MCP tools for this session
+• /resume: Show the latest interrupted-turn resume note
+• /approvals: Show current one-time, session, and persistent approvals
+• /revoke: Revoke a persistent approval by id
+• /yolo: Toggle session YOLO/open mode; hard safety blocks still apply
+• /cron: Manage scheduled tasks
+• /trust: Trust this workspace for proactive local work
+• /untrust: Revoke workspace trust
+• /workspace.trust.status: Show whether the current workspace is trusted
+• /doctor: Run a quick in-session health check
+• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /handoff: Generate a handoff code to share this session with Telegram
+• /clear: Clear the terminal
+• /exit: End the session
+• /version: Show the installed version"
+`;
+
+exports[`Session surfaces — /tools renders in plain: tools-plain 1`] = `"- No tools match ""."`;
+
+exports[`Session surfaces — /tools renders in standard dark: tools-standard dark 1`] = `"• No tools match ""."`;
+
+exports[`Session surfaces — /tools renders in standard light: tools-standard light 1`] = `"• No tools match ""."`;
+
+exports[`Session surfaces — /tools renders in no color: tools-no color 1`] = `"• No tools match ""."`;
+
+exports[`Session surfaces — /tools renders in no Unicode: tools-no Unicode 1`] = `"- No tools match ""."`;
+
+exports[`Session surfaces — /tools renders in narrow width: tools-narrow width 1`] = `"• No tools match ""."`;
+
+exports[`Session surfaces — slash menu renders in plain: slash-menu-plain 1`] = `
+"[OK] 
+
+Commands
+Name                     Description                                                           
+-----------------------  ----------------------------------------------------------------------
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — slash menu renders in standard dark: slash-menu-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1m\x1B[0m
+
+\x1B[1mCommands\x1B[0m
+\x1B[38;2;90;172;255mName                   \x1B[0m  \x1B[38;2;90;172;255mDescription                                                           \x1B[0m
+\x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — slash menu renders in standard light: slash-menu-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1m\x1B[0m
+
+\x1B[1mCommands\x1B[0m
+\x1B[38;2;0;87;217mName                   \x1B[0m  \x1B[38;2;0;87;217mDescription                                                           \x1B[0m
+\x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — slash menu renders in no color: slash-menu-no color 1`] = `
+"[OK] 
+
+Commands
+Name                     Description                                                           
+───────────────────────  ──────────────────────────────────────────────────────────────────────
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — slash menu renders in no Unicode: slash-menu-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1m\x1B[0m
+
+\x1B[1mCommands\x1B[0m
+\x1B[38;2;90;172;255mName                   \x1B[0m  \x1B[38;2;90;172;255mDescription                                                           \x1B[0m
+\x1B[2m-----------------------  ----------------------------------------------------------------------\x1B[0m
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — slash menu renders in narrow width: slash-menu-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1m\x1B[0m
+
+\x1B[1mCommands\x1B[0m
+\x1B[38;2;90;172;255mName                   \x1B[0m  \x1B[38;2;90;172;255mDescription                                                           \x1B[0m
+\x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
+/help                    Show command help                                                     
+/status                  Show runtime, model, context, trust, memory, and skill status         
+/model                   Show or switch the active model and provider                          
+/switch                  Switch to an existing session                                         
+/search                  Search session history                                                
+/reset                   Start a fresh session and refresh the skill/config snapshot           
+/memory                  Inspect promoted memory conclusions                                   
+/tools                   Browse available tools grouped by capability                          
+/browser                 Manage local browser/CDP connection                                   
+/skills                  Browse commands and available skills                                  
+/reload-mcp              Reload MCP config and refresh MCP tools for this session              
+/resume                  Show the latest interrupted-turn resume note                          
+/approvals               Show current one-time, session, and persistent approvals              
+/revoke                  Revoke a persistent approval by id                                    
+/yolo                    Toggle session YOLO/open mode; hard safety blocks still apply         
+/cron                    Manage scheduled tasks                                                
+/trust                   Trust this workspace for proactive local work                         
+/untrust                 Revoke workspace trust                                                
+/workspace.trust.status  Show whether the current workspace is trusted                         
+/doctor                  Run a quick in-session health check                                   
+/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/handoff                 Generate a handoff code to share this session with Telegram           
+/clear                   Clear the terminal                                                    
+/exit                    End the session                                                       
+/version                 Show the installed version                                            "
+`;
+
+exports[`Session surfaces — unknown-command fallback renders in plain: unknown-command-plain 1`] = `"- No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — unknown-command fallback renders in standard dark: unknown-command-standard dark 1`] = `"• No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — unknown-command fallback renders in standard light: unknown-command-standard light 1`] = `"• No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — unknown-command fallback renders in no color: unknown-command-no color 1`] = `"• No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — unknown-command fallback renders in no Unicode: unknown-command-no Unicode 1`] = `"- No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — unknown-command fallback renders in narrow width: unknown-command-narrow width 1`] = `"• No slash commands or skills match "/nonexistent"."`;
+
+exports[`Session surfaces — startup renders in plain: startup-plain 1`] = `
+"EstaCoda
+Kemet Research
+السيادة التكنولوجية العربية
+model: openrouter/claude-sonnet-4
+readiness: ready"
+`;
+
+exports[`Session surfaces — startup renders in standard dark: startup-standard dark 1`] = `
+"
+\x1B[38;2;90;172;255m\x1B[1mEstaCoda\x1B[0m\x1B[0m
+
+\x1B[2mKemet Research\x1B[0m
+\x1B[2mالسيادة التكنولوجية العربية\x1B[0m
+
+│ model: \x1B[2mopenrouter/claude-sonnet-4\x1B[0m
+│ readiness: \x1B[38;2;76;175;80mready\x1B[0m"
+`;
+
+exports[`Session surfaces — startup renders in standard light: startup-standard light 1`] = `
+"
+\x1B[38;2;0;87;217m\x1B[1mEstaCoda\x1B[0m\x1B[0m
+
+\x1B[2mKemet Research\x1B[0m
+\x1B[2mالسيادة التكنولوجية العربية\x1B[0m
+
+│ model: \x1B[2mopenrouter/claude-sonnet-4\x1B[0m
+│ readiness: \x1B[38;2;46;125;50mready\x1B[0m"
+`;
+
+exports[`Session surfaces — startup renders in no color: startup-no color 1`] = `
+"
+EstaCoda
+
+Kemet Research
+السيادة التكنولوجية العربية
+
+│ model: openrouter/claude-sonnet-4
+│ readiness: ready"
+`;
+
+exports[`Session surfaces — startup renders in no Unicode: startup-no Unicode 1`] = `
+"
+\x1B[38;2;90;172;255m\x1B[1mEstaCoda\x1B[0m\x1B[0m
+
+\x1B[2mKemet Research\x1B[0m
+\x1B[2mالسيادة التكنولوجية العربية\x1B[0m
+
+| model: \x1B[2mopenrouter/claude-sonnet-4\x1B[0m
+| readiness: \x1B[38;2;76;175;80mready\x1B[0m"
+`;
+
+exports[`Session surfaces — startup renders in narrow width: startup-narrow width 1`] = `
+"
+\x1B[38;2;90;172;255m\x1B[1mEstaCoda\x1B[0m\x1B[0m
+
+\x1B[2mKemet Research\x1B[0m
+\x1B[2mالسيادة التكنولوجية العربية\x1B[0m
+
+│ model: \x1B[2mopenrouter/claude-sonnet-4\x1B[0m
+│ readiness: \x1B[38;2;76;175;80mready\x1B[0m"
+`;
+
+exports[`Session surfaces — picker renders in plain: picker-plain 1`] = `
+"Select provider
+   1) OpenRouter
+     Multi-provider gateway
+   2) Anthropic
+     Direct Claude access
+   3) OpenAI
+     GPT models"
+`;
+
+exports[`Session surfaces — picker renders in standard dark: picker-standard dark 1`] = `
+"\x1B[1mSelect provider\x1B[0m
+   1) OpenRouter
+\x1B[2m     Multi-provider gateway\x1B[0m
+   2) Anthropic
+\x1B[2m     Direct Claude access\x1B[0m
+   3) OpenAI
+\x1B[2m     GPT models\x1B[0m"
+`;
+
+exports[`Session surfaces — picker renders in standard light: picker-standard light 1`] = `
+"\x1B[1mSelect provider\x1B[0m
+   1) OpenRouter
+\x1B[2m     Multi-provider gateway\x1B[0m
+   2) Anthropic
+\x1B[2m     Direct Claude access\x1B[0m
+   3) OpenAI
+\x1B[2m     GPT models\x1B[0m"
+`;
+
+exports[`Session surfaces — picker renders in no color: picker-no color 1`] = `
+"Select provider
+   1) OpenRouter
+     Multi-provider gateway
+   2) Anthropic
+     Direct Claude access
+   3) OpenAI
+     GPT models"
+`;
+
+exports[`Session surfaces — picker renders in no Unicode: picker-no Unicode 1`] = `
+"\x1B[1mSelect provider\x1B[0m
+   1) OpenRouter
+\x1B[2m     Multi-provider gateway\x1B[0m
+   2) Anthropic
+\x1B[2m     Direct Claude access\x1B[0m
+   3) OpenAI
+\x1B[2m     GPT models\x1B[0m"
+`;
+
+exports[`Session surfaces — picker renders in narrow width: picker-narrow width 1`] = `
+"\x1B[1mSelect provider\x1B[0m
+   1) OpenRouter
+\x1B[2m     Multi-provider gateway\x1B[0m
+   2) Anthropic
+\x1B[2m     Direct Claude access\x1B[0m
+   3) OpenAI
+\x1B[2m     GPT models\x1B[0m"
+`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in plain: rail-frame-plain 1`] = `"--------------------------------------------------------------------------------"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in plain: prompt-prefix-plain 1`] = `"> "`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in standard dark: rail-frame-standard dark 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────\x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in standard dark: prompt-prefix-standard dark 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in standard light: rail-frame-standard light 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────\x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in standard light: prompt-prefix-standard light 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in no color: rail-frame-no color 1`] = `"────────────────────────────────────────────────────────────────────────────────"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in no color: prompt-prefix-no color 1`] = `"𓂀 > "`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in no Unicode: rail-frame-no Unicode 1`] = `"\x1B[38;2;42;42;42m--------------------------------------------------------------------------------\x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in no Unicode: prompt-prefix-no Unicode 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders horizontal rule in narrow width: rail-frame-narrow width 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────\x1B[0m"`;
+
+exports[`Session surfaces — input rail-frame renders prompt prefix in narrow width: prompt-prefix-narrow width 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+
+exports[`Session surfaces — assistant response renders in plain: assistant-response-plain 1`] = `
+"EstaCoda:
+Here is the analysis you requested.
+
+The codebase is well-structured.
+
+skills: code-review, security-audit
+progress: intent routed -> security assessed -> tools executed"
+`;
+
+exports[`Session surfaces — assistant response renders in standard dark: assistant-response-standard dark 1`] = `
+"
+╭─────────────────────────────────────
+│ \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+\x1B[2mskills: code-review, security-audit\x1B[0m
+\x1B[2mprogress: intent routed -> security assessed -> tools executed\x1B[0m"
+`;
+
+exports[`Session surfaces — assistant response renders in standard light: assistant-response-standard light 1`] = `
+"
+╭─────────────────────────────────────
+│ \x1B[38;2;0;87;217m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+\x1B[2mskills: code-review, security-audit\x1B[0m
+\x1B[2mprogress: intent routed -> security assessed -> tools executed\x1B[0m"
+`;
+
+exports[`Session surfaces — assistant response renders in no color: assistant-response-no color 1`] = `
+"
+╭─────────────────────────────────────
+│ 𓂀 EstaCoda
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+skills: code-review, security-audit
+progress: intent routed -> security assessed -> tools executed"
+`;
+
+exports[`Session surfaces — assistant response renders in no Unicode: assistant-response-no Unicode 1`] = `
+"
++-------------------------------------
+| \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+| Here is the analysis you requested.
+| 
+| The codebase is well-structured.
++-------------------------------------
+\x1B[2mskills: code-review, security-audit\x1B[0m
+\x1B[2mprogress: intent routed -> security assessed -> tools executed\x1B[0m"
+`;
+
+exports[`Session surfaces — assistant response renders in narrow width: assistant-response-narrow width 1`] = `
+"
+╭─────────────────────────────────────
+│ \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ Here is the analysis you requested.
+│ 
+│ The codebase is well-structured.
+╰─────────────────────────────────────
+\x1B[2mskills: code-review, security-audit\x1B[0m
+\x1B[2mprogress: intent routed -> security assessed -> tools executed\x1B[0m"
+`;
