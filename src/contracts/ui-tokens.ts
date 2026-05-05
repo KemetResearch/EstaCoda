@@ -102,6 +102,6 @@ export type TokenOverlay = Partial<
 export interface ResolvedTokens {
   readonly mode: UiMode;
   readonly theme: UiTheme;
-  readonly skin: SkinName | "none";
+  readonly skin: SkinName;
   readonly contract: UiTokenContract;
 }

@@ -42,6 +42,12 @@ export const plainOverlay: TokenOverlay = {
     telegram: "@",
     media: "*",
   },
+  branding: {
+    responseLabel: "EstaCoda",
+    helpHeader: "Available Commands",
+    taglinePrimary: "Kemet Research",
+    taglineSecondary: "",
+  },
   behavior: {
     allowEmoji: false,
     allowAnimation: false,

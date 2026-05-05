@@ -43,15 +43,13 @@ function mergeDeep<T extends object>(
 export function resolveTokens(
   mode: UiMode,
   theme: UiTheme,
-  skin: SkinName | "none" = "none"
+  skin: SkinName = "kemetBlue"
 ): ResolvedTokens {
   const base = theme === "light" ? lightTheme : darkTheme;
 
   let merged: UiTokenContract = { ...base };
 
-  if (skin === "kemetBlue") {
-    merged = applyOverlay(merged, kemetBlueSkin);
-  }
+  merged = applyOverlay(merged, kemetBlueSkin);
 
   if (mode === "plain") {
     merged = applyOverlay(merged, plainOverlay);

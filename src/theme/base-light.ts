@@ -3,8 +3,8 @@ import type { UiTokenContract } from "../contracts/ui-tokens.js";
 export const lightTheme: UiTokenContract = {
   palette: {
     brand: "#0057D9",
-    action: "#00BFA5",
-    caution: "#FFA000",
+    action: "#008C95",
+    caution: "#B45309",
   },
   severity: {
     ok: "#2E7D32",

@@ -36,6 +36,6 @@ export const kemetBlueSkin: TokenOverlay = {
     responseLabel: "𓂀 EstaCoda",
     helpHeader: "𓂀 Available Commands",
     taglinePrimary: "☥ Kemet Research ☥",
-    taglineSecondary: "السيادة التكنولوجية للعالم العربي",
+    taglineSecondary: "السيادة التكنولوجية العربية",
   },
 };
