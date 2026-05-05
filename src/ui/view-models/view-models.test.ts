@@ -1,0 +1,476 @@
+import { describe, it, expect } from "vitest";
+import {
+  approvalAction,
+  buildActivityTimelineViewModel,
+  buildApprovalSecurityViewModel,
+  buildCommandResultViewModel,
+  buildKeyValueBlockViewModel,
+  buildListViewModel,
+  buildPickerViewModel,
+  buildPlainFallbackViewModel,
+  buildProgressContextRailViewModel,
+  buildStartupViewModel,
+  buildStatusViewModel,
+  buildTableViewModel,
+  buildWarningErrorViewModel,
+  kv,
+  listItem,
+  pickerOption,
+  progressStep,
+  timelineEvent,
+} from "./builders.js";
+
+describe("ViewModel builders", () => {
+  it("buildStatusViewModel produces plain structured object", () => {
+    const vm = buildStatusViewModel({
+      agentName: "EstaCoda",
+      model: { provider: "openrouter", id: "claude-sonnet-4" },
+      securityMode: "open",
+      skillCount: 12,
+      skillAutonomy: "suggest",
+      toolCount: 34,
+      mcpActive: 2,
+      mcpTotal: 3,
+      taskflowActive: true,
+      warnings: [
+        buildWarningErrorViewModel({
+          severity: "warn",
+          title: "Skill load",
+          message: "1 warning",
+        }),
+      ],
+    });
+
+    expect(vm.kind).toBe("status");
+    expect(vm.agentName).toBe("EstaCoda");
+    expect(vm.model.provider).toBe("openrouter");
+    expect(vm.securityMode).toBe("open");
+    expect(vm.skillCount).toBe(12);
+    expect(vm.skillAutonomy).toBe("suggest");
+    expect(vm.toolCount).toBe(34);
+    expect(vm.mcp).toEqual({ active: 2, total: 3 });
+    expect(vm.taskflowActive).toBe(true);
+    expect(vm.warnings).toHaveLength(1);
+    expect(vm.warnings[0].kind).toBe("warning");
+    expect(vm.sections).toBeUndefined();
+
+    // Must be a plain object with no methods
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildStatusViewModel defaults warnings to empty array", () => {
+    const vm = buildStatusViewModel({
+      agentName: "EstaCoda",
+      model: { provider: "openrouter", id: "claude-sonnet" },
+      securityMode: "closed",
+      skillCount: 0,
+      toolCount: 0,
+      mcpActive: 0,
+      mcpTotal: 0,
+      taskflowActive: false,
+    });
+
+    expect(vm.warnings).toEqual([]);
+  });
+
+  it("buildTableViewModel produces plain structured object", () => {
+    const vm = buildTableViewModel({
+      title: "Cron jobs",
+      columns: [
+        { key: "id", header: "ID", alignment: "left" },
+        { key: "name", header: "Name", alignment: "left" },
+        { key: "status", header: "Status", alignment: "center" },
+      ],
+      rows: [
+        { id: "job-1", name: "Daily report", status: "active" },
+        { id: "job-2", name: "Weekly sync", status: "paused" },
+      ],
+      emptyMessage: "No jobs",
+    });
+
+    expect(vm.kind).toBe("table");
+    expect(vm.title).toBe("Cron jobs");
+    expect(vm.columns).toHaveLength(3);
+    expect(vm.columns[2].alignment).toBe("center");
+    expect(vm.rows).toHaveLength(2);
+    expect(vm.emptyMessage).toBe("No jobs");
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildKeyValueBlockViewModel produces plain structured object", () => {
+    const vm = buildKeyValueBlockViewModel({
+      title: "Channel status",
+      entries: [
+        kv("Telegram", "ready", "ok"),
+        kv("Discord", "configured, missing credentials", "warn"),
+        kv("Email", "disabled"),
+      ],
+    });
+
+    expect(vm.kind).toBe("kv");
+    expect(vm.title).toBe("Channel status");
+    expect(vm.entries).toHaveLength(3);
+    expect(vm.entries[0]).toEqual({ key: "Telegram", value: "ready", severity: "ok" });
+    expect(vm.entries[1]).toEqual({
+      key: "Discord",
+      value: "configured, missing credentials",
+      severity: "warn",
+    });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildListViewModel produces plain structured object", () => {
+    const vm = buildListViewModel({
+      title: "Delivery platforms",
+      items: [
+        listItem("telegram"),
+        listItem("discord", undefined, "ok"),
+        listItem("email", "not ready", "warn"),
+      ],
+      ordered: false,
+      emptyMessage: "none configured",
+    });
+
+    expect(vm.kind).toBe("list");
+    expect(vm.title).toBe("Delivery platforms");
+    expect(vm.items).toHaveLength(3);
+    expect(vm.items[2]).toEqual({ label: "email", value: "not ready", severity: "warn" });
+    expect(vm.ordered).toBe(false);
+    expect(vm.emptyMessage).toBe("none configured");
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildWarningErrorViewModel produces plain structured object", () => {
+    const vm = buildWarningErrorViewModel({
+      severity: "error",
+      title: "Missing config",
+      message: "BOT_TOKEN is not set",
+      details: ["Set ESTACODA_TELEGRAM_BOT_TOKEN in your environment"],
+    });
+
+    expect(vm.kind).toBe("warning");
+    expect(vm.severity).toBe("error");
+    expect(vm.title).toBe("Missing config");
+    expect(vm.message).toBe("BOT_TOKEN is not set");
+    expect(vm.details).toEqual(["Set ESTACODA_TELEGRAM_BOT_TOKEN in your environment"]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildApprovalSecurityViewModel produces plain structured object", () => {
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal",
+      riskClass: "destructive-local",
+      targetSummary: "rm -rf /home/user/project",
+      severity: "warn",
+      actions: [
+        approvalAction("allow", "Allow once", "ok"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+      details: ["This action cannot be undone"],
+    });
+
+    expect(vm.kind).toBe("approval");
+    expect(vm.toolName).toBe("terminal");
+    expect(vm.riskClass).toBe("destructive-local");
+    expect(vm.targetSummary).toBe("rm -rf /home/user/project");
+    expect(vm.severity).toBe("warn");
+    expect(vm.actions).toHaveLength(2);
+    expect(vm.actions[0]).toEqual({ id: "allow", label: "Allow once", severity: "ok" });
+    expect(vm.details).toEqual(["This action cannot be undone"]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildActivityTimelineViewModel produces plain structured object", () => {
+    const vm = buildActivityTimelineViewModel({
+      events: [
+        timelineEvent("terminal", "running", { elapsedMs: 1200 }),
+        timelineEvent("web.extract", "done", { elapsedMs: 3400, chars: 1200, sentChars: 800 }),
+        timelineEvent("terminal", "gated", { decision: "ask", riskClass: "destructive-local" }),
+      ],
+    });
+
+    expect(vm.kind).toBe("timeline");
+    expect(vm.events).toHaveLength(3);
+    expect(vm.events[0]).toEqual({ tool: "terminal", status: "running", elapsedMs: 1200 });
+    expect(vm.events[1]).toEqual({
+      tool: "web.extract",
+      status: "done",
+      elapsedMs: 3400,
+      chars: 1200,
+      sentChars: 800,
+    });
+    expect(vm.events[2]).toEqual({
+      tool: "terminal",
+      status: "gated",
+      decision: "ask",
+      riskClass: "destructive-local",
+    });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildProgressContextRailViewModel produces plain structured object", () => {
+    const vm = buildProgressContextRailViewModel({
+      title: "Setup",
+      steps: [
+        progressStep("Config loaded", "done"),
+        progressStep("Skills loaded", "done"),
+        progressStep("MCP connected", "active"),
+        progressStep("Ready", "pending"),
+      ],
+    });
+
+    expect(vm.kind).toBe("progress");
+    expect(vm.title).toBe("Setup");
+    expect(vm.steps).toHaveLength(4);
+    expect(vm.steps[2]).toEqual({ label: "MCP connected", status: "active" });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildPickerViewModel produces plain structured object", () => {
+    const vm = buildPickerViewModel({
+      title: "Select a model",
+      options: [
+        pickerOption("claude-sonnet", "Claude Sonnet", { selected: true }),
+        pickerOption("gpt-4o", "GPT-4o", { description: "Fast and capable" }),
+        pickerOption("gemini-pro", "Gemini Pro"),
+      ],
+    });
+
+    expect(vm.kind).toBe("picker");
+    expect(vm.title).toBe("Select a model");
+    expect(vm.options).toHaveLength(3);
+    expect(vm.options[0]).toEqual({ id: "claude-sonnet", label: "Claude Sonnet", selected: true });
+    expect(vm.options[1]).toEqual({
+      id: "gpt-4o",
+      label: "GPT-4o",
+      description: "Fast and capable",
+    });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildStartupViewModel produces plain structured object", () => {
+    const vm = buildStartupViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research", "Autonomous Engineering"],
+      model: { provider: "openrouter", id: "claude-sonnet-4" },
+      readiness: "ready",
+      warnings: [],
+    });
+
+    expect(vm.kind).toBe("startup");
+    expect(vm.agentName).toBe("EstaCoda");
+    expect(vm.taglines).toEqual(["Kemet Research", "Autonomous Engineering"]);
+    expect(vm.model.id).toBe("claude-sonnet-4");
+    expect(vm.readiness).toBe("ready");
+    expect(vm.warnings).toEqual([]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildStartupViewModel defaults warnings to empty array", () => {
+    const vm = buildStartupViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      model: { provider: "openrouter", id: "claude-sonnet" },
+      readiness: "degraded",
+    });
+
+    expect(vm.warnings).toEqual([]);
+  });
+
+  it("buildCommandResultViewModel produces plain structured object", () => {
+    const inner = buildKeyValueBlockViewModel({
+      entries: [kv("result", "ok")],
+    });
+
+    const vm = buildCommandResultViewModel({
+      ok: true,
+      title: "Gateway status",
+      blocks: [inner],
+    });
+
+    expect(vm.kind).toBe("commandResult");
+    expect(vm.ok).toBe(true);
+    expect(vm.title).toBe("Gateway status");
+    expect(vm.blocks).toHaveLength(1);
+    expect(vm.blocks[0].kind).toBe("kv");
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildPlainFallbackViewModel produces plain structured object", () => {
+    const vm = buildPlainFallbackViewModel({
+      lines: ["EstaCoda is ready", "model: openrouter/claude-sonnet"],
+    });
+
+    expect(vm.kind).toBe("plainFallback");
+    expect(vm.lines).toEqual(["EstaCoda is ready", "model: openrouter/claude-sonnet"]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+});
+
+describe("ViewModel convenience helpers", () => {
+  it("kv creates a KeyValueEntry", () => {
+    const entry = kv("key", "value", "warn");
+    expect(entry).toEqual({ key: "key", value: "value", severity: "warn" });
+  });
+
+  it("kv without severity omits severity field", () => {
+    const entry = kv("key", "value");
+    expect(entry).toEqual({ key: "key", value: "value" });
+    expect(entry.severity).toBeUndefined();
+  });
+
+  it("listItem creates a ListItem", () => {
+    const item = listItem("label", "value", "error");
+    expect(item).toEqual({ label: "label", value: "value", severity: "error" });
+  });
+
+  it("timelineEvent creates a TimelineEvent with overrides", () => {
+    const event = timelineEvent("browser.navigate", "running", { elapsedMs: 500 });
+    expect(event).toEqual({ tool: "browser.navigate", status: "running", elapsedMs: 500 });
+  });
+
+  it("progressStep creates a ProgressStep", () => {
+    const step = progressStep("Load", "done");
+    expect(step).toEqual({ label: "Load", status: "done" });
+  });
+
+  it("pickerOption creates a PickerOption with overrides", () => {
+    const option = pickerOption("id", "Label", { description: "desc", selected: true });
+    expect(option).toEqual({ id: "id", label: "Label", description: "desc", selected: true });
+  });
+
+  it("approvalAction creates an ApprovalAction", () => {
+    const action = approvalAction("allow", "Allow", "ok");
+    expect(action).toEqual({ id: "allow", label: "Allow", severity: "ok" });
+  });
+});
+
+describe("ViewModel shape invariants", () => {
+  it("all builders produce objects with kind discriminator", () => {
+    const status = buildStatusViewModel({
+      agentName: "A",
+      model: { provider: "p", id: "i" },
+      securityMode: "open",
+      skillCount: 1,
+      toolCount: 1,
+      mcpActive: 0,
+      mcpTotal: 0,
+      taskflowActive: false,
+    });
+    const table = buildTableViewModel({ columns: [], rows: [] });
+    const kvBlock = buildKeyValueBlockViewModel({ entries: [] });
+    const list = buildListViewModel({ items: [] });
+    const warning = buildWarningErrorViewModel({ severity: "info", title: "T", message: "M" });
+    const approval = buildApprovalSecurityViewModel({
+      toolName: "t",
+      targetSummary: "s",
+      severity: "warn",
+      actions: [],
+    });
+    const timeline = buildActivityTimelineViewModel({ events: [] });
+    const progress = buildProgressContextRailViewModel({ steps: [] });
+    const picker = buildPickerViewModel({ title: "T", options: [] });
+    const startup = buildStartupViewModel({
+      agentName: "A",
+      taglines: [],
+      model: { provider: "p", id: "i" },
+      readiness: "ready",
+    });
+    const result = buildCommandResultViewModel({ ok: true, title: "T", blocks: [] });
+    const plain = buildPlainFallbackViewModel({ lines: [] });
+
+    expect(status.kind).toBe("status");
+    expect(table.kind).toBe("table");
+    expect(kvBlock.kind).toBe("kv");
+    expect(list.kind).toBe("list");
+    expect(warning.kind).toBe("warning");
+    expect(approval.kind).toBe("approval");
+    expect(timeline.kind).toBe("timeline");
+    expect(progress.kind).toBe("progress");
+    expect(picker.kind).toBe("picker");
+    expect(startup.kind).toBe("startup");
+    expect(result.kind).toBe("commandResult");
+    expect(plain.kind).toBe("plainFallback");
+  });
+
+  it("builder outputs contain no functions (pure data only)", () => {
+    const vm = buildCommandResultViewModel({
+      ok: true,
+      title: "Test",
+      blocks: [
+        buildStatusViewModel({
+          agentName: "A",
+          model: { provider: "p", id: "i" },
+          securityMode: "open",
+          skillCount: 1,
+          toolCount: 1,
+          mcpActive: 0,
+          mcpTotal: 0,
+          taskflowActive: false,
+        }),
+        buildTableViewModel({ columns: [], rows: [] }),
+        buildKeyValueBlockViewModel({ entries: [kv("k", "v")] }),
+        buildListViewModel({ items: [listItem("i")] }),
+        buildWarningErrorViewModel({ severity: "info", title: "T", message: "M" }),
+        buildApprovalSecurityViewModel({
+          toolName: "t",
+          targetSummary: "s",
+          severity: "warn",
+          actions: [approvalAction("a", "A")],
+        }),
+        buildActivityTimelineViewModel({ events: [timelineEvent("t", "done")] }),
+        buildProgressContextRailViewModel({ steps: [progressStep("s", "done")] }),
+        buildPickerViewModel({ title: "T", options: [pickerOption("i", "L")] }),
+        buildStartupViewModel({
+          agentName: "A",
+          taglines: [],
+          model: { provider: "p", id: "i" },
+          readiness: "ready",
+        }),
+        buildPlainFallbackViewModel({ lines: ["line"] }),
+      ],
+    });
+
+    function assertNoFunctions(value: unknown): void {
+      if (value === null || value === undefined) return;
+      if (typeof value === "function") {
+        throw new Error("ViewModel must not contain functions");
+      }
+      if (typeof value === "object") {
+        for (const v of Object.values(value)) {
+          assertNoFunctions(v);
+        }
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          assertNoFunctions(item);
+        }
+      }
+    }
+
+    assertNoFunctions(vm);
+  });
+
+  it("builder outputs contain no ANSI escape codes", () => {
+    const vm = buildCommandResultViewModel({
+      ok: true,
+      title: "Test",
+      blocks: [
+        buildPlainFallbackViewModel({ lines: ["plain text"] }),
+        buildWarningErrorViewModel({ severity: "error", title: "Title", message: "Message" }),
+      ],
+    });
+
+    function assertNoAnsi(value: unknown): void {
+      if (typeof value === "string") {
+        expect(value).not.toMatch(/\x1b\[/);
+      } else if (Array.isArray(value)) {
+        for (const item of value) assertNoAnsi(item);
+      } else if (value !== null && typeof value === "object") {
+        for (const v of Object.values(value)) assertNoAnsi(v);
+      }
+    }
+
+    assertNoAnsi(vm);
+  });
+});
