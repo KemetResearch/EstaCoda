@@ -477,16 +477,16 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderProgressRail(vm: ProgressContextRailViewModel): string {
-    if (vm.steps.length === 0) {
+    if (vm.steps.length === 0 && vm.sessionElapsedMs === undefined && vm.taskElapsedMs === undefined) {
       const empty = vm.title !== undefined
         ? `${this.#bold(vm.title)}\n${this.#dim("No steps.")}`
         : this.#dim("No steps.");
       return empty;
     }
 
-    const lines: string[] = [];
+    const parts: string[] = [];
     if (vm.title !== undefined) {
-      lines.push(this.#bold(vm.title));
+      parts.push(this.#bold(vm.title));
     }
 
     for (const step of vm.steps) {
@@ -498,10 +498,28 @@ export class StandardRenderer {
           : step.status === "done"
             ? this.#dim(step.label)
             : step.label;
-      lines.push(`${marker} ${label}`);
+      parts.push(`${marker} ${label}`);
     }
 
-    return lines.join("\n");
+    const timerParts: string[] = [];
+    if (vm.sessionElapsedMs !== undefined) {
+      const glyph = this.#useUnicode ? "◷" : "sess";
+      timerParts.push(`${glyph} ${formatDuration(vm.sessionElapsedMs)}`);
+    }
+    if (vm.taskElapsedMs !== undefined) {
+      if (vm.taskElapsedMs === "idle") {
+        const glyph = this.#useUnicode ? "⧖" : "task";
+        timerParts.push(`${glyph} idle`);
+      } else {
+        const glyph = this.#useUnicode ? "⧖" : "task";
+        timerParts.push(`${glyph} ${formatDuration(vm.taskElapsedMs)}`);
+      }
+    }
+    if (timerParts.length > 0) {
+      parts.push(timerParts.join("  "));
+    }
+
+    return parts.join("\n");
   }
 
   #progressStatusMarker(status: ProgressContextRailViewModel["steps"][number]["status"]): string {

@@ -326,6 +326,28 @@ function progressRailFailedVm(): ViewModel {
   });
 }
 
+function progressRailTimerVm(): ViewModel {
+  return buildProgressContextRailViewModel({
+    title: "Turn progress",
+    steps: [
+      progressStep("web.extract", "done"),
+      progressStep("memory.write", "active"),
+      progressStep("terminal.exec", "pending"),
+    ],
+    sessionElapsedMs: 58_000,
+    taskElapsedMs: 16_000,
+  });
+}
+
+function progressRailIdleVm(): ViewModel {
+  return buildProgressContextRailViewModel({
+    title: "Turn progress",
+    steps: [],
+    sessionElapsedMs: 120_000,
+    taskElapsedMs: "idle",
+  });
+}
+
 // ──────────────────────────────────────
 // Test suites
 // ──────────────────────────────────────
@@ -421,6 +443,16 @@ describe("Progress context rail", () => {
     it(`renders failed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailFailedVm());
       expect(output).toMatchSnapshot(`rail-failed-${ctx.name}`);
+    });
+
+    it(`renders timers in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(progressRailTimerVm());
+      expect(output).toMatchSnapshot(`rail-timer-${ctx.name}`);
+    });
+
+    it(`renders idle in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(progressRailIdleVm());
+      expect(output).toMatchSnapshot(`rail-idle-${ctx.name}`);
     });
   }
 });

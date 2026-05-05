@@ -365,8 +365,14 @@ export function buildSetupNeededViewModel(setup: SetupNeededInfo): WarningErrorV
 // Turn Progress Rail Builder
 // ─────────────────────────────────────────────────────────────
 
-export function buildTurnProgressRail(toolExecutions: readonly ToolExecutionRecord[]): ProgressContextRailViewModel {
-  const steps = toolExecutions.map((execution) => {
+export interface BuildTurnProgressRailOptions {
+  readonly toolExecutions: readonly ToolExecutionRecord[];
+  readonly sessionElapsedMs?: number;
+  readonly taskElapsedMs?: number | "idle";
+}
+
+export function buildTurnProgressRail(options: BuildTurnProgressRailOptions): ProgressContextRailViewModel {
+  const steps = options.toolExecutions.map((execution) => {
     const status = execution.decision === "ask"
       ? "pending"
       : execution.result?.ok === false
@@ -379,7 +385,9 @@ export function buildTurnProgressRail(toolExecutions: readonly ToolExecutionReco
   });
 
   return buildProgressContextRailViewModel({
-    title: toolExecutions.length > 0 ? "Turn progress" : undefined,
+    title: options.toolExecutions.length > 0 ? "Turn progress" : undefined,
     steps,
+    sessionElapsedMs: options.sessionElapsedMs,
+    taskElapsedMs: options.taskElapsedMs,
   });
 }

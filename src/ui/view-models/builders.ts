@@ -195,6 +195,8 @@ export function buildActivityTimelineViewModel(
 export interface BuildProgressRailInput {
   readonly title?: string;
   readonly steps: readonly ProgressStep[];
+  readonly sessionElapsedMs?: number;
+  readonly taskElapsedMs?: number | "idle";
 }
 
 export function buildProgressContextRailViewModel(
@@ -204,6 +206,8 @@ export function buildProgressContextRailViewModel(
     kind: "progress",
     title: input.title,
     steps: input.steps,
+    sessionElapsedMs: input.sessionElapsedMs,
+    taskElapsedMs: input.taskElapsedMs,
   };
 }
 

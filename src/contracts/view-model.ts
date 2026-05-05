@@ -151,6 +151,8 @@ export interface ProgressContextRailViewModel {
   readonly kind: "progress";
   readonly title?: string;
   readonly steps: readonly ProgressStep[];
+  readonly sessionElapsedMs?: number;
+  readonly taskElapsedMs?: number | "idle";
 }
 
 // ─────────────────────────────────────────────────────────────

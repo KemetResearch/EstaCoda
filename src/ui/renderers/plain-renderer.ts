@@ -338,7 +338,7 @@ function formatCount(value: number): string {
 // ─────────────────────────────────────────────────────────────
 
 export function renderProgressRail(vm: ProgressContextRailViewModel): string {
-  if (vm.steps.length === 0) {
+  if (vm.steps.length === 0 && vm.sessionElapsedMs === undefined && vm.taskElapsedMs === undefined) {
     return vm.title !== undefined ? `${vm.title}\nNo steps.` : "No steps.";
   }
 
@@ -350,6 +350,21 @@ export function renderProgressRail(vm: ProgressContextRailViewModel): string {
   for (const step of vm.steps) {
     const marker = progressStatusMarker(step.status);
     lines.push(`${marker} ${step.label}`);
+  }
+
+  const timerParts: string[] = [];
+  if (vm.sessionElapsedMs !== undefined) {
+    timerParts.push(`sess ${formatDuration(vm.sessionElapsedMs)}`);
+  }
+  if (vm.taskElapsedMs !== undefined) {
+    if (vm.taskElapsedMs === "idle") {
+      timerParts.push("task idle");
+    } else {
+      timerParts.push(`task ${formatDuration(vm.taskElapsedMs)}`);
+    }
+  }
+  if (timerParts.length > 0) {
+    lines.push(timerParts.join("  "));
   }
 
   return lines.join("\n");

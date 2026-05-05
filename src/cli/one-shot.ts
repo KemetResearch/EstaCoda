@@ -1,6 +1,8 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
+import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -28,16 +30,17 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     await options.runtime.trustWorkspace();
   }
 
-  const activityRenderer = new ToolActivityRenderer({
+  const activityBuilder = new ToolActivityViewModelBuilder({
     tools: options.runtime.tools()
   });
   const eventLines: string[] = [];
+  const streamState = { lastWriteEndedWithNewline: true };
   const response = await options.runtime.handle({
     text: parsed.prompt,
     channel: "cli",
     trustedWorkspace: parsed.trustWorkspace ? true : undefined,
     onEvent: (event) => {
-      const rendered = renderOneShotEvent(event, activityRenderer);
+      const rendered = renderOneShotEvent(event, activityBuilder, streamState);
 
       if (rendered !== undefined) {
         eventLines.push(rendered);
@@ -95,34 +98,49 @@ function parseOneShotArgs(argv: string[]): {
 
 function renderOneShotEvent(
   event: RuntimeEvent,
-  activityRenderer: ToolActivityRenderer
+  activityBuilder: ToolActivityViewModelBuilder,
+  streamState: { lastWriteEndedWithNewline: boolean }
 ): string | undefined {
+  function safeLine(text: string): string {
+    const endsWithNewline = text.endsWith("\n");
+    const needsBoundary = !streamState.lastWriteEndedWithNewline && !text.startsWith("\n");
+    streamState.lastWriteEndedWithNewline = endsWithNewline;
+    return needsBoundary ? `\n${text}` : text;
+  }
+
   switch (event.kind) {
     case "agent-start":
-      return `thinking: ${event.input}`;
+      return safeLine(`thinking: ${event.input}`);
     case "intent":
-      return `intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)`;
+      return safeLine(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)`);
     case "skill":
-      return `skill: ${event.name}`;
-    case "tool-start":
-      return activityRenderer.render(event);
-    case "tool-result":
-      return activityRenderer.render(event);
+      return safeLine(`skill: ${event.name}`);
+    case "tool-start": {
+      const vm = activityBuilder.buildTimelineEvent(event);
+      return safeLine(renderPlain({ kind: "timeline", events: [vm] }));
+    }
+    case "tool-result": {
+      const vm = activityBuilder.buildTimelineEvent(event);
+      return safeLine(renderPlain({ kind: "timeline", events: [vm] }));
+    }
     case "provider-attempt":
-      return event.fallback
+      return safeLine(event.fallback
         ? `provider fallback: ${event.provider}/${event.model}`
-        : `provider: ${event.provider}/${event.model}`;
+        : `provider: ${event.provider}/${event.model}`);
     case "provider-tool-call":
-      return `${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}`;
+      return safeLine(`${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}`);
     case "provider-result":
-      return event.ok
+      return safeLine(event.ok
         ? `provider ready: ${event.provider}/${event.model}`
-        : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`;
+        : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`);
     case "provider-budget-exhausted":
-      return `provider budget: ${event.reason}`;
+      return safeLine(`provider budget: ${event.reason}`);
     case "agent-cancelled":
-      return `cancelled: ${event.reason}`;
-    case "provider-token":
+      return safeLine(`cancelled: ${event.reason}`);
+    case "provider-token": {
+      streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
+      return event.text;
+    }
     case "agent-final":
       return undefined;
   }

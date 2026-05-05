@@ -15,7 +15,14 @@ import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildToolsMe
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
+import {
+  ToolActivityViewModelBuilder,
+  buildApprovalPromptViewModel,
+  buildSecurityAuditViewModel,
+  buildSetupNeededViewModel,
+} from "./tool-activity-view-models.js";
 import { createSessionRenderer } from "./session-renderer.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -33,7 +40,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output });
   let runtime = options.runtime;
-  let activityRenderer = new ToolActivityRenderer({
+  let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
   });
   let activeTurn: AbortController | undefined;
@@ -82,7 +89,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
           runtime = shouldExit.runtime;
-          activityRenderer = new ToolActivityRenderer({
+          activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
           });
           output.write(`${shouldExit.notice(runtime)}\n\n`);
@@ -100,11 +107,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       while (retryText !== undefined) {
         output.write("\n");
         activeTurn = new AbortController();
+        const streamState = { lastWriteEndedWithNewline: true };
         const response = await runtime.handle({
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
-            onEvent: (event) => renderRuntimeEvent(output, event, activityRenderer)
+            onEvent: (event) => renderRuntimeEvent(output, event, activityBuilder, renderer, streamState)
           })
           .finally(() => {
             activeTurn = undefined;
@@ -120,6 +128,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           runtime,
           prompt,
           output,
+          renderer,
           homeDir: options.homeDir,
           execution: response.toolExecutions.find(hasSetupNeededResult)
         });
@@ -246,7 +255,7 @@ async function handleSlashCommand(input: {
     case "security":
       input.output.write(`${await renderSecurityAudit(input.runtime, {
         debug: args.includes("debug") || args.includes("--debug")
-      })}\n\n`);
+      }, input.renderer)}\n\n`);
       return false;
     case "yolo": {
       if (input.runtime.toggleYoloMode === undefined) {
@@ -596,80 +605,19 @@ async function handleTaskFlowCommand(input: {
   }
 }
 
-async function renderSecurityAudit(runtime: Runtime, options: { debug: boolean }): Promise<string> {
+async function renderSecurityAudit(
+  runtime: Runtime,
+  options: { debug: boolean },
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string }
+): Promise<string> {
   const events = await runtime.sessionDb.listEvents(runtime.sessionId);
   const securityEvents = events
     .filter((event): event is Extract<SessionEvent, { kind: "security-assessed" }> => event.kind === "security-assessed")
     .slice(-8)
     .reverse();
 
-  if (securityEvents.length === 0) {
-    return [
-      "Security audit",
-      "No tool security decisions have been recorded for this session yet."
-    ].join("\n");
-  }
-
-  return [
-    "Security audit",
-    ...securityEvents.map((event, index) =>
-      options.debug
-        ? renderSecurityEventDebug(index + 1, event)
-        : renderSecurityEventCompact(index + 1, event)
-    )
-  ].join("\n");
-}
-
-function renderSecurityEventCompact(
-  index: number,
-  event: Extract<SessionEvent, { kind: "security-assessed" }>
-): string {
-  return [
-    `${index}. ${event.tool} -> ${event.assessment.decision}`,
-    `   risk=${event.riskClass} rule=${event.assessment.deterministicRule ?? "policy"}`,
-    event.targetSummary === undefined ? undefined : `   target=${truncateSingleLine(event.targetSummary, 96)}`,
-    `   reason=${truncateSingleLine(event.assessment.reason, 120)}`
-  ].filter((line): line is string => typeof line === "string").join("\n");
-}
-
-function renderSecurityEventDebug(
-  index: number,
-  event: Extract<SessionEvent, { kind: "security-assessed" }>
-): string {
-  const assessment = event.assessment;
-  return [
-    `${index}. ${event.tool}`,
-    `   final decision: ${assessment.decision}`,
-    `   mode: ${assessment.mode}`,
-    `   risk: ${assessment.risk}`,
-    `   risk class: ${event.riskClass}`,
-    `   deterministic rule: ${assessment.deterministicRule ?? "none"}`,
-    event.targetKey === undefined ? undefined : `   target key: ${truncateSingleLine(event.targetKey, 140)}`,
-    event.targetSummary === undefined ? undefined : `   target: ${truncateSingleLine(event.targetSummary, 140)}`,
-    `   reason: ${assessment.reason}`,
-    `   assessor: ${renderAssessorDebug(assessment)}`
-  ].filter((line): line is string => typeof line === "string").join("\n");
-}
-
-function renderAssessorDebug(assessment: SecurityAssessment): string {
-  const assessor = assessment.assessor;
-  if (assessor === undefined) {
-    return "not used";
-  }
-
-  if (assessor.used !== true) {
-    return `not used (${assessor.status ?? "disabled"})`;
-  }
-
-  return [
-    `used status=${assessor.status ?? "unknown"}`,
-    assessor.provider === undefined ? undefined : `provider=${assessor.provider}`,
-    assessor.model === undefined ? undefined : `model=${assessor.model}`,
-    assessor.decision === undefined ? undefined : `decision=${assessor.decision}`,
-    assessor.risk === undefined ? undefined : `risk=${assessor.risk}`,
-    assessor.confidence === undefined ? undefined : `confidence=${assessor.confidence}`,
-    assessor.reason === undefined ? undefined : `reason=${truncateSingleLine(assessor.reason, 80)}`
-  ].filter((part): part is string => typeof part === "string").join(" ");
+  const vm = buildSecurityAuditViewModel({ events: securityEvents, debug: options.debug });
+  return renderer.render(vm);
 }
 
 async function maybeHandleApprovalGate(input: {
@@ -724,6 +672,7 @@ async function maybeHandleSetupNeeded(input: {
   runtime: Runtime;
   prompt: Prompt;
   output: NodeJS.WritableStream;
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   homeDir?: string;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
@@ -740,9 +689,15 @@ async function maybeHandleSetupNeeded(input: {
   }
 
   if (setup.capability !== "image_generation" || execution.tool.name !== "image.generate") {
+    const vm = buildSetupNeededViewModel({
+      capability: setup.capability,
+      provider: setup.provider,
+      model: typeof setup.model === "string" ? setup.model : undefined,
+      requiredSecret: setup.requiredSecret,
+    });
     return {
       handled: true,
-      message: `Setup is required for ${setup.capability}. This CLI session cannot complete that setup flow yet.`
+      message: input.renderer.render(vm)
     };
   }
 
@@ -751,15 +706,15 @@ async function maybeHandleSetupNeeded(input: {
     ? setup.model
     : defaultImageModel(provider);
   const requiredSecret = setup.requiredSecret;
-  input.output.write([
-    "",
-    "Image generation needs one protected credential before I can continue.",
-    `Provider: ${provider}`,
-    `Model: ${model}`,
-    `Secret env: ${requiredSecret}`,
-    "The key is captured by the CLI and is not sent to the model or written to the transcript.",
-    ""
-  ].join("\n"));
+
+  const vm = buildSetupNeededViewModel({
+    capability: "image_generation",
+    provider,
+    model,
+    requiredSecret,
+  });
+  input.output.write(input.renderer.render(vm));
+  input.output.write("\n\n");
 
   const secret = await input.prompt(`Paste ${requiredSecret} (or type cancel): `, { secret: true });
   if (secret.trim().length === 0 || ["cancel", "c", "no", "n"].includes(secret.trim().toLowerCase())) {
@@ -854,17 +809,8 @@ function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadat
 }
 
 function renderApprovalPrompt(execution: ToolExecutionRecord): string {
-  const details = [
-    "",
-    "Approval required",
-    `Tool: ${execution.tool.name}`,
-    `Risk: ${execution.riskClass}`,
-    execution.targetSummary === undefined ? undefined : `Target: ${execution.targetSummary}`,
-    "Choose once, session, always, or deny",
-    "approval > "
-  ].filter((line): line is string => typeof line === "string");
-
-  return details.join("\n");
+  const vm = buildApprovalPromptViewModel(execution);
+  return `${renderPlain(vm)}\napproval > `;
 }
 
 function normalizeApprovalScope(value: string): "once" | "session" | "always" | undefined {
@@ -1055,50 +1001,70 @@ async function renderMemoryPromotions(runtime: Runtime): Promise<string> {
 function renderRuntimeEvent(
   output: NodeJS.WritableStream,
   event: RuntimeEvent,
-  activityRenderer: ToolActivityRenderer
+  activityBuilder: ToolActivityViewModelBuilder,
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
+  streamState: { lastWriteEndedWithNewline: boolean }
 ): void {
+  function safeWrite(text: string): void {
+    const endsWithNewline = text.endsWith("\n");
+    // If the last write didn't end with a newline and this write doesn't
+    // start with one, we need to create a boundary to avoid interleaving
+    // into an active provider-token stream.
+    if (!streamState.lastWriteEndedWithNewline && !text.startsWith("\n")) {
+      output.write("\n");
+    }
+    output.write(text);
+    streamState.lastWriteEndedWithNewline = endsWithNewline;
+  }
+
   switch (event.kind) {
     case "agent-start":
-      output.write(`thinking: ${event.input}\n`);
+      safeWrite(`thinking: ${event.input}\n`);
       return;
     case "intent":
-      output.write(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
+      safeWrite(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
       return;
     case "skill":
-      output.write(`☥ skill: ${event.name}\n`);
+      safeWrite(`☥ skill: ${event.name}\n`);
       return;
-    case "tool-start":
-      output.write(`${activityRenderer.render(event)}\n`);
+    case "tool-start": {
+      const vm = activityBuilder.buildTimelineEvent(event);
+      safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
       return;
-    case "tool-result":
-      output.write(`${activityRenderer.render(event)}\n`);
+    }
+    case "tool-result": {
+      const vm = activityBuilder.buildTimelineEvent(event);
+      safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
       return;
+    }
     case "provider-attempt":
-      output.write(event.fallback
+      safeWrite(event.fallback
         ? `provider: switching to ${event.provider}/${event.model}\n`
         : `provider: using ${event.provider}/${event.model}\n`);
       return;
-    case "provider-token":
+    case "provider-token": {
+      // Provider tokens stream directly; never inject newlines here.
       output.write(event.text);
+      streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
       return;
+    }
     case "provider-tool-call":
-      output.write(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
+      safeWrite(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
       return;
     case "provider-result":
       if (event.ok) {
-        output.write(`\nprovider: ${event.provider}/${event.model} ready\n`);
+        safeWrite(`\nprovider: ${event.provider}/${event.model} ready\n`);
         return;
       }
-
-      output.write(event.willFallback
+      safeWrite(event.willFallback
         ? `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}; trying fallback\n`
         : `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}\n`);
       return;
     case "provider-budget-exhausted":
-      output.write(`\nprovider budget: ${event.reason}\n`);
+      safeWrite(`\nprovider budget: ${event.reason}\n`);
       return;
     case "agent-cancelled":
-      output.write(`\ncancelled: ${event.reason}\n`);
+      safeWrite(`\ncancelled: ${event.reason}\n`);
       return;
     case "agent-final":
       return;

@@ -9155,8 +9155,12 @@ assert(renderedSessionLoop.includes("Cron jobs") || renderedSessionLoop.includes
 assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
 assert(
-  renderedSessionLoop.includes("🧿 extracting web") || renderedSessionLoop.includes("☥ planning workflow"),
-  "expected session tool icon rendering"
+  renderedSessionLoop.includes("[>]") || renderedSessionLoop.includes("[x]"),
+  "expected session tool activity markers"
+);
+assert(
+  renderedSessionLoop.includes("web.extract") || renderedSessionLoop.includes("browser") || renderedSessionLoop.includes("workflow") || renderedSessionLoop.includes("terminal"),
+  "expected session tool semantic activity text"
 );
 assert(renderedSessionLoop.includes("Ending EstaCoda session."), "expected session loop exit rendering");
 assert(imageSetupPromptSecrets.includes(true), "expected image setup loop to request masked secret input");
