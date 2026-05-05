@@ -1,5 +1,7 @@
 import type { RegisteredTool } from "../contracts/tool.js";
 import { CronStore } from "./cron-store.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { buildCronListViewModel, buildCronActionViewModel, buildCronNotFoundViewModel } from "./cron-view-models.js";
 
 type CronjobToolInput = {
   action?: "create" | "list" | "update" | "pause" | "resume" | "run" | "remove";
@@ -124,20 +126,13 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
 }
 
 export function renderCronJobs(jobs: Awaited<ReturnType<CronStore["list"]>>): string {
-  if (jobs.length === 0) {
-    return "No cron jobs configured.";
-  }
-  return [
-    "Cron jobs",
-    ...jobs.map((job) => [
-      `${job.id} [${job.status}] ${job.name}`,
-      `  schedule: ${job.schedule}`,
-      `  next: ${job.nextRunAt ?? "none"}`,
-      job.script === undefined ? undefined : `  script: ${job.script}`,
-      `  runs: ${job.runCount}`,
-      job.skills.length === 0 ? undefined : `  skills: ${job.skills.join(", ")}`
-    ].filter((line) => line !== undefined).join("\n"))
-  ].join("\n");
+  return renderPlain(buildCronListViewModel({ jobs }));
+}
+
+function renderMaybeJob(prefix: string, job: Awaited<ReturnType<CronStore["get"]>>, id: string) {
+  return job === undefined
+    ? { ok: false, content: renderPlain(buildCronNotFoundViewModel({ id })) }
+    : { ok: true, content: renderPlain(buildCronActionViewModel({ action: prefix, job })) };
 }
 
 function normalizeSkills(input: CronjobToolInput): string[] {
@@ -151,12 +146,6 @@ function resolveUpdatedSkills(current: string[], input: CronjobToolInput): strin
   if (input.add_skill !== undefined) return current.includes(input.add_skill) ? current : [...current, input.add_skill];
   if (input.remove_skill !== undefined) return current.filter((skill) => skill !== input.remove_skill);
   return undefined;
-}
-
-function renderMaybeJob(prefix: string, job: Awaited<ReturnType<CronStore["get"]>>, id: string) {
-  return job === undefined
-    ? { ok: false, content: `Cron job not found: ${id}` }
-    : { ok: true, content: `${prefix} cron job ${job.id}: ${job.name}` };
 }
 
 function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {

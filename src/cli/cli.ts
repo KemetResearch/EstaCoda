@@ -48,6 +48,8 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { runSessionsCommand } from "./session-commands.js";
+import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { Database } from "bun:sqlite";
 import {
@@ -2506,203 +2508,21 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
 }
 
 async function handoff(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand, ...rest] = args;
-
-  if (subcommand === "telegram") {
-    const runtime = options.runtime;
-    if (runtime === undefined) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: "No active session. Start an interactive session first, then run: estacoda handoff telegram"
-      };
-    }
-
-    const { FileHandoffStore } = await import("../channels/handoff-store.js");
-    const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
-    const handoff = await store.create({
-      sessionId: runtime.sessionId,
-      surfaceType: "telegram",
-      ttlMinutes: 10
-    });
-
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Handoff code for Telegram: ${handoff.code}`,
-        `Session: ${runtime.sessionId}`,
-        `Expires: ${handoff.expiresAt}`,
-        "",
-        "To attach a Telegram chat to this session, send the following in Telegram:",
-        `  /attach ${handoff.code}`,
-        "",
-        "This code is single-use and expires in 10 minutes."
-      ].join("\n")
-    };
-  }
-
-  if (subcommand === "list") {
-    const { FileHandoffStore } = await import("../channels/handoff-store.js");
-    const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
-    const codes = await store.list();
-    const active = codes.filter((c) => !c.redeemed && new Date(c.expiresAt).getTime() > Date.now());
-
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Active handoff codes: ${active.length}`,
-        ...active.map((c) => `${c.code} → ${c.sessionId} (expires ${c.expiresAt})`)
-      ].join("\n") || "No active handoff codes."
-    };
-  }
-
-  return {
-    handled: true,
-    exitCode: 0,
-    output: [
-      "EstaCoda handoff",
-      "  estacoda handoff telegram  Generate a handoff code for Telegram",
-      "  estacoda handoff list      List active handoff codes"
-    ].join("\n")
-  };
+  const result = await runHandoffCommand({
+    args,
+    homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
+    runtime: options.runtime,
+  });
+  return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
 }
 
 async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand, ...rest] = args;
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const dbPath = join(homeDir, ".estacoda", "sessions.sqlite");
-
-  if (subcommand === "list" || subcommand === undefined) {
-    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
-    const db = new SQLiteSessionDB({ path: dbPath });
-    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
-    try {
-      const sessions = await db.listSessions("default");
-      const pointers = await pointerStore.listPointers();
-      const lines = sessions.slice(0, 20).map((s) => {
-        const updated = s.updatedAt ? `updated ${s.updatedAt}` : "no activity";
-        const attached = pointers.filter((p) => p.record.sessionId === s.id).map((p) => `${p.surfaceType}:${p.surfaceId}`).join(", ");
-        const attachment = attached.length > 0 ? ` [${attached}]` : "";
-        return `${s.id} — ${s.title ?? "(no title)"} — ${updated}${attachment}`;
-      });
-      return {
-        handled: true,
-        exitCode: 0,
-        output: [
-          `Sessions: ${sessions.length}`,
-          ...lines
-        ].join("\n")
-      };
-    } finally {
-      await db.close();
-    }
-  }
-
-  if (subcommand === "show") {
-    const sessionId = rest[0];
-    if (sessionId === undefined) {
-      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions show <session-id>" };
-    }
-    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
-    const db = new SQLiteSessionDB({ path: dbPath });
-    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
-    try {
-      const session = await db.getSession(sessionId);
-      if (session === undefined) {
-        return { handled: true, exitCode: 1, output: `Session not found: ${sessionId}` };
-      }
-      const messages = await db.listMessages(sessionId);
-      const pointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === sessionId);
-      const lines = [
-        `Session: ${session.id}`,
-        `Title: ${session.title ?? "(no title)"}`,
-        `Profile: ${session.profileId}`,
-        `Created: ${session.createdAt}`,
-        `Updated: ${session.updatedAt ?? "no activity"}`,
-        `Messages: ${messages.length}`,
-        "",
-        "Surface pointers",
-        ...pointers.map((p) => `  ${p.surfaceType}:${p.surfaceId} (since ${p.record.attachedAt})${p.record.homeDelivery !== undefined ? ` home=${p.record.homeDelivery}` : ""}`),
-        pointers.length === 0 ? "  none" : undefined,
-      ].filter((line) => line !== undefined);
-      return { handled: true, exitCode: 0, output: lines.join("\n") };
-    } finally {
-      await db.close();
-    }
-  }
-
-  if (subcommand === "current") {
-    const runtime = options.runtime;
-    if (runtime === undefined) {
-      return { handled: true, exitCode: 1, output: "No active session in this shell." };
-    }
-    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
-    const pointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === runtime.sessionId);
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Current session: ${runtime.sessionId}`,
-        "",
-        "Surface pointers",
-        ...pointers.map((p) => `  ${p.surfaceType}:${p.surfaceId} (since ${p.record.attachedAt})`),
-        pointers.length === 0 ? "  none" : undefined,
-      ].filter((line) => line !== undefined).join("\n")
-    };
-  }
-
-  if (subcommand === "attach") {
-    const [surface, surfaceId, sessionId] = rest;
-    if (surface === undefined || surfaceId === undefined || sessionId === undefined) {
-      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions attach <surface> <surface-id> <session-id>" };
-    }
-    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
-    const validSurfaces = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
-    if (!validSurfaces.includes(surface as typeof validSurfaces[number])) {
-      return { handled: true, exitCode: 1, output: `Invalid surface: ${surface}. Valid: ${validSurfaces.join(", ")}` };
-    }
-    await pointerStore.setPointer(surface as typeof validSurfaces[number], surfaceId, {
-      sessionId,
-      attachedAt: new Date().toISOString()
-    });
-    return { handled: true, exitCode: 0, output: `Attached ${surface}:${surfaceId} to session ${sessionId}.` };
-  }
-
-  if (subcommand === "detach") {
-    const [surface, surfaceId] = rest;
-    if (surface === undefined || surfaceId === undefined) {
-      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions detach <surface> <surface-id>" };
-    }
-    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
-    const validSurfaces = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
-    if (!validSurfaces.includes(surface as typeof validSurfaces[number])) {
-      return { handled: true, exitCode: 1, output: `Invalid surface: ${surface}. Valid: ${validSurfaces.join(", ")}` };
-    }
-    await pointerStore.removePointer(surface as typeof validSurfaces[number], surfaceId);
-    return { handled: true, exitCode: 0, output: `Detached ${surface}:${surfaceId}.` };
-  }
-
-  return {
-    handled: true,
-    exitCode: 0,
-    output: [
-      "EstaCoda sessions",
-      "  estacoda sessions list                      List recent sessions",
-      "  estacoda sessions show <session-id>         Show session details",
-      "  estacoda sessions current                   Show current session",
-      "  estacoda sessions attach <surface> <id> <session-id>  Attach surface to session",
-      "  estacoda sessions detach <surface> <id>     Detach surface from session"
-    ].join("\n")
-  };
+  const result = await runSessionsCommand({
+    args,
+    homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
+    runtime: options.runtime,
+  });
+  return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
 }
 
 async function channels(options: CliOptions, args: string[]): Promise<CliCommandResult> {

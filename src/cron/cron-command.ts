@@ -2,37 +2,50 @@ import { CronStore, type CronJob } from "./cron-store.js";
 import type { CronExecutionStore } from "./cron-execution-store.js";
 import { renderCronJobs } from "./cron-tools.js";
 import { commandRegistry } from "../cli/command-registry.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import type { ViewModel } from "../contracts/view-model.js";
+import {
+  buildCronHelpViewModel,
+  buildCronListViewModel,
+  buildCronJobDetailViewModel,
+  buildCronExecutionHistoryViewModel,
+  buildCronActionViewModel,
+  buildCronCreatedViewModel,
+  buildCronNotFoundViewModel,
+  buildCronUsageErrorViewModel,
+  buildCronUnknownCommandViewModel,
+} from "./cron-view-models.js";
 
-export async function runCronCommand(input: {
-  args: string[];
-  store: CronStore;
-  executionStore?: CronExecutionStore;
-  tick?: () => Promise<string>;
-  origin?: CronJob["origin"];
-  defaultDelivery?: string;
-}): Promise<{ ok: boolean; output: string }> {
+export type CronRenderer = (viewModel: ViewModel) => string;
+
+export async function runCronCommand(
+  input: {
+    args: string[];
+    store: CronStore;
+    executionStore?: CronExecutionStore;
+    tick?: () => Promise<string>;
+    origin?: CronJob["origin"];
+    defaultDelivery?: string;
+  },
+  renderer: CronRenderer = renderPlain
+): Promise<{ ok: boolean; output: string }> {
   const [command, ...rest] = input.args;
   const resolved = command !== undefined ? commandRegistry.resolveSubcommand("cron", command) : undefined;
   const canonical = resolved?.name ?? command;
 
   if (command === undefined || canonical === "help") {
     const cronCommands = commandRegistry.list({ scope: "both", parent: "cron" });
-    const maxWidth = Math.max(...cronCommands.map((c) => c.name.length), 6);
-    return {
-      ok: true,
-      output: [
-        "EstaCoda cron",
-        ...cronCommands.map(
-          (cmd) => `  cron ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
-        ),
-      ].join("\n"),
-    };
+    const viewModel = buildCronHelpViewModel({ commands: cronCommands });
+    return { ok: true, output: renderer(viewModel) };
   }
 
   if (canonical === "add") {
     const parsed = parseCronAddArgs(rest);
     if (parsed.schedule === undefined || parsed.prompt === undefined) {
-      return { ok: false, output: "Usage: cron add <schedule> \"<prompt>\" [--name name] [--skill skill]" };
+      const viewModel = buildCronUsageErrorViewModel({
+        message: "Usage: cron add <schedule> \"<prompt>\" [--name name] [--skill skill]",
+      });
+      return { ok: false, output: renderer(viewModel) };
     }
     if (parsed.delivery === undefined) {
       parsed.delivery = input.defaultDelivery;
@@ -43,26 +56,32 @@ export async function runCronCommand(input: {
       prompt: parsed.prompt,
       origin: input.origin
     });
-    return { ok: true, output: renderCreated(job) };
+    const viewModel = buildCronCreatedViewModel({ job });
+    return { ok: true, output: renderer(viewModel) };
   }
 
   if (canonical === "list") {
-    return { ok: true, output: renderCronJobs(await input.store.list()) };
+    const jobs = await input.store.list();
+    const viewModel = buildCronListViewModel({ jobs });
+    return { ok: true, output: renderer(viewModel) };
   }
 
   if (canonical === "show") {
     const id = rest[0];
     if (id === undefined) {
-      return { ok: false, output: "Usage: cron show <job-id>" };
+      const viewModel = buildCronUsageErrorViewModel({ message: "Usage: cron show <job-id>" });
+      return { ok: false, output: renderer(viewModel) };
     }
     const job = await input.store.get(id);
     if (job === undefined) {
-      return { ok: false, output: `Cron job not found: ${id}` };
+      const viewModel = buildCronNotFoundViewModel({ id });
+      return { ok: false, output: renderer(viewModel) };
     }
     const executions = input.executionStore !== undefined
       ? await input.executionStore.list({ jobId: id, limit: 5 })
       : [];
-    return { ok: true, output: renderJobDetail(job, executions) };
+    const viewModel = buildCronJobDetailViewModel({ job, executions });
+    return { ok: true, output: renderer(viewModel) };
   }
 
   if (canonical === "history") {
@@ -71,7 +90,8 @@ export async function runCronCommand(input: {
     const executions = input.executionStore !== undefined
       ? await input.executionStore.list({ jobId, limit })
       : [];
-    return { ok: true, output: renderExecutionHistory(executions, jobId) };
+    const viewModel = buildCronExecutionHistoryViewModel({ executions, jobId });
+    return { ok: true, output: renderer(viewModel) };
   }
 
   if (canonical === "tick") {
@@ -80,32 +100,35 @@ export async function runCronCommand(input: {
 
   const id = rest[0];
   if (id === undefined) {
-    return { ok: false, output: `Usage: cron ${command} <job-id>` };
+    const viewModel = buildCronUsageErrorViewModel({ message: `Usage: cron ${command} <job-id>` });
+    return { ok: false, output: renderer(viewModel) };
   }
 
   if (canonical === "edit") {
     const existing = await input.store.get(id);
     if (existing === undefined) {
-      return { ok: false, output: `Cron job not found: ${id}` };
+      const viewModel = buildCronNotFoundViewModel({ id });
+      return { ok: false, output: renderer(viewModel) };
     }
     const patch = parseCronEditArgs(rest.slice(1), existing.skills);
     const job = await input.store.update(id, patch);
     return job === undefined
-      ? { ok: false, output: `Cron job not found: ${id}` }
-      : { ok: true, output: `Updated cron job ${job.id}: ${job.name}` };
+      ? { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) }
+      : { ok: true, output: renderer(buildCronActionViewModel({ action: "Updated", job })) };
   }
 
-  if (canonical === "pause") return renderMaybe("Paused", await input.store.pause(id), id);
-  if (canonical === "resume") return renderMaybe("Resumed", await input.store.resume(id), id);
-  if (canonical === "run") return renderMaybe("Queued", await input.store.requestRun(id), id);
+  if (canonical === "pause") return renderMaybe("Paused", await input.store.pause(id), id, renderer);
+  if (canonical === "resume") return renderMaybe("Resumed", await input.store.resume(id), id, renderer);
+  if (canonical === "run") return renderMaybe("Queued", await input.store.requestRun(id), id, renderer);
   if (canonical === "remove") {
     const removed = await input.store.remove(id);
     return removed
-      ? { ok: true, output: `Removed cron job ${id}.` }
-      : { ok: false, output: `Cron job not found: ${id}` };
+      ? { ok: true, output: renderer(buildCronActionViewModel({ action: "Removed", job: { id, name: id } as CronJob })) }
+      : { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) };
   }
 
-  return { ok: false, output: `Unknown cron command: ${command}` };
+  const viewModel = buildCronUnknownCommandViewModel({ command: command ?? "" });
+  return { ok: false, output: renderer(viewModel) };
 }
 
 function parseCronAddArgs(args: string[]): {
@@ -235,59 +258,15 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   return parsed;
 }
 
-function renderCreated(job: CronJob): string {
-  return [
-    `Created cron job ${job.id}: ${job.name}`,
-    `Schedule: ${job.schedule}`,
-    `Next run: ${job.nextRunAt ?? "none"}`,
-    job.script === undefined ? undefined : `Script: ${job.script}`,
-    `Delivery: ${job.delivery}`
-  ].filter((line) => line !== undefined).join("\n");
-}
-
-function renderMaybe(prefix: string, job: CronJob | undefined, id: string): { ok: boolean; output: string } {
+function renderMaybe(
+  prefix: string,
+  job: CronJob | undefined,
+  id: string,
+  renderer: CronRenderer
+): { ok: boolean; output: string } {
   return job === undefined
-    ? { ok: false, output: `Cron job not found: ${id}` }
-    : { ok: true, output: `${prefix} cron job ${job.id}: ${job.name}` };
-}
-
-function renderJobDetail(job: CronJob, executions: Awaited<ReturnType<CronExecutionStore["list"]>>): string {
-  const lines = [
-    `Cron job: ${job.id}`,
-    `Name: ${job.name}`,
-    `Status: ${job.status}`,
-    `Schedule: ${job.schedule}`,
-    `Next run: ${job.nextRunAt ?? "none"}`,
-    `Last run: ${job.lastRunAt ?? "never"}`,
-    `Runs: ${job.runCount}`,
-    job.script === undefined ? undefined : `Script: ${job.script}`,
-    `Delivery: ${job.delivery}`,
-    job.skills.length === 0 ? undefined : `Skills: ${job.skills.join(", ")}`,
-    "",
-    `Recent executions (${executions.length} shown):`
-  ].filter((line) => line !== undefined);
-
-  if (executions.length === 0) {
-    lines.push("  No execution history recorded.");
-  } else {
-    for (const ex of executions) {
-      const duration = ex.completedAt !== undefined
-        ? ` (${Math.round((new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime()) / 1000)}s)`
-        : "";
-      lines.push(`  ${ex.id} [${ex.status}] ${ex.startedAt}${duration}`);
-      if (ex.failureClass !== undefined) {
-        lines.push(`    failure: ${ex.failureClass} — ${ex.failureMessage ?? ""}`);
-      }
-      if (ex.deliveryResults.size > 0) {
-        const targets = Array.from(ex.deliveryResults.entries())
-          .map(([target, result]) => `${target}:${result.success ? "ok" : "fail"}`)
-          .join(", ");
-        lines.push(`    delivery: ${targets}`);
-      }
-    }
-  }
-
-  return lines.join("\n");
+    ? { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) }
+    : { ok: true, output: renderer(buildCronActionViewModel({ action: prefix, job })) };
 }
 
 function parseHistoryLimit(args: string[]): number {
@@ -296,37 +275,3 @@ function parseHistoryLimit(args: string[]): number {
   const parsed = Number(args[index + 1]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
 }
-
-function renderExecutionHistory(
-  executions: Awaited<ReturnType<CronExecutionStore["list"]>>,
-  jobId?: string
-): string {
-  if (executions.length === 0) {
-    return jobId === undefined
-      ? "No cron execution history."
-      : `No execution history for job ${jobId}.`;
-  }
-
-  const lines = [
-    jobId === undefined ? "Cron execution history" : `Execution history for ${jobId}`,
-    ...executions.map((ex) => {
-      const duration = ex.completedAt !== undefined
-        ? ` (${Math.round((new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime()) / 1000)}s)`
-        : "";
-      const base = `${ex.id} [${ex.status}] ${ex.startedAt}${duration}`;
-      if (ex.failureClass !== undefined) {
-        return `${base}\n  failure: ${ex.failureClass} — ${ex.failureMessage ?? ""}`;
-      }
-      if (ex.deliveryResults.size > 0) {
-        const targets = Array.from(ex.deliveryResults.entries())
-          .map(([target, result]) => `${target}:${result.success ? "ok" : "fail"}`)
-          .join(", ");
-        return `${base}\n  delivery: ${targets}`;
-      }
-      return base;
-    })
-  ];
-
-  return lines.join("\n");
-}
-
