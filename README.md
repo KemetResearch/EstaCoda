@@ -47,6 +47,18 @@ On first launch, EstaCoda runs an interactive setup flow:
 - **Operator surface (v0.9):** CLI commands for gateway status/diagnose, channels list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
 
+## UI / CLI Rendering (v0.95)
+
+EstaCoda v0.95 introduced a structured rendering pipeline for all CLI and channel output:
+
+- **ViewModel layer** — pure data types (`status`, `table`, `list`, `approval`, `timeline`, `progress`, `startup`, `assistantResponse`, etc.)
+- **Renderer layer** — `PlainRenderer` (ASCII-only, no ANSI) and `StandardRenderer` (ANSI colors, Unicode symbols, animation)
+- **Surface Adapter layer** — channel-safe formatters for Telegram, Discord, Email, WhatsApp, and plain logs
+- **Terminal capability detection** — automatic fallback based on `isTTY`, `NO_COLOR`, `TERM=dumb`, `CI`, and terminal width
+- **Theme system** — base themes (`light` | `dark`) + skin overlays (`kemetBlue`) + mode overlays (`plain` | `standard`)
+
+See [UI Architecture](docs/ui-architecture.md), [Theme & Tokens](docs/theme-tokens.md), and [Rendering Guide](docs/rendering-guide.md) for details.
+
 ## TaskFlow (v0.8)
 
 TaskFlow adds durable, observable multi-step execution:
@@ -67,8 +79,9 @@ Run these before pushing changes:
 
 ```bash
 cd /path/to/EstaCoda
-bun run typecheck
-bun run smoke
+bun run test        # unit tests (authoritative gate)
+bun run typecheck   # TypeScript compilation
+bun run smoke       # runtime integration smoke tests
 bun run scripts/run-eval-fixtures.ts
 ```
 

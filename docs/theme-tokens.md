@@ -1,0 +1,268 @@
+# EstaCoda Theme & Token System (v0.95)
+
+> **Evidence:** `smoke-tested` for token resolution; `eval-tested` for plain/standard parity.
+
+---
+
+## 1. Model Overview
+
+The v0.95 UI uses a three-layer token model:
+
+```
+Base Theme (light | dark)
+    +
+Skin Overlay (kemetBlue)
+    +
+Mode Overlay (plain | standard)
+    =
+ResolvedTokens
+```
+
+| Layer | File | Purpose |
+|-------|------|---------|
+| **Base Theme** | `src/theme/base-light.ts`, `src/theme/base-dark.ts` | Color palette, surfaces, text, severity, interactive states |
+| **Skin Overlay** | `src/theme/kemet-blue-skin.ts` | Brand glyphs, spinner frames, tool icons, branding text |
+| **Mode Overlay** | `src/theme/plain-overlay.ts` | ASCII-safe symbols, disables ANSI/emoji/animation |
+| **Resolver** | `src/theme/token-resolver.ts` | Merges layers into `ResolvedTokens` |
+
+---
+
+## 2. Base Themes
+
+### 2.1 Dark Theme (`base-dark.ts`)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `palette.brand` | `#5AACFF` | Identity, live state, agent name |
+| `palette.action` | `#40E0D0` | Selection, action accent (turquoise) |
+| `palette.caution` | `#FFB454` | Rare caution/approval accent (amber) |
+| `severity.ok` | `#4CAF50` | Success indicators |
+| `severity.error` | `#EF5350` | Errors, failures |
+| `severity.warn` | `#FFA726` | Warnings |
+| `severity.info` | `#5AACFF` | Info banners |
+| `surface.bg` | `#1A1A1A` | Page background |
+| `surface.bgElevated` | `#252525` | Elevated panels |
+| `surface.border` | `#333333` | Strong borders |
+| `text.primary` | `#E8E8E8` | Main text |
+| `text.secondary` | `#B0B0B0` | Secondary text |
+| `text.muted` | `#707070` | Dimmed text |
+| `interactive.primary` | `#5AACFF` | Primary interactive |
+| `interactive.selectedBg` | `#1A3A5C` | Selected item background |
+
+### 2.2 Light Theme (`base-light.ts`)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `palette.brand` | `#0057D9` | Identity, live state |
+| `palette.action` | `#008C95` | Selection accent |
+| `palette.caution` | `#B45309` | Caution accent |
+| `severity.ok` | `#2E7D32` | Success |
+| `severity.error` | `#C62828` | Errors |
+| `severity.warn` | `#EF6C00` | Warnings |
+| `severity.info` | `#0057D9` | Info |
+| `surface.bg` | `#FFFFFF` | Page background |
+| `surface.bgElevated` | `#F5F5F5` | Elevated panels |
+| `surface.border` | `#E0E0E0` | Strong borders |
+| `text.primary` | `#1A1A1A` | Main text |
+| `text.secondary` | `#4A4A4A` | Secondary text |
+| `text.muted` | `#8A8A8A` | Dimmed text |
+
+### 2.3 Design Rules
+
+- **Brand color = identity and live state**, not decoration.
+- **Turquoise = selection/action accent**.
+- **Amber = rare caution/approval accent**.
+- **Violet is not used** in v0.95.
+- **Surfaces stay neutral**, not blue-heavy.
+- **Security severity uses semantic tokens**, not brand color.
+
+---
+
+## 3. KemetBlue Skin Overlay
+
+The KemetBlue skin overrides glyphs, branding, and tool icons with Egyptian-themed symbols. It does **not** change the base palette — it works on top of both `light` and `dark`.
+
+### 3.1 Glyph Overrides
+
+| Glyph | Default | KemetBlue |
+|-------|---------|-----------|
+| `prompt` | `›` | `›` |
+| `spinner.waiting` | Braille dots | `(⌦) (◈) (✦) (◉) (☥)` |
+| `spinner.thinking` | `◐◓◑◒` | `(⌦) (◐) (◑) (◒)` |
+
+### 3.2 Tool Icon Overrides
+
+| Tool | Default | KemetBlue |
+|------|---------|-----------|
+| `terminal` | `$` | `⌘` |
+| `webSearch` | `◎` | `◎` |
+| `readFile` | `◰` | `◰` |
+| `writeFile` | `◆` | `◆` |
+| `memory` | `☥` | `☥` |
+| `telegram` | `✉` | `✉` |
+
+### 3.3 Branding Overrides
+
+| Field | Default | KemetBlue |
+|-------|---------|-----------|
+| `agentName` | `EstaCoda` | `EstaCoda` |
+| `responseLabel` | `EstaCoda` | `𓂀 EstaCoda` |
+| `helpHeader` | `Available Commands` | `𓂀 Available Commands` |
+| `taglinePrimary` | (empty) | `☥ Kemet Research ☥` |
+| `taglineSecondary` | (empty) | `السيادة التكنولوجية العربية` |
+| `promptPrefix` | (none) | `𓂀 > ` |
+
+---
+
+## 4. Plain Mode Overlay
+
+The plain overlay is applied **last** and forces ASCII-safe output regardless of base theme or skin.
+
+### 4.1 Symbol Mappings
+
+| Symbol | Standard | Plain |
+|--------|----------|-------|
+| `prompt` | `›` | `>` |
+| `toolPrefix` | `│` | `|` |
+| `continuation` | `…` | `...` |
+| `bullet` | `•` | `-` |
+| `check` | `✓` | `[OK]` |
+| `cross` | `✗` | `[X]` |
+| `arrow` | `→` | `>>` |
+| `spinner.waiting` | Braille / Kemet | `| / - \` |
+| `spinner.thinking` | `◐◓◑◒` | `o O o .` |
+| `progress.filled` | `█` | `#` |
+| `progress.empty` | `░` | `-` |
+| `progress.thumb` | `▌` | `>` |
+
+### 4.2 Tool Icon Mappings (Plain)
+
+| Tool | Standard | Plain |
+|------|----------|-------|
+| `terminal` | `$` / `⌘` | `$` |
+| `webSearch` | `◎` | `?` |
+| `readFile` | `◰` | `R` |
+| `writeFile` | `◆` | `W` |
+| `searchFiles` | `◇` | `F` |
+| `executeCode` | `⌬` | `X` |
+| `browserNavigate` | `☞` | `B` |
+| `delegateTask` | `☷` | `D` |
+| `memory` | `☥` | `~` |
+| `clarify` | `?` | `?` |
+| `cronjob` | `◷` | `C` |
+| `process` | `⌁` | `P` |
+| `todo` | `□` | `T` |
+| `telegram` | `✉` | `@` |
+| `media` | `◉` | `*` |
+
+### 4.3 Behavior Overrides
+
+```
+allowEmoji: false
+allowAnimation: false
+allowAnsiColor: false
+```
+
+---
+
+## 5. Token Resolution
+
+### 5.1 API
+
+```typescript
+import { resolveTokens } from "./theme/token-resolver.js";
+
+const tokens = resolveTokens(mode, theme, skin);
+// mode: "plain" | "standard"
+// theme: "light" | "dark"
+// skin: "kemetBlue"
+```
+
+### 5.2 Merge Strategy
+
+1. Start with base theme (`light` or `dark`).
+2. Deep-merge `kemetBlueSkin` overlay.
+3. If `mode === "plain"`, deep-merge `plainOverlay`.
+
+The merge is **deep** for nested objects (`glyph`, `spinner`, `progress`, `toolIcon`, `branding`, `behavior`).
+
+### 5.3 ResolvedTokens Shape
+
+```typescript
+interface ResolvedTokens {
+  readonly mode: UiMode;
+  readonly theme: UiTheme;
+  readonly skin: SkinName;
+  readonly contract: UiTokenContract;
+}
+```
+
+---
+
+## 6. ANSI Mappings
+
+### 6.1 True Color (24-bit)
+
+When `supportsTrueColor === true`:
+
+```
+Foreground: \x1b[38;2;R;G;Bm<text>\x1b[0m
+Background: \x1b[48;2;R;G;Bm<text>\x1b[0m
+```
+
+### 6.2 ANSI 256
+
+When `supportsColor === true` but `supportsTrueColor === false`:
+
+```
+Foreground: \x1b[38;5;Nm<text>\x1b[0m
+Background: \x1b[48;5;Nm<text>\x1b[0m
+```
+
+Where `N` is computed via `hexToAnsi256()` using the 6x6x6 RGB cube or grayscale ramp.
+
+### 6.3 Plain Mode
+
+All ANSI helpers return the raw text unchanged:
+
+```typescript
+#color(text, hex) → text
+#bold(text) → text
+#dim(text) → text
+```
+
+---
+
+## 7. Extending the Token System
+
+### 7.1 Adding a New Skin
+
+1. Create `src/theme/my-skin.ts` exporting a `TokenOverlay`.
+2. Import it in `src/theme/token-resolver.ts`.
+3. Add the skin name to the `SkinName` union in `src/contracts/ui-tokens.ts`.
+4. Apply the overlay in `resolveTokens()` when the skin matches.
+
+### 7.2 Adding a New Token Category
+
+1. Add the field to `UiTokenContract` in `src/contracts/ui-tokens.ts`.
+2. Add a default value to `base-light.ts` and `base-dark.ts`.
+3. Add plain-safe fallback to `plain-overlay.ts`.
+4. Consume it in `StandardRenderer`.
+
+---
+
+## 8. Environment Variables
+
+| Variable | Effect |
+|----------|--------|
+| `NO_COLOR` | Disables all ANSI color |
+| `FORCE_COLOR=0` | Disables color |
+| `FORCE_COLOR=1` | Enables basic color |
+| `FORCE_COLOR=3` | Enables true color |
+| `TERM=dumb` | Disables color and animation |
+| `COLUMNS` | Overrides terminal width |
+| `NO_EMOJI` | Disables emoji |
+| `ESTACODA_NO_EMOJI` | Disables emoji (EstaCoda-specific) |
+| `ESTACODA_THEME` | Sets theme (`light` or `dark`) |
+| `ESTACODA_MODE` | Sets mode (`plain` or `standard`) |
+| `ESTACODA_SKIN` | Sets skin (`kemetBlue`) |

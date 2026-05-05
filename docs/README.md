@@ -17,9 +17,14 @@ This directory is the **source of truth** for the EstaCoda codebase as it exists
 |---------|---------|
 | [Architecture](./architecture/) | System structure, runtime composition, data flow, evolution, and risk register. |
 | [Subsystems](./subsystems/) | Per-subsystem deep dives: skills, memory, security, providers, channels, tools, CLI, traces, evals, cron, browser, MCP, ACP. |
-- [Operations](./operations/) | How to set up, test, run smoke, perform maintenance, agent handoff, and validate releases. |
+| [Operations](./operations/) | How to set up, test, run smoke, perform maintenance, agent handoff, and validate releases. |
 | [ADR](./adr/) | Architectural Decision Records for durable cross-subsystem decisions. |
 | [Planning](./planning/) | Governance note: planning docs are private workspace artifacts. |
+| **UI / CLI (v0.95)** | |
+| [UI Architecture](./ui-architecture.md) | ViewModel → Renderer → Surface Adapter pipeline. |
+| [Theme & Tokens](./theme-tokens.md) | Semantic token system, light/dark themes, KemetBlue skin, plain mode. |
+| [Rendering Guide](./rendering-guide.md) | Contributor guide for adding new CLI surfaces. |
+| [Manual QA](./manual-qa.md) | Environment fallback, streaming safety, and visual validation procedures. |
 
 ---
 
