@@ -17,6 +17,7 @@ export function getProtectedPaths(homeDir: string, workspaceRoot?: string): Prot
     { source: join(root, "memory"), label: "memory directory" },
     { source: join(root, "skills", "local"), label: "local skills" },
     { source: join(root, "skills", ".evolution"), label: "skill evolution" },
+    { source: join(root, "capabilities", "registry.jsonl"), label: "capability registry" },
     { source: join(root, "cron"), label: "cron directory" }
   ];
 

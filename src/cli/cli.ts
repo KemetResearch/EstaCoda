@@ -64,6 +64,8 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
+import { CapabilityRegistry } from "../capabilities/capability-registry.js";
+import { validateCapabilityManifest } from "../capabilities/capability-validator.js";
 import { trace } from "./trace-commands.js";
 import { evalCommand } from "./eval-commands.js";
 import { proposalCommand } from "./proposal-commands.js";
@@ -304,6 +306,27 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
     extraLines.push("State backup: ready");
   } else {
     extraWarnings.push(`State backup not ready: ${backupReady.reason}`);
+  }
+
+  // Capability registry validation
+  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const registry = new CapabilityRegistry({ homeDir });
+  const capabilities = await registry.list();
+  if (capabilities.length === 0) {
+    extraLines.push("Capability registry: not initialized");
+  } else {
+    const validationErrors: string[] = [];
+    for (const entry of capabilities) {
+      const v = validateCapabilityManifest(entry.manifest);
+      if (!v.ok) {
+        validationErrors.push(`${entry.manifest.id} — ${v.errors.join(", ")}`);
+      }
+    }
+    if (validationErrors.length > 0) {
+      extraWarnings.push(`Capability registry errors:\n${validationErrors.map((e) => `  - ${e}`).join("\n")}`);
+    } else {
+      extraLines.push(`Capability registry: valid (${capabilities.length} installed)`);
+    }
   }
 
   const ok = result.ok && extraWarnings.length === 0;
@@ -645,12 +668,22 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
     warnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
-  // Capability directory exists (created by Phase 1 init)
+  // Capability registry health
   const notes: string[] = [];
-  const { existsSync } = await import("node:fs");
-  const capabilitiesDir = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "capabilities");
-  if (!existsSync(capabilitiesDir)) {
-    notes.push("Capability directory does not exist. Run `estacoda init` to create it.");
+  const capRegistry = new CapabilityRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const capEntries = await capRegistry.list();
+  if (capEntries.length === 0) {
+    notes.push("Capability registry: no capabilities installed");
+  } else {
+    const errorCount = capEntries.filter((e) => e.status === "error").length;
+    const disabledCount = capEntries.filter((e) => e.status === "disabled").length;
+    notes.push(`Capability registry: ${capEntries.length} installed`);
+    if (errorCount > 0) {
+      warnings.push(`${errorCount} capability(ies) have status error`);
+    }
+    if (disabledCount > 0) {
+      notes.push(`${disabledCount} capability(ies) disabled`);
+    }
   }
 
   return {

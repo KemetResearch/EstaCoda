@@ -4,7 +4,7 @@ import {
   detectTerminalCapabilities,
   shouldAnimate,
   shouldUseEmoji,
-} from "./capabilities.js";
+} from "./terminal-capabilities.js";
 
 describe("detectTerminalCapabilities", () => {
   it("returns defaults for a non-TTY stream with no env", () => {

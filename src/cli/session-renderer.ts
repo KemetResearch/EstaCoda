@@ -5,7 +5,7 @@
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import { detectTerminalCapabilities } from "../ui/capabilities.js";
+import { detectTerminalCapabilities } from "../ui/terminal-capabilities.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { resolveTokens } from "../theme/token-resolver.js";
