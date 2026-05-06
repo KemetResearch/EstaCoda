@@ -74,6 +74,7 @@ import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import { evolutionCommand } from "./evolution-commands.js";
 import { flowCommand } from "./flow-commands.js";
+import { skillsCommand } from "./skills-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import {
   formatSecurityMode,
@@ -179,6 +180,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return evolutionCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
+    case "skills":
+      return skillsCommand(options, args);
     case "handoff":
       return handoff(options, args);
     case "sessions":

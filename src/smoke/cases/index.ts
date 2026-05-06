@@ -4,6 +4,7 @@ import { bundled_skill_sync_case } from "./bundled-skill-sync.js";
 import { init_lifecycle_case } from "./init-lifecycle.js";
 import { update_dry_run_case } from "./update-dry-run.js";
 import { bare_launch_case } from "./bare-launch.js";
+import { skills_pack_lifecycle_case } from "./skills-pack-lifecycle.js";
 
 export const allSmokeCases = [
   legacy_monolith_case,
@@ -11,5 +12,6 @@ export const allSmokeCases = [
   bundled_skill_sync_case,
   init_lifecycle_case,
   update_dry_run_case,
-  bare_launch_case
+  bare_launch_case,
+  skills_pack_lifecycle_case
 ];

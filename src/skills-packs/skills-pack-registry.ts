@@ -15,7 +15,11 @@ export class SkillsPackRegistry {
     this.#path = join(options.homeDir, ".estacoda", "skills-packs", "registry.jsonl");
   }
 
-  async install(manifest: SkillsPackManifest, actor: string): Promise<{ ok: true; entry: InstalledSkillsPack } | { ok: false; errors: string[] }> {
+  async install(
+    manifest: SkillsPackManifest,
+    actor: string,
+    options?: { status?: SkillsPackStatus }
+  ): Promise<{ ok: true; entry: InstalledSkillsPack } | { ok: false; errors: string[] }> {
     const validation = validateSkillsPackManifest(manifest);
     if (!validation.ok) {
       return { ok: false, errors: validation.errors };
@@ -27,7 +31,7 @@ export class SkillsPackRegistry {
       return { ok: false, errors: [`Skills pack "${manifest.id}" is already installed`] };
     }
 
-    const status = this.#defaultStatus(manifest);
+    const status = options?.status ?? this.#defaultStatus(manifest);
     const entry: InstalledSkillsPack = {
       manifest,
       status,
