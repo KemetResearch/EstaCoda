@@ -410,12 +410,12 @@ function deterministicReason(
   }
   if (rule === "capability-first") {
     if (decision === "allow") {
-      return "Allowed by capability-first policy for this tool and workspace state.";
+      return "Allowed by skills-first policy for this tool and workspace state.";
     }
     if (decision === "deny") {
-      return "Denied by capability-first policy.";
+      return "Denied by skills-first policy.";
     }
-    return "Approval required by capability-first policy.";
+    return "Approval required by skills-first policy.";
   }
 
   return `Security decision recorded by ${rule}.`;

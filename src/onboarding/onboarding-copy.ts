@@ -376,7 +376,7 @@ export const onboardingCopyEn: OnboardingCopy = {
   optional: {
     title: "Optional capabilities",
     body: "Set up extra capabilities now or skip them for later.",
-    bodyAfterSelection: "Set up another capability, or choose Done to continue.",
+    bodyAfterSelection: "Set up another skills pack, or choose Done to continue.",
     skipDescription: "Start with the core terminal agent.",
     doneDescription: "Continue with the selected capabilities.",
     channels: { label: "Channels", description: "Connect Telegram for remote messages and updates." },

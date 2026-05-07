@@ -153,7 +153,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "gateway":
       return gateway(options, args);
     case "model":
-      return model(options);
+      return model(options, args);
     case "tools":
       return tools(options);
     case "doctor":
@@ -587,9 +587,84 @@ async function profile(options: CliOptions, args: string[]): Promise<CliCommandR
   };
 }
 
-async function model(options: CliOptions): Promise<CliCommandResult> {
+async function model(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const config = await loadRuntimeConfig(options);
   const diagnostic = await diagnoseProviderConfig(config);
+
+  if (args[0] === "set" && args[1] !== undefined) {
+    const providerModel = args[1];
+    const slashIndex = providerModel.indexOf("/");
+    if (slashIndex === -1) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: expected <provider>/<model>, got "${providerModel}"`,
+          "",
+          "Usage:",
+          "  estacoda model set <provider>/<model>"
+        ].join("\n")
+      };
+    }
+    const provider = providerModel.slice(0, slashIndex);
+    const modelId = providerModel.slice(slashIndex + 1);
+
+    const providerConfig = config.config.providers?.[provider];
+    if (providerConfig === undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: provider "${provider}" is not configured.`,
+          "",
+          "Configured providers:",
+          ...Object.keys(config.config.providers ?? {}).map((p) => `  ${p}`),
+          "",
+          "Configure a provider first:",
+          `  estacoda setup --provider ${provider} --model ${modelId}`
+        ].join("\n")
+      };
+    }
+
+    if (!providerConfig.models?.includes(modelId)) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: model "${modelId}" is not listed for provider "${provider}".`,
+          "",
+          `Available models for ${provider}:`,
+          ...(providerConfig.models ?? []).map((m) => `  ${m}`),
+          "",
+          "Add the model to the provider config, then try again."
+        ].join("\n")
+      };
+    }
+
+    const result = await setupProviderConfig({
+      ...options,
+      input: {
+        provider,
+        model: modelId,
+        models: providerConfig.models,
+        primary: true
+      }
+    });
+
+    const updated = await loadRuntimeConfig(options);
+    const updatedDiagnostic = await diagnoseProviderConfig(updated);
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Switched to ${provider}/${modelId}.`,
+        `Config: ${result.path}`,
+        "",
+        renderProviderDiagnostic(updatedDiagnostic)
+      ].join("\n")
+    };
+  }
 
   return {
     handled: true,
@@ -604,7 +679,10 @@ async function model(options: CliOptions): Promise<CliCommandResult> {
       `Browser backend: ${config.browser.backend}`,
       `Config sources: ${config.sources.join(", ") || "none"}`,
       "",
-      renderProviderDiagnostic(diagnostic)
+      renderProviderDiagnostic(diagnostic),
+      "",
+      "Commands:",
+      "  estacoda model set <provider>/<model>"
     ].join("\n")
   };
 }
@@ -890,6 +968,7 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
       input: {
         provider: "local",
         model: selectedModel,
+        models: discovery.models,
         baseUrl,
         enableNetwork: true,
         scope: parsed.scope
@@ -1356,23 +1435,48 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
     };
   }
 
-  const parsed = parseSecuritySetupArgs(rest);
-  const result = await setupSecurityConfig({
-    ...options,
-    input: parsed
-  });
-  const loaded = await loadRuntimeConfig(options);
-  const mode = formatSecurityMode(loaded.security.approvalMode, localeForConfig(loaded));
+  if (subcommand === "setup") {
+    let parsed: SecuritySetupInput;
+    try {
+      parsed = parseSecuritySetupArgs(rest);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: ${message}`,
+          "",
+          "Usage:",
+          "  estacoda security setup --mode strict|adaptive|open",
+          "  estacoda security setup --assessor-enabled --assessor-provider <provider> --assessor-model <model>",
+          "  estacoda security setup --assessor-disabled"
+        ].join("\n")
+      };
+    }
+    const result = await setupSecurityConfig({
+      ...options,
+      input: parsed
+    });
+    const loaded = await loadRuntimeConfig(options);
+    const mode = formatSecurityMode(loaded.security.approvalMode, localeForConfig(loaded));
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Approval mode: ${mode.label} (${mode.value}).`,
+        `Description: ${mode.description}`,
+        `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
 
   return {
     handled: true,
-    exitCode: 0,
-    output: [
-      `Approval mode: ${mode.label} (${mode.value}).`,
-      `Description: ${mode.description}`,
-      `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
-      `Config: ${result.path}`
-    ].join("\n")
+    exitCode: 1,
+    output: "Unknown security subcommand. Use `estacoda security status` or `estacoda security setup`."
   };
 }
 
@@ -2606,6 +2710,8 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
     } else if (arg === "--assessor-enabled") {
       parsed.assessorEnabled = true;
     } else if (arg === "--no-assessor") {
+      parsed.assessorEnabled = false;
+    } else if (arg === "--assessor-disabled") {
       parsed.assessorEnabled = false;
     } else if (arg === "--assessor-provider") {
       parsed.assessorProvider = next as SecuritySetupInput["assessorProvider"] | undefined;

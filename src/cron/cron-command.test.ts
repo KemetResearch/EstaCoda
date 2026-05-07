@@ -51,6 +51,24 @@ describe("runCronCommand", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("adds a job with flag syntax", async () => {
+    const result = await runCronCommand({
+      args: ["add", "--name", "x", "--schedule", "*/5 * * * *", "--command", "echo test"],
+      store,
+      executionStore
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("Created cron job");
+    expect(result.output).toContain("x");
+    expect(result.output).toContain("*/5 * * * *");
+  });
+
+  it("shows usage when flag syntax is missing required args", async () => {
+    const result = await runCronCommand({ args: ["add", "--schedule", "*/5 * * * *"], store, executionStore });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("cron add --schedule");
+  });
+
   it("lists jobs", async () => {
     await store.create({ schedule: "1h", prompt: "test" });
     const result = await runCronCommand({ args: ["list"], store, executionStore });
@@ -155,5 +173,20 @@ describe("runCronCommand", () => {
     expect(result.output).toContain("cron resume");
     expect(result.output).toContain("cron run");
     expect(result.output).toContain("cron remove");
+  });
+
+  it("does not crash on show/history with a fresh execution store (auto-creates schema)", async () => {
+    const freshDbDir = join(tmpDir, ".estacoda-fresh");
+    await mkdir(freshDbDir, { recursive: true });
+    const freshDbPath = join(freshDbDir, "sessions.sqlite");
+    const freshDb = new Database(freshDbPath, { create: true });
+    const freshExecutionStore = new CronExecutionStore(freshDb);
+    const job = await store.create({ schedule: "1h", prompt: "test" });
+    const resultShow = await runCronCommand({ args: ["show", job.id], store, executionStore: freshExecutionStore });
+    expect(resultShow.ok).toBe(true);
+    expect(resultShow.output).toContain(job.id);
+    const resultHistory = await runCronCommand({ args: ["history", job.id], store, executionStore: freshExecutionStore });
+    expect(resultHistory.ok).toBe(true);
+    freshDb.close();
   });
 });

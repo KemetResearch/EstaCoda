@@ -43,7 +43,7 @@ export async function runCronCommand(
     const parsed = parseCronAddArgs(rest);
     if (parsed.schedule === undefined || parsed.prompt === undefined) {
       const viewModel = buildCronUsageErrorViewModel({
-        message: "Usage: cron add <schedule> \"<prompt>\" [--name name] [--skill skill]",
+        message: "Usage: cron add <schedule> \"<prompt>\" [--name name] [--skill skill]\n   or: cron add --schedule <schedule> --command \"<prompt>\" [--name name] [--skill skill]",
       });
       return { ok: false, output: renderer(viewModel) };
     }
@@ -151,6 +151,12 @@ function parseCronAddArgs(args: string[]): {
     if (arg === "--name") {
       parsed.name = next;
       index += 1;
+    } else if (arg === "--schedule") {
+      parsed.schedule = next;
+      index += 1;
+    } else if (arg === "--command") {
+      parsed.prompt = next;
+      index += 1;
     } else if (arg === "--skill") {
       if (next !== undefined) parsed.skills.push(next);
       index += 1;
@@ -175,11 +181,11 @@ function parseCronAddArgs(args: string[]): {
   }
 
   if (positional[0]?.toLowerCase() === "every" && positional[1] !== undefined) {
-    parsed.schedule = `${positional[0]} ${positional[1]}`;
-    parsed.prompt = positional.slice(2).join(" ").trim() || undefined;
+    parsed.schedule = parsed.schedule ?? `${positional[0]} ${positional[1]}`;
+    parsed.prompt = parsed.prompt ?? (positional.slice(2).join(" ").trim() || undefined);
   } else {
-    parsed.schedule = positional[0];
-    parsed.prompt = positional.slice(1).join(" ").trim() || undefined;
+    parsed.schedule = parsed.schedule ?? positional[0];
+    parsed.prompt = parsed.prompt ?? (positional.slice(1).join(" ").trim() || undefined);
   }
   return parsed;
 }

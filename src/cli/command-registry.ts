@@ -175,7 +175,7 @@ function registerAll(): void {
     name: "tools",
     aliases: [],
     category: "Info",
-    description: "Browse available tools grouped by capability",
+    description: "Browse available tools grouped by toolset",
     visibility: "public",
     scope: "both",
   });

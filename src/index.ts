@@ -6,12 +6,13 @@ import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
 import { createRuntime } from "./runtime/create-runtime.js";
-import { runSessionLoop } from "./cli/session-loop.js";
+import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { launchInteractiveSession } from "./cli/interactive-launcher.js";
 import { getPackageVersion } from "./cli/version-command.js";
+import { renderPlain } from "./ui/renderers/plain-renderer.js";
 
 const argv = process.argv.slice(2);
 
@@ -142,13 +143,54 @@ if (argv.length === 0 && canRunInteractive()) {
   process.exit(0);
 }
 
-const oneShot = await runOneShotPrompt({
-  runtime,
-  argv
+if (argv.length >= 1 && argv[0].startsWith("/")) {
+  const chunks: string[] = [];
+  const output = {
+    write: (chunk: string | Buffer) => { chunks.push(String(chunk)); },
+    end: () => {}
+  } as NodeJS.WritableStream;
+
+  const result = await handleSlashCommand({
+    text: argv.join(" "),
+    runtime,
+    output,
+    renderer: { render: renderPlain },
+    workspaceRoot
+  });
+
+  if (typeof result !== "boolean") {
+    chunks.push(result.notice(runtime));
+  }
+
+  console.log(chunks.join(""));
+  await runtime.dispose();
+  process.exit(0);
+}
+
+const ONE_SHOT_TIMEOUT_MS = 30_000;
+
+const oneShot = await Promise.race([
+  runOneShotPrompt({
+    runtime,
+    argv
+  }),
+  new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`One-shot prompt timed out after ${ONE_SHOT_TIMEOUT_MS}ms. The provider may be unresponsive.`));
+    }, ONE_SHOT_TIMEOUT_MS);
+  })
+]).catch((error) => {
+  return {
+    handled: true,
+    exitCode: 1,
+    output: `Error: ${error instanceof Error ? error.message : String(error)}`
+  } as Awaited<ReturnType<typeof runOneShotPrompt>>;
 });
 
 if (oneShot.handled) {
-  console.log(oneShot.output);
+  if (oneShot.output.length > 0) {
+    console.log(oneShot.output);
+  }
   await runtime.dispose();
   process.exit(oneShot.exitCode);
 }

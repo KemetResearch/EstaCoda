@@ -385,6 +385,7 @@ export type LoadedRuntimeConfig = {
 export type ProviderSetupInput = {
   provider: ProviderId;
   model: string;
+  models?: string[];
   baseUrl?: string;
   apiKeyEnv?: string;
   apiKey?: string;
@@ -1134,7 +1135,7 @@ export async function setupProviderConfig(options: {
     kind: "openai-compatible" as const,
     baseUrl: options.input.baseUrl ?? defaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
-    models: [options.input.model],
+    models: options.input.models ?? [options.input.model],
     enableNetwork: options.input.enableNetwork ?? true
   };
   const primaryModelPatch = options.input.primary === false

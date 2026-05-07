@@ -55,6 +55,30 @@ export class CronExecutionStore {
     this.#db = opts.db;
     this.#now = opts.now ?? (() => new Date());
     this.#id = opts.id ?? (() => randomUUID());
+    this.#ensureSchema();
+  }
+
+  #ensureSchema(): void {
+    this.#db.exec(`
+      create table if not exists cron_executions (
+        id text primary key,
+        job_id text not null,
+        session_id text,
+        trajectory_id text,
+        scheduled_at text,
+        started_at text not null,
+        completed_at text,
+        status text not null,
+        output_summary text,
+        delivery_results_json text,
+        failure_class text,
+        failure_message text,
+        created_at text not null
+      );
+      create index if not exists idx_cron_executions_job on cron_executions(job_id, started_at desc);
+      create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
+      create index if not exists idx_cron_executions_session on cron_executions(session_id);
+    `);
   }
 
   async create(input: {
