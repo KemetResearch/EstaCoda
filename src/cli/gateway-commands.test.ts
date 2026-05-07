@@ -14,6 +14,9 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
+import { writeGatewayPid, removeGatewayPid } from "../gateway/pid-file.js";
+import { writeGatewayState, removeGatewayState } from "../gateway/supervisor-state.js";
+import { acquireGatewayLock, releaseGatewayLock } from "../gateway/gateway-lock.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
@@ -140,6 +143,26 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Email:");
     });
+
+    it("shows Supervisor block with PID and lifecycle when state exists", async () => {
+      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.5" });
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Supervisor");
+      expect(result.output).toContain(`PID: ${process.pid}`);
+      expect(result.output).toContain("State: running");
+      expect(result.output).toContain("Version: 0.0.5");
+    });
+
+    it("shows Supervisor block as stopped when no state", async () => {
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Supervisor");
+      expect(result.output).toContain("PID: none");
+      expect(result.output).toContain("State: stopped");
+    });
   });
 
   describe("runGatewayDiagnose", () => {
@@ -166,6 +189,20 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Jobs file readable:");
       expect(result.output).toContain("Output dir writable:");
       expect(result.output).toContain("Lock dir writable:");
+    });
+
+    it("reports Supervisor health with PID and lock healthy", async () => {
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Supervisor");
+      expect(result.output).toContain("PID healthy:");
+      expect(result.output).toContain("Lock healthy:");
+    });
+
+    it("reports stale PID as unhealthy", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Supervisor");
+      expect(result.output).toContain("PID healthy: no");
     });
   });
 

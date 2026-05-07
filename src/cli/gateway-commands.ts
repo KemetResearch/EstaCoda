@@ -25,6 +25,9 @@ import type {
 } from "./gateway-view-models.js";
 import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
+import { readGatewayPid, isStalePid } from "../gateway/pid-file.js";
+import { readGatewayState } from "../gateway/supervisor-state.js";
+import { isStaleLock } from "../gateway/gateway-lock.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -87,6 +90,9 @@ export async function runGatewayStatus(
     missingConfig.push(...config.channels.whatsapp.missing.map((m) => ({ channel: "whatsapp", item: m })));
   }
 
+  const state = await readGatewayState(homeDir);
+  const pidContent = await readGatewayPid(homeDir);
+
   const data: GatewayStatusData = {
     channels: config.channels,
     cronJobs: cronJobs.map((j) => ({ status: j.status, name: j.name, nextRunAt: j.nextRunAt })),
@@ -95,6 +101,21 @@ export async function runGatewayStatus(
     surfacePointers,
     approvalCount: allApprovals.length,
     missingConfig,
+    supervisor:
+      state !== undefined
+        ? {
+            pid: pidContent?.pid ?? state.pid,
+            lifecycle: state.lifecycle,
+            startedAt: state.startedAt,
+            version: state.version,
+          }
+        : pidContent !== undefined
+          ? {
+              pid: pidContent.pid,
+              startedAt: pidContent.startedAt,
+              version: pidContent.version,
+            }
+          : undefined,
   };
 
   const viewModel = buildGatewayStatusViewModel(data);
@@ -132,6 +153,10 @@ export async function runGatewayDiagnose(
     jobsFileReadable,
     outputDirWritable,
     lockDirWritable,
+    supervisor: {
+      pidHealthy: !(await isStalePid(homeDir)),
+      lockHealthy: !(await isStaleLock(homeDir)),
+    },
   };
 
   const viewModel = buildGatewayDiagnoseViewModel(data);

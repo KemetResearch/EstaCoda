@@ -27,6 +27,13 @@ import {
 // Gateway Status
 // ─────────────────────────────────────────────────────────────
 
+export type SupervisorSnapshot = {
+  readonly pid?: number;
+  readonly lifecycle?: string;
+  readonly startedAt?: string;
+  readonly version?: string;
+};
+
 export type GatewayStatusData = {
   readonly channels: LoadedRuntimeConfig["channels"];
   readonly cronJobs: readonly { readonly status: string; readonly name: string; readonly nextRunAt?: string }[];
@@ -48,6 +55,7 @@ export type GatewayStatusData = {
   }[];
   readonly approvalCount: number;
   readonly missingConfig: readonly { readonly channel: string; readonly item: string }[];
+  readonly supervisor?: SupervisorSnapshot;
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -57,6 +65,7 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())[0];
 
   const blocks: ViewModel[] = [
+    buildSupervisorBlock(data.supervisor),
     buildKeyValueBlockViewModel({
       title: "Process",
       entries: [kv("Status", "CLI view (no live gateway process in this shell)")],
@@ -96,6 +105,41 @@ function buildChannelsOverviewBlock(channels: LoadedRuntimeConfig["channels"]): 
       channelKv("Email", channels.email),
       channelKv("WhatsApp", channels.whatsapp),
     ],
+  });
+}
+
+function buildSupervisorBlock(supervisor: GatewayStatusData["supervisor"]): ViewModel {
+  if (supervisor === undefined || supervisor.pid === undefined) {
+    return buildKeyValueBlockViewModel({
+      title: "Supervisor",
+      entries: [
+        kv("PID", "none"),
+        kv("State", "stopped"),
+      ],
+    });
+  }
+
+  const entries: KeyValueEntry[] = [
+    kv("PID", supervisor.pid),
+    kv("State", supervisor.lifecycle ?? "unknown"),
+  ];
+
+  if (supervisor.startedAt !== undefined) {
+    const started = new Date(supervisor.startedAt);
+    const now = new Date();
+    const uptimeMs = now.getTime() - started.getTime();
+    const uptimeMin = Math.floor(uptimeMs / 60_000);
+    const uptimeStr = uptimeMin < 1 ? "<1m" : `${uptimeMin}m`;
+    entries.push(kv("Uptime", uptimeStr));
+  }
+
+  if (supervisor.version !== undefined) {
+    entries.push(kv("Version", supervisor.version));
+  }
+
+  return buildKeyValueBlockViewModel({
+    title: "Supervisor",
+    entries,
   });
 }
 
@@ -179,6 +223,11 @@ function buildMissingConfigBlock(
 // Gateway Diagnose
 // ─────────────────────────────────────────────────────────────
 
+export type SupervisorHealth = {
+  readonly pidHealthy: boolean;
+  readonly lockHealthy: boolean;
+};
+
 export type GatewayDiagnoseData = {
   readonly telegram: TelegramGatewayDiagnostics;
   readonly discord: LoadedRuntimeConfig["channels"]["discord"];
@@ -189,11 +238,37 @@ export type GatewayDiagnoseData = {
   readonly jobsFileReadable: boolean;
   readonly outputDirWritable: boolean;
   readonly lockDirWritable: boolean;
+  readonly supervisor?: SupervisorHealth;
 };
 
 export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): CommandResultViewModel {
   const warnings: WarningErrorViewModel[] = [];
   const blocks: ViewModel[] = [];
+
+  // Supervisor
+  const svEntries: KeyValueEntry[] = [];
+  if (data.supervisor !== undefined) {
+    svEntries.push(kv("PID healthy", data.supervisor.pidHealthy ? "yes" : "no"));
+    svEntries.push(kv("Lock healthy", data.supervisor.lockHealthy ? "yes" : "no"));
+    if (!data.supervisor.pidHealthy) {
+      warnings.push(buildWarningErrorViewModel({
+        severity: "warn",
+        title: "Supervisor",
+        message: "stale PID file detected",
+      }));
+    }
+    if (!data.supervisor.lockHealthy) {
+      warnings.push(buildWarningErrorViewModel({
+        severity: "warn",
+        title: "Supervisor",
+        message: "stale lock file detected",
+      }));
+    }
+  } else {
+    svEntries.push(kv("PID healthy", "yes"));
+    svEntries.push(kv("Lock healthy", "yes"));
+  }
+  blocks.push(buildKeyValueBlockViewModel({ title: "Supervisor", entries: svEntries }));
 
   // Telegram
   const tgEntries: KeyValueEntry[] = [
