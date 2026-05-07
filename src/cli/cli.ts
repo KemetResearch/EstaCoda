@@ -58,7 +58,7 @@ import {
   renderProviderDiagnostic,
   renderProviderLiveDiagnostic
 } from "../config/provider-diagnostics.js";
-import { runTelegramGateway } from "../channels/gateway-runner.js";
+import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
@@ -1604,7 +1604,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
         `Config: ${result.path}`,
         "",
         "Send this code to your Telegram bot from the chat you want to pair.",
-        "Then start the gateway with: estacoda gateway start --telegram"
+        "Then start the gateway with: estacoda gateway start"
       ].join("\n")
     };
   }
@@ -1697,7 +1697,7 @@ async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
         "Next:",
         "  estacoda telegram status",
         "  estacoda telegram sync-commands",
-        "  estacoda gateway start --telegram"
+        "  estacoda gateway start"
       ].filter((line) => line !== undefined).join("\n")
     };
   } finally {
@@ -1955,24 +1955,37 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   }
 
   if (subcommand === "start") {
-    if (!hasFlag(rest, "--telegram")) {
+    const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
+    const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
+    if (foundDeprecated !== undefined) {
       return {
         handled: true,
         exitCode: 1,
-        output: "Choose a channel: estacoda gateway start --telegram"
+        output: [
+          `Error: ${foundDeprecated} is deprecated.`,
+          "",
+          "The gateway now starts all enabled adapters automatically.",
+          "",
+          "To configure adapters:",
+          "  estacoda channels enable telegram",
+          "  estacoda channels list",
+          "",
+          "To start the gateway:",
+          "  estacoda gateway start",
+        ].join("\n"),
       };
     }
 
-    const result = await runTelegramGateway({
+    const result = await runGatewaySupervisor({
       ...options,
       once: hasFlag(rest, "--once"),
-      telegramFetch: options.telegramFetch
+      telegramFetch: options.telegramFetch,
     });
 
     return {
       handled: true,
       exitCode: result.ok ? 0 : 1,
-      output: result.output
+      output: result.output,
     };
   }
 
@@ -1985,9 +1998,9 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway diagnose",
       "  estacoda gateway stop",
       "  estacoda gateway stop --force",
-      "  estacoda gateway start --telegram",
-      "  estacoda gateway start --telegram --once"
-    ].join("\n")
+      "  estacoda gateway start",
+      "  estacoda gateway start --once",
+    ].join("\n"),
   };
 }
 

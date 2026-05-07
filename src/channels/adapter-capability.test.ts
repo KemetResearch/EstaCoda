@@ -44,7 +44,7 @@ describe("buildAdapterCapability", () => {
   it("treats empty missing array as no missing config", () => {
     const cap = buildAdapterCapability({
       kind: "whatsapp",
-      config: { enabled: true },
+      config: { enabled: true, experimental: true },
       missing: [],
     });
     expect(cap.configured).toBe(true);
@@ -54,10 +54,47 @@ describe("buildAdapterCapability", () => {
   it("returns whatsapp as experimental", () => {
     const cap = buildAdapterCapability({
       kind: "whatsapp",
-      config: { enabled: true },
+      config: { enabled: true, experimental: true },
     });
     expect(cap.experimental).toBe(true);
     expect(cap.implementationStatus).toBe("present_not_live_proven");
+  });
+
+  it("whatsapp experimental gate closed → not configured", () => {
+    const cap = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, experimental: false },
+      missing: [],
+    });
+    expect(cap.configured).toBe(false);
+  });
+
+  it("whatsapp experimental gate open + missing config → not configured", () => {
+    const cap = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, experimental: true },
+      missing: ["AUTH_DIR"],
+    });
+    expect(cap.configured).toBe(false);
+  });
+
+  it("whatsapp experimental gate open + no missing config → configured", () => {
+    const cap = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, experimental: true },
+      missing: [],
+    });
+    expect(cap.configured).toBe(true);
+  });
+
+  it("telegram enabled + no missing config → configured (not affected by experimental)", () => {
+    const cap = buildAdapterCapability({
+      kind: "telegram",
+      config: { enabled: true },
+      missing: [],
+    });
+    expect(cap.configured).toBe(true);
+    expect(cap.experimental).toBe(false);
   });
 
   it("returns discord with correct static traits", () => {

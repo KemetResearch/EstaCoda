@@ -72,7 +72,10 @@ export function buildAdapterCapability(input: CapabilityInput): AdapterCapabilit
   const base = BASE_CAPABILITIES[input.kind];
   const enabled = input.config.enabled ?? false;
   const missingConfig = input.missing !== undefined && input.missing.length > 0 ? input.missing : undefined;
-  const configured = enabled && missingConfig === undefined;
+  let configured = enabled && missingConfig === undefined;
+  if (base.experimental && input.kind === "whatsapp" && !input.config.experimental) {
+    configured = false;
+  }
 
   return {
     kind: input.kind as ChannelKind,
