@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { classifySkillsPackRisk } from "./skills-pack-risk-classifier.js";
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+import { classifyPackRisk } from "./pack-risk-classifier.js";
+import type { PackManifest } from "../contracts/pack.js";
 
-function baseManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManifest {
+function baseManifest(overrides?: Partial<PackManifest>): PackManifest {
   return {
     id: "test",
     name: "Test",
     version: "1.0.0",
     description: "Test",
-    skillsPackType: "skill_pack",
+    packType: "skill_pack",
     entrypoints: {},
     permissions: {},
     provenance: {
@@ -26,14 +26,14 @@ function baseManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManife
   };
 }
 
-describe("classifySkillsPackRisk", () => {
+describe("classifyPackRisk", () => {
   it("returns low for read-only bundled", () => {
-    const result = classifySkillsPackRisk(baseManifest());
+    const result = classifyPackRisk(baseManifest());
     expect(result.level).toBe("low");
   });
 
   it("returns high for external with shell", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       provenance: { origin: "external", trustLevel: "external_untrusted" },
       permissions: {
         shell: { allowedCommands: ["git"] }
@@ -51,7 +51,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns medium for external with network only", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       provenance: { origin: "external", trustLevel: "external_reviewed" },
       permissions: {
         network: { allowedHosts: ["github.com"] }
@@ -69,12 +69,12 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for invalid manifest", () => {
-    const result = classifySkillsPackRisk(baseManifest({ id: "" }));
+    const result = classifyPackRisk(baseManifest({ id: "" }));
     expect(result.level).toBe("blocked");
   });
 
   it("returns blocked for permission findings", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       permissions: {
         shell: { allowedCommands: ["*"] }
       }
@@ -83,7 +83,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for defaultMode=allow with shell", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       sandbox: {
         defaultMode: "allow",
         filesystemMode: "deny",
@@ -100,7 +100,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for shellMode=ask", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       sandbox: {
         defaultMode: "deny",
         filesystemMode: "deny",
@@ -114,7 +114,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for networkMode=ask", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       sandbox: {
         defaultMode: "deny",
         filesystemMode: "deny",
@@ -128,7 +128,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for allow_list with empty allowedCommands", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       sandbox: {
         defaultMode: "deny",
         filesystemMode: "deny",
@@ -145,7 +145,7 @@ describe("classifySkillsPackRisk", () => {
   });
 
   it("returns blocked for allow_list with empty allowedHosts", () => {
-    const result = classifySkillsPackRisk(baseManifest({
+    const result = classifyPackRisk(baseManifest({
       sandbox: {
         defaultMode: "deny",
         filesystemMode: "deny",

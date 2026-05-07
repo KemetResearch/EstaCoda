@@ -1,6 +1,6 @@
-import type { SkillsPackManifest, SkillsPackType, SandboxMode, FilesystemMode, ShellMode, NetworkMode, SecretsMode, ProvenanceOrigin, TrustLevel } from "../contracts/skills-pack.js";
+import type { PackManifest, PackType, SandboxMode, FilesystemMode, ShellMode, NetworkMode, SecretsMode, ProvenanceOrigin, TrustLevel } from "../contracts/pack.js";
 
-const VALID_SKILLS_PACK_TYPES: SkillsPackType[] = ["skill_pack", "tool_pack", "workflow_pack", "mixed"];
+const VALID_SKILLS_PACK_TYPES: PackType[] = ["skill_pack", "tool_pack", "workflow_pack", "mixed"];
 const VALID_SANDBOX_MODES: SandboxMode[] = ["deny", "ask", "allow"];
 const VALID_FILESYSTEM_MODES: FilesystemMode[] = ["deny", "read_only", "scoped_write"];
 const VALID_SHELL_MODES: ShellMode[] = ["deny", "ask", "allow_list"];
@@ -9,7 +9,7 @@ const VALID_SECRETS_MODES: SecretsMode[] = ["deny", "explicit_only"];
 const VALID_PROVENANCE_ORIGINS: ProvenanceOrigin[] = ["bundled", "local", "external"];
 const VALID_TRUST_LEVELS: TrustLevel[] = ["first_party", "local_user", "external_reviewed", "external_untrusted"];
 
-export function validateSkillsPackManifest(manifest: unknown): { ok: true; manifest: SkillsPackManifest } | { ok: false; errors: string[] } {
+export function validatePackManifest(manifest: unknown): { ok: true; manifest: PackManifest } | { ok: false; errors: string[] } {
   const errors: string[] = [];
 
   if (manifest === null || typeof manifest !== "object") {
@@ -26,9 +26,9 @@ export function validateSkillsPackManifest(manifest: unknown): { ok: true; manif
     }
   }
 
-  // skillsPackType
-  if (!VALID_SKILLS_PACK_TYPES.includes(m.skillsPackType as SkillsPackType)) {
-    errors.push(`Invalid skillsPackType: ${String(m.skillsPackType)}. Must be one of ${VALID_SKILLS_PACK_TYPES.join(", ")}`);
+  // packType
+  if (!VALID_SKILLS_PACK_TYPES.includes(m.packType as PackType)) {
+    errors.push(`Invalid packType: ${String(m.packType)}. Must be one of ${VALID_SKILLS_PACK_TYPES.join(", ")}`);
   }
 
   // entrypoints
@@ -80,5 +80,5 @@ export function validateSkillsPackManifest(manifest: unknown): { ok: true; manif
     return { ok: false, errors };
   }
 
-  return { ok: true, manifest: m as SkillsPackManifest };
+  return { ok: true, manifest: m as PackManifest };
 }

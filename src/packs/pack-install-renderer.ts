@@ -1,13 +1,13 @@
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
-import type { SkillsPackRiskClassification } from "./skills-pack-risk-classifier.js";
+import type { PackManifest } from "../contracts/pack.js";
+import type { PackRiskClassification } from "./pack-risk-classifier.js";
 
-export function renderSkillsPackReview(
-  manifest: SkillsPackManifest,
-  risk: SkillsPackRiskClassification
+export function renderPackReview(
+  manifest: PackManifest,
+  risk: PackRiskClassification
 ): string {
   const lines: string[] = [];
 
-  lines.push(`Skills pack: ${manifest.name}`);
+  lines.push(`pack: ${manifest.name}`);
   lines.push(`Origin: ${manifest.provenance.origin}`);
   lines.push(`Version: ${manifest.version}`);
   lines.push(`Trust: ${formatTrustLevel(manifest.provenance.trustLevel)}`);

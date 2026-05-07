@@ -23,7 +23,7 @@ export const init_lifecycle_case: SmokeCase = {
         "skills",
         "skills/local",
         "skills/.evolution",
-        "skills-packs",
+        "packs",
         "cron",
         ".backups"
       ];

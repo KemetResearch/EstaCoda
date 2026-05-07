@@ -1,16 +1,16 @@
-import { readFile, mkdir, rm, cp } from "node:fs/promises";
+import { readFile, mkdir, rm, cp, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { createHash } from "node:crypto";
-import type { SkillsPackManifest, SkillsPackStatus } from "../contracts/skills-pack.js";
-import { SkillsPackRegistry } from "./skills-pack-registry.js";
-import { validateSkillsPackManifest } from "./skills-pack-validator.js";
-import { classifySkillsPackRisk } from "./skills-pack-risk-classifier.js";
-import { renderSkillsPackReview } from "./skills-pack-install-renderer.js";
-import { writeSkillsPackForceAuditRecord } from "./skills-pack-force-audit-log.js";
+import type { PackManifest, PackStatus } from "../contracts/pack.js";
+import { PackRegistry } from "./pack-registry.js";
+import { validatePackManifest } from "./pack-validator.js";
+import { classifyPackRisk } from "./pack-risk-classifier.js";
+import { renderPackReview } from "./pack-install-renderer.js";
+import { writePackForceAuditRecord } from "./pack-force-audit-log.js";
 import type { Prompt } from "../onboarding/interactive-onboarding.js";
 
-export type InstallSkillsPackOptions = {
+export type InstallPackOptions = {
   homeDir: string;
   sourcePath: string;
   actor: string;
@@ -18,7 +18,7 @@ export type InstallSkillsPackOptions = {
   prompt?: Prompt;
 };
 
-export type EnableSkillsPackOptions = {
+export type EnablePackOptions = {
   homeDir: string;
   id: string;
   actor: string;
@@ -26,35 +26,35 @@ export type EnableSkillsPackOptions = {
   prompt?: Prompt;
 };
 
-export type DisableSkillsPackOptions = {
+export type DisablePackOptions = {
   homeDir: string;
   id: string;
 };
 
-export type UninstallSkillsPackOptions = {
+export type UninstallPackOptions = {
   homeDir: string;
   id: string;
   actor: string;
   keepFiles?: boolean;
 };
 
-function hashManifest(manifest: SkillsPackManifest): string {
+function hashManifest(manifest: PackManifest): string {
   return createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16);
 }
 
 async function loadManifestFromPath(
   sourcePath: string
-): Promise<{ ok: true; manifest: SkillsPackManifest } | { ok: false; errors: string[] }> {
-  const manifestPath = join(sourcePath, "skills-pack.json");
+): Promise<{ ok: true; manifest: PackManifest } | { ok: false; errors: string[] }> {
+  const manifestPath = join(sourcePath, "pack.json");
   if (!existsSync(manifestPath)) {
-    return { ok: false, errors: [`skills-pack.json not found in ${sourcePath}`] };
+    return { ok: false, errors: [`pack.json not found in ${sourcePath}`] };
   }
   try {
     const text = await readFile(manifestPath, "utf8");
     const parsed = JSON.parse(text);
-    return validateSkillsPackManifest(parsed);
+    return validatePackManifest(parsed);
   } catch (e) {
-    return { ok: false, errors: [`Failed to read skills-pack.json: ${e instanceof Error ? e.message : String(e)}`] };
+    return { ok: false, errors: [`Failed to read pack.json: ${e instanceof Error ? e.message : String(e)}`] };
   }
 }
 
@@ -72,33 +72,64 @@ async function createBackup(sourcePath: string, backupsDir: string, id: string):
   return backupPath;
 }
 
+async function findSkillDirectories(root: string): Promise<string[]> {
+  const results: string[] = [];
+  async function scan(dir: string): Promise<void> {
+    if (!existsSync(dir)) return;
+    // Check if the current directory itself is a skill directory
+    if (existsSync(join(dir, "SKILL.md"))) {
+      results.push(dir);
+    }
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const childPath = join(dir, entry.name);
+      await scan(childPath);
+    }
+  }
+  await scan(root);
+  return results;
+}
+
+async function materializePackSkills(packPath: string, destRoot: string): Promise<void> {
+  const skillDirs = await findSkillDirectories(packPath);
+  if (skillDirs.length === 0) return;
+  await mkdir(destRoot, { recursive: true });
+  for (const skillDir of skillDirs) {
+    const rel = relative(packPath, skillDir);
+    const dest = join(destRoot, rel);
+    await mkdir(dirname(dest), { recursive: true });
+    await cp(skillDir, dest, { recursive: true, force: true });
+  }
+}
+
 async function runForceOverrideFlow(
-  manifest: SkillsPackManifest,
+  manifest: PackManifest,
   risk: { level: string; reasons: string[] },
   actor: string,
   prompt: Prompt | undefined,
   homeDir: string
 ): Promise<{ ok: boolean; output: string }> {
   const lines: string[] = [];
-  lines.push("DANGER: --force override. This skills pack is BLOCKED. Intended for expert/local development use only.");
+  lines.push("DANGER: --force override. This pack is BLOCKED. Intended for expert/local development use only.");
   lines.push("");
-  lines.push(renderSkillsPackReview(manifest, risk as { level: "low" | "medium" | "high" | "blocked"; reasons: string[] }));
+  lines.push(renderPackReview(manifest, risk as { level: "low" | "medium" | "high" | "blocked"; reasons: string[] }));
   lines.push("");
 
   if (prompt === undefined) {
-    return { ok: false, output: "Blocked skills pack requires interactive confirmation. Run without --force or provide an interactive terminal." };
+    return { ok: false, output: "Blocked pack requires interactive confirmation. Run without --force or provide an interactive terminal." };
   }
 
-  const confirmation = await prompt(`Type the skills pack id to confirm override: ${manifest.id}`);
+  const confirmation = await prompt(`Type the pack id to confirm override: ${manifest.id}`);
   if (confirmation.trim() !== manifest.id) {
     return { ok: false, output: "Override aborted: id mismatch." };
   }
 
-  await writeSkillsPackForceAuditRecord(
+  await writePackForceAuditRecord(
     { homeDir },
     {
       timestamp: new Date().toISOString(),
-      skillsPackId: manifest.id,
+      packId: manifest.id,
       version: manifest.version,
       manifestHash: hashManifest(manifest),
       riskReasons: risk.reasons,
@@ -109,8 +140,8 @@ async function runForceOverrideFlow(
   return { ok: true, output: lines.join("\n") };
 }
 
-export async function installSkillsPack(
-  options: InstallSkillsPackOptions
+export async function installPack(
+  options: InstallPackOptions
 ): Promise<{ ok: boolean; exitCode: number; output: string }> {
   const { homeDir, sourcePath, actor, force, prompt } = options;
 
@@ -128,14 +159,14 @@ export async function installSkillsPack(
   }
   const manifest = manifestResult.manifest;
 
-  const risk = classifySkillsPackRisk(manifest);
+  const risk = classifyPackRisk(manifest);
 
   if (risk.level === "blocked") {
     if (!force) {
       return {
         ok: false,
         exitCode: 3,
-        output: `Blocked: ${risk.reasons.join("; ")}\n\n${renderSkillsPackReview(manifest, risk)}`
+        output: `Blocked: ${risk.reasons.join("; ")}\n\n${renderPackReview(manifest, risk)}`
       };
     }
     const forceResult = await runForceOverrideFlow(manifest, risk, actor, prompt, homeDir);
@@ -153,17 +184,17 @@ export async function installSkillsPack(
       return {
         ok: false,
         exitCode: 2,
-        output: "This skills pack requires interactive confirmation. Run without --force or provide an interactive terminal."
+        output: "This pack requires interactive confirmation. Run without --force or provide an interactive terminal."
       };
     }
-    const review = renderSkillsPackReview(manifest, risk);
-    const answer = await prompt(`${review}\n\nDo you want to install this skills pack? (yes/no)`);
+    const review = renderPackReview(manifest, risk);
+    const answer = await prompt(`${review}\n\nDo you want to install this pack? (yes/no)`);
     if (answer.trim().toLowerCase() !== "yes") {
       return { ok: false, exitCode: 2, output: "Installation aborted by user." };
     }
   }
 
-  const packsDir = join(homeDir, ".estacoda", "skills-packs");
+  const packsDir = join(homeDir, ".estacoda", "packs");
   const destPath = join(packsDir, manifest.id);
 
   if (existsSync(destPath)) {
@@ -175,7 +206,7 @@ export async function installSkillsPack(
   await copyPack(sourcePath, destPath);
 
   // Risk-aware status policy
-  let computedStatus: SkillsPackStatus;
+  let computedStatus: PackStatus;
   if (isExternal) {
     computedStatus = "disabled";
   } else if (risk.level === "blocked" || risk.level === "medium" || risk.level === "high") {
@@ -184,7 +215,7 @@ export async function installSkillsPack(
     computedStatus = "enabled";
   }
 
-  const registry = new SkillsPackRegistry({ homeDir });
+  const registry = new PackRegistry({ homeDir });
   const installResult = await registry.install(manifest, actor, { status: computedStatus });
   if (!installResult.ok) {
     await rm(destPath, { recursive: true, force: true });
@@ -192,13 +223,13 @@ export async function installSkillsPack(
   }
 
   const status = installResult.entry.status;
-  const skillsDest = join(homeDir, ".estacoda", "skills", manifest.id);
+  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", manifest.id);
   if (status === "enabled" && !existsSync(skillsDest)) {
-    await copyPack(destPath, skillsDest);
+    await materializePackSkills(destPath, skillsDest);
   }
 
   const lines: string[] = [];
-  lines.push(`Installed skills pack: ${manifest.name} (${manifest.id})`);
+  lines.push(`Installed pack: ${manifest.name} (${manifest.id})`);
   lines.push(`Status: ${status}`);
   lines.push(`Risk: ${risk.level}`);
   if (manifest.evals !== undefined && manifest.evals.length > 0) {
@@ -208,26 +239,26 @@ export async function installSkillsPack(
     lines.push(`Skills copied to: ${skillsDest}`);
     lines.push("Note: Start a new session for skills to be available.");
   } else {
-    lines.push(`Enable with: estacoda skills enable ${manifest.id}`);
+    lines.push(`Enable with: estacoda packs enable ${manifest.id}`);
   }
 
   return { ok: true, exitCode: 0, output: lines.join("\n") };
 }
 
-export async function enableSkillsPack(
-  options: EnableSkillsPackOptions
+export async function enablePack(
+  options: EnablePackOptions
 ): Promise<{ ok: boolean; exitCode: number; output: string }> {
   const { homeDir, id, actor, force, prompt } = options;
 
-  const registry = new SkillsPackRegistry({ homeDir });
+  const registry = new PackRegistry({ homeDir });
   const entry = await registry.find(id);
   if (entry === undefined) {
-    return { ok: false, exitCode: 1, output: `Skills pack not found: ${id}` };
+    return { ok: false, exitCode: 1, output: `pack not found: ${id}` };
   }
 
-  const packPath = join(homeDir, ".estacoda", "skills-packs", id);
+  const packPath = join(homeDir, ".estacoda", "packs", id);
   if (!existsSync(packPath)) {
-    return { ok: false, exitCode: 1, output: `Skills pack files missing: ${packPath}` };
+    return { ok: false, exitCode: 1, output: `pack files missing: ${packPath}` };
   }
 
   const manifestResult = await loadManifestFromPath(packPath);
@@ -240,13 +271,13 @@ export async function enableSkillsPack(
   }
   const manifest = manifestResult.manifest;
 
-  const risk = classifySkillsPackRisk(manifest);
+  const risk = classifyPackRisk(manifest);
   if (risk.level === "blocked") {
     if (!force) {
       return {
         ok: false,
         exitCode: 3,
-        output: `Blocked: ${risk.reasons.join("; ")}\n\n${renderSkillsPackReview(manifest, risk)}`
+        output: `Blocked: ${risk.reasons.join("; ")}\n\n${renderPackReview(manifest, risk)}`
       };
     }
     const forceResult = await runForceOverrideFlow(manifest, risk, actor, prompt, homeDir);
@@ -255,18 +286,18 @@ export async function enableSkillsPack(
     }
   }
 
-  const skillsDest = join(homeDir, ".estacoda", "skills", id);
+  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
   if (existsSync(skillsDest)) {
-    const backupsDir = join(homeDir, ".estacoda", "skills-packs", "backups");
+    const backupsDir = join(homeDir, ".estacoda", "packs", "backups");
     await createBackup(skillsDest, backupsDir, id);
     await rm(skillsDest, { recursive: true, force: true });
   }
 
-  await copyPack(packPath, skillsDest);
+  await materializePackSkills(packPath, skillsDest);
   await registry.updateStatus(id, "enabled");
 
   const lines: string[] = [];
-  lines.push(`Enabled skills pack: ${manifest.name} (${id})`);
+  lines.push(`Enabled pack: ${manifest.name} (${id})`);
   if (manifest.evals !== undefined && manifest.evals.length > 0) {
     lines.push("Eval hooks are not executed in EstaCoda v0.1.0");
   }
@@ -275,18 +306,18 @@ export async function enableSkillsPack(
   return { ok: true, exitCode: 0, output: lines.join("\n") };
 }
 
-export async function disableSkillsPack(
-  options: DisableSkillsPackOptions
+export async function disablePack(
+  options: DisablePackOptions
 ): Promise<{ ok: boolean; exitCode: number; output: string }> {
   const { homeDir, id } = options;
 
-  const registry = new SkillsPackRegistry({ homeDir });
+  const registry = new PackRegistry({ homeDir });
   const entry = await registry.find(id);
   if (entry === undefined) {
-    return { ok: false, exitCode: 1, output: `Skills pack not found: ${id}` };
+    return { ok: false, exitCode: 1, output: `pack not found: ${id}` };
   }
 
-  const skillsDest = join(homeDir, ".estacoda", "skills", id);
+  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
   if (existsSync(skillsDest)) {
     await rm(skillsDest, { recursive: true, force: true });
   }
@@ -296,26 +327,26 @@ export async function disableSkillsPack(
   return {
     ok: true,
     exitCode: 0,
-    output: `Disabled skills pack: ${entry.manifest.name} (${id})\nNote: Start a new session for changes to take full effect.`
+    output: `Disabled pack: ${entry.manifest.name} (${id})\nNote: Start a new session for changes to take full effect.`
   };
 }
 
-export async function uninstallSkillsPack(
-  options: UninstallSkillsPackOptions
+export async function uninstallPack(
+  options: UninstallPackOptions
 ): Promise<{ ok: boolean; exitCode: number; output: string }> {
   const { homeDir, id, actor, keepFiles } = options;
 
-  const registry = new SkillsPackRegistry({ homeDir });
+  const registry = new PackRegistry({ homeDir });
   const entry = await registry.find(id);
   if (entry === undefined) {
-    return { ok: false, exitCode: 1, output: `Skills pack not found: ${id}` };
+    return { ok: false, exitCode: 1, output: `pack not found: ${id}` };
   }
 
-  const packPath = join(homeDir, ".estacoda", "skills-packs", id);
-  const skillsDest = join(homeDir, ".estacoda", "skills", id);
+  const packPath = join(homeDir, ".estacoda", "packs", id);
+  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
 
   if (existsSync(packPath)) {
-    const backupsDir = join(homeDir, ".estacoda", "skills-packs", "backups");
+    const backupsDir = join(homeDir, ".estacoda", "packs", "backups");
     await createBackup(packPath, backupsDir, id);
   }
 
@@ -330,7 +361,7 @@ export async function uninstallSkillsPack(
   }
 
   const lines: string[] = [];
-  lines.push(`Uninstalled skills pack: ${entry.manifest.name} (${id})`);
+  lines.push(`Uninstalled pack: ${entry.manifest.name} (${id})`);
   if (keepFiles) {
     lines.push(`Pack files preserved at: ${packPath}`);
   }

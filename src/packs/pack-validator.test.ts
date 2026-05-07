@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { validateSkillsPackManifest } from "./skills-pack-validator.js";
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+import { validatePackManifest } from "./pack-validator.js";
+import type { PackManifest } from "../contracts/pack.js";
 
-function validManifest(): SkillsPackManifest {
+function validManifest(): PackManifest {
   return {
-    id: "test-skills-pack",
-    name: "Test Skills Pack",
+    id: "test-pack",
+    name: "Test pack",
     version: "1.0.0",
-    description: "A test skills pack",
-    skillsPackType: "skill_pack",
+    description: "A test pack",
+    packType: "skill_pack",
     entrypoints: {},
     permissions: {},
     provenance: {
@@ -25,17 +25,17 @@ function validManifest(): SkillsPackManifest {
   };
 }
 
-describe("validateSkillsPackManifest", () => {
+describe("validatePackManifest", () => {
   it("accepts a valid manifest", () => {
-    const result = validateSkillsPackManifest(validManifest());
+    const result = validatePackManifest(validManifest());
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.manifest.id).toBe("test-skills-pack");
+      expect(result.manifest.id).toBe("test-pack");
     }
   });
 
   it("rejects null", () => {
-    const result = validateSkillsPackManifest(null);
+    const result = validatePackManifest(null);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors[0]).toContain("must be an object");
@@ -44,7 +44,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects missing id", () => {
     const m = { ...validManifest(), id: "" };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("id"))).toBe(true);
@@ -53,7 +53,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects missing name", () => {
     const m = { ...validManifest(), name: "" };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("name"))).toBe(true);
@@ -62,25 +62,25 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects missing version", () => {
     const m = { ...validManifest(), version: undefined };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("version"))).toBe(true);
     }
   });
 
-  it("rejects invalid skillsPackType", () => {
-    const m = { ...validManifest(), skillsPackType: "unknown" as any };
-    const result = validateSkillsPackManifest(m);
+  it("rejects invalid packType", () => {
+    const m = { ...validManifest(), packType: "unknown" as any };
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errors.some((e) => e.includes("skillsPackType"))).toBe(true);
+      expect(result.errors.some((e) => e.includes("packType"))).toBe(true);
     }
   });
 
   it("rejects invalid sandbox.defaultMode", () => {
     const m = { ...validManifest(), sandbox: { ...validManifest().sandbox, defaultMode: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("defaultMode"))).toBe(true);
@@ -89,7 +89,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid sandbox.filesystemMode", () => {
     const m = { ...validManifest(), sandbox: { ...validManifest().sandbox, filesystemMode: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("filesystemMode"))).toBe(true);
@@ -98,7 +98,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid sandbox.shellMode", () => {
     const m = { ...validManifest(), sandbox: { ...validManifest().sandbox, shellMode: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("shellMode"))).toBe(true);
@@ -107,7 +107,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid sandbox.networkMode", () => {
     const m = { ...validManifest(), sandbox: { ...validManifest().sandbox, networkMode: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("networkMode"))).toBe(true);
@@ -116,7 +116,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid sandbox.secretsMode", () => {
     const m = { ...validManifest(), sandbox: { ...validManifest().sandbox, secretsMode: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("secretsMode"))).toBe(true);
@@ -125,7 +125,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid provenance.origin", () => {
     const m = { ...validManifest(), provenance: { ...validManifest().provenance, origin: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("provenance.origin"))).toBe(true);
@@ -134,7 +134,7 @@ describe("validateSkillsPackManifest", () => {
 
   it("rejects invalid provenance.trustLevel", () => {
     const m = { ...validManifest(), provenance: { ...validManifest().provenance, trustLevel: "invalid" as any } };
-    const result = validateSkillsPackManifest(m);
+    const result = validatePackManifest(m);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("provenance.trustLevel"))).toBe(true);

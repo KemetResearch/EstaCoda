@@ -1,8 +1,8 @@
 import { writeEnvSecret } from "../config/env-secret-store.js";
 
 // Legacy secret storage helper for feature capability configuration.
-// NOT part of the skills pack trust model introduced in Phase 2.
-// For trust model, see src/skills-packs/skills-pack-registry.ts and src/contracts/skills-pack.ts.
+// NOT part of the pack trust model introduced in Phase 2.
+// For trust model, see src/packs/pack-registry.ts and src/contracts/pack.ts.
 
 export type CapabilitySetupKind = "image_generation" | "voice" | "web_search" | "browser" | "mcp";
 

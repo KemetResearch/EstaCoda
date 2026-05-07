@@ -64,8 +64,8 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { storeCapabilitySecret } from "../setup/capability-setup.js";
-import { SkillsPackRegistry } from "../skills-packs/skills-pack-registry.js";
-import { validateSkillsPackManifest } from "../skills-packs/skills-pack-validator.js";
+import { PackRegistry } from "../packs/pack-registry.js";
+import { validatePackManifest } from "../packs/pack-validator.js";
 import { trace } from "./trace-commands.js";
 import { evalCommand } from "./eval-commands.js";
 import { proposalCommand } from "./proposal-commands.js";
@@ -74,7 +74,8 @@ import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import { evolutionCommand } from "./evolution-commands.js";
 import { flowCommand } from "./flow-commands.js";
-import { skillsCommand } from "./skills-commands.js";
+import { packCommand } from "./pack-commands.js";
+import { skillsCommand } from "./skill-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import {
   formatSecurityMode,
@@ -311,23 +312,23 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
     extraWarnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
-  // Skills pack registry validation
-  const registry = new SkillsPackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
-  const skillsPacks = await registry.list();
-  if (skillsPacks.length === 0) {
-    extraLines.push("Skills pack registry: not initialized");
+  // pack registry validation
+  const registry = new PackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const installedPacks = await registry.list();
+  if (installedPacks.length === 0) {
+    extraLines.push("pack registry: not initialized");
   } else {
     const validationErrors: string[] = [];
-    for (const entry of skillsPacks) {
-      const v = validateSkillsPackManifest(entry.manifest);
+    for (const entry of installedPacks) {
+      const v = validatePackManifest(entry.manifest);
       if (!v.ok) {
         validationErrors.push(`${entry.manifest.id} — ${v.errors.join(", ")}`);
       }
     }
     if (validationErrors.length > 0) {
-      extraWarnings.push(`Skills pack registry errors:\n${validationErrors.map((e) => `  - ${e}`).join("\n")}`);
+      extraWarnings.push(`pack registry errors:\n${validationErrors.map((e) => `  - ${e}`).join("\n")}`);
     } else {
-      extraLines.push(`Skills pack registry: valid (${skillsPacks.length} installed)`);
+      extraLines.push(`pack registry: valid (${installedPacks.length} installed)`);
     }
   }
 
@@ -749,21 +750,21 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
     warnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
-  // Skills pack registry health
-  const spRegistry = new SkillsPackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  // pack registry health
+  const spRegistry = new PackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
   const spEntries = await spRegistry.list();
   if (spEntries.length === 0) {
-    notes.push("Skills pack registry: no skills packs installed");
+    notes.push("pack registry: no packs installed");
   } else {
-    notes.push(`Skills pack registry: ${spEntries.length} installed`);
+    notes.push(`pack registry: ${spEntries.length} installed`);
     const spErrors = await spRegistry.getErrors();
     const errorCount = spErrors.length;
     const disabledCount = spEntries.filter((e) => e.status === "disabled").length;
     if (errorCount > 0) {
-      warnings.push(`${errorCount} skills pack(s) have status error`);
+      warnings.push(`${errorCount} pack(s) have status error`);
     }
     if (disabledCount > 0) {
-      notes.push(`${disabledCount} skills pack(s) disabled`);
+      notes.push(`${disabledCount} pack(s) disabled`);
     }
   }
 

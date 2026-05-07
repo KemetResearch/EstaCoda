@@ -11,7 +11,7 @@
 - Install script at `scripts/install.sh` with Bun-backed dev fallback
 - State preservation rules define protected paths for backup/restore
 - `estacoda verify` checks config syntax and state directory backup readiness
-- `estacoda doctor` reports state directory health, config syntax validity, and skills pack directory existence
+- `estacoda doctor` reports state directory health, config syntax validity, and pack state directory existence
 
 ### Documentation
 - Added `docs/install.md` and `docs/uninstall.md`

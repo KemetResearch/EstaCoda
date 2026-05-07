@@ -37,6 +37,7 @@ export type SkillLoadOptions = {
   sourceRoot?: string;
   maxDepth?: number;
   maxFiles?: number;
+  exclude?: string[];
 };
 
 export type SkillLoadError = {
@@ -52,7 +53,8 @@ export async function loadSkillsFromDirectory(root: string, options: SkillLoadOp
   try {
     skillFiles = await findSkillFiles(root, {
       maxDepth: options.maxDepth ?? MAX_SKILL_SCAN_DEPTH,
-      maxFiles: options.maxFiles ?? MAX_SKILL_FILES
+      maxFiles: options.maxFiles ?? MAX_SKILL_FILES,
+      exclude: new Set(options.exclude ?? [])
     });
   } catch (error) {
     return {
@@ -158,7 +160,7 @@ export async function hydrateSkillResources(skill: LoadedSkill): Promise<LoadedS
 
 async function findSkillFiles(
   root: string,
-  options: { maxDepth: number; maxFiles: number },
+  options: { maxDepth: number; maxFiles: number; exclude?: Set<string> },
   depth = 0,
   files: string[] = []
 ): Promise<string[]> {
@@ -179,6 +181,9 @@ async function findSkillFiles(
     const path = join(root, entry.name);
 
     if (entry.isDirectory()) {
+      if (options.exclude?.has(entry.name)) {
+        continue;
+      }
       await findSkillFiles(path, options, depth + 1, files);
       continue;
     }

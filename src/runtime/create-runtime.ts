@@ -268,13 +268,50 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       toolRegistry.register(tool);
     }
   }
-  for (const root of [localSkillsRoot, ...(options.externalSkillRoots ?? [])]) {
+  // Load skills from three sources with explicit priority:
+  // 1. local/        -> sourceKind: "local"    (highest priority)
+  // 2. packs/        -> sourceKind: "external"  (lowest priority)
+  // 3. everything else -> sourceKind: "bundled" (middle priority)
+  const localUserRoot = join(localSkillsRoot, "local");
+  const packsRoot = join(localSkillsRoot, "packs");
+
+  // external: pack-materialized skills
+  const packsLoaded = await loadSkillsFromDirectory(packsRoot, {
+    sourceKind: "external",
+    sourceRoot: packsRoot
+  }).catch(() => ({ skills: [], errors: [] }));
+  skillLoadWarnings.push(...packsLoaded.errors.map((error) => error.message));
+  for (const skill of packsLoaded.skills) {
+    skillRegistry.register(skill);
+  }
+
+  // bundled: synced built-in skills (excluding local/ and packs/)
+  const bundledLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
+    sourceKind: "bundled",
+    sourceRoot: localSkillsRoot,
+    exclude: ["local", "packs"]
+  }).catch(() => ({ skills: [], errors: [] }));
+  skillLoadWarnings.push(...bundledLoaded.errors.map((error) => error.message));
+  for (const skill of bundledLoaded.skills) {
+    skillRegistry.register(skill);
+  }
+
+  // local: user-local skills (highest priority, loaded last to win conflicts)
+  const localLoaded = await loadSkillsFromDirectory(localUserRoot, {
+    sourceKind: "local",
+    sourceRoot: localUserRoot
+  }).catch(() => ({ skills: [], errors: [] }));
+  skillLoadWarnings.push(...localLoaded.errors.map((error) => error.message));
+  for (const skill of localLoaded.skills) {
+    skillRegistry.register(skill);
+  }
+
+  for (const root of options.externalSkillRoots ?? []) {
     const loaded = await loadSkillsFromDirectory(root, {
-      sourceKind: root === localSkillsRoot ? "local" : "external",
+      sourceKind: "external",
       sourceRoot: root
     }).catch(() => ({ skills: [], errors: [] }));
     skillLoadWarnings.push(...loaded.errors.map((error) => error.message));
-
     for (const skill of loaded.skills) {
       skillRegistry.register(skill);
     }

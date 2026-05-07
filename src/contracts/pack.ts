@@ -1,6 +1,6 @@
-export type SkillsPackType = "skill_pack" | "tool_pack" | "workflow_pack" | "mixed";
+export type PackType = "skill_pack" | "tool_pack" | "workflow_pack" | "mixed";
 
-export type SkillsPackManifest = {
+export type PackManifest = {
   id: string;
   name: string;
   version: string;
@@ -9,20 +9,20 @@ export type SkillsPackManifest = {
   homepage?: string;
   source?: string;
   license?: string;
-  skillsPackType: SkillsPackType;
+  packType: PackType;
   entrypoints: {
     skills?: string[];
     tools?: string[];
     workflows?: string[];
   };
-  permissions: SkillsPackPermissionManifest;
-  provenance: SkillsPackProvenanceManifest;
-  sandbox: SkillsPackSandboxPolicy;
-  evals?: SkillsPackEvalHook[];
-  rollback?: SkillsPackRollbackPolicy;
+  permissions: PackPermissionManifest;
+  provenance: PackProvenanceManifest;
+  sandbox: PackSandboxPolicy;
+  evals?: PackEvalHook[];
+  rollback?: PackRollbackPolicy;
 };
 
-export type SkillsPackPermissionManifest = {
+export type PackPermissionManifest = {
   filesystem?: {
     read?: string[];
     write?: string[];
@@ -60,7 +60,7 @@ export type TrustLevel =
   | "external_reviewed"
   | "external_untrusted";
 
-export type SkillsPackProvenanceManifest = {
+export type PackProvenanceManifest = {
   origin: ProvenanceOrigin;
   sourceUrl?: string;
   installedAt?: string;
@@ -76,7 +76,7 @@ export type ShellMode = "deny" | "ask" | "allow_list";
 export type NetworkMode = "deny" | "ask" | "allow_list";
 export type SecretsMode = "deny" | "explicit_only";
 
-export type SkillsPackSandboxPolicy = {
+export type PackSandboxPolicy = {
   defaultMode: SandboxMode;
   filesystemMode: FilesystemMode;
   shellMode: ShellMode;
@@ -84,33 +84,33 @@ export type SkillsPackSandboxPolicy = {
   secretsMode: SecretsMode;
 };
 
-export type SkillsPackEvalHook = {
+export type PackEvalHook = {
   name: string;
   command: string;
   description?: string;
 };
 
-export type SkillsPackRollbackPolicy = {
+export type PackRollbackPolicy = {
   strategy: "remove" | "restore_previous" | "none";
   previousSnapshotPath?: string;
 };
 
-export type SkillsPackStatus =
+export type PackStatus =
   | "disabled"
   | "pending_approval"
   | "enabled"
   | "error";
 
-export type InstalledSkillsPack = {
-  manifest: SkillsPackManifest;
-  status: SkillsPackStatus;
+export type InstalledPack = {
+  manifest: PackManifest;
+  status: PackStatus;
   installedAt: string;
   installedBy: string;
 };
 
-export type SkillsPackForceAuditRecord = {
+export type PackForceAuditRecord = {
   timestamp: string;
-  skillsPackId: string;
+  packId: string;
   version: string;
   manifestHash: string;
   riskReasons: string[];

@@ -196,6 +196,14 @@ function registerAll(): void {
     scope: "both",
   });
   commandRegistry.register({
+    name: "packs",
+    aliases: [],
+    category: "Skills",
+    description: "Manage packs (install, enable, disable, uninstall)",
+    visibility: "public",
+    scope: "both",
+  });
+  commandRegistry.register({
     name: "reload-mcp",
     aliases: [],
     category: "System",
@@ -518,22 +526,69 @@ function registerAll(): void {
     scope: "cli",
   });
 
-  // ── Skills pack subcommands (namespaced under "skills") ──
+  // ── pack subcommands (namespaced under "packs") ──
   commandRegistry.register({
     name: "list",
     aliases: [],
-    parent: "skills",
+    parent: "packs",
     category: "Skills",
-    description: "List installed skills packs",
+    description: "List installed packs",
     visibility: "public",
     scope: "cli",
   });
   commandRegistry.register({
     name: "install",
     aliases: [],
+    parent: "packs",
+    category: "Skills",
+    description: "Install a pack from a local path",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "inspect",
+    aliases: [],
+    parent: "packs",
+    category: "Skills",
+    description: "Show full manifest and metadata for a pack",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "enable",
+    aliases: [],
+    parent: "packs",
+    category: "Skills",
+    description: "Enable a pack",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "disable",
+    aliases: [],
+    parent: "packs",
+    category: "Skills",
+    description: "Disable a pack",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "uninstall",
+    aliases: ["remove"],
+    parent: "packs",
+    category: "Skills",
+    description: "Uninstall a pack",
+    visibility: "public",
+    scope: "cli",
+  });
+
+  // ── skill subcommands (namespaced under "skills") ──
+  commandRegistry.register({
+    name: "list",
+    aliases: [],
     parent: "skills",
     category: "Skills",
-    description: "Install a skills pack from a local path",
+    description: "List available skills from enabled packs",
     visibility: "public",
     scope: "cli",
   });
@@ -542,34 +597,16 @@ function registerAll(): void {
     aliases: [],
     parent: "skills",
     category: "Skills",
-    description: "Show full manifest and metadata for a skills pack",
+    description: "Show metadata for a skill",
     visibility: "public",
     scope: "cli",
   });
   commandRegistry.register({
-    name: "enable",
+    name: "view",
     aliases: [],
     parent: "skills",
     category: "Skills",
-    description: "Enable a skills pack",
-    visibility: "public",
-    scope: "cli",
-  });
-  commandRegistry.register({
-    name: "disable",
-    aliases: [],
-    parent: "skills",
-    category: "Skills",
-    description: "Disable a skills pack",
-    visibility: "public",
-    scope: "cli",
-  });
-  commandRegistry.register({
-    name: "uninstall",
-    aliases: ["remove"],
-    parent: "skills",
-    category: "Skills",
-    description: "Uninstall a skills pack",
+    description: "View the full SKILL.md content for a skill",
     visibility: "public",
     scope: "cli",
   });

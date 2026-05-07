@@ -3551,7 +3551,7 @@ permission_expectations:
 ---
 Loaded from \${ESTACODA_SKILLS_REPO}.
 `, "utf8");
-const externalHomePersonalSkillRoot = join(externalSkillsHome, ".estacoda", "skills", "shared-team-skill");
+const externalHomePersonalSkillRoot = join(externalSkillsHome, ".estacoda", "skills", "local", "shared-team-skill");
 await mkdir(externalHomePersonalSkillRoot, { recursive: true });
 await writeFile(join(externalHomePersonalSkillRoot, "SKILL.md"), `---
 name: shared-team-skill

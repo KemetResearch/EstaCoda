@@ -1,14 +1,14 @@
-import { SkillsPackRegistry } from "../skills-packs/skills-pack-registry.js";
+import { PackRegistry } from "../packs/pack-registry.js";
 import {
-  installSkillsPack,
-  enableSkillsPack,
-  disableSkillsPack,
-  uninstallSkillsPack
-} from "../skills-packs/skills-pack-installer.js";
+  installPack,
+  enablePack,
+  disablePack,
+  uninstallPack
+} from "../packs/pack-installer.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
 import { createReadlinePrompt } from "../onboarding/interactive-onboarding.js";
 
-export async function skillsCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+export async function packCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];
   const subArgs = args.slice(1);
   const homeDir = options.homeDir ?? process.env.HOME ?? "";
@@ -16,7 +16,7 @@ export async function skillsCommand(options: CliOptions, args: string[]): Promis
 
   switch (subcommand) {
     case "list":
-      return listSkillsPacks(homeDir, subArgs);
+      return listPacks(homeDir, subArgs);
     case "install":
       return installCommand(homeDir, subArgs, actor, options);
     case "inspect":
@@ -32,23 +32,23 @@ export async function skillsCommand(options: CliOptions, args: string[]): Promis
         handled: true,
         exitCode: 1,
         output: [
-          "Usage: estacoda skills <subcommand>",
+          "Usage: estacoda packs <subcommand>",
           "",
           "Subcommands:",
-          "  list                       List installed skills packs",
-          "  install <path> [--force]   Install a skills pack from a local path",
+          "  list                       List installed packs",
+          "  install <path> [--force]   Install a pack from a local path",
           "  inspect <id>               Show full manifest and metadata",
-          "  enable <id> [--force]      Enable a skills pack",
-          "  disable <id>               Disable a skills pack",
-          "  uninstall <id> [--keep-files]  Uninstall a skills pack",
+          "  enable <id> [--force]      Enable a pack",
+          "  disable <id>               Disable a pack",
+          "  uninstall <id> [--keep-files]  Uninstall a pack",
           ""
         ].join("\n")
       };
   }
 }
 
-async function listSkillsPacks(homeDir: string, args: string[]): Promise<CliCommandResult> {
-  const registry = new SkillsPackRegistry({ homeDir });
+async function listPacks(homeDir: string, args: string[]): Promise<CliCommandResult> {
+  const registry = new PackRegistry({ homeDir });
   const entries = await registry.list();
 
   const statusFilter = valueAfter(args, "--status");
@@ -64,7 +64,7 @@ async function listSkillsPacks(homeDir: string, args: string[]): Promise<CliComm
     return {
       handled: true,
       exitCode: 0,
-      output: "No skills packs installed."
+      output: "No packs installed."
     };
   }
 
@@ -92,11 +92,11 @@ async function installCommand(
 ): Promise<CliCommandResult> {
   const path = args[0];
   if (path === undefined) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda skills install <path> [--force]" };
+    return { handled: true, exitCode: 1, output: "Usage: estacoda packs install <path> [--force]" };
   }
 
   const prompt = options.interactive !== false ? options.prompt ?? createReadlinePrompt() : undefined;
-  const result = await installSkillsPack({
+  const result = await installPack({
     homeDir,
     sourcePath: path,
     actor,
@@ -114,13 +114,13 @@ async function installCommand(
 async function inspectCommand(homeDir: string, args: string[]): Promise<CliCommandResult> {
   const id = args[0];
   if (id === undefined) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda skills inspect <id>" };
+    return { handled: true, exitCode: 1, output: "Usage: estacoda packs inspect <id>" };
   }
 
-  const registry = new SkillsPackRegistry({ homeDir });
+  const registry = new PackRegistry({ homeDir });
   const entry = await registry.find(id);
   if (entry === undefined) {
-    return { handled: true, exitCode: 1, output: `Skills pack not found: ${id}` };
+    return { handled: true, exitCode: 1, output: `pack not found: ${id}` };
   }
 
   const output = JSON.stringify(
@@ -149,11 +149,11 @@ async function enableCommand(
 ): Promise<CliCommandResult> {
   const id = args[0];
   if (id === undefined) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda skills enable <id> [--force]" };
+    return { handled: true, exitCode: 1, output: "Usage: estacoda packs enable <id> [--force]" };
   }
 
   const prompt = options.interactive !== false ? options.prompt ?? createReadlinePrompt() : undefined;
-  const result = await enableSkillsPack({
+  const result = await enablePack({
     homeDir,
     id,
     actor,
@@ -171,10 +171,10 @@ async function enableCommand(
 async function disableCommand(homeDir: string, args: string[]): Promise<CliCommandResult> {
   const id = args[0];
   if (id === undefined) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda skills disable <id>" };
+    return { handled: true, exitCode: 1, output: "Usage: estacoda packs disable <id>" };
   }
 
-  const result = await disableSkillsPack({ homeDir, id });
+  const result = await disablePack({ homeDir, id });
 
   return {
     handled: true,
@@ -186,10 +186,10 @@ async function disableCommand(homeDir: string, args: string[]): Promise<CliComma
 async function uninstallCommand(homeDir: string, args: string[], actor: string): Promise<CliCommandResult> {
   const id = args[0];
   if (id === undefined) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda skills uninstall <id> [--keep-files]" };
+    return { handled: true, exitCode: 1, output: "Usage: estacoda packs uninstall <id> [--keep-files]" };
   }
 
-  const result = await uninstallSkillsPack({
+  const result = await uninstallPack({
     homeDir,
     id,
     actor,

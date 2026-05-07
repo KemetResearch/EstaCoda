@@ -2,16 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SkillsPackRegistry } from "./skills-pack-registry.js";
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+import { PackRegistry } from "./pack-registry.js";
+import type { PackManifest } from "../contracts/pack.js";
 
-function makeManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManifest {
+function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
   return {
     id: "test-sp",
-    name: "Test Skills Pack",
+    name: "Test pack",
     version: "1.0.0",
-    description: "A test skills pack",
-    skillsPackType: "skill_pack",
+    description: "A test pack",
+    packType: "skill_pack",
     entrypoints: {},
     permissions: {},
     provenance: {
@@ -31,7 +31,7 @@ function makeManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManife
   };
 }
 
-describe("SkillsPackRegistry", () => {
+describe("PackRegistry", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -42,8 +42,8 @@ describe("SkillsPackRegistry", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("installs and lists a skills pack", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("installs and lists a pack", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const manifest = makeManifest();
     const result = await registry.install(manifest, "test-user");
     expect(result.ok).toBe(true);
@@ -57,22 +57,22 @@ describe("SkillsPackRegistry", () => {
     expect(list[0].manifest.id).toBe("test-sp");
   });
 
-  it("finds a skills pack by id", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("finds a pack by id", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
     const found = await registry.find("test-sp");
     expect(found).toBeDefined();
     expect(found!.manifest.id).toBe("test-sp");
   });
 
-  it("returns undefined for missing skills pack", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("returns undefined for missing pack", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const found = await registry.find("missing");
     expect(found).toBeUndefined();
   });
 
   it("defaults external to disabled", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const result = await registry.install(
       makeManifest({ provenance: { origin: "external", trustLevel: "external_untrusted" } }),
       "test-user"
@@ -84,7 +84,7 @@ describe("SkillsPackRegistry", () => {
   });
 
   it("defaults bundled to enabled", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const result = await registry.install(makeManifest(), "test-user");
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -93,7 +93,7 @@ describe("SkillsPackRegistry", () => {
   });
 
   it("rejects invalid manifests", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const bad = makeManifest({ id: "" });
     const result = await registry.install(bad, "test-user");
     expect(result.ok).toBe(false);
@@ -103,7 +103,7 @@ describe("SkillsPackRegistry", () => {
   });
 
   it("rejects duplicate ids", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
     const result = await registry.install(makeManifest(), "test-user");
     expect(result.ok).toBe(false);
@@ -113,7 +113,7 @@ describe("SkillsPackRegistry", () => {
   });
 
   it("updates status", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
     const updated = await registry.updateStatus("test-sp", "disabled");
     expect(updated).toBe(true);
@@ -121,14 +121,14 @@ describe("SkillsPackRegistry", () => {
     expect(found!.status).toBe("disabled");
   });
 
-  it("returns false updating missing skills pack", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("returns false updating missing pack", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const updated = await registry.updateStatus("missing", "disabled");
     expect(updated).toBe(false);
   });
 
-  it("removes a skills pack", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("removes a pack", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
     const removed = await registry.remove("test-sp");
     expect(removed).toBe(true);
@@ -136,19 +136,19 @@ describe("SkillsPackRegistry", () => {
     expect(list).toHaveLength(0);
   });
 
-  it("returns false removing missing skills pack", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+  it("returns false removing missing pack", async () => {
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const removed = await registry.remove("missing");
     expect(removed).toBe(false);
   });
 
   it("skips malformed lines on read", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
 
     // Append a malformed line directly to the file
     const { appendFile } = await import("node:fs/promises");
-    const path = join(tmpDir, ".estacoda", "skills-packs", "registry.jsonl");
+    const path = join(tmpDir, ".estacoda", "packs", "registry.jsonl");
     await appendFile(path, "not-json\n", "utf8");
 
     const list = await registry.list();
@@ -157,7 +157,7 @@ describe("SkillsPackRegistry", () => {
   });
 
   it("getErrors reports validation failures", async () => {
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     await registry.install(makeManifest(), "test-user");
     await registry.updateStatus("test-sp", "error");
     const errors = await registry.getErrors();

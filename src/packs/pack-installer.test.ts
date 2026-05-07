@@ -3,21 +3,21 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  installSkillsPack,
-  enableSkillsPack,
-  disableSkillsPack,
-  uninstallSkillsPack
-} from "./skills-pack-installer.js";
-import { SkillsPackRegistry } from "./skills-pack-registry.js";
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
+  installPack,
+  enablePack,
+  disablePack,
+  uninstallPack
+} from "./pack-installer.js";
+import { PackRegistry } from "./pack-registry.js";
+import type { PackManifest } from "../contracts/pack.js";
 
-function makeManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManifest {
+function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
   return {
     id: "test-sp",
-    name: "Test Skills Pack",
+    name: "Test pack",
     version: "1.0.0",
-    description: "A test skills pack",
-    skillsPackType: "skill_pack",
+    description: "A test pack",
+    packType: "skill_pack",
     entrypoints: { skills: ["SKILL.md"] },
     permissions: {
       filesystem: { read: ["."] },
@@ -42,13 +42,13 @@ function makeManifest(overrides?: Partial<SkillsPackManifest>): SkillsPackManife
   };
 }
 
-function writePack(dir: string, manifest: SkillsPackManifest): void {
+function writePack(dir: string, manifest: PackManifest): void {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "skills-pack.json"), JSON.stringify(manifest, null, 2), "utf8");
+  writeFileSync(join(dir, "pack.json"), JSON.stringify(manifest, null, 2), "utf8");
   writeFileSync(join(dir, "SKILL.md"), "# Test Skill\n", "utf8");
 }
 
-describe("skills-pack-installer", () => {
+describe("pack-installer", () => {
   let tmpDir: string;
   let sourceDir: string;
 
@@ -61,11 +61,11 @@ describe("skills-pack-installer", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("installs a local skills pack as enabled", async () => {
+  it("installs a local pack as enabled", async () => {
     const manifest = makeManifest();
     writePack(sourceDir, manifest);
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
@@ -73,20 +73,20 @@ describe("skills-pack-installer", () => {
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Installed skills pack: Test Skills Pack (test-sp)");
+    expect(result.output).toContain("Installed pack: Test pack (test-sp)");
     expect(result.output).toContain("Status: enabled");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(true);
-    expect(existsSync(join(skillsDest, "skills-pack.json"))).toBe(true);
+    expect(existsSync(join(skillsDest, "SKILL.md"))).toBe(true);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry).toBeDefined();
     expect(entry!.status).toBe("enabled");
   });
 
-  it("installs an external skills pack as disabled", async () => {
+  it("installs an external pack as disabled", async () => {
     const manifest = makeManifest({
       provenance: { origin: "external", trustLevel: "external_reviewed" }
     });
@@ -94,7 +94,7 @@ describe("skills-pack-installer", () => {
 
     const prompt = async (question: string) => "yes";
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user",
@@ -105,22 +105,22 @@ describe("skills-pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Status: disabled");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("disabled");
   });
 
-  it("installs external low-risk skills pack as disabled without confirmation", async () => {
+  it("installs external low-risk pack as disabled without confirmation", async () => {
     const manifest = makeManifest({
       provenance: { origin: "external", trustLevel: "first_party" }
     });
     writePack(sourceDir, manifest);
 
     // No prompt provided — should not require interaction for low risk
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
@@ -130,12 +130,12 @@ describe("skills-pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Status: disabled");
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("disabled");
   });
 
-  it("installs medium-risk local skills pack as disabled after confirmation", async () => {
+  it("installs medium-risk local pack as disabled after confirmation", async () => {
     const manifest = makeManifest({
       provenance: { origin: "local", trustLevel: "local_user" },
       permissions: {
@@ -158,7 +158,7 @@ describe("skills-pack-installer", () => {
 
     const prompt = async (question: string) => "yes";
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user",
@@ -170,15 +170,15 @@ describe("skills-pack-installer", () => {
     expect(result.output).toContain("Status: disabled");
     expect(result.output).toContain("Risk: medium");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("disabled");
   });
 
-  it("installs high-risk local skills pack as disabled after confirmation", async () => {
+  it("installs high-risk local pack as disabled after confirmation", async () => {
     const manifest = makeManifest({
       provenance: { origin: "local", trustLevel: "local_user" },
       permissions: {
@@ -201,7 +201,7 @@ describe("skills-pack-installer", () => {
 
     const prompt = async (question: string) => "yes";
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user",
@@ -213,15 +213,15 @@ describe("skills-pack-installer", () => {
     expect(result.output).toContain("Status: disabled");
     expect(result.output).toContain("Risk: high");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("disabled");
   });
 
-  it("rejects blocked skills pack without --force", async () => {
+  it("rejects blocked pack without --force", async () => {
     const manifest = makeManifest({
       permissions: {
         filesystem: { write: ["/"] },
@@ -241,7 +241,7 @@ describe("skills-pack-installer", () => {
     });
     writePack(sourceDir, manifest);
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
@@ -273,11 +273,11 @@ describe("skills-pack-installer", () => {
     writePack(sourceDir, manifest);
 
     const prompt = async (question: string) => {
-      if (question.includes("Type the skills pack id")) return "test-sp";
+      if (question.includes("Type the pack id")) return "test-sp";
       return "";
     };
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user",
@@ -289,17 +289,17 @@ describe("skills-pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Status: disabled");
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry).toBeDefined();
     expect(entry!.status).toBe("disabled");
 
-    const auditPath = join(tmpDir, ".estacoda", "skills-packs", "audit", "force-overrides.jsonl");
+    const auditPath = join(tmpDir, ".estacoda", "packs", "audit", "force-overrides.jsonl");
     expect(existsSync(auditPath)).toBe(true);
     const lines = readFileSync(auditPath, "utf8").trim().split("\n");
     expect(lines.length).toBeGreaterThan(0);
     const record = JSON.parse(lines[lines.length - 1]);
-    expect(record.skillsPackId).toBe("test-sp");
+    expect(record.packId).toBe("test-sp");
     expect(record.overrideActor).toBe("test-user");
   });
 
@@ -324,11 +324,11 @@ describe("skills-pack-installer", () => {
     writePack(sourceDir, manifest);
 
     const prompt = async (question: string) => {
-      if (question.includes("Type the skills pack id")) return "wrong-id";
+      if (question.includes("Type the pack id")) return "wrong-id";
       return "";
     };
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user",
@@ -345,17 +345,17 @@ describe("skills-pack-installer", () => {
     const manifest = makeManifest();
     writePack(sourceDir, manifest);
 
-    await installSkillsPack({
+    await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
     });
 
     // First disable so we can test enable
-    const { disableSkillsPack } = await import("./skills-pack-installer.js");
-    await disableSkillsPack({ homeDir: tmpDir, id: "test-sp" });
+    const { disablePack } = await import("./pack-installer.js");
+    await disablePack({ homeDir: tmpDir, id: "test-sp" });
 
-    const result = await enableSkillsPack({
+    const result = await enablePack({
       homeDir: tmpDir,
       id: "test-sp",
       actor: "test-user"
@@ -363,12 +363,13 @@ describe("skills-pack-installer", () => {
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Enabled skills pack");
+    expect(result.output).toContain("Enabled pack");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(true);
+    expect(existsSync(join(skillsDest, "SKILL.md"))).toBe(true);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("enabled");
   });
@@ -377,25 +378,25 @@ describe("skills-pack-installer", () => {
     const manifest = makeManifest();
     writePack(sourceDir, manifest);
 
-    await installSkillsPack({
+    await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
     });
 
-    const result = await disableSkillsPack({
+    const result = await disablePack({
       homeDir: tmpDir,
       id: "test-sp"
     });
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Disabled skills pack");
+    expect(result.output).toContain("Disabled pack");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "test-sp");
+    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry!.status).toBe("disabled");
   });
@@ -404,13 +405,13 @@ describe("skills-pack-installer", () => {
     const manifest = makeManifest();
     writePack(sourceDir, manifest);
 
-    await installSkillsPack({
+    await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
     });
 
-    const result = await uninstallSkillsPack({
+    const result = await uninstallPack({
       homeDir: tmpDir,
       id: "test-sp",
       actor: "test-user"
@@ -418,16 +419,16 @@ describe("skills-pack-installer", () => {
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Uninstalled skills pack");
+    expect(result.output).toContain("Uninstalled pack");
 
-    const packPath = join(tmpDir, ".estacoda", "skills-packs", "test-sp");
+    const packPath = join(tmpDir, ".estacoda", "packs", "test-sp");
     expect(existsSync(packPath)).toBe(false);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     const entry = await registry.find("test-sp");
     expect(entry).toBeUndefined();
 
-    const backupsDir = join(tmpDir, ".estacoda", "skills-packs", "backups");
+    const backupsDir = join(tmpDir, ".estacoda", "packs", "backups");
     expect(existsSync(backupsDir)).toBe(true);
   });
 
@@ -435,13 +436,13 @@ describe("skills-pack-installer", () => {
     const manifest = makeManifest();
     writePack(sourceDir, manifest);
 
-    await installSkillsPack({
+    await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
     });
 
-    const result = await uninstallSkillsPack({
+    const result = await uninstallPack({
       homeDir: tmpDir,
       id: "test-sp",
       actor: "test-user",
@@ -451,18 +452,18 @@ describe("skills-pack-installer", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toContain("Pack files preserved");
 
-    const packPath = join(tmpDir, ".estacoda", "skills-packs", "test-sp");
+    const packPath = join(tmpDir, ".estacoda", "packs", "test-sp");
     expect(existsSync(packPath)).toBe(true);
 
-    const registry = new SkillsPackRegistry({ homeDir: tmpDir });
+    const registry = new PackRegistry({ homeDir: tmpDir });
     expect(await registry.find("test-sp")).toBeUndefined();
   });
 
-  it("requires skills-pack.json", async () => {
+  it("requires pack.json", async () => {
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, "README.md"), "# No manifest\n", "utf8");
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"
@@ -470,7 +471,7 @@ describe("skills-pack-installer", () => {
 
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("skills-pack.json not found");
+    expect(result.output).toContain("pack.json not found");
   });
 
   it("shows eval hooks informational note when evals are defined", async () => {
@@ -479,7 +480,7 @@ describe("skills-pack-installer", () => {
     });
     writePack(sourceDir, manifest);
 
-    const result = await installSkillsPack({
+    const result = await installPack({
       homeDir: tmpDir,
       sourcePath: sourceDir,
       actor: "test-user"

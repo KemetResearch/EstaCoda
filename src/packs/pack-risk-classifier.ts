@@ -1,17 +1,17 @@
-import type { SkillsPackManifest } from "../contracts/skills-pack.js";
-import { validateSkillsPackManifest } from "./skills-pack-validator.js";
-import { validateSkillsPackPermissions } from "./skills-pack-permission-validator.js";
+import type { PackManifest } from "../contracts/pack.js";
+import { validatePackManifest } from "./pack-validator.js";
+import { validatePackPermissions } from "./pack-permission-validator.js";
 
-export type SkillsPackRiskClassification = {
+export type PackRiskClassification = {
   level: "low" | "medium" | "high" | "blocked";
   reasons: string[];
 };
 
-export function classifySkillsPackRisk(manifest: SkillsPackManifest): SkillsPackRiskClassification {
+export function classifyPackRisk(manifest: PackManifest): PackRiskClassification {
   const reasons: string[] = [];
 
   // 1. Manifest validation
-  const validation = validateSkillsPackManifest(manifest);
+  const validation = validatePackManifest(manifest);
   if (!validation.ok) {
     return {
       level: "blocked",
@@ -20,7 +20,7 @@ export function classifySkillsPackRisk(manifest: SkillsPackManifest): SkillsPack
   }
 
   // 2. Permission findings
-  const permissionFindings = validateSkillsPackPermissions(manifest.permissions);
+  const permissionFindings = validatePackPermissions(manifest.permissions);
   if (permissionFindings.length > 0) {
     return {
       level: "blocked",
