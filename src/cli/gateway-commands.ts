@@ -30,6 +30,14 @@ import { readGatewayPid, isStalePid } from "../gateway/pid-file.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStaleLock } from "../gateway/gateway-lock.js";
 import { stopGateway } from "../gateway/supervisor-lifecycle.js";
+import { listAdapterIdentityLocks } from "../gateway/identity-lock.js";
+import {
+  deriveTelegramIdentityHash,
+  deriveDiscordIdentityHash,
+  deriveEmailIdentityHash,
+  deriveWhatsAppIdentityHash,
+} from "../channels/adapter-identity.js";
+import type { IdentityLockStatus } from "./gateway-view-models.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -95,6 +103,8 @@ export async function runGatewayStatus(
   const state = await readGatewayState(homeDir);
   const pidContent = await readGatewayPid(homeDir);
 
+  const identityLocks = await buildIdentityLockStatuses(homeDir, config.channels);
+
   const data: GatewayStatusData = {
     channels: config.channels,
     cronJobs: cronJobs.map((j) => ({ status: j.status, name: j.name, nextRunAt: j.nextRunAt })),
@@ -118,6 +128,7 @@ export async function runGatewayStatus(
               version: pidContent.version,
             }
           : undefined,
+    identityLocks,
   };
 
   const viewModel = buildGatewayStatusViewModel(data);
@@ -159,6 +170,7 @@ export async function runGatewayDiagnose(
       pidHealthy: !(await isStalePid(homeDir)),
       lockHealthy: !(await isStaleLock(homeDir)),
     },
+    identityLockHealth: await buildIdentityLockHealth(homeDir, config.channels),
   };
 
   const viewModel = buildGatewayDiagnoseViewModel(data);
@@ -284,6 +296,78 @@ export async function runChannelsStatus(
 
   const viewModel = buildChannelsStatusViewModel({ channel: options.channel ?? "unknown" });
   return { ok: false, output: renderer(viewModel) };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity Lock Helpers
+// ─────────────────────────────────────────────────────────────
+
+async function buildIdentityLockStatuses(
+  homeDir: string,
+  _channels: LoadedRuntimeConfig["channels"]
+): Promise<IdentityLockStatus[]> {
+  const locks = await listAdapterIdentityLocks(homeDir);
+  const staleLocks = locks.filter((l) => l.stale);
+
+  // Deduplicate by kind; status only surfaces actionable problems
+  const seen = new Set<string>();
+  const results: IdentityLockStatus[] = [];
+  for (const lock of staleLocks) {
+    if (!seen.has(lock.kind)) {
+      seen.add(lock.kind);
+      results.push({ kind: lock.kind, state: "stale", pid: lock.pid });
+    }
+  }
+  return results;
+}
+
+async function buildIdentityLockHealth(
+  homeDir: string,
+  channels: LoadedRuntimeConfig["channels"]
+): Promise<{
+  staleLocks: { kind: string; pid: number }[];
+  duplicateHashes: string[];
+  missingLocks: string[];
+}> {
+  const [tgHash, dcHash, emHash, waHash] = await Promise.all([
+    deriveTelegramIdentityHash(homeDir, channels.telegram),
+    deriveDiscordIdentityHash(homeDir, channels.discord),
+    deriveEmailIdentityHash(homeDir, channels.email),
+    deriveWhatsAppIdentityHash(homeDir, channels.whatsapp),
+  ]);
+
+  const locks = await listAdapterIdentityLocks(homeDir);
+
+  const staleLocks = locks
+    .filter((l) => l.stale)
+    .map((l) => ({ kind: l.kind, pid: l.pid }));
+
+  const seenHashes = new Set<string>();
+  const duplicateHashes: string[] = [];
+  for (const lock of locks) {
+    if (seenHashes.has(lock.identityHash)) {
+      duplicateHashes.push(`${lock.kind}:${lock.identityHash.slice(0, 8)}...`);
+    }
+    seenHashes.add(lock.identityHash);
+  }
+
+  const missingLocks: string[] = [];
+  const kindToHash = new Map<string, string | undefined>([
+    ["telegram", tgHash],
+    ["discord", dcHash],
+    ["email", emHash],
+    ["whatsapp", waHash],
+  ]);
+  for (const kind of ["telegram", "discord", "email", "whatsapp"] as const) {
+    const hash = kindToHash.get(kind);
+    if (hash === undefined) continue;
+    const hasLock = locks.some((l) => l.kind === kind && l.identityHash === hash);
+    if (!hasLock) {
+      missingLocks.push(kind);
+    }
+  }
+
+  return { staleLocks, duplicateHashes, missingLocks };
 }
 
 // ─────────────────────────────────────────────────────────────

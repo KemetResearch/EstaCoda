@@ -19,6 +19,7 @@ import { writeGatewayPid, removeGatewayPid } from "../gateway/pid-file.js";
 import { writeGatewayState, removeGatewayState } from "../gateway/supervisor-state.js";
 import { acquireGatewayLock, releaseGatewayLock } from "../gateway/gateway-lock.js";
 import { stopGateway } from "../gateway/supervisor-lifecycle.js";
+import { acquireAdapterIdentityLock, listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
@@ -165,6 +166,52 @@ describe("gateway commands", () => {
       expect(result.output).toContain("PID: none");
       expect(result.output).toContain("State: stopped");
     });
+
+    it("does not show identity lock block when only healthy locks exist", async () => {
+      const hash = "a".repeat(64);
+      await acquireAdapterIdentityLock(tmpDir, "telegram", hash);
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).not.toContain("Identity Locks");
+      expect(result.output).not.toContain("primitives only");
+    });
+
+    it("shows corrupt identity lock in status", async () => {
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      await mkdir(locksDir, { recursive: true });
+      await writeFile(
+        join(locksDir, "identity-telegram-deadbeef.lock"),
+        "this is not valid json",
+        "utf8"
+      );
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Identity Locks");
+      expect(result.output).toContain("telegram");
+      expect(result.output).toContain("corrupt");
+      expect(result.output).not.toContain("-1");
+      expect(result.output).not.toContain("deadbeef");
+    });
+    it("shows stale identity lock in status", async () => {
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      await mkdir(locksDir, { recursive: true });
+      await writeFile(
+        join(locksDir, "identity-telegram-deadbeef.lock"),
+        JSON.stringify({ pid: 99999, startedAt: new Date().toISOString() }),
+        "utf8"
+      );
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Identity Locks");
+      expect(result.output).toContain("telegram");
+      expect(result.output).toContain("stale");
+      expect(result.output).toContain("99999");
+    });
   });
 
   describe("runGatewayDiagnose", () => {
@@ -205,6 +252,41 @@ describe("gateway commands", () => {
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Supervisor");
       expect(result.output).toContain("PID healthy: no");
+    });
+
+    it("reports stale identity lock in diagnose", async () => {
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      await mkdir(locksDir, { recursive: true });
+      await writeFile(
+        join(locksDir, "identity-telegram-deadbeef.lock"),
+        JSON.stringify({ pid: 99999, startedAt: new Date().toISOString() }),
+        "utf8"
+      );
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Identity Locks");
+      expect(result.output).toContain("primitives only");
+      expect(result.output).toContain("not yet enforced");
+      expect(result.output).toContain("Stale locks");
+      expect(result.output).toContain("telegram");
+      expect(result.output).toContain("99999");
+    });
+
+    it("diagnose output does not contain raw token from lock file", async () => {
+      const rawToken = "super_secret_bot_token_xyz";
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      await mkdir(locksDir, { recursive: true });
+      await writeFile(
+        join(locksDir, "identity-discord-abc123de.lock"),
+        JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+        "utf8"
+      );
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).not.toContain(rawToken);
+      expect(result.output).not.toContain("super_secret");
     });
   });
 

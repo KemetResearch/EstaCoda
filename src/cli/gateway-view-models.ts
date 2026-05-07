@@ -36,6 +36,12 @@ export type SupervisorSnapshot = {
   readonly version?: string;
 };
 
+export type IdentityLockStatus = {
+  readonly kind: string;
+  readonly state: "locked" | "unlocked" | "stale" | "n/a";
+  readonly pid?: number;
+};
+
 export type GatewayStatusData = {
   readonly channels: LoadedRuntimeConfig["channels"];
   readonly cronJobs: readonly { readonly status: string; readonly name: string; readonly nextRunAt?: string }[];
@@ -58,6 +64,7 @@ export type GatewayStatusData = {
   readonly approvalCount: number;
   readonly missingConfig: readonly { readonly channel: string; readonly item: string }[];
   readonly supervisor?: SupervisorSnapshot;
+  readonly identityLocks: readonly IdentityLockStatus[];
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -66,8 +73,10 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     .filter((j) => j.nextRunAt !== undefined)
     .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())[0];
 
+  const identityLocksBlock = buildIdentityLocksBlock(data.identityLocks);
   const blocks: ViewModel[] = [
     buildSupervisorBlock(data.supervisor),
+    ...(identityLocksBlock ? [identityLocksBlock] : []),
     buildKeyValueBlockViewModel({
       title: "Process",
       entries: [kv("Status", "CLI view (no live gateway process in this shell)")],
@@ -143,6 +152,26 @@ function buildSupervisorBlock(supervisor: GatewayStatusData["supervisor"]): View
     title: "Supervisor",
     entries,
   });
+}
+
+function buildIdentityLocksBlock(locks: readonly IdentityLockStatus[]): ViewModel | undefined {
+  const problemLocks = locks.filter((l) => l.state === "stale");
+  if (problemLocks.length === 0) return undefined;
+
+  const entries: KeyValueEntry[] = problemLocks.map((l) =>
+    kv(l.kind, l.pid === -1 ? "corrupt" : `stale (pid ${l.pid}, dead)`)
+  );
+  return buildKeyValueBlockViewModel({
+    title: "Identity Locks",
+    entries,
+  });
+}
+
+function lockStateLabel(lock: IdentityLockStatus | undefined): string {
+  if (lock === undefined) return "n/a";
+  if (lock.state === "locked") return `locked (pid ${lock.pid})`;
+  if (lock.state === "stale") return `stale (pid ${lock.pid}, dead)`;
+  return lock.state;
 }
 
 function channelKv(name: string, channel: LoadedRuntimeConfig["channels"]["telegram"]): KeyValueEntry {
@@ -241,6 +270,11 @@ export type GatewayDiagnoseData = {
   readonly outputDirWritable: boolean;
   readonly lockDirWritable: boolean;
   readonly supervisor?: SupervisorHealth;
+  readonly identityLockHealth?: {
+    readonly staleLocks: readonly { readonly kind: string; readonly pid: number }[];
+    readonly duplicateHashes: readonly string[];
+    readonly missingLocks: readonly string[];
+  };
 };
 
 export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): CommandResultViewModel {
@@ -397,6 +431,43 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     }));
   }
   blocks.push(buildKeyValueBlockViewModel({ title: "Cron", entries: cronEntries }));
+
+  // Identity Locks
+  const ilh = data.identityLockHealth;
+  if (ilh !== undefined) {
+    const hasProblems = ilh.staleLocks.length > 0 || ilh.duplicateHashes.length > 0 || ilh.missingLocks.length > 0;
+    if (hasProblems) {
+      const ilEntries: KeyValueEntry[] = [
+        kv("Note", "primitives only \u2014 not yet enforced at supervisor start"),
+      ];
+      if (ilh.staleLocks.length > 0) {
+        ilEntries.push(kv("Stale locks", ilh.staleLocks.map((l) => `${l.kind} (${l.pid === -1 ? "corrupt" : `pid ${l.pid}`})`).join(", "), "warn"));
+        for (const stale of ilh.staleLocks) {
+          const desc = stale.pid === -1 ? "corrupt lock" : "stale lock";
+          const detail = stale.pid === -1 ? "" : ` (pid ${stale.pid})`;
+          warnings.push(buildWarningErrorViewModel({
+            severity: "warn",
+            title: "Identity Lock",
+            message: `${desc} for ${stale.kind}${detail}`,
+          }));
+        }
+      }
+      if (ilh.duplicateHashes.length > 0) {
+        ilEntries.push(kv("Duplicate hashes", ilh.duplicateHashes.join(", "), "warn"));
+        for (const dup of ilh.duplicateHashes) {
+          warnings.push(buildWarningErrorViewModel({
+            severity: "warn",
+            title: "Identity Lock",
+            message: `duplicate hash detected: ${dup}`,
+          }));
+        }
+      }
+      if (ilh.missingLocks.length > 0) {
+        ilEntries.push(kv("Not yet acquired", ilh.missingLocks.join(", ")));
+      }
+      blocks.push(buildKeyValueBlockViewModel({ title: "Identity Locks", entries: ilEntries }));
+    }
+  }
 
   return buildCommandResultViewModel({
     ok: warnings.length === 0,
