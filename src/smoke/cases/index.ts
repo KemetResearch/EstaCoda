@@ -7,6 +7,7 @@ import { bare_launch_case } from "./bare-launch.js";
 import { pack_lifecycle_case } from "./pack-lifecycle.js";
 import { evolution_safety_case } from "./evolution-safety.js";
 import { evolution_lifecycle_case } from "./evolution-lifecycle.js";
+import { gateway_stop_case } from "./gateway-stop.js";
 
 export const allSmokeCases = [
   legacy_monolith_case,
@@ -17,5 +18,6 @@ export const allSmokeCases = [
   bare_launch_case,
   pack_lifecycle_case,
   evolution_safety_case,
-  evolution_lifecycle_case
+  evolution_lifecycle_case,
+  gateway_stop_case
 ];

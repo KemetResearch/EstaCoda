@@ -28,6 +28,7 @@ import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostic
 import { readGatewayPid, isStalePid } from "../gateway/pid-file.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStaleLock } from "../gateway/gateway-lock.js";
+import { stopGateway } from "../gateway/supervisor-lifecycle.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -163,9 +164,46 @@ export async function runGatewayDiagnose(
   return { ok: viewModel.ok, output: renderer(viewModel) };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
+// Gateway Stop
+// ───────────────────────────────────────────────────────────
+
+export async function runGatewayStop(
+  options: GatewayCommandOptions & { force?: boolean }
+): Promise<{ ok: boolean; output: string }> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const result = await stopGateway(homeDir, { force: options.force });
+
+  if (result.ok) {
+    if (result.action === "was_not_running") {
+      if (result.liveLock) {
+        return { ok: true, output: "Gateway is not running (live operation lock exists)" };
+      }
+      if (result.pid !== undefined) {
+        return {
+          ok: true,
+          output: `Gateway was not running (cleaned up stale state for PID ${result.pid})`,
+        };
+      }
+      return { ok: true, output: "Gateway is not running" };
+    }
+
+    // action === "stopped"
+    if (result.forced) {
+      return {
+        ok: true,
+        output: `Gateway stopped (forced, PID ${result.pid})`,
+      };
+    }
+    return { ok: true, output: `Gateway stopped (PID ${result.pid})` };
+  }
+
+  return { ok: false, output: result.error };
+}
+
+// ───────────────────────────────────────────────────────────
 // Channels List
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
 
 export async function runChannelsList(
   options: GatewayCommandOptions,

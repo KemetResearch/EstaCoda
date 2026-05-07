@@ -88,7 +88,8 @@ import {
   runGatewayStatus,
   runGatewayDiagnose,
   runChannelsList,
-  runChannelsStatus
+  runChannelsStatus,
+  runGatewayStop
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -1945,6 +1946,14 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
+  if (subcommand === "stop") {
+    const result = await runGatewayStop({
+      ...options,
+      force: hasFlag(rest, "--force")
+    });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
   if (subcommand === "start") {
     if (!hasFlag(rest, "--telegram")) {
       return {
@@ -1974,6 +1983,8 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "EstaCoda gateway",
       "  estacoda gateway status",
       "  estacoda gateway diagnose",
+      "  estacoda gateway stop",
+      "  estacoda gateway stop --force",
       "  estacoda gateway start --telegram",
       "  estacoda gateway start --telegram --once"
     ].join("\n")

@@ -89,6 +89,11 @@ export async function acquireGatewayLock(
   }
 }
 
+export async function readGatewayLockContent(homeDir: string): Promise<LockFileContent | undefined> {
+  const lock = await readLock(homeDir);
+  return lock?.content;
+}
+
 export async function releaseGatewayLock(homeDir: string): Promise<void> {
   await rm(lockPath(homeDir), { force: true });
 }

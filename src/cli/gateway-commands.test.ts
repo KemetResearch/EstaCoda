@@ -7,7 +7,8 @@ import {
   runGatewayStatus,
   runGatewayDiagnose,
   runChannelsList,
-  runChannelsStatus
+  runChannelsStatus,
+  runGatewayStop
 } from "./gateway-commands.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
@@ -17,6 +18,7 @@ import { DeliveryRouter } from "../channels/delivery-router.js";
 import { writeGatewayPid, removeGatewayPid } from "../gateway/pid-file.js";
 import { writeGatewayState, removeGatewayState } from "../gateway/supervisor-state.js";
 import { acquireGatewayLock, releaseGatewayLock } from "../gateway/gateway-lock.js";
+import { stopGateway } from "../gateway/supervisor-lifecycle.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
@@ -251,6 +253,33 @@ describe("gateway commands", () => {
       const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "unknown" });
       expect(result.ok).toBe(false);
       expect(result.output).toContain("Unknown channel");
+    });
+  });
+
+  describe("runGatewayStop", () => {
+    it("reports was not running with stale PID", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("was not running");
+      expect(result.output).toContain("99999");
+    });
+
+    it("reports not running when no PID file exists", async () => {
+      const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Gateway is not running");
+    });
+
+    it("reports live lock exists when no PID but live lock is held", async () => {
+      await acquireGatewayLock(tmpDir);
+      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.1" });
+
+      const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Gateway is not running (live operation lock exists)");
+
+      await releaseGatewayLock(tmpDir);
     });
   });
 });
