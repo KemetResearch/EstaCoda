@@ -15,6 +15,7 @@ import type {
   GatewayDiagnoseData,
   ChannelsStatusData,
 } from "./gateway-view-models.js";
+import type { AdapterCapability } from "../contracts/channel.js";
 
 // ─────────────────────────────────────────────────────────────
 // Rendering context factories
@@ -104,6 +105,63 @@ function snapshotContexts() {
 // ─────────────────────────────────────────────────────────────
 // Fake data factories
 // ─────────────────────────────────────────────────────────────
+
+function fakeCapabilities(): AdapterCapability[] {
+  return [
+    {
+      kind: "telegram",
+      enabled: false,
+      configured: false,
+      inboundMode: "polling",
+      outboundMode: "push",
+      supportsAttachments: true,
+      supportsThreads: true,
+      supportsApprovals: true,
+      supportsProgressStreaming: true,
+      experimental: false,
+      implementationStatus: "live_proven",
+    },
+    {
+      kind: "discord",
+      enabled: false,
+      configured: false,
+      inboundMode: "websocket",
+      outboundMode: "push",
+      supportsAttachments: false,
+      supportsThreads: false,
+      supportsApprovals: false,
+      supportsProgressStreaming: false,
+      experimental: false,
+      implementationStatus: "present_not_live_proven",
+    },
+    {
+      kind: "email",
+      enabled: false,
+      configured: false,
+      inboundMode: "polling",
+      outboundMode: "push",
+      supportsAttachments: false,
+      supportsThreads: true,
+      supportsApprovals: false,
+      supportsProgressStreaming: false,
+      experimental: false,
+      implementationStatus: "present_not_live_proven",
+    },
+    {
+      kind: "whatsapp",
+      enabled: false,
+      configured: false,
+      inboundMode: "websocket",
+      outboundMode: "push",
+      supportsAttachments: false,
+      supportsThreads: false,
+      supportsApprovals: false,
+      supportsProgressStreaming: false,
+      experimental: true,
+      implementationStatus: "present_not_live_proven",
+    },
+  ];
+}
 
 function fakeGatewayStatusData(): GatewayStatusData {
   return {
@@ -195,8 +253,9 @@ function fakeChannelsStatusData(): ChannelsStatusData {
       pointers: [
         { surfaceType: "telegram", surfaceId: "chat-1", record: { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z" } },
       ],
+      capability: fakeCapabilities()[0],
     },
-  } as unknown as ChannelsStatusData;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -228,6 +287,7 @@ describe("Gateway surfaces — channels list", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildChannelsListViewModel({
         channels: fakeGatewayStatusData().channels,
+        capabilities: fakeCapabilities(),
       });
       const output = ctx.renderer.render(vm);
       expect(output).toMatchSnapshot(`channels-list-${ctx.name}`);

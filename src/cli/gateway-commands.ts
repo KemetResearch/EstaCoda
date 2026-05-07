@@ -9,6 +9,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
+import { AdapterRegistry } from "../channels/adapter-registry.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -210,8 +211,9 @@ export async function runChannelsList(
   renderer: GatewayRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
   const config = await loadRuntimeConfig(options);
+  const registry = new AdapterRegistry(config.channels);
 
-  const viewModel = buildChannelsListViewModel({ channels: config.channels });
+  const viewModel = buildChannelsListViewModel({ channels: config.channels, capabilities: registry.all() });
   return { ok: true, output: renderer(viewModel) };
 }
 
@@ -230,6 +232,8 @@ export async function runChannelsStatus(
   const surfacePointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
   const surfacePointers = await surfacePointerStore.listPointers();
 
+  const registry = new AdapterRegistry(config.channels);
+
   const channel = options.channel?.toLowerCase();
 
   if (channel === undefined || channel === "telegram") {
@@ -238,7 +242,7 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "telegram",
-      telegram: { diag: tgDiag, pointers: tgPointers },
+      telegram: { diag: tgDiag, pointers: tgPointers, capability: registry.get("telegram")! },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: viewModel.kind !== "plainFallback", output: renderer(viewModel) };
@@ -249,7 +253,7 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "discord",
-      discord: { config: config.channels.discord, pointers: dcPointers },
+      discord: { config: config.channels.discord, pointers: dcPointers, capability: registry.get("discord")! },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };
@@ -260,7 +264,7 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "email",
-      email: { config: config.channels.email, pointers: emPointers },
+      email: { config: config.channels.email, pointers: emPointers, capability: registry.get("email")! },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };
@@ -272,7 +276,7 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "whatsapp",
-      whatsapp: { diag: waDiag, config: config.channels.whatsapp, pointers: waPointers },
+      whatsapp: { diag: waDiag, config: config.channels.whatsapp, pointers: waPointers, capability: registry.get("whatsapp")! },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };

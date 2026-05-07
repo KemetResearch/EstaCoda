@@ -11,6 +11,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
+  AdapterCapability,
   ChannelAdapter,
   ChannelAttachment,
   ChannelAttachmentKind,
@@ -20,6 +21,8 @@ import type {
   ChannelTextOptions,
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { WhatsAppChannelConfig } from "../config/runtime-config.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel } from "./activity-labels.js";
 
 export type WhatsAppAdapterOptions = {
@@ -51,6 +54,7 @@ export type WhatsAppAdapterOptions = {
   /** Enable experimental live WhatsApp adapter */
   experimental?: boolean;
   now?: () => Date;
+  missing?: string[];
 };
 
 type ConnectionStatus =
@@ -76,10 +80,20 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private socket?: WASocket;
   private handler?: (message: ChannelMessage) => Promise<void>;
   private options: WhatsAppAdapterOptions;
+  private missing: string[] | undefined;
   private seenMessageIds = new Set<string>();
 
   constructor(options: WhatsAppAdapterOptions = {}) {
     this.options = options;
+    this.missing = options.missing;
+  }
+
+  getCapabilities(): AdapterCapability {
+    const config: WhatsAppChannelConfig = {
+      enabled: true,
+      ...this.options,
+    };
+    return buildAdapterCapability({ kind: "whatsapp", config, missing: this.missing });
   }
 
   /**

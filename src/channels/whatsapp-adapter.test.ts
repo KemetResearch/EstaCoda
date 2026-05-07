@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { WhatsAppAdapter } from "./whatsapp-adapter.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
+import { AdapterRegistry } from "./adapter-registry.js";
 import type { ChannelMessage } from "../contracts/channel.js";
 import type { WASocket, BaileysEventMap } from "@whiskeysockets/baileys";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 describe("WhatsAppAdapter", () => {
   let tmpDir: string;
@@ -50,6 +53,49 @@ describe("WhatsAppAdapter", () => {
     await expect(adapter.start(async () => {})).rejects.toThrow(
       "WhatsApp live adapter is experimental. Set experimental: true in config to enable."
     );
+  });
+
+  it("getCapabilities returns static whatsapp traits", () => {
+    const { adapter } = createAdapter();
+    const cap = adapter.getCapabilities!();
+    expect(cap.kind).toBe("whatsapp");
+    expect(cap.enabled).toBe(true);
+    expect(cap.experimental).toBe(true);
+    expect(cap.inboundMode).toBe("websocket");
+    expect(cap.supportsAttachments).toBe(false);
+    expect(cap.implementationStatus).toBe("present_not_live_proven");
+  });
+
+  it("getCapabilities reflects missing config", () => {
+    const { adapter } = createAdapter({ missing: ["authDir"] });
+    const cap = adapter.getCapabilities!();
+    expect(cap.enabled).toBe(true);
+    expect(cap.configured).toBe(false);
+    expect(cap.missingConfig).toEqual(["authDir"]);
+  });
+
+  it("getCapabilities delegates to shared builder", () => {
+    const { adapter } = createAdapter({ missing: ["authDir"] });
+    const cap = adapter.getCapabilities!();
+    const expected = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, authDir: join(tmpDir, "auth"), experimental: true },
+      missing: ["authDir"],
+    });
+    expect(cap).toEqual(expected);
+  });
+
+  it("getCapabilities matches registry output for same normalized config", () => {
+    const channels = {
+      telegram: { enabled: false, ready: false },
+      discord: { enabled: false, ready: false },
+      email: { enabled: false, ready: false },
+      whatsapp: { enabled: true, ready: false, experimental: true, authDir: join(tmpDir, "auth"), missing: ["authDir"] },
+    } as unknown as LoadedRuntimeConfig["channels"];
+
+    const { adapter } = createAdapter({ missing: ["authDir"] });
+    const registry = new AdapterRegistry(channels);
+    expect(adapter.getCapabilities!()).toEqual(registry.get("whatsapp"));
   });
 
   it("starts and stops cleanly", async () => {

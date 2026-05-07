@@ -5,6 +5,7 @@ import { Client, GatewayIntentBits, Events } from "discord.js";
 import type { TextBasedChannel, Message } from "discord.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
+  AdapterCapability,
   ChannelAdapter,
   ChannelAttachment,
   ChannelAttachmentKind,
@@ -13,6 +14,8 @@ import type {
   ChannelTextOptions,
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { DiscordChannelConfig } from "../config/runtime-config.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel } from "./activity-labels.js";
 
 export type DiscordAdapterOptions = {
@@ -25,6 +28,8 @@ export type DiscordAdapterOptions = {
   maxTextLength?: number;
   now?: () => Date;
   clientFactory?: (options: { intents: number[] }) => Client;
+  enabled?: boolean;
+  missing?: string[];
 };
 
 export class DiscordAdapter implements ChannelAdapter {
@@ -34,9 +39,23 @@ export class DiscordAdapter implements ChannelAdapter {
   private client?: Client;
   private handler?: (message: ChannelMessage) => Promise<void>;
   private options: DiscordAdapterOptions;
+  private config: DiscordChannelConfig;
+  private missing: string[] | undefined;
 
   constructor(options: DiscordAdapterOptions) {
     this.options = options;
+    this.missing = options.missing;
+    this.config = {
+      enabled: options.enabled ?? true,
+      allowedUsers: options.allowedUsers,
+      allowedGuilds: options.allowedGuilds,
+      allowedChannels: options.allowedChannels,
+      freeResponseChannels: options.freeResponseChannels,
+    };
+  }
+
+  getCapabilities(): AdapterCapability {
+    return buildAdapterCapability({ kind: "discord", config: this.config, missing: this.missing });
   }
 
   async start(handler: (message: ChannelMessage) => Promise<void>): Promise<void> {

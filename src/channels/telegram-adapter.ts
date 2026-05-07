@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
+  AdapterCapability,
   ChannelAdapter,
   ChannelAttachment,
   ChannelAttachmentStatus,
@@ -10,6 +11,8 @@ import type {
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { TelegramChannelConfig } from "../config/runtime-config.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
 
@@ -35,6 +38,8 @@ export type TelegramAdapterOptions = {
   activityLabelsLocale?: ActivityLabelLocale;
   fetch?: TelegramFetch;
   now?: () => Date;
+  enabled?: boolean;
+  missing?: string[];
 };
 
 export type TelegramCommand = {
@@ -141,6 +146,8 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly #activityLabelsLocale: ActivityLabelLocale;
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
+  readonly #config: TelegramChannelConfig;
+  readonly #missing: string[] | undefined;
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #offset = 0;
   #running = false;
@@ -193,6 +200,17 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#activityLabelsLocale = options.activityLabelsLocale ?? "en";
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
+    this.#missing = options.missing;
+    this.#config = {
+      enabled: options.enabled ?? true,
+      defaultChatId: options.defaultChatId,
+      pollTimeoutSeconds: options.pollTimeoutSeconds,
+      maxAttachmentBytes: options.maxAttachmentBytes,
+    };
+  }
+
+  getCapabilities(): AdapterCapability {
+    return buildAdapterCapability({ kind: "telegram", config: this.#config, missing: this.#missing });
   }
 
   async start(handler: (message: ChannelMessage) => Promise<void>): Promise<void> {

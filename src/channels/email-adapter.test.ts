@@ -3,7 +3,10 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EmailAdapter } from "./email-adapter.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
+import { AdapterRegistry } from "./adapter-registry.js";
 import type { ChannelMessage } from "../contracts/channel.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 describe("EmailAdapter", () => {
   let tmpDir: string;
@@ -48,6 +51,49 @@ describe("EmailAdapter", () => {
     expect(adapter.running).toBe(true);
     await adapter.stop();
     expect(adapter.running).toBe(false);
+  });
+
+  it("getCapabilities returns static email traits", () => {
+    const adapter = createAdapter({ enabled: true });
+    const cap = adapter.getCapabilities!();
+    expect(cap.kind).toBe("email");
+    expect(cap.enabled).toBe(true);
+    expect(cap.inboundMode).toBe("polling");
+    expect(cap.supportsThreads).toBe(true);
+    expect(cap.supportsAttachments).toBe(false);
+    expect(cap.implementationStatus).toBe("present_not_live_proven");
+  });
+
+  it("getCapabilities reflects missing config", () => {
+    const adapter = createAdapter({ enabled: true, missing: ["EMAIL_PASSWORD"] });
+    const cap = adapter.getCapabilities!();
+    expect(cap.enabled).toBe(true);
+    expect(cap.configured).toBe(false);
+    expect(cap.missingConfig).toEqual(["EMAIL_PASSWORD"]);
+  });
+
+  it("getCapabilities delegates to shared builder", () => {
+    const adapter = createAdapter({ enabled: false, missing: ["EMAIL_PASSWORD"] });
+    const cap = adapter.getCapabilities!();
+    const expected = buildAdapterCapability({
+      kind: "email",
+      config: { enabled: false },
+      missing: ["EMAIL_PASSWORD"],
+    });
+    expect(cap).toEqual(expected);
+  });
+
+  it("getCapabilities matches registry output for same normalized config", () => {
+    const channels = {
+      telegram: { enabled: false, ready: false },
+      discord: { enabled: false, ready: false },
+      email: { enabled: true, ready: false, imapHost: "imap.test.com", missing: ["EMAIL_PASSWORD"] },
+      whatsapp: { enabled: false, ready: false, experimental: false },
+    } as unknown as LoadedRuntimeConfig["channels"];
+
+    const adapter = createAdapter({ enabled: true, missing: ["EMAIL_PASSWORD"] });
+    const registry = new AdapterRegistry(channels);
+    expect(adapter.getCapabilities!()).toEqual(registry.get("email"));
   });
 
   it("polls and receives messages from mock worker", async () => {

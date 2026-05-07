@@ -9,6 +9,7 @@ import type {
   ViewModel,
   WarningErrorViewModel,
 } from "../contracts/view-model.js";
+import type { AdapterCapability } from "../contracts/channel.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
@@ -18,6 +19,7 @@ import {
   buildKeyValueBlockViewModel,
   buildListViewModel,
   buildPlainFallbackViewModel,
+  buildTableViewModel,
   buildWarningErrorViewModel,
   kv,
   listItem,
@@ -409,6 +411,7 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
 
 export type ChannelsListData = {
   readonly channels: LoadedRuntimeConfig["channels"];
+  readonly capabilities: readonly AdapterCapability[];
 };
 
 export function buildChannelsListViewModel(data: ChannelsListData): CommandResultViewModel {
@@ -424,6 +427,7 @@ export function buildChannelsListViewModel(data: ChannelsListData): CommandResul
           compactChannelItem("whatsapp", data.channels.whatsapp),
         ],
       }),
+      buildCapabilitiesTable(data.capabilities),
     ],
   });
 }
@@ -442,25 +446,29 @@ export type ChannelsStatusData = {
   readonly telegram?: {
     readonly diag: TelegramGatewayDiagnostics;
     readonly pointers: GatewayStatusData["surfacePointers"];
+    readonly capability: AdapterCapability;
   };
   readonly discord?: {
     readonly config: LoadedRuntimeConfig["channels"]["discord"];
     readonly pointers: GatewayStatusData["surfacePointers"];
+    readonly capability: AdapterCapability;
   };
   readonly email?: {
     readonly config: LoadedRuntimeConfig["channels"]["email"];
     readonly pointers: GatewayStatusData["surfacePointers"];
+    readonly capability: AdapterCapability;
   };
   readonly whatsapp?: {
     readonly diag: WhatsAppGatewayDiagnostics;
     readonly config: LoadedRuntimeConfig["channels"]["whatsapp"];
     readonly pointers: GatewayStatusData["surfacePointers"];
+    readonly capability: AdapterCapability;
   };
 };
 
 export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandResultViewModel | PlainFallbackViewModel {
   if (data.channel === "telegram" && data.telegram !== undefined) {
-    const { diag, pointers } = data.telegram;
+    const { diag, pointers, capability } = data.telegram;
     const entries: KeyValueEntry[] = [
       kv("Enabled", diag.enabled ? "yes" : "no"),
       kv("Ready", diag.ready ? "yes" : "no"),
@@ -483,13 +491,14 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
       title: "Telegram channel status",
       blocks: [
         buildKeyValueBlockViewModel({ entries }),
+        buildCapabilitiesBlock(capability),
         buildSurfacePointersBlock(pointers),
       ],
     });
   }
 
   if (data.channel === "discord" && data.discord !== undefined) {
-    const { config, pointers } = data.discord;
+    const { config, pointers, capability } = data.discord;
     const tokenPresent = config.botTokenEnv !== undefined && process.env[config.botTokenEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -506,13 +515,14 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Allowed channels", (config.allowedChannels ?? []).join(", ") || "none"),
           ],
         }),
+        buildCapabilitiesBlock(capability),
         buildSurfacePointersBlock(pointers),
       ],
     });
   }
 
   if (data.channel === "email" && data.email !== undefined) {
-    const { config, pointers } = data.email;
+    const { config, pointers, capability } = data.email;
     const passwordPresent = config.passwordEnv !== undefined && process.env[config.passwordEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -532,13 +542,14 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Allow all users", config.allowAllUsers ? "yes" : "no"),
           ],
         }),
+        buildCapabilitiesBlock(capability),
         buildSurfacePointersBlock(pointers),
       ],
     });
   }
 
   if (data.channel === "whatsapp" && data.whatsapp !== undefined) {
-    const { diag, config, pointers } = data.whatsapp;
+    const { diag, config, pointers, capability } = data.whatsapp;
     return buildCommandResultViewModel({
       ok: true,
       title: "WhatsApp channel status",
@@ -556,6 +567,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Pairing mode", config.pairingMode ?? "qr"),
           ],
         }),
+        buildCapabilitiesBlock(capability),
         buildSurfacePointersBlock(pointers),
       ],
     });
@@ -563,5 +575,54 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
 
   return buildPlainFallbackViewModel({
     lines: [`Unknown channel: ${data.channel}. Supported: telegram, discord, email, whatsapp.`],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Capability Helpers
+// ─────────────────────────────────────────────────────────────
+
+function buildCapabilitiesBlock(capability: AdapterCapability): ViewModel {
+  const entries: KeyValueEntry[] = [
+    kv("Enabled", capability.enabled ? "yes" : "no"),
+    kv("Configured", capability.configured ? "yes" : "no"),
+    kv("Missing config", capability.missingConfig?.join(", ") ?? "none"),
+    kv("Inbound mode", capability.inboundMode),
+    kv("Outbound mode", capability.outboundMode),
+    kv("Supports attachments", capability.supportsAttachments ? "yes" : "no"),
+    kv("Supports threads", capability.supportsThreads ? "yes" : "no"),
+    kv("Supports approvals", capability.supportsApprovals ? "yes" : "no"),
+    kv("Supports progress streaming", capability.supportsProgressStreaming ? "yes" : "no"),
+    kv("Experimental", capability.experimental ? "yes" : "no"),
+    kv("Implementation status", capability.implementationStatus),
+  ];
+  return buildKeyValueBlockViewModel({ title: "Capabilities", entries });
+}
+
+function buildCapabilitiesTable(capabilities: readonly AdapterCapability[]): ViewModel {
+  return buildTableViewModel({
+    title: "Capabilities",
+    columns: [
+      { key: "kind", header: "Channel" },
+      { key: "enabled", header: "Enabled" },
+      { key: "configured", header: "Configured" },
+      { key: "inboundMode", header: "Inbound" },
+      { key: "outboundMode", header: "Outbound" },
+      { key: "supportsAttachments", header: "Attachments" },
+      { key: "supportsThreads", header: "Threads" },
+      { key: "experimental", header: "Experimental" },
+      { key: "implementationStatus", header: "Status" },
+    ],
+    rows: capabilities.map((c) => ({
+      kind: c.kind,
+      enabled: c.enabled ? "yes" : "no",
+      configured: c.configured ? "yes" : "no",
+      inboundMode: c.inboundMode,
+      outboundMode: c.outboundMode,
+      supportsAttachments: c.supportsAttachments ? "yes" : "no",
+      supportsThreads: c.supportsThreads ? "yes" : "no",
+      experimental: c.experimental ? "yes" : "no",
+      implementationStatus: c.implementationStatus,
+    })),
   });
 }

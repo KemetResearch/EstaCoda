@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
+  AdapterCapability,
   ChannelAdapter,
   ChannelAttachment,
   ChannelMessage,
@@ -10,6 +11,8 @@ import type {
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { EmailChannelConfig } from "../config/runtime-config.js";
+import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +35,8 @@ export type EmailAdapterOptions = {
   now?: () => Date;
   skipAttachments?: boolean;
   markAllSeenOnConnect?: boolean;
+  enabled?: boolean;
+  missing?: string[];
 };
 
 type EmailWorkerPollResult = {
@@ -95,6 +100,8 @@ export class EmailAdapter implements ChannelAdapter {
   readonly #now: () => Date;
   readonly #skipAttachments: boolean;
   readonly #markAllSeenOnConnect: boolean;
+  readonly #config: EmailChannelConfig;
+  readonly #missing: string[] | undefined;
 
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #running = false;
@@ -137,6 +144,24 @@ export class EmailAdapter implements ChannelAdapter {
     this.#now = options.now ?? (() => new Date());
     this.#skipAttachments = options.skipAttachments ?? false;
     this.#markAllSeenOnConnect = options.markAllSeenOnConnect ?? false;
+    this.#missing = options.missing;
+    this.#config = {
+      enabled: options.enabled ?? true,
+      imapHost: options.imapHost,
+      imapPort: options.imapPort,
+      smtpHost: options.smtpHost,
+      smtpPort: options.smtpPort,
+      username: options.username,
+      ownAddress: options.ownAddress,
+      homeAddress: options.homeAddress,
+      allowedSenders: options.allowedSenders,
+      allowAllUsers: options.allowAllUsers,
+      pollIntervalSeconds: options.pollIntervalSeconds,
+    };
+  }
+
+  getCapabilities(): AdapterCapability {
+    return buildAdapterCapability({ kind: "email", config: this.#config, missing: this.#missing });
   }
 
   async start(handler: (message: ChannelMessage) => Promise<void>): Promise<void> {

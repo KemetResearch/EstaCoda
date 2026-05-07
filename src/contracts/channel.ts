@@ -111,6 +111,45 @@ export type ChannelDelivery = {
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<void>;
 };
 
+export type InboundMode = "polling" | "websocket" | "webhook" | "none";
+
+/**
+ * Static outbound delivery capability.
+ * "push" = adapter can actively send outbound messages/replies through platform API
+ * "pull" = outbound delivery is fetched/polled by external consumer
+ * "none" = outbound delivery unsupported
+ */
+export type OutboundMode = "push" | "pull" | "none";
+
+export type ImplementationStatus = "live_proven" | "present_not_live_proven" | "stub" | "unsupported";
+
+export type AdapterCapability = {
+  /** Static kind — never changes at runtime */
+  kind: ChannelKind;
+  /** Whether the user has enabled this channel in config */
+  enabled: boolean;
+  /** Whether required credentials are present */
+  configured: boolean;
+  /** Missing config keys, if any */
+  missingConfig?: string[];
+  /** How inbound messages arrive */
+  inboundMode: InboundMode;
+  /** How outbound messages are sent — see OutboundMode comment for semantics */
+  outboundMode: OutboundMode;
+  /** Can receive and send files/images/audio/video */
+  supportsAttachments: boolean;
+  /** Supports thread/topic/reply-chain semantics with explicit threadId preservation */
+  supportsThreads: boolean;
+  /** Supports interactive inline approve/reject */
+  supportsApprovals: boolean;
+  /** Can stream progress updates mid-turn */
+  supportsProgressStreaming: boolean;
+  /** Gated behind an experimental flag */
+  experimental: boolean;
+  /** Maturity level */
+  implementationStatus: ImplementationStatus;
+};
+
 export type ChannelAdapter = {
   id?: string;
   kind: ChannelKind;
@@ -120,6 +159,8 @@ export type ChannelAdapter = {
   stop?(): Promise<void>;
   receive?(event: unknown): Promise<ChannelEvent | ChannelMessage>;
   send?(reply: ChannelReply): Promise<void>;
+  /** Static capability metadata. Optional so mock adapters need not implement. */
+  getCapabilities?(): AdapterCapability;
 };
 
 export type ChannelAuthPolicy =
