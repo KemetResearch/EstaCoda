@@ -382,7 +382,7 @@ describe("runGatewaySupervisor", () => {
     expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
   });
 
-  it("pollOnce error is caught and warned, supervisor continues", async () => {
+  it("pollOnce error is caught by wrapper, supervisor continues", async () => {
     const configPath = join(tmpDir, ".estacoda", "config.json");
     await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
     await writeFile(configPath, JSON.stringify({
@@ -397,11 +397,6 @@ describe("runGatewaySupervisor", () => {
     process.env.TEST_BOT_TOKEN = "fake";
 
     const tick = fakeTickCron();
-    const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "));
-    };
 
     const badAdapter = {
       ...fakeAdapter("telegram"),
@@ -422,11 +417,58 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    console.warn = originalWarn;
     delete process.env.TEST_BOT_TOKEN;
 
     expect(result.ok).toBe(true);
     expect(result.polls).toBe(1);
-    expect(warnings.some((w) => w.includes("poll explosion"))).toBe(true);
+    expect(result.processed).toBe(0);
+  });
+
+  it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {
+    const configPath = join(tmpDir, ".estacoda", "config.json");
+    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+        },
+      },
+    }));
+    process.env.TEST_BOT_TOKEN = "fake";
+
+    let pollOnceCalls = 0;
+    const adapter = {
+      ...fakeAdapter("telegram"),
+      pollOnce: async () => {
+        pollOnceCalls += 1;
+        return 3;
+      },
+    };
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => ({
+          start: async () => {
+            for (const a of opts?.adapters ?? []) {
+              await a.start?.(async () => {});
+            }
+          },
+          stop: async () => {},
+        }) as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createTelegramAdapter: () => adapter as any,
+      },
+    });
+
+    delete process.env.TEST_BOT_TOKEN;
+
+    expect(result.ok).toBe(true);
+    expect(result.processed).toBe(3);
+    expect(pollOnceCalls).toBe(1);
   });
 });

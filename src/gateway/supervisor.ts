@@ -39,6 +39,8 @@ import {
 } from "./identity-lock.js";
 import { getPackageVersion } from "../cli/version-command.js";
 import type { GatewayRunOptions, GatewayRunResult } from "../channels/gateway-runner.js";
+import { AdapterResilienceSupervisor } from "./adapter-resilience.js";
+import { writeAdapterRuntimeState, RUNTIME_STATE_HEARTBEAT_MS } from "./adapter-runtime-state.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 
@@ -411,7 +413,41 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }
     }
 
-    // 9. Build ChannelGateway
+    // 9. Call setCommands on raw Telegram adapters before wrapping
+    for (const adapter of adapters) {
+      if (adapter.kind === "telegram") {
+        try {
+          await (adapter as TelegramAdapter).setCommands(telegramGatewayCommands());
+        } catch (err) {
+          logWarning(`Telegram setCommands failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    // 10. Wrap adapters in resilience supervisors
+    let lastRuntimeStateWrite = Date.now();
+    const wrappers = adapters.map((adapter) => {
+      return new AdapterResilienceSupervisor(adapter, undefined, () => {
+        writeAdapterRuntimeState(homeDir, {
+          supervisorPid: process.pid,
+          supervisorStartedAt: startedAt,
+          updatedAt: new Date().toISOString(),
+          adapters: wrappers.map((w) => w.getState()),
+        }).catch(() => {});
+      });
+    });
+
+    async function writeRuntimeState(): Promise<void> {
+      lastRuntimeStateWrite = Date.now();
+      await writeAdapterRuntimeState(homeDir, {
+        supervisorPid: process.pid,
+        supervisorStartedAt: startedAt,
+        updatedAt: new Date().toISOString(),
+        adapters: wrappers.map((w) => w.getState()),
+      });
+    }
+
+    // 11. Build ChannelGateway with wrappers
     const telegram = config.channels.telegram;
     const authPolicy = telegram.enabled === true
       ? (() => {
@@ -444,7 +480,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
-          adapters,
+          adapters: wrappers,
           deliveryRouter: router,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
@@ -504,7 +540,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
         })
       : new ChannelGateway({
-          adapters,
+          adapters: wrappers,
           deliveryRouter: router,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
@@ -566,20 +602,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     state.channelGateway = gateway;
 
-    // 10. Start adapters
+    // 12. Start adapters through ChannelGateway (wrappers swallow errors)
     await gateway.start();
-
-    for (const adapter of adapters) {
-      if (adapter.kind === "telegram") {
-        await (adapter as TelegramAdapter).setCommands(telegramGatewayCommands());
-      }
-    }
 
     if (configured.length > 0) {
       logInfo(`Started ${configured.length} adapter(s): ${configured.map((c) => c.kind).join(", ")}`);
     }
 
-    // 11. Main loop
+    // 13. Main loop
     let polls = 0;
     let processed = 0;
     const pollIntervalMs = 1000;
@@ -658,15 +688,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         }),
       });
 
-      for (const adapter of adapters) {
-        if (adapter.kind === "telegram" || adapter.kind === "email") {
-          try {
-            const count = await (adapter as TelegramAdapter | EmailAdapter).pollOnce();
-            processed += count;
-          } catch (err) {
-            logWarning(`Adapter ${adapter.kind} pollOnce() error: ${err instanceof Error ? err.message : String(err)}`);
-          }
+      for (const wrapper of wrappers) {
+        await wrapper.tick();
+      }
+
+      for (const wrapper of wrappers) {
+        try {
+          const count = await wrapper.poll();
+          processed += count;
+        } catch (err) {
+          logWarning(`Adapter ${wrapper.kind} poll error: ${err instanceof Error ? err.message : String(err)}`);
         }
+      }
+
+      const now = Date.now();
+      if (now - lastRuntimeStateWrite >= RUNTIME_STATE_HEARTBEAT_MS) {
+        await writeRuntimeState();
       }
 
       polls += 1;
@@ -681,12 +718,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }
     } while (state.running);
 
-    // 12. Shutdown
+    // Write final runtime state before shutdown
+    await writeRuntimeState();
+
+    // 14. Shutdown
     await cleanupSupervisorStartupResources(state);
 
     return {
       ok: true,
-      output: `Gateway stopped`,
+      output: `Gateway stopped\nMessages processed: ${processed}`,
       polls,
       processed,
     };

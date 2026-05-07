@@ -14,6 +14,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import type { DeliveryErrorRecord } from "../channels/delivery-router.js";
+import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
 import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
@@ -65,6 +66,7 @@ export type GatewayStatusData = {
   readonly missingConfig: readonly { readonly channel: string; readonly item: string }[];
   readonly supervisor?: SupervisorSnapshot;
   readonly identityLocks: readonly IdentityLockStatus[];
+  readonly runtimeState?: PersistedRuntimeState;
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -74,8 +76,10 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())[0];
 
   const identityLocksBlock = buildIdentityLocksBlock(data.identityLocks);
+  const adapterRuntimeBlock = buildAdapterRuntimeBlock(data.runtimeState);
   const blocks: ViewModel[] = [
     buildSupervisorBlock(data.supervisor),
+    ...(adapterRuntimeBlock ? [adapterRuntimeBlock] : []),
     ...(identityLocksBlock ? [identityLocksBlock] : []),
     buildKeyValueBlockViewModel({
       title: "Process",
@@ -163,6 +167,28 @@ function buildIdentityLocksBlock(locks: readonly IdentityLockStatus[]): ViewMode
   );
   return buildKeyValueBlockViewModel({
     title: "Identity Locks",
+    entries,
+  });
+}
+
+function buildAdapterRuntimeBlock(runtimeState: PersistedRuntimeState | undefined): ViewModel | undefined {
+  if (runtimeState === undefined) return undefined;
+  if (runtimeState.adapters.length === 0) return undefined;
+
+  const entries: KeyValueEntry[] = runtimeState.adapters.map((a) => {
+    const stateLabel = a.state;
+    const retryLabel = a.retry !== undefined
+      ? ` (retry ${a.retry.attempt}/${a.retry.maxAttempts} at ${a.retry.nextRetryAt})`
+      : "";
+    const errorLabel = a.lastError !== undefined
+      ? ` — ${a.lastError.message} (x${a.lastError.count})`
+      : "";
+    const pollsLabel = `polls=${a.pollsTotal} processed=${a.pollMessagesProcessed} failed=${a.pollsFailed}`;
+    return kv(a.kind, `${stateLabel}${retryLabel}${errorLabel} | ${pollsLabel}`);
+  });
+
+  return buildKeyValueBlockViewModel({
+    title: "Adapter Runtime",
     entries,
   });
 }
@@ -275,6 +301,8 @@ export type GatewayDiagnoseData = {
     readonly duplicateHashes: readonly string[];
     readonly missingLocks: readonly string[];
   };
+  readonly runtimeState?: PersistedRuntimeState;
+  readonly runtimeStateNote?: "stale" | "pid-mismatch" | "supervisor-not-live";
 };
 
 export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): CommandResultViewModel {
@@ -305,6 +333,20 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     svEntries.push(kv("Lock healthy", "yes"));
   }
   blocks.push(buildKeyValueBlockViewModel({ title: "Supervisor", entries: svEntries }));
+
+  // Runtime state notes
+  if (data.runtimeStateNote !== undefined) {
+    const noteMessages: Record<string, string> = {
+      stale: "runtime state is stale (supervisor may have crashed)",
+      "pid-mismatch": "runtime state PID does not match current supervisor PID",
+      "supervisor-not-live": "runtime state exists but supervisor is not live",
+    };
+    warnings.push(buildWarningErrorViewModel({
+      severity: "warn",
+      title: "Adapter Runtime",
+      message: noteMessages[data.runtimeStateNote] ?? `runtime state note: ${data.runtimeStateNote}`,
+    }));
+  }
 
   // Telegram
   const tgEntries: KeyValueEntry[] = [

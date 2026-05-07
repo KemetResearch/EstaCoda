@@ -1,0 +1,365 @@
+import { describe, it, expect } from "vitest";
+import { AdapterResilienceSupervisor, DEFAULT_ADAPTER_BACKOFF, computeBackoffDelay } from "./adapter-resilience.js";
+import type { ChannelAdapter } from "../contracts/channel.js";
+
+function fakeAdapter(overrides?: Partial<ChannelAdapter> & { pollThrows?: boolean; startThrows?: boolean }): ChannelAdapter {
+  return {
+    id: "test",
+    kind: "telegram",
+    delivery: {
+      sendText: async () => {},
+    },
+    start: overrides?.startThrows
+      ? async () => { throw new Error("start fail"); }
+      : async () => {},
+    stop: async () => {},
+    pollOnce: overrides?.pollThrows
+      ? async () => { throw new Error("poll fail"); }
+      : async () => 0,
+    ...overrides,
+  };
+}
+
+function fakeRandomSequence(values: number[]) {
+  let i = 0;
+  return () => {
+    const v = values[i % values.length];
+    i += 1;
+    return v;
+  };
+}
+
+describe("AdapterResilienceSupervisor", () => {
+  it("start succeeds -> state healthy, pendingOperation cleared", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter());
+    await wrapper.start(async () => {});
+    const state = wrapper.getState();
+    expect(state.state).toBe("healthy");
+    expect(state.pendingOperation).toBeUndefined();
+    expect(state.lastError).toBeUndefined();
+  });
+
+  it("start fails once -> state degraded, pendingOperation = start", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }));
+    await wrapper.start(async () => {});
+    const state = wrapper.getState();
+    expect(state.state).toBe("degraded");
+    expect(state.pendingOperation).toBe("start");
+    expect(state.lastError?.message).toBe("start fail");
+    expect(state.lastError?.count).toBe(1);
+  });
+
+  it("start fails twice -> state retry_scheduled with backoff", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }));
+    await wrapper.start(async () => {});
+    await wrapper.tick();
+    const state = wrapper.getState();
+    expect(state.state).toBe("retry_scheduled");
+    expect(state.pendingOperation).toBe("start");
+    expect(state.retry).toBeDefined();
+    expect(state.retry!.attempt).toBe(2);
+  });
+
+  it("start fails max times -> state failed", async () => {
+    const wrapper = new AdapterResilienceSupervisor(
+      fakeAdapter({ startThrows: true }),
+      { maxAttempts: 2 }
+    );
+    await wrapper.start(async () => {});
+    await wrapper.tick(); // attempt 2 -> fails -> retry_scheduled
+    // Force past backoff
+    const s1 = wrapper.getState();
+    if (s1.retry) {
+      const next = new Date(s1.retry.nextRetryAt);
+      const original = Date.now;
+      globalThis.Date.now = () => next.getTime() + 1;
+      await wrapper.tick();
+      globalThis.Date.now = original;
+    }
+    const state = wrapper.getState();
+    expect(state.state).toBe("failed");
+    expect(state.retry).toBeUndefined();
+  });
+
+  it("start fails then tick retries start and succeeds -> state healthy", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      start: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("start fail");
+        }
+      },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    await wrapper.start(async () => {});
+    expect(wrapper.getState().state).toBe("degraded");
+    await wrapper.tick();
+    expect(wrapper.getState().state).toBe("healthy");
+    expect(wrapper.getState().pendingOperation).toBeUndefined();
+  });
+
+  it("websocket adapter start fails, tick retries, succeeds -> state healthy", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      kind: "discord",
+      pollOnce: undefined,
+      start: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("ws fail");
+        }
+      },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    await wrapper.start(async () => {});
+    expect(wrapper.getState().state).toBe("degraded");
+    await wrapper.tick();
+    expect(wrapper.getState().state).toBe("healthy");
+  });
+
+  it("websocket adapter start fails repeatedly -> reaches failed", async () => {
+    const adapter = fakeAdapter({
+      kind: "discord",
+      pollOnce: undefined,
+      startThrows: true,
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter, { maxAttempts: 2 });
+    await wrapper.start(async () => {});
+    await wrapper.tick(); // degraded -> retry
+    const s = wrapper.getState();
+    if (s.retry) {
+      const next = new Date(s.retry.nextRetryAt);
+      const original = Date.now;
+      globalThis.Date.now = () => next.getTime() + 1;
+      await wrapper.tick();
+      globalThis.Date.now = original;
+    }
+    expect(wrapper.getState().state).toBe("failed");
+  });
+
+  it("poll succeeds -> increments pollsTotal and pollMessagesProcessed", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: async () => 3 }));
+    await wrapper.start(async () => {});
+    const count = await wrapper.poll();
+    const state = wrapper.getState();
+    expect(count).toBe(3);
+    expect(state.pollsTotal).toBe(1);
+    expect(state.pollMessagesProcessed).toBe(3);
+  });
+
+  it("poll fails once -> state degraded, pendingOperation = poll", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollThrows: true }));
+    await wrapper.start(async () => {});
+    const count = await wrapper.poll();
+    const state = wrapper.getState();
+    expect(count).toBe(0);
+    expect(state.state).toBe("degraded");
+    expect(state.pendingOperation).toBe("poll");
+    expect(state.pollsFailed).toBe(1);
+  });
+
+  it("poll fails twice -> state retry_scheduled with backoff", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollThrows: true }));
+    await wrapper.start(async () => {});
+    await wrapper.poll(); // degraded
+    await wrapper.poll(); // retry_scheduled
+    const state = wrapper.getState();
+    expect(state.state).toBe("retry_scheduled");
+    expect(state.pendingOperation).toBe("poll");
+    expect(state.retry).toBeDefined();
+  });
+
+  it("poll retry via tick succeeds -> state healthy, resets retry", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      pollOnce: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("poll fail");
+        }
+        return 5;
+      },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    await wrapper.start(async () => {});
+    await wrapper.poll(); // degraded
+    // tick() for poll is NOT triggered by tick() because degraded + pendingOperation === "poll"
+    // is handled by poll() directly on the next loop iteration, not tick()
+    // Wait, the plan says:
+    // tick() handles: degraded + pendingOperation === "start" → attempt start()
+    // poll() handles: degraded + pendingOperation === "poll" → calls pollOnce directly
+    const count = await wrapper.poll();
+    expect(count).toBe(5);
+    expect(wrapper.getState().state).toBe("healthy");
+    expect(wrapper.getState().retry).toBeUndefined();
+  });
+
+  it("poll retry exhausts -> state failed", async () => {
+    const wrapper = new AdapterResilienceSupervisor(
+      fakeAdapter({ pollThrows: true }),
+      { maxAttempts: 2 }
+    );
+    await wrapper.start(async () => {});
+    await wrapper.poll(); // degraded
+    await wrapper.poll(); // retry_scheduled with attempt=2
+    // Force past backoff
+    const s = wrapper.getState();
+    if (s.retry) {
+      const next = new Date(s.retry.nextRetryAt);
+      const original = Date.now;
+      globalThis.Date.now = () => next.getTime() + 1;
+      await wrapper.tick(); // tick retries poll
+      globalThis.Date.now = original;
+    }
+    expect(wrapper.getState().state).toBe("failed");
+  });
+
+  it("stop -> state stopped, clears retry", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter());
+    await wrapper.start(async () => {});
+    await wrapper.stop();
+    const state = wrapper.getState();
+    expect(state.state).toBe("stopped");
+    expect(state.retry).toBeUndefined();
+    expect(state.pendingOperation).toBeUndefined();
+  });
+
+  it("backoff delay increases exponentially", () => {
+    const random = () => 0;
+    const options = {
+      baseDelayMs: 1000,
+      maxDelayMs: 60000,
+      maxAttempts: 5,
+      jitter: 0.2,
+      randomFn: random,
+    };
+    expect(computeBackoffDelay(1, options)).toBe(1000);
+    expect(computeBackoffDelay(2, options)).toBe(2000);
+    expect(computeBackoffDelay(3, options)).toBe(4000);
+    expect(computeBackoffDelay(4, options)).toBe(8000);
+  });
+
+  it("backoff delay capped at maxDelayMs", () => {
+    const random = () => 0;
+    const options = {
+      baseDelayMs: 1000,
+      maxDelayMs: 5000,
+      maxAttempts: 10,
+      jitter: 0.2,
+      randomFn: random,
+    };
+    expect(computeBackoffDelay(1, options)).toBe(1000);
+    expect(computeBackoffDelay(2, options)).toBe(2000);
+    expect(computeBackoffDelay(3, options)).toBe(4000);
+    expect(computeBackoffDelay(4, options)).toBe(5000);
+    expect(computeBackoffDelay(5, options)).toBe(5000);
+    expect(computeBackoffDelay(10, options)).toBe(5000);
+  });
+
+  it("jitter uses injected randomFn", () => {
+    const options = {
+      baseDelayMs: 1000,
+      maxDelayMs: 60000,
+      maxAttempts: 5,
+      jitter: 0.2,
+      randomFn: () => 0.5,
+    };
+    // base = 1000 * 2^(2-1) = 2000, jitter = 1 + 0.5*0.2 = 1.1, delay = 2200
+    expect(computeBackoffDelay(2, options)).toBe(2200);
+  });
+
+  it("one adapter failed does not affect another adapter's polling", async () => {
+    const bad = new AdapterResilienceSupervisor(fakeAdapter({ pollThrows: true }));
+    const good = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: async () => 3 }));
+    await bad.start(async () => {});
+    await good.start(async () => {});
+    await bad.poll();
+    const goodCount = await good.poll();
+    expect(goodCount).toBe(3);
+    expect(good.getState().state).toBe("healthy");
+  });
+
+  it("lastError count increments on consecutive same-operation failures", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }));
+    await wrapper.start(async () => {});
+    expect(wrapper.getState().lastError!.count).toBe(1);
+    await wrapper.tick();
+    expect(wrapper.getState().lastError!.count).toBe(2);
+  });
+
+  it("websocket adapter (no pollOnce) poll() returns 0 and does not throw", async () => {
+    const adapter = fakeAdapter({ kind: "discord", pollOnce: undefined });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    await wrapper.start(async () => {});
+    const count = await wrapper.poll();
+    expect(count).toBe(0);
+    expect(wrapper.getState().state).toBe("healthy");
+  });
+
+  it("start never throws, even when raw adapter start throws", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }));
+    await expect(wrapper.start(async () => {})).resolves.toBeUndefined();
+    expect(wrapper.getState().state).toBe("degraded");
+  });
+
+  it("wrapper proxies id, kind, delivery from raw adapter", () => {
+    const adapter = fakeAdapter({ id: "my-id", kind: "email" });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    expect(wrapper.id).toBe("my-id");
+    expect(wrapper.kind).toBe("email");
+    expect(wrapper.delivery).toBe(adapter.delivery);
+  });
+
+  it("wrapper preserves getCapabilities if raw adapter has it", () => {
+    const cap = () => ({
+      kind: "telegram" as const,
+      enabled: true,
+      configured: true,
+      inboundMode: "polling" as const,
+      outboundMode: "push" as const,
+      supportsAttachments: true,
+      supportsThreads: true,
+      supportsApprovals: true,
+      supportsProgressStreaming: true,
+      experimental: false,
+      implementationStatus: "live_proven" as const,
+    });
+    const adapter = fakeAdapter({ getCapabilities: cap });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    expect(wrapper.getCapabilities).toBe(cap);
+  });
+
+  it("pollOnce proxy exists when raw adapter has pollOnce", () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: async () => 5 }));
+    expect(wrapper.pollOnce).toBeDefined();
+    expect(typeof wrapper.pollOnce).toBe("function");
+  });
+
+  it("pollOnce proxy returns undefined when raw adapter has no pollOnce", () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: undefined }));
+    expect(wrapper.pollOnce).toBeUndefined();
+  });
+
+  it("pollOnce proxy calls wrapper poll path and updates state on failure", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollThrows: true }));
+    await wrapper.start(async () => {});
+    expect(wrapper.pollOnce).toBeDefined();
+    const count = await wrapper.pollOnce!();
+    expect(count).toBe(0);
+    const state = wrapper.getState();
+    expect(state.state).toBe("degraded");
+    expect(state.pendingOperation).toBe("poll");
+    expect(state.pollsFailed).toBe(1);
+  });
+
+  it("pollOnce proxy counts messages on success", async () => {
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: async () => 7 }));
+    await wrapper.start(async () => {});
+    const count = await wrapper.pollOnce!();
+    expect(count).toBe(7);
+    const state = wrapper.getState();
+    expect(state.pollsTotal).toBe(1);
+    expect(state.pollMessagesProcessed).toBe(7);
+  });
+});

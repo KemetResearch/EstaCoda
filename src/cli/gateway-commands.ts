@@ -38,6 +38,8 @@ import {
   deriveWhatsAppIdentityHash,
 } from "../channels/adapter-identity.js";
 import type { IdentityLockStatus } from "./gateway-view-models.js";
+import { readAdapterRuntimeState, isRuntimeStateFresh, isRuntimeStatePidMatch } from "../gateway/adapter-runtime-state.js";
+import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -105,6 +107,13 @@ export async function runGatewayStatus(
 
   const identityLocks = await buildIdentityLockStatuses(homeDir, config.channels);
 
+  const runtimeState = await readAdapterRuntimeState(homeDir);
+  const supervisorLive = pidContent !== undefined && !(await isStalePid(homeDir));
+  const runtimeStateValid = runtimeState !== undefined
+    && isRuntimeStateFresh(runtimeState)
+    && isRuntimeStatePidMatch(runtimeState, pidContent?.pid ?? -1)
+    && supervisorLive;
+
   const data: GatewayStatusData = {
     channels: config.channels,
     cronJobs: cronJobs.map((j) => ({ status: j.status, name: j.name, nextRunAt: j.nextRunAt })),
@@ -129,6 +138,7 @@ export async function runGatewayStatus(
             }
           : undefined,
     identityLocks,
+    runtimeState: runtimeStateValid ? runtimeState : undefined,
   };
 
   const viewModel = buildGatewayStatusViewModel(data);
@@ -156,6 +166,19 @@ export async function runGatewayDiagnose(
   const outputDirWritable = await isWritable(join(stateRoot, "cron", "output"));
   const lockDirWritable = await isWritable(join(stateRoot, "cron", "locks"));
 
+  const runtimeState = await readAdapterRuntimeState(homeDir);
+  const pidContent = await readGatewayPid(homeDir);
+  const supervisorLive = pidContent !== undefined && !(await isStalePid(homeDir));
+  const runtimeStateNote = runtimeState === undefined
+    ? undefined
+    : !isRuntimeStateFresh(runtimeState)
+      ? "stale"
+      : !isRuntimeStatePidMatch(runtimeState, pidContent?.pid ?? -1)
+        ? "pid-mismatch"
+        : !supervisorLive
+          ? "supervisor-not-live"
+          : undefined;
+
   const data: GatewayDiagnoseData = {
     telegram: tgDiag,
     discord: config.channels.discord,
@@ -171,6 +194,8 @@ export async function runGatewayDiagnose(
       lockHealthy: !(await isStaleLock(homeDir)),
     },
     identityLockHealth: await buildIdentityLockHealth(homeDir, config.channels),
+    runtimeState: runtimeState ?? undefined,
+    runtimeStateNote,
   };
 
   const viewModel = buildGatewayDiagnoseViewModel(data);

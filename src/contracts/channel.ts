@@ -161,6 +161,8 @@ export type ChannelAdapter = {
   send?(reply: ChannelReply): Promise<void>;
   /** Static capability metadata. Optional so mock adapters need not implement. */
   getCapabilities?(): AdapterCapability;
+  /** Poll for inbound messages. Present on polling adapters (Telegram, Email). */
+  pollOnce?(): Promise<number>;
 };
 
 export type ChannelAuthPolicy =

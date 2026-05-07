@@ -123,6 +123,9 @@ import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { runPythonWorker } from "../workers/python-worker.js";
 import { runEvalCases } from "../eval/eval-runner.js";
 import { defaultEvalFixtures } from "../eval/fixtures/index.js";
+import { readGatewayPid } from "../gateway/pid-file.js";
+import { readGatewayState } from "../gateway/supervisor-state.js";
+import { readGatewayLockContent } from "../gateway/gateway-lock.js";
 import { assessSecurityPolicy, capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "../contracts/security.js";
 
 
@@ -1628,8 +1631,15 @@ const gatewayMediaSetup = await runCliCommand({
   workspaceRoot: gatewayMediaWorkspace,
   homeDir: gatewayMediaHome
 });
-const gatewayStartOnce = await runCliCommand({
+const deprecatedGatewayStartHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-deprecated-home-"));
+const deprecatedGatewayStart = await runCliCommand({
   argv: ["gateway", "start", "--telegram", "--once"],
+  workspaceRoot: gatewayWorkspace,
+  homeDir: deprecatedGatewayStartHome,
+  telegramFetch: async () => fakeTelegramResponse({ message_id: 98 })
+});
+const gatewayStartOnce = await runCliCommand({
+  argv: ["gateway", "start", "--once"],
   workspaceRoot: gatewayWorkspace,
   homeDir: gatewayHome,
   telegramFetch: async (url, init) => {
@@ -1661,7 +1671,7 @@ const gatewayStartOnce = await runCliCommand({
 process.env.ESTACODA_GATEWAY_MEDIA_TELEGRAM_TOKEN = "gateway-media-token";
 const gatewayMediaRuntimeInputs: string[] = [];
 const gatewayMediaOnce = await runCliCommand({
-  argv: ["gateway", "start", "--telegram", "--once"],
+  argv: ["gateway", "start", "--once"],
   workspaceRoot: gatewayMediaWorkspace,
   homeDir: gatewayMediaHome,
   telegramFetch: async (url, init) => {
@@ -1714,7 +1724,7 @@ const gatewayMediaOnce = await runCliCommand({
 });
 delete process.env.ESTACODA_GATEWAY_MEDIA_TELEGRAM_TOKEN;
 const gatewayStopOnce = await runCliCommand({
-  argv: ["gateway", "start", "--telegram", "--once"],
+  argv: ["gateway", "start", "--once"],
   workspaceRoot: gatewayWorkspace,
   homeDir: gatewayHome,
   telegramFetch: async (url, init) => {
@@ -1749,7 +1759,7 @@ const pairingRequests: Array<{
   body: Record<string, unknown>;
 }> = [];
 const pairingGatewayOnce = await runCliCommand({
-  argv: ["gateway", "start", "--telegram", "--once"],
+  argv: ["gateway", "start", "--once"],
   workspaceRoot: pairingWorkspace,
   homeDir: pairingHome,
   telegramFetch: async (url, init) => {
@@ -5379,11 +5389,13 @@ assert(gatewayStatusLocked.output.includes("Telegram: configured, missing creden
 assert(gatewayStatusReady.exitCode === 0, "expected gateway status to pass with token");
 assert(gatewayStatusReady.output.includes("EstaCoda gateway status"), "expected gateway status header in ready state");
 assert(gatewayStatusReady.output.includes("Telegram:"), "expected gateway status shows telegram");
+assert(deprecatedGatewayStart.exitCode === 1, "expected deprecated gateway --telegram start to fail");
+assert(deprecatedGatewayStart.output.toLowerCase().includes("deprecated"), "expected deprecated gateway --telegram output to mention deprecated");
+assert((await readGatewayPid(deprecatedGatewayStartHome)) === undefined, "expected deprecated gateway start to avoid writing PID file");
+assert((await readGatewayState(deprecatedGatewayStartHome)) === undefined, "expected deprecated gateway start to avoid writing state file");
+assert((await readGatewayLockContent(deprecatedGatewayStartHome)) === undefined, "expected deprecated gateway start to avoid writing lock file");
 assert(gatewayStartOnce.exitCode === 0, "expected gateway start once to succeed");
-assert(gatewayStartOnce.output.includes("EstaCoda Telegram gateway"), "expected gateway start banner");
-assert(gatewayStartOnce.output.includes("Commands synced: yes"), "expected gateway command sync summary");
-assert(gatewayStartOnce.output.includes("Model route:"), "expected gateway model route in start output");
-assert(gatewayStartOnce.output.includes("Session DB:"), "expected gateway state paths in start output");
+assert(gatewayStartOnce.output.includes("Gateway stopped"), "expected gateway start once to stop cleanly");
 assert(gatewayStartOnce.output.includes("Messages processed: 1"), "expected gateway start once message count");
 assert(
   gatewayRequests.some((request) => request.url.endsWith("/setMyCommands")),
