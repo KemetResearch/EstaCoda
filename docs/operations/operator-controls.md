@@ -78,6 +78,20 @@ estacoda gateway diagnose     # Per-channel readiness check
 
 Returns exit code 1 if any warnings exist.
 
+### Gateway Stop and Restart
+
+```bash
+estacoda gateway stop           # Send SIGTERM and wait for shutdown
+estacoda gateway stop --force   # Force termination if graceful stop is not desired or fails
+
+estacoda gateway restart              # Primitive restart (may interrupt active turns)
+estacoda gateway restart --graceful   # Drain active turns, then restart
+```
+
+`stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. If the process does not exit within the graceful timeout, `--force` sends SIGKILL and cleans up.
+
+`restart` calls `stop` then `start`. Without `--graceful`, this is a primitive restart — active turns may be interrupted. With `--graceful`, the supervisor sets lifecycle to `draining`, rejects new turns, waits for active turns to complete (up to 30s), then stops and starts. A `.clean_shutdown` marker is written after a successful graceful drain.
+
 ### Channel Commands
 
 ```bash
@@ -87,6 +101,25 @@ estacoda channels status discord    # Detailed Discord status
 estacoda channels status email      # Detailed Email status
 estacoda channels status whatsapp   # Detailed WhatsApp status
 ```
+
+### Channel Enable / Disable
+
+```bash
+estacoda channels enable telegram    # Enable Telegram adapter
+estacoda channels enable discord     # Enable Discord adapter
+estacoda channels enable email       # Enable Email adapter
+estacoda channels enable whatsapp    # Enable WhatsApp adapter
+
+estacoda channels disable telegram   # Disable Telegram adapter
+estacoda channels disable discord    # Disable Discord adapter
+estacoda channels disable email      # Disable Email adapter
+estacoda channels disable whatsapp   # Disable WhatsApp adapter
+```
+
+`enable` sets `enabled: true` in `config.json` for the named channel. `disable` sets `enabled: false`.
+Both commands are idempotent. Both preserve all other channel fields (tokens, allowlists, busy policy, queue depth).
+
+Valid channel names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitive).
 
 Channel status shows:
 - Enabled/disabled state
@@ -143,7 +176,7 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 - `/reset` — reset current session
 - `/cron` — list cron jobs
 - `/approvals` — show pending approvals
-- `/stop` — stop the gateway
+- `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
 
 ## /steer Semantics
 
@@ -210,6 +243,41 @@ Approval gates are created by the security layer when a tool call requires expli
 - `deterministicRule`: which rule triggered the gate
 
 `/flow approve` and `/flow reject` resolve gates and emit `OperatorEvent` records.
+
+## Busy Policy Configuration
+
+When a user sends input while the agent is already processing a turn, the busy policy determines behavior:
+
+| Policy | Behavior |
+|--------|----------|
+| `reject` (default) | Reply immediately with a busy message. |
+| `queue` | Buffer the message and process it after the current turn completes. |
+| `interrupt` | Abort the current turn and start a new one immediately. |
+
+Configure per-channel in `config.json`:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "busyPolicy": "queue",
+      "queueDepth": 5
+    },
+    "discord": {
+      "enabled": true,
+      "busyPolicy": "reject",
+      "queueDepth": 3
+    }
+  }
+}
+```
+
+- `busyPolicy`: `"reject"` | `"queue"` | `"interrupt"`
+- `queueDepth`: integer clamped to `[1, 10]`. Default: `3`. Only meaningful when `busyPolicy` is `"queue"`.
+- Each channel configures its own policy independently. There is no top-level global busy policy setting.
+- Omitted values normalize to `"reject"` and `3`.
+- Invalid `busyPolicy` values fall back to `"reject"` with a runtime warning.
 
 ## Retry and Skip Safety Rules
 

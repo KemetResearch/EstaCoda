@@ -68,7 +68,8 @@ Responsibilities:
 
 ```bash
 estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
-estacoda gateway start --telegram
+estacoda channels enable telegram
+estacoda gateway start
 ```
 
 ## Discord Adapter
@@ -94,7 +95,8 @@ estacoda gateway start --telegram
 
 ```bash
 estacoda discord configure --bot-token-env ESTACODA_DISCORD_TOKEN --allow-user 123456789
-estacoda gateway start --discord
+estacoda channels enable discord
+estacoda gateway start
 ```
 
 ## Email Adapter
@@ -205,14 +207,27 @@ Explicit attach/detach is required:
 
 Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-pointers.json`).
 
+## Busy Policy
+
+Each channel independently configures how incoming messages are handled when the agent is already processing a turn:
+
+- `reject` — reply with a busy message (default)
+- `queue` — buffer messages, process sequentially after the current turn
+- `interrupt` — abort the current turn and start the new one immediately
+
+See [Channel Configuration](../operations/channel-configuration.md) for config schema and examples.
+
 ## Gateway Runtime
 
 Gateway turns rebuild runtimes from fresh config snapshots. This helps MCP reload semantics but means adapter-level settings are established at gateway start.
 
 ```bash
+# Enable channels before starting
+estacoda channels enable telegram
+estacoda channels enable discord
+
 # Start gateway
-estacoda gateway start --telegram
-estacoda gateway start --discord
+estacoda gateway start
 
 # Check status
 estacoda gateway status
@@ -236,7 +251,7 @@ Channel-specific commands available in gateway:
 - `/reset` — reset current session
 - `/cron` — list cron jobs
 - `/approvals` — show pending approvals
-- `/stop` — stop the gateway
+- `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
 
 ## Limitations
 

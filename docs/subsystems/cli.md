@@ -30,7 +30,7 @@ bun run dev -- verify          # Verify configuration
 bun run dev -- settings        # Show current settings
 bun run dev -- doctor --live   # Live provider check
 bun run dev -- telegram setup  # Configure Telegram
-bun run dev -- gateway start --telegram  # Start gateway
+bun run dev -- gateway start      # Start gateway (channels must be enabled first)
 ```
 
 ## Trace Commands
