@@ -10,6 +10,7 @@ import { createFakeWhatsAppAdapter } from "../test/fakes/fake-whatsapp-adapter.j
 import { PlainLogSurfaceAdapter } from "./surface-adapters/plain-log-surface-adapter.js";
 import type { ChannelAdapter, ChannelSessionKey } from "../contracts/channel.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
+import { HookRegistry } from "../gateway/hook-registry.js";
 
 type FakeAdapter = ChannelAdapter & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -399,6 +400,225 @@ describe("DeliveryRouter", () => {
 
       expect(results.get("telegram:123")?.success).toBe(true);
       expect(telegram.records[0].text).toBe("Direct text");
+    });
+  });
+
+  describe("hook emissions", () => {
+    let events: Array<{ name: string; payload: unknown }> = [];
+    let originalEmit: typeof HookRegistry.prototype.emit;
+
+    beforeEach(() => {
+      events = [];
+      originalEmit = HookRegistry.prototype.emit;
+      HookRegistry.prototype.emit = async function (name: string, payload: unknown) {
+        events.push({ name, payload });
+        return originalEmit.call(this, name as any, payload as any);
+      };
+    });
+
+    afterEach(() => {
+      HookRegistry.prototype.emit = originalEmit;
+    });
+
+    it("delivery:success emitted on successful text delivery to adapter with sanitized target", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const results = await router.deliverText(targets, "Hello");
+
+      expect(results.get("telegram:123")?.success).toBe(true);
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("text");
+      expect(payload.platform).toBe("telegram");
+      expect(payload.truncated).toBeUndefined();
+      expect(payload.target).not.toBe("telegram:123");
+      expect(payload.target).toMatch(/^telegram:[a-f0-9]{16}$/);
+    });
+
+    it("delivery:success includes truncated: true when text exceeds limit", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, maxOutputChars: 20, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const longText = "This is a very long message that should be truncated by the delivery router.";
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverText(targets, longText);
+
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.truncated).toBe(true);
+      expect(payload.target).not.toBe("telegram:123");
+      expect(payload.target).toMatch(/^telegram:[a-f0-9]{16}$/);
+    });
+
+    it("delivery:success emitted for local target", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+
+      const targets = router.parseTarget("local", baseSessionKey);
+      const results = await router.deliverText(targets, "Local content");
+
+      expect(results.get("local")?.success).toBe(true);
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.target).toBe("local");
+      expect(payload.platform).toBeUndefined();
+    });
+
+    it("delivery:success emitted for silent target", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+
+      const targets = router.parseTarget("silent", baseSessionKey);
+      const results = await router.deliverText(targets, "Hidden");
+
+      expect(results.get("silent")?.success).toBe(true);
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.target).toBe("silent");
+      expect(payload.platform).toBeUndefined();
+    });
+
+    it("delivery:error emitted on adapter text delivery failure with sanitized target", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter({ shouldFailDelivery: true, failureMessage: "network down" }) as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const results = await router.deliverText(targets, "Hello");
+
+      expect(results.get("telegram:123")?.success).toBe(false);
+      const errorEvents = events.filter((e) => e.name === "delivery:error");
+      expect(errorEvents).toHaveLength(1);
+      const payload = errorEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("text");
+      expect(payload.errorClass).toBe("Error");
+      expect(payload.errorMessage).toBe("network down");
+      expect(payload.target).not.toBe("telegram:123");
+      expect(payload.target).toMatch(/^telegram:[a-f0-9]{16}$/);
+
+      // Verify ordering: error written to jsonl before hook
+      await new Promise((r) => setTimeout(r, 50));
+      const errorPath = join(tmpDir, ".estacoda", "gateway", "delivery-errors.jsonl");
+      const content = await readFile(errorPath, "utf-8");
+      expect(content).toContain("network down");
+    });
+
+    it("delivery:success emitted on successful progress delivery", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const event = { kind: "tool-start" as const, tool: "search", input: "query" };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverProgress(targets[0], event);
+
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("progress");
+    });
+
+    it("delivery:error emitted on progress delivery failure", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      // Override sendProgress to throw
+      (telegram as any).delivery!.sendProgress = async () => {
+        throw new Error("progress failed");
+      };
+      router.registerAdapter(telegram);
+
+      const event = { kind: "tool-start" as const, tool: "search", input: "query" };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverProgress(targets[0], event);
+
+      const errorEvents = events.filter((e) => e.name === "delivery:error");
+      expect(errorEvents).toHaveLength(1);
+      const payload = errorEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("progress");
+    });
+
+    it("delivery:success emitted on successful artifact delivery", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const artifact = { id: "art-1", kind: "document" as const, name: "report.md", mimeType: "text/markdown", path: "/tmp/report.md", bytes: 100, createdAt: new Date().toISOString() };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverArtifact(targets[0], artifact);
+
+      const successEvents = events.filter((e) => e.name === "delivery:success");
+      expect(successEvents).toHaveLength(1);
+      const payload = successEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("artifact");
+    });
+
+    it("delivery:error emitted on artifact delivery failure", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      // Override sendArtifact to throw
+      (telegram as any).delivery!.sendArtifact = async () => {
+        throw new Error("artifact failed");
+      };
+      router.registerAdapter(telegram);
+
+      const artifact = { id: "art-1", kind: "document" as const, name: "report.md", mimeType: "text/markdown", path: "/tmp/report.md", bytes: 100, createdAt: new Date().toISOString() };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverArtifact(targets[0], artifact);
+
+      const errorEvents = events.filter((e) => e.name === "delivery:error");
+      expect(errorEvents).toHaveLength(1);
+      const payload = errorEvents[0].payload as Record<string, unknown>;
+      expect(payload.kind).toBe("artifact");
+    });
+
+    it("hook failure does not affect delivery result map", async () => {
+      const originalEmit = HookRegistry.prototype.emit;
+      try {
+        HookRegistry.prototype.emit = async function (name: string, payload: unknown) {
+          if (name === "delivery:success") {
+            throw new Error("hook boom");
+          }
+          return originalEmit.call(this, name as any, payload as any);
+        };
+
+        const hookRegistry = new HookRegistry();
+        const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+        const telegram = createFakeTelegramAdapter() as FakeAdapter;
+        router.registerAdapter(telegram);
+
+        const targets = router.parseTarget("telegram:123", baseSessionKey);
+        const results = await router.deliverText(targets, "Hello");
+
+        expect(results.get("telegram:123")?.success).toBe(true);
+      } finally {
+        HookRegistry.prototype.emit = originalEmit;
+      }
+    });
+
+    it("no hooks emitted when hookRegistry is omitted", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await router.deliverText(targets, "Hello");
+
+      expect(events).toHaveLength(0);
     });
   });
 });

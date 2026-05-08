@@ -1239,22 +1239,44 @@ describe("supervisor 5E internals", () => {
         await mkdir(stateDir, { recursive: true });
         await mkdir(sessionDir, { recursive: true });
 
+        // Write config to enable telegram adapter
+        const configPath = join(tmpDir, ".estacoda", "config.json");
+        await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+        await writeFile(configPath, JSON.stringify({
+          channels: {
+            telegram: {
+              enabled: true,
+              botTokenEnv: "TEST_BOT_TOKEN",
+              defaultChatId: "123",
+            },
+          },
+        }));
+        process.env.TEST_BOT_TOKEN = "fake";
+
         let receivedGatewayHookRegistry: unknown;
 
         const result = await runGatewaySupervisor({
           workspaceRoot: tmpDir,
           homeDir: tmpDir,
-          userConfigPath: join(tmpDir, "estacoda.yaml"),
-          projectConfigPath: join(tmpDir, "estacoda.project.yaml"),
           factories: {
             createChannelGateway: (opts) => {
               receivedGatewayHookRegistry = (opts as { hookRegistry?: unknown }).hookRegistry;
-              return fakeChannelGateway() as any;
+              const gateway = fakeChannelGateway() as any;
+              const originalStart = gateway.start;
+              gateway.start = async () => {
+                for (const adapter of (opts as { adapters?: Array<{ start?: (handler: (msg: unknown) => Promise<void>) => Promise<void> }> }).adapters ?? []) {
+                  await adapter.start?.(async () => {});
+                }
+                await originalStart?.();
+              };
+              return gateway;
             },
             createTelegramAdapter: () => fakeAdapter("telegram") as any,
           },
           once: true,
         });
+
+        delete process.env.TEST_BOT_TOKEN;
 
         // The supervisor constructs RuntimeCache internally; we can verify
         // the gateway received a HookRegistry.
@@ -1679,6 +1701,49 @@ describe("supervisor lifecycle hooks", () => {
     }
   });
 
+  it("DeliveryRouter receives hookRegistry when constructed by supervisor", async () => {
+    let capturedOpts: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: (opts: any) => {
+          capturedOpts = opts;
+          return fakeDeliveryRouter() as any;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedOpts).toBeDefined();
+    expect(capturedOpts.hookRegistry).toBeInstanceOf(HookRegistry);
+  });
+
+  it("tickCron receives hookRegistry when called by supervisor", async () => {
+    let capturedInput: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        tickCron: async (input: any) => {
+          capturedInput = input;
+          return [];
+        },
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedInput).toBeDefined();
+    expect(capturedInput.hookRegistry).toBeInstanceOf(HookRegistry);
+  });
+
   it("hook failures do not affect supervisor shutdown", async () => {
     const originalEmit = HookRegistry.prototype.emit;
     HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
@@ -1707,5 +1772,25 @@ describe("supervisor lifecycle hooks", () => {
     } finally {
       HookRegistry.prototype.emit = originalEmit;
     }
+  });
+
+  it("createDeliveryRouter factory receives default hookRegistry when none injected", async () => {
+    let capturedOpts: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: (opts: any) => {
+          capturedOpts = opts;
+          return fakeDeliveryRouter() as any;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedOpts.hookRegistry).toBeInstanceOf(HookRegistry);
   });
 });

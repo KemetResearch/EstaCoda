@@ -9,6 +9,7 @@ import { CronExecutionStore } from "./cron-execution-store.js";
 import { createFileCronJobLock } from "./cron-lock.js";
 import { tickCron, type CronRunner } from "./cron-runner.js";
 import type { CronJob } from "./cron-store.js";
+import { HookRegistry } from "../gateway/hook-registry.js";
 
 function mockOk(job: CronJob): ReturnType<CronRunner["runJob"]> {
   return Promise.resolve({
@@ -430,5 +431,198 @@ describe("tickCron with execution store and job lock", () => {
     const results = await tickCron({ store, runner, now });
     expect(results.length).toBe(1);
     expect(results[0].ok).toBe(true);
+  });
+
+  describe("hook emissions", () => {
+    let events: Array<{ name: string; payload: unknown }> = [];
+    let originalEmit: typeof HookRegistry.prototype.emit;
+
+    beforeEach(() => {
+      events = [];
+      originalEmit = HookRegistry.prototype.emit;
+      HookRegistry.prototype.emit = async function (name: string, payload: unknown) {
+        events.push({ name, payload });
+        return originalEmit.call(this, name as any, payload as any);
+      };
+    });
+
+    afterEach(() => {
+      HookRegistry.prototype.emit = originalEmit;
+    });
+
+    it("cron:tick:start emitted with correct dueCount", async () => {
+      await store.create({ name: "Job A", schedule: "* * * * *", prompt: "a", delivery: "local" });
+      await store.create({ name: "Job B", schedule: "* * * * *", prompt: "b", delivery: "local" });
+
+      const runner: CronRunner = { runJob: async (job) => mockOk(job) };
+      const hookRegistry = new HookRegistry();
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }), hookRegistry, now });
+
+      const startEvents = events.filter((e) => e.name === "cron:tick:start");
+      expect(startEvents).toHaveLength(1);
+      expect((startEvents[0].payload as Record<string, unknown>).dueCount).toBe(2);
+    });
+
+    it("cron:tick:complete emitted with correct totals after mixed results", async () => {
+      await store.create({ name: "Ok job", schedule: "* * * * *", prompt: "ok", delivery: "local" });
+      await store.create({ name: "Fail job", schedule: "* * * * *", prompt: "fail", delivery: "local" });
+      await store.create({ name: "Skip job", schedule: "* * * * *", prompt: "skip", delivery: "local" });
+
+      let callCount = 0;
+      const runner: CronRunner = {
+        runJob: async (job) => {
+          callCount++;
+          if (job.name === "Fail job") return mockFail(job, "provider_error", "bad response");
+          return mockOk(job);
+        }
+      };
+
+      const hookRegistry = new HookRegistry();
+      let acquireCount = 0;
+      const mockLock: import("./cron-lock.js").CronJobLock = {
+        acquire: async () => {
+          acquireCount++;
+          if (acquireCount === 3) return { acquired: false, stale: false };
+          return { acquired: true, stale: false };
+        },
+        release: async () => {},
+        isLocked: async () => true,
+        staleSince: async () => undefined
+      };
+
+      const now = new Date("2030-01-01T00:00:00Z");
+      const results = await tickCron({ store, runner, executionStore, jobLock: mockLock, hookRegistry, now });
+
+      expect(results.filter((r) => r.ok && !r.skipped).length).toBe(1);
+      expect(results.filter((r) => !r.ok && !r.skipped).length).toBe(1);
+      expect(results.filter((r) => r.skipped).length).toBe(1);
+
+      const completeEvents = events.filter((e) => e.name === "cron:tick:complete");
+      expect(completeEvents).toHaveLength(1);
+      const payload = completeEvents[0].payload as Record<string, unknown>;
+      expect(payload.total).toBe(3);
+      expect(payload.passed).toBe(1);
+      expect(payload.failed).toBe(1);
+      expect(payload.skipped).toBe(1);
+    });
+
+    it("cron:job:fail emitted when runner returns ok: false", async () => {
+      await store.create({ name: "Fail job", schedule: "* * * * *", prompt: "fail", delivery: "local" });
+
+      const runner: CronRunner = {
+        runJob: async (job) => mockFail(job, "provider_error", "bad response")
+      };
+
+      const hookRegistry = new HookRegistry();
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }), hookRegistry, now });
+
+      const failEvents = events.filter((e) => e.name === "cron:job:fail");
+      expect(failEvents).toHaveLength(1);
+      const payload = failEvents[0].payload as Record<string, unknown>;
+      expect(payload.failureClass).toBe("provider_error");
+      expect(payload.delivered).toBe(false);
+    });
+
+    it("cron:job:fail emitted when runner throws", async () => {
+      await store.create({ name: "Exploding job", schedule: "* * * * *", prompt: "boom", delivery: "local" });
+
+      const runner: CronRunner = {
+        runJob: async () => {
+          throw new Error("boom");
+        }
+      };
+
+      const hookRegistry = new HookRegistry();
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }), hookRegistry, now });
+
+      const failEvents = events.filter((e) => e.name === "cron:job:fail");
+      expect(failEvents).toHaveLength(1);
+      const payload = failEvents[0].payload as Record<string, unknown>;
+      expect(payload.failureClass).toBe("runtime_error");
+      expect(payload.delivered).toBe(false);
+    });
+
+    it("cron:job:fail is NOT emitted for skipped jobs", async () => {
+      await store.create({ name: "Skip job", schedule: "* * * * *", prompt: "skip", delivery: "local" });
+
+      const runner: CronRunner = { runJob: async (job) => mockOk(job) };
+
+      const hookRegistry = new HookRegistry();
+      const mockLock: import("./cron-lock.js").CronJobLock = {
+        acquire: async () => ({ acquired: false, stale: false }),
+        release: async () => {},
+        isLocked: async () => true,
+        staleSince: async () => undefined
+      };
+
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: mockLock, hookRegistry, now });
+
+      const failEvents = events.filter((e) => e.name === "cron:job:fail");
+      expect(failEvents).toHaveLength(0);
+    });
+
+    it("cron:tick:start and cron:tick:complete ordering", async () => {
+      await store.create({ name: "Job A", schedule: "* * * * *", prompt: "a", delivery: "local" });
+
+      const runner: CronRunner = { runJob: async (job) => mockOk(job) };
+      const hookRegistry = new HookRegistry();
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }), hookRegistry, now });
+
+      const startIdx = events.findIndex((e) => e.name === "cron:tick:start");
+      const completeIdx = events.findIndex((e) => e.name === "cron:tick:complete");
+      expect(startIdx).toBeGreaterThanOrEqual(0);
+      expect(completeIdx).toBeGreaterThanOrEqual(0);
+      expect(startIdx).toBeLessThan(completeIdx);
+    });
+
+    it("hook failure does not affect execution store, locks, or markRunResult", async () => {
+      const originalEmit = HookRegistry.prototype.emit;
+      try {
+        HookRegistry.prototype.emit = async function (name: string, payload: unknown) {
+          if (name === "cron:job:fail") {
+            throw new Error("hook boom");
+          }
+          return originalEmit.call(this, name as any, payload as any);
+        };
+
+        await store.create({ name: "Fail job", schedule: "* * * * *", prompt: "fail", delivery: "local" });
+
+        const runner: CronRunner = {
+          runJob: async (job) => mockFail(job, "provider_error", "bad response")
+        };
+
+        const hookRegistry = new HookRegistry();
+        const jobLock = createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 });
+        const now = new Date("2030-01-01T00:00:00Z");
+        const results = await tickCron({ store, runner, executionStore, jobLock, hookRegistry, now });
+
+        expect(results[0].ok).toBe(false);
+
+        const history = await executionStore.list();
+        expect(history.length).toBe(1);
+        expect(history[0].status).toBe("failed");
+
+        // Lock should be released
+        const locked = await jobLock.isLocked(results[0].job.id);
+        expect(locked).toBe(false);
+      } finally {
+        HookRegistry.prototype.emit = originalEmit;
+      }
+    });
+
+    it("no hooks emitted when hookRegistry is omitted", async () => {
+      await store.create({ name: "Job A", schedule: "* * * * *", prompt: "a", delivery: "local" });
+
+      const runner: CronRunner = { runJob: async (job) => mockOk(job) };
+      const now = new Date("2030-01-01T00:00:00Z");
+      await tickCron({ store, runner, executionStore, jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }), now });
+
+      expect(events).toHaveLength(0);
+    });
   });
 });

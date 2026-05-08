@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
   ChannelAdapter,
@@ -12,6 +13,27 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SurfaceAdapter } from "../contracts/surface-adapter.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import {
+  HookRegistry,
+  type GatewayHookEventName,
+  type GatewayHookPayloadByName,
+  sanitizeHookError,
+} from "../gateway/hook-registry.js";
+
+function emitDeliveryHook<N extends GatewayHookEventName>(
+  hookRegistry: HookRegistry | undefined,
+  name: N,
+  payload: GatewayHookPayloadByName[N],
+): void {
+  try {
+    const p = hookRegistry?.emit(name, payload);
+    if (p) {
+      p.catch(() => {});
+    }
+  } catch {
+    // ignore sync throws from HookRegistry internals
+  }
+}
 
 export type DeliveryTarget =
   | { kind: "origin"; originalSessionKey: ChannelSessionKey }
@@ -23,6 +45,7 @@ export type DeliveryRouterOptions = {
   homeDir?: string;
   maxOutputChars?: number;
   now?: () => Date;
+  hookRegistry?: HookRegistry;
 };
 
 export type DeliveryErrorRecord = {
@@ -40,11 +63,13 @@ export class DeliveryRouter {
   readonly #maxOutputChars: number;
   readonly #now: () => Date;
   #surfaceAdapter?: SurfaceAdapter;
+  #hookRegistry?: HookRegistry;
 
   constructor(options: DeliveryRouterOptions = {}) {
     this.#homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
     this.#maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;
     this.#now = options.now ?? (() => new Date());
+    this.#hookRegistry = options.hookRegistry;
   }
 
   registerAdapter(adapter: ChannelAdapter): void {
@@ -128,12 +153,26 @@ export class DeliveryRouter {
     for (const target of targets) {
       const targetKey = this.#targetToString(target);
       try {
-        await this.#deliverSingleText(target, text, options);
+        const meta = await this.#deliverSingleText(target, text, options);
         results.set(targetKey, { success: true });
+        emitDeliveryHook(this.#hookRegistry, "delivery:success", {
+          kind: "text",
+          target: this.#sanitizeHookTarget(target),
+          platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+          truncated: meta.truncated,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results.set(targetKey, { success: false, error: message });
         await this.#recordDeliveryError(targetKey, message);
+        const { errorClass, errorMessage } = sanitizeHookError(err);
+        emitDeliveryHook(this.#hookRegistry, "delivery:error", {
+          kind: "text",
+          target: this.#sanitizeHookTarget(target),
+          platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+          errorClass,
+          errorMessage,
+        });
       }
     }
 
@@ -155,16 +194,16 @@ export class DeliveryRouter {
     target: DeliveryTarget,
     text: string,
     options?: ChannelTextOptions
-  ): Promise<void> {
+  ): Promise<{ truncated?: boolean }> {
     if (target.kind === "silent") {
-      return;
+      return {};
     }
 
     if (target.kind === "local") {
       const path = target.path ?? join(this.#homeDir, ".estacoda", "delivery", `${this.#now().toISOString()}.md`);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text, "utf-8");
-      return;
+      return {};
     }
 
     let sessionKey: ChannelSessionKey;
@@ -181,7 +220,7 @@ export class DeliveryRouter {
       };
       adapter = this.#adapters.get(target.platform);
     } else {
-      return;
+      return {};
     }
 
     if (!adapter?.delivery) {
@@ -194,6 +233,8 @@ export class DeliveryRouter {
     if (truncated.wasTruncated && truncated.fullPath) {
       // Full output already saved to disk during truncation
     }
+
+    return { truncated: truncated.wasTruncated || undefined };
   }
 
   async deliverProgress(
@@ -227,9 +268,22 @@ export class DeliveryRouter {
 
     try {
       await adapter.delivery.sendProgress(sessionKey, event);
+      emitDeliveryHook(this.#hookRegistry, "delivery:success", {
+        kind: "progress",
+        target: this.#sanitizeHookTarget(target),
+        platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.#recordDeliveryError(this.#targetToString(target), `progress: ${message}`);
+      const { errorClass, errorMessage } = sanitizeHookError(err);
+      emitDeliveryHook(this.#hookRegistry, "delivery:error", {
+        kind: "progress",
+        target: this.#sanitizeHookTarget(target),
+        platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+        errorClass,
+        errorMessage,
+      });
     }
   }
 
@@ -264,9 +318,22 @@ export class DeliveryRouter {
 
     try {
       await adapter.delivery.sendArtifact(sessionKey, artifact);
+      emitDeliveryHook(this.#hookRegistry, "delivery:success", {
+        kind: "artifact",
+        target: this.#sanitizeHookTarget(target),
+        platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.#recordDeliveryError(this.#targetToString(target), `artifact: ${message}`);
+      const { errorClass, errorMessage } = sanitizeHookError(err);
+      emitDeliveryHook(this.#hookRegistry, "delivery:error", {
+        kind: "artifact",
+        target: this.#sanitizeHookTarget(target),
+        platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+        errorClass,
+        errorMessage,
+      });
     }
   }
 
@@ -295,6 +362,15 @@ export class DeliveryRouter {
       return parts.join(":");
     }
     return "unknown";
+  }
+
+  #sanitizeHookTarget(target: DeliveryTarget): string {
+    if (target.kind === "origin") return "origin";
+    if (target.kind === "local") return "local";
+    if (target.kind === "silent") return "silent";
+    // channel target: hash the raw target string
+    const raw = this.#targetToString(target);
+    return `${target.platform}:${createHash("sha256").update(raw).digest("hex").slice(0, 16)}`;
   }
 
   async #recordDeliveryError(target: string, error: string): Promise<void> {

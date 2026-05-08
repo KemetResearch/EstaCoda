@@ -556,8 +556,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     // 8. Adapter instantiation
     const adapters: ChannelAdapter[] = [];
     const router = options.factories?.createDeliveryRouter
-      ? options.factories.createDeliveryRouter({ homeDir })
-      : new DeliveryRouter({ homeDir });
+      ? options.factories.createDeliveryRouter({ homeDir, hookRegistry })
+      : new DeliveryRouter({ homeDir, hookRegistry });
 
     for (const cap of configured) {
       let adapter: ChannelAdapter;
@@ -925,10 +925,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     do {
       if (!state.draining) {
         await doTickCron({
-        store: cronStore,
-        executionStore: cronExecutionStore,
-        jobLock: cronJobLock,
-        runner: createRuntimeCronRunner({
+          store: cronStore,
+          executionStore: cronExecutionStore,
+          jobLock: cronJobLock,
+          hookRegistry,
+          runner: createRuntimeCronRunner({
           deliver: async (job, content) => {
             const originKey = job.origin?.channel === "telegram" && job.origin.chatId !== undefined
               ? {

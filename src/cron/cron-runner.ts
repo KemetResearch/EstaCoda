@@ -8,6 +8,26 @@ import { classifyCronFailure, classifyCronScriptFailure } from "./cron-failure-c
 import type { CronJobLock } from "./cron-lock.js";
 import type { CronJob } from "./cron-store.js";
 import { CronStore } from "./cron-store.js";
+import {
+  HookRegistry,
+  type GatewayHookEventName,
+  type GatewayHookPayloadByName,
+} from "../gateway/hook-registry.js";
+
+function emitCronHook<N extends GatewayHookEventName>(
+  hookRegistry: HookRegistry | undefined,
+  name: N,
+  payload: GatewayHookPayloadByName[N],
+): void {
+  try {
+    const p = hookRegistry?.emit(name, payload);
+    if (p) {
+      p.catch(() => {});
+    }
+  } catch {
+    // ignore sync throws from HookRegistry internals
+  }
+}
 
 export type CronDeliveryResult = {
   success: boolean;
@@ -46,12 +66,15 @@ export type TickCronInput = {
   lockPath?: string;
   executionStore?: CronExecutionStore;
   jobLock?: CronJobLock;
+  hookRegistry?: HookRegistry;
 };
 
 export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
   return withCronTickLock(input.lockPath ?? defaultLockPath(input.store), async () => {
     const due = await input.store.due(input.now);
     const results: CronRunResult[] = [];
+
+    emitCronHook(input.hookRegistry, "cron:tick:start", { dueCount: due.length });
 
     for (const job of due) {
       // Per-job locking
@@ -99,6 +122,16 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
             ok: enriched.ok,
             output: enriched.output
           });
+
+          if (!enriched.ok && !enriched.skipped) {
+            emitCronHook(input.hookRegistry, "cron:job:fail", {
+              jobId: job.id,
+              executionId: enriched.executionId,
+              failureClass: enriched.failureClass ?? "unknown",
+              delivered: enriched.delivered,
+            });
+          }
+
           results.push(enriched);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -117,6 +150,14 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
             ok: false,
             output: message
           });
+
+          emitCronHook(input.hookRegistry, "cron:job:fail", {
+            jobId: job.id,
+            executionId,
+            failureClass: failure.class,
+            delivered: false,
+          });
+
           results.push({
             job,
             ok: false,
@@ -139,6 +180,13 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
         results.push(result);
       }
     }
+
+    emitCronHook(input.hookRegistry, "cron:tick:complete", {
+      total: results.length,
+      passed: results.filter(r => r.ok && !r.skipped).length,
+      failed: results.filter(r => !r.ok && !r.skipped).length,
+      skipped: results.filter(r => r.skipped).length,
+    });
 
     return results;
   });
