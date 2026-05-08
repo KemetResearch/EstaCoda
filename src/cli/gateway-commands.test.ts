@@ -156,7 +156,7 @@ describe("gateway commands", () => {
       expect(result.output).toContain("home=local");
     });
 
-    it("shows pending approvals count", async () => {
+    it("shows approvals block with policy and granted count", async () => {
       const store = new ChannelApprovalStore({ path: join(stateRoot, "channel-approvals.json") });
       await store.grant({
         sessionKey: { platform: "telegram", chatId: "123", userId: "u1" },
@@ -166,8 +166,9 @@ describe("gateway commands", () => {
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
-      expect(result.output).toContain("Pending approvals");
-      expect(result.output).toContain("Total grants: 1");
+      expect(result.output).toContain("Approvals");
+      expect(result.output).toContain("Policy:");
+      expect(result.output).toContain("Granted: 1");
     });
 
     it("shows WhatsApp experimental gate status", async () => {

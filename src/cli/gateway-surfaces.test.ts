@@ -184,6 +184,7 @@ function fakeGatewayStatusData(): GatewayStatusData {
       { surfaceType: "telegram", surfaceId: "chat-1", record: { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z", homeDelivery: "local" } },
     ],
     approvalCount: 1,
+    approvalPolicy: "adaptive",
     missingConfig: [
       { channel: "telegram", item: "BOT_TOKEN_ENV" },
     ],
@@ -243,6 +244,9 @@ function fakeGatewayDiagnoseData(): GatewayDiagnoseData {
     jobsFileReadable: true,
     outputDirWritable: true,
     lockDirWritable: true,
+    approvalCount: 0,
+    recentDeliveryErrors: [],
+    channels: fakeGatewayStatusData().channels,
   } as unknown as GatewayDiagnoseData;
 }
 

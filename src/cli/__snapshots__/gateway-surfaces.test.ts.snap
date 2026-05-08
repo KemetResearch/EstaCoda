@@ -16,14 +16,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-DeliveryRouter platforms
-- none configured
+Delivery
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 Surface pointers
 - telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-Pending approvals
-Total grants: 1
+Approvals
+Policy: adaptive
+Granted: 1
 
 Cron
 Jobs: 1 total, 1 active
@@ -55,14 +57,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-\x1B[1mDeliveryRouter platforms\x1B[0m
-• none configured
+\x1B[1mDelivery\x1B[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 \x1B[1mSurface pointers\x1B[0m
 • telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-\x1B[1mPending approvals\x1B[0m
-Total grants: 1
+\x1B[1mApprovals\x1B[0m
+Policy: adaptive
+Granted: 1
 
 \x1B[1mCron\x1B[0m
 Jobs: 1 total, 1 active
@@ -94,14 +98,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-\x1B[1mDeliveryRouter platforms\x1B[0m
-• none configured
+\x1B[1mDelivery\x1B[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 \x1B[1mSurface pointers\x1B[0m
 • telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-\x1B[1mPending approvals\x1B[0m
-Total grants: 1
+\x1B[1mApprovals\x1B[0m
+Policy: adaptive
+Granted: 1
 
 \x1B[1mCron\x1B[0m
 Jobs: 1 total, 1 active
@@ -133,14 +139,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-DeliveryRouter platforms
-• none configured
+Delivery
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 Surface pointers
 • telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-Pending approvals
-Total grants: 1
+Approvals
+Policy: adaptive
+Granted: 1
 
 Cron
 Jobs: 1 total, 1 active
@@ -172,14 +180,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-\x1B[1mDeliveryRouter platforms\x1B[0m
-- none configured
+\x1B[1mDelivery\x1B[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 \x1B[1mSurface pointers\x1B[0m
 - telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-\x1B[1mPending approvals\x1B[0m
-Total grants: 1
+\x1B[1mApprovals\x1B[0m
+Policy: adaptive
+Granted: 1
 
 \x1B[1mCron\x1B[0m
 Jobs: 1 total, 1 active
@@ -211,14 +221,16 @@ Discord: disabled
 Email: disabled
 WhatsApp: disabled
 
-\x1B[1mDeliveryRouter platforms\x1B[0m
-• none configured
+\x1B[1mDelivery\x1B[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 \x1B[1mSurface pointers\x1B[0m
 • telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
 
-\x1B[1mPending approvals\x1B[0m
-Total grants: 1
+\x1B[1mApprovals\x1B[0m
+Policy: adaptive
+Granted: 1
 
 \x1B[1mCron\x1B[0m
 Jobs: 1 total, 1 active

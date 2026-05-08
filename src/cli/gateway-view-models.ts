@@ -64,6 +64,7 @@ export type GatewayStatusData = {
     };
   }[];
   readonly approvalCount: number;
+  readonly approvalPolicy: string;
   readonly missingConfig: readonly { readonly channel: string; readonly item: string }[];
   readonly supervisor?: SupervisorSnapshot;
   readonly identityLocks: readonly IdentityLockStatus[];
@@ -96,11 +97,14 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
       entries: [kv("Status", "CLI view (no live gateway process in this shell)")],
     }),
     buildChannelsOverviewBlock(data.channels),
-    buildDeliveryPlatformsBlock(data.channels),
+    buildDeliveryBlock(data.channels, data.recentDeliveryErrors),
     buildSurfacePointersBlock(data.surfacePointers),
     buildKeyValueBlockViewModel({
-      title: "Pending approvals",
-      entries: [kv("Total grants", data.approvalCount)],
+      title: "Approvals",
+      entries: [
+        kv("Policy", data.approvalPolicy),
+        kv("Granted", data.approvalCount),
+      ],
     }),
     buildKeyValueBlockViewModel({
       title: "Cron",
@@ -213,22 +217,23 @@ function lockStateLabel(lock: IdentityLockStatus | undefined): string {
 function channelKv(name: string, channel: LoadedRuntimeConfig["channels"]["telegram"]): KeyValueEntry {
   const status = channel.ready ? "ready" : channel.enabled ? "configured, missing credentials" : "disabled";
   const missing = channel.missing !== undefined && channel.missing.length > 0 ? ` (missing: ${channel.missing.join(", ")})` : "";
-  return kv(name, `${status}${missing}`);
+  const busySuffix = channel.enabled ? ` (${channel.busyPolicy ?? "reject"}, depth ${channel.queueDepth ?? 3})` : "";
+  return kv(name, `${status}${missing}${busySuffix}`);
 }
 
-function buildDeliveryPlatformsBlock(channels: LoadedRuntimeConfig["channels"]): ViewModel {
+function buildDeliveryBlock(channels: LoadedRuntimeConfig["channels"], recentDeliveryErrors: readonly DeliveryErrorRecord[]): ViewModel {
   const platforms: string[] = [];
   if (channels.telegram.enabled) platforms.push("telegram");
   if (channels.discord.enabled) platforms.push("discord");
   if (channels.email.enabled) platforms.push("email");
   if (channels.whatsapp.enabled && channels.whatsapp.experimental) platforms.push("whatsapp");
 
-  if (platforms.length === 0) {
-    return buildListViewModel({ title: "DeliveryRouter platforms", items: [listItem("none configured")], emptyMessage: "none configured" });
-  }
-  return buildListViewModel({
-    title: "DeliveryRouter platforms",
-    items: platforms.map((p) => listItem(p)),
+  return buildKeyValueBlockViewModel({
+    title: "Delivery",
+    entries: [
+      kv("Enabled platforms", platforms.length === 0 ? "none" : platforms.join(", ")),
+      kv("Recent errors", `${recentDeliveryErrors.length} (last 5 records)`),
+    ],
   });
 }
 
@@ -315,6 +320,9 @@ export type GatewayDiagnoseData = {
   readonly runtimeStateNote?: "stale" | "pid-mismatch" | "supervisor-not-live";
   readonly runtimeCacheState?: RuntimeCacheState;
   readonly runtimeCacheStateNote?: "stale" | "pid-mismatch" | "supervisor-not-live";
+  readonly approvalCount: number;
+  readonly recentDeliveryErrors: readonly DeliveryErrorRecord[];
+  readonly channels: LoadedRuntimeConfig["channels"];
 };
 
 export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): CommandResultViewModel {
@@ -560,6 +568,41 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
         ilEntries.push(kv("Not yet acquired", ilh.missingLocks.join(", ")));
       }
       blocks.push(buildKeyValueBlockViewModel({ title: "Identity Locks", entries: ilEntries }));
+    }
+  }
+
+  // Delivery health check
+  if (data.recentDeliveryErrors.length >= 3) {
+    warnings.push(buildWarningErrorViewModel({
+      severity: "warn",
+      title: "Delivery",
+      message: `${data.recentDeliveryErrors.length} recent delivery errors (last 5 records)`,
+    }));
+  }
+
+  // Approvals accumulation info
+  if (data.approvalCount >= 20) {
+    warnings.push(buildWarningErrorViewModel({
+      severity: "info",
+      title: "Approvals",
+      message: `${data.approvalCount} granted approvals accumulated`,
+    }));
+  }
+
+  // Busy policy note
+  const channelEntries: [string, LoadedRuntimeConfig["channels"]["telegram"]][] = [
+    ["telegram", data.channels.telegram],
+    ["discord", data.channels.discord],
+    ["email", data.channels.email],
+    ["whatsapp", data.channels.whatsapp],
+  ];
+  for (const [name, channel] of channelEntries) {
+    if (channel.enabled && (channel.queueDepth ?? 3) > 5) {
+      warnings.push(buildWarningErrorViewModel({
+        severity: "info",
+        title: "Channels",
+        message: `${name} queue depth is ${channel.queueDepth ?? 3} (potential memory pressure)`,
+      }));
     }
   }
 

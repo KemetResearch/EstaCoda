@@ -20,6 +20,7 @@ function baseStatusData(): GatewayStatusData {
     recentDeliveryErrors: [],
     surfacePointers: [],
     approvalCount: 0,
+    approvalPolicy: "adaptive",
     missingConfig: [],
     identityLocks: [],
   };
@@ -75,6 +76,9 @@ function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"], cacheN
     identityLockHealth: { staleLocks: [], duplicateHashes: [], missingLocks: [] },
     runtimeStateNote: note,
     runtimeCacheStateNote: cacheNote,
+    approvalCount: 0,
+    recentDeliveryErrors: [],
+    channels: baseStatusData().channels,
   };
 }
 
@@ -212,6 +216,43 @@ describe("buildGatewayDiagnoseViewModel", () => {
     const vm = buildGatewayDiagnoseViewModel(data);
     const rendered = renderPlain(vm);
     expect(rendered).toContain("[WARN] Runtime Cache: runtime-cache-state exists but supervisor is not live");
+  });
+
+  it("warns when recent delivery errors >= 3", () => {
+    const data: GatewayDiagnoseData = {
+      ...baseDiagnoseData(),
+      recentDeliveryErrors: [
+        { timestamp: "2024-01-01T00:00:00Z", target: "telegram:123", error: "fail", retryCount: 0 },
+        { timestamp: "2024-01-01T00:01:00Z", target: "telegram:123", error: "fail", retryCount: 0 },
+        { timestamp: "2024-01-01T00:02:00Z", target: "telegram:123", error: "fail", retryCount: 0 },
+      ],
+    };
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("[WARN] Delivery: 3 recent delivery errors (last 5 records)");
+  });
+
+  it("shows info note when granted approvals >= 20", () => {
+    const data: GatewayDiagnoseData = {
+      ...baseDiagnoseData(),
+      approvalCount: 20,
+    };
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("[INFO] Approvals: 20 granted approvals accumulated");
+  });
+
+  it("shows info note when enabled channel queueDepth > 5", () => {
+    const data: GatewayDiagnoseData = {
+      ...baseDiagnoseData(),
+      channels: {
+        ...baseDiagnoseData().channels,
+        telegram: { ...baseDiagnoseData().channels.telegram, enabled: true, queueDepth: 7 },
+      },
+    };
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("[INFO] Channels: telegram queue depth is 7 (potential memory pressure)");
   });
 });
 

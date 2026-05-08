@@ -139,6 +139,7 @@ export async function runGatewayStatus(
     recentDeliveryErrors,
     surfacePointers,
     approvalCount: allApprovals.length,
+    approvalPolicy: config.security.approvalMode,
     missingConfig,
     supervisor:
       state !== undefined
@@ -210,6 +211,12 @@ export async function runGatewayDiagnose(
           ? "supervisor-not-live"
           : undefined;
 
+  const deliveryRouter = new DeliveryRouter({ homeDir });
+  const recentDeliveryErrors = await deliveryRouter.getRecentErrors(5);
+
+  const approvalStore = new ChannelApprovalStore({ path: join(stateRoot, "channel-approvals.json") });
+  const allApprovals = await approvalStore.listAll();
+
   const data: GatewayDiagnoseData = {
     telegram: tgDiag,
     discord: config.channels.discord,
@@ -229,6 +236,9 @@ export async function runGatewayDiagnose(
     runtimeStateNote,
     runtimeCacheState: rawRuntimeCacheState ?? undefined,
     runtimeCacheStateNote,
+    approvalCount: allApprovals.length,
+    recentDeliveryErrors,
+    channels: config.channels,
   };
 
   const viewModel = buildGatewayDiagnoseViewModel(data);
