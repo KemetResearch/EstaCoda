@@ -15,6 +15,7 @@ import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import type { DeliveryErrorRecord } from "../channels/delivery-router.js";
 import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
+import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
@@ -67,6 +68,7 @@ export type GatewayStatusData = {
   readonly supervisor?: SupervisorSnapshot;
   readonly identityLocks: readonly IdentityLockStatus[];
   readonly runtimeState?: PersistedRuntimeState;
+  readonly runtimeCacheState?: RuntimeCacheState;
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -77,9 +79,17 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
 
   const identityLocksBlock = buildIdentityLocksBlock(data.identityLocks);
   const adapterRuntimeBlock = buildAdapterRuntimeBlock(data.runtimeState);
+  const runtimeCacheBlock = buildRuntimeCacheBlock(data.runtimeCacheState);
+  const activeTurnsBlock = buildActiveTurnsBlock(data.runtimeCacheState);
+  const suspendedSessionsBlock = buildSuspendedSessionsBlock(data.runtimeCacheState);
+  const stuckTurnHistoryBlock = buildStuckTurnHistoryBlock(data.runtimeCacheState);
   const blocks: ViewModel[] = [
     buildSupervisorBlock(data.supervisor),
     ...(adapterRuntimeBlock ? [adapterRuntimeBlock] : []),
+    ...(runtimeCacheBlock ? [runtimeCacheBlock] : []),
+    ...(activeTurnsBlock ? [activeTurnsBlock] : []),
+    ...(suspendedSessionsBlock ? [suspendedSessionsBlock] : []),
+    ...(stuckTurnHistoryBlock ? [stuckTurnHistoryBlock] : []),
     ...(identityLocksBlock ? [identityLocksBlock] : []),
     buildKeyValueBlockViewModel({
       title: "Process",
@@ -303,6 +313,8 @@ export type GatewayDiagnoseData = {
   };
   readonly runtimeState?: PersistedRuntimeState;
   readonly runtimeStateNote?: "stale" | "pid-mismatch" | "supervisor-not-live";
+  readonly runtimeCacheState?: RuntimeCacheState;
+  readonly runtimeCacheStateNote?: "stale" | "pid-mismatch" | "supervisor-not-live";
 };
 
 export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): CommandResultViewModel {
@@ -346,6 +358,46 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
       title: "Adapter Runtime",
       message: noteMessages[data.runtimeStateNote] ?? `runtime state note: ${data.runtimeStateNote}`,
     }));
+  }
+
+  // Runtime cache state notes
+  if (data.runtimeCacheStateNote !== undefined) {
+    const cacheNoteMessages: Record<string, string> = {
+      stale: "runtime-cache-state is stale (supervisor may have crashed)",
+      "pid-mismatch": "runtime-cache-state PID does not match current supervisor PID",
+      "supervisor-not-live": "runtime-cache-state exists but supervisor is not live",
+    };
+    warnings.push(buildWarningErrorViewModel({
+      severity: "warn",
+      title: "Runtime Cache",
+      message: cacheNoteMessages[data.runtimeCacheStateNote] ?? `runtime-cache-state note: ${data.runtimeCacheStateNote}`,
+    }));
+  }
+
+  // Runtime cache blocks in diagnose (even when stale)
+  if (data.runtimeCacheState !== undefined) {
+    const cacheBlock = buildRuntimeCacheBlock(data.runtimeCacheState);
+    const turnsBlock = buildActiveTurnsBlock(data.runtimeCacheState);
+    const suspendedBlock = buildSuspendedSessionsBlock(data.runtimeCacheState);
+    const stuckBlock = buildStuckTurnHistoryBlock(data.runtimeCacheState);
+    if (cacheBlock) blocks.push(cacheBlock);
+    if (turnsBlock) blocks.push(turnsBlock);
+    if (suspendedBlock) {
+      blocks.push(suspendedBlock);
+      warnings.push(buildWarningErrorViewModel({
+        severity: "warn",
+        title: "Runtime Cache",
+        message: `${data.runtimeCacheState.suspendedSummary.length} suspended session(s) present`,
+      }));
+    }
+    if (stuckBlock) {
+      blocks.push(stuckBlock);
+      warnings.push(buildWarningErrorViewModel({
+        severity: "warn",
+        title: "Runtime Cache",
+        message: `${data.runtimeCacheState.stuckTurnHistory.length} stuck turn(s) in history`,
+      }));
+    }
   }
 
   // Telegram
@@ -737,5 +789,65 @@ function buildCapabilitiesTable(capabilities: readonly AdapterCapability[]): Vie
       experimental: c.experimental ? "yes" : "no",
       implementationStatus: c.implementationStatus,
     })),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Runtime Cache Blocks
+// ─────────────────────────────────────────────────────────────────
+
+function buildRuntimeCacheBlock(state: RuntimeCacheState | undefined): ViewModel | undefined {
+  if (state === undefined) return undefined;
+  const s = state.cacheStats;
+  return buildKeyValueBlockViewModel({
+    title: "Runtime Cache",
+    entries: [
+      kv("Entries", s.totalEntries),
+      kv("Active borrows", s.activeBorrows),
+      kv("Suspended", s.suspendedEntries),
+      kv("Created", s.totalCreated),
+      kv("Reused", s.totalReused),
+      kv("Disposed", s.totalDisposed),
+      kv("Invalidated", s.totalInvalidated),
+    ],
+  });
+}
+
+function buildActiveTurnsBlock(state: RuntimeCacheState | undefined): ViewModel | undefined {
+  if (state === undefined) return undefined;
+  const s = state.registryStats;
+  return buildKeyValueBlockViewModel({
+    title: "Active Turns",
+    entries: [
+      kv("Active turns", s.activeTurnCount),
+      kv("Started", s.totalStarted),
+      kv("Ended", s.totalEnded),
+      kv("Aborted", s.totalAborted),
+      kv("Stuck turns", s.stuckTurnCount),
+      kv("Repeat stuck", s.repeatStuckCount),
+    ],
+  });
+}
+
+function buildSuspendedSessionsBlock(state: RuntimeCacheState | undefined): ViewModel | undefined {
+  if (state === undefined) return undefined;
+  if (state.suspendedSummary.length === 0) return undefined;
+  return buildListViewModel({
+    title: "Suspended Sessions",
+    items: state.suspendedSummary.map((e) =>
+      listItem(`${e.sessionId} — ${e.reason} at ${e.suspendedAt}`)
+    ),
+  });
+}
+
+function buildStuckTurnHistoryBlock(state: RuntimeCacheState | undefined): ViewModel | undefined {
+  if (state === undefined) return undefined;
+  if (state.stuckTurnHistory.length === 0) return undefined;
+  return buildListViewModel({
+    title: "Stuck Turn History",
+    items: state.stuckTurnHistory.map((t) => {
+      const abortLabel = t.wasAborted ? " (aborted)" : "";
+      return listItem(`${t.turnId} — ${t.durationMs}ms${abortLabel}`);
+    }),
   });
 }

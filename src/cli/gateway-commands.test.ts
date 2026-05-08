@@ -20,6 +20,38 @@ import { writeGatewayState, removeGatewayState } from "../gateway/supervisor-sta
 import { acquireGatewayLock, releaseGatewayLock } from "../gateway/gateway-lock.js";
 import { stopGateway } from "../gateway/supervisor-lifecycle.js";
 import { acquireAdapterIdentityLock, listAdapterIdentityLocks } from "../gateway/identity-lock.js";
+import { writeRuntimeCacheState, runtimeCacheStatePath } from "../gateway/runtime-cache-state.js";
+import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
+
+function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
+  return {
+    version: 1,
+    writtenAt: new Date().toISOString(),
+    supervisorPid: process.pid,
+    supervisorStartedAt: new Date().toISOString(),
+    cacheStats: {
+      totalEntries: 2,
+      activeBorrows: 1,
+      suspendedEntries: 0,
+      totalCreated: 5,
+      totalReused: 3,
+      totalDisposed: 2,
+      totalInvalidated: 0,
+    },
+    suspendedSummary: [],
+    registryStats: {
+      activeTurnCount: 1,
+      totalStarted: 10,
+      totalEnded: 9,
+      totalAborted: 0,
+      stuckTurnCount: 0,
+      repeatStuckCount: 0,
+    },
+    stuckTurnHistory: [],
+    fingerprintHash: "abc123def4567890",
+    ...overrides,
+  };
+}
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
@@ -212,6 +244,50 @@ describe("gateway commands", () => {
       expect(result.output).toContain("stale");
       expect(result.output).toContain("99999");
     });
+
+    it("shows Runtime Cache and Active Turns blocks when state is trustworthy", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState());
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Runtime Cache");
+      expect(result.output).toContain("Active Turns");
+      expect(result.output).toContain("Entries:");
+      expect(result.output).toContain("Active turns:");
+    });
+
+    it("omits runtime-cache blocks when state is stale", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      const staleState = fakeRuntimeCacheState({ writtenAt: new Date(Date.now() - 300_000).toISOString() });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), staleState);
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).not.toContain("Runtime Cache");
+      expect(result.output).not.toContain("Active Turns");
+    });
+
+    it("omits runtime-cache blocks when PID mismatches", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      const mismatchedState = fakeRuntimeCacheState({ supervisorPid: 99999 });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), mismatchedState);
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).not.toContain("Runtime Cache");
+      expect(result.output).not.toContain("Active Turns");
+    });
+
+    it("omits runtime-cache blocks when supervisor is not live", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState({ supervisorPid: 99999 }));
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).not.toContain("Runtime Cache");
+      expect(result.output).not.toContain("Active Turns");
+    });
   });
 
   describe("runGatewayDiagnose", () => {
@@ -287,6 +363,49 @@ describe("gateway commands", () => {
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).not.toContain(rawToken);
       expect(result.output).not.toContain("super_secret");
+    });
+
+    it("reports stale runtime-cache-state warning", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      const staleState = fakeRuntimeCacheState({ writtenAt: new Date(Date.now() - 300_000).toISOString() });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), staleState);
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Runtime Cache");
+      expect(result.output).toContain("stale");
+      expect(result.output).toContain("runtime-cache-state is stale");
+    });
+
+    it("reports PID-mismatch runtime-cache-state warning", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      const mismatchedState = fakeRuntimeCacheState({ supervisorPid: 99999 });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), mismatchedState);
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Runtime Cache");
+      expect(result.output).toContain("runtime-cache-state PID does not match");
+    });
+
+    it("reports supervisor-not-live runtime-cache-state warning", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState({ supervisorPid: 99999 }));
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Runtime Cache");
+      expect(result.output).toContain("runtime-cache-state exists but supervisor is not live");
+    });
+
+    it("reports suspended sessions warning in diagnose", async () => {
+      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      const state = fakeRuntimeCacheState({
+        suspendedSummary: [{ sessionId: "sess-1", reason: "stuck-loop", suspendedAt: new Date().toISOString() }],
+      });
+      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), state);
+
+      const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Suspended Sessions");
+      expect(result.output).toContain("sess-1");
+      expect(result.output).toContain("1 suspended session(s) present");
     });
   });
 

@@ -40,6 +40,13 @@ import {
 import type { IdentityLockStatus } from "./gateway-view-models.js";
 import { readAdapterRuntimeState, isRuntimeStateFresh, isRuntimeStatePidMatch } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
+import {
+  runtimeCacheStatePath,
+  readRuntimeCacheState,
+  isRuntimeCacheStateFresh,
+  isRuntimeCacheStatePidMatch,
+  type RuntimeCacheState,
+} from "../gateway/runtime-cache-state.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -114,6 +121,13 @@ export async function runGatewayStatus(
     && isRuntimeStatePidMatch(runtimeState, pidContent?.pid ?? -1)
     && supervisorLive;
 
+  // Trust model: only show runtime-cache-state in status when trustworthy
+  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(homeDir));
+  const runtimeCacheStateTrustworthy = rawRuntimeCacheState !== undefined
+    && isRuntimeCacheStateFresh(rawRuntimeCacheState)
+    && isRuntimeCacheStatePidMatch(rawRuntimeCacheState, pidContent?.pid ?? -1)
+    && supervisorLive;
+
   const data: GatewayStatusData = {
     channels: config.channels,
     cronJobs: cronJobs.map((j) => ({ status: j.status, name: j.name, nextRunAt: j.nextRunAt })),
@@ -139,6 +153,7 @@ export async function runGatewayStatus(
           : undefined,
     identityLocks,
     runtimeState: runtimeStateValid ? runtimeState : undefined,
+    runtimeCacheState: runtimeCacheStateTrustworthy ? rawRuntimeCacheState : undefined,
   };
 
   const viewModel = buildGatewayStatusViewModel(data);
@@ -179,6 +194,18 @@ export async function runGatewayDiagnose(
           ? "supervisor-not-live"
           : undefined;
 
+  // Diagnose always reads runtime-cache-state; may display with warnings
+  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(homeDir));
+  const runtimeCacheStateNote = rawRuntimeCacheState === undefined
+    ? undefined
+    : !isRuntimeCacheStateFresh(rawRuntimeCacheState)
+      ? "stale"
+      : !isRuntimeCacheStatePidMatch(rawRuntimeCacheState, pidContent?.pid ?? -1)
+        ? "pid-mismatch"
+        : !supervisorLive
+          ? "supervisor-not-live"
+          : undefined;
+
   const data: GatewayDiagnoseData = {
     telegram: tgDiag,
     discord: config.channels.discord,
@@ -196,6 +223,8 @@ export async function runGatewayDiagnose(
     identityLockHealth: await buildIdentityLockHealth(homeDir, config.channels),
     runtimeState: runtimeState ?? undefined,
     runtimeStateNote,
+    runtimeCacheState: rawRuntimeCacheState ?? undefined,
+    runtimeCacheStateNote,
   };
 
   const viewModel = buildGatewayDiagnoseViewModel(data);

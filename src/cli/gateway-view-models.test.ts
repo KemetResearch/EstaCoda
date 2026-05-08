@@ -25,7 +25,7 @@ function baseStatusData(): GatewayStatusData {
   };
 }
 
-function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"]): GatewayDiagnoseData {
+function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"], cacheNote?: GatewayDiagnoseData["runtimeCacheStateNote"]): GatewayDiagnoseData {
   return {
     telegram: {
       adapter: "telegram",
@@ -74,6 +74,7 @@ function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"]): Gatew
     supervisor: { pidHealthy: true, lockHealthy: true },
     identityLockHealth: { staleLocks: [], duplicateHashes: [], missingLocks: [] },
     runtimeStateNote: note,
+    runtimeCacheStateNote: cacheNote,
   };
 }
 
@@ -122,6 +123,58 @@ describe("buildGatewayStatusViewModel", () => {
     expect(rendered).toContain("retry 2/5 at 2024-01-01T00:02:00.000Z");
     expect(rendered).toContain("network timeout (x2)");
   });
+
+  it("renders with runtime cache blocks when state is present", () => {
+    const data: GatewayStatusData = {
+      ...baseStatusData(),
+      runtimeCacheState: {
+        version: 1,
+        writtenAt: new Date().toISOString(),
+        supervisorPid: process.pid,
+        supervisorStartedAt: new Date().toISOString(),
+        cacheStats: {
+          totalEntries: 3,
+          activeBorrows: 1,
+          suspendedEntries: 1,
+          totalCreated: 10,
+          totalReused: 5,
+          totalDisposed: 2,
+          totalInvalidated: 0,
+        },
+        suspendedSummary: [{ sessionId: "sess-1", reason: "stuck-loop", suspendedAt: new Date().toISOString() }],
+        registryStats: {
+          activeTurnCount: 2,
+          totalStarted: 20,
+          totalEnded: 18,
+          totalAborted: 0,
+          stuckTurnCount: 1,
+          repeatStuckCount: 0,
+        },
+        stuckTurnHistory: [{ turnId: "turn-1", keyHash: "abc", startedAt: "2024-01-01T00:00:00Z", endedAt: "2024-01-01T00:01:00Z", durationMs: 60000, wasAborted: true }],
+        fingerprintHash: "abc123",
+      },
+    };
+    const vm = buildGatewayStatusViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("Runtime Cache");
+    expect(rendered).toContain("Entries:");
+    expect(rendered).toContain("Active Turns");
+    expect(rendered).toContain("Active turns:");
+    expect(rendered).toContain("Suspended Sessions");
+    expect(rendered).toContain("sess-1");
+    expect(rendered).toContain("Stuck Turn History");
+    expect(rendered).toContain("turn-1");
+  });
+
+  it("omits runtime cache blocks when state is absent", () => {
+    const data = baseStatusData();
+    const vm = buildGatewayStatusViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).not.toContain("Runtime Cache");
+    expect(rendered).not.toContain("Active Turns");
+    expect(rendered).not.toContain("Suspended Sessions");
+    expect(rendered).not.toContain("Stuck Turn History");
+  });
 });
 
 describe("buildGatewayDiagnoseViewModel", () => {
@@ -140,11 +193,25 @@ describe("buildGatewayDiagnoseViewModel", () => {
     expect(rendered).toContain("[WARN] Adapter Runtime: runtime state is stale (supervisor may have crashed)");
   });
 
-  it("renders pid-mismatch runtime state warning", () => {
-    const data = baseDiagnoseData("pid-mismatch");
+  it("renders stale runtime-cache-state warning", () => {
+    const data = baseDiagnoseData(undefined, "stale");
     const vm = buildGatewayDiagnoseViewModel(data);
     const rendered = renderPlain(vm);
-    expect(rendered).toContain("[WARN] Adapter Runtime: runtime state PID does not match current supervisor PID");
+    expect(rendered).toContain("[WARN] Runtime Cache: runtime-cache-state is stale (supervisor may have crashed)");
+  });
+
+  it("renders pid-mismatch runtime-cache-state warning", () => {
+    const data = baseDiagnoseData(undefined, "pid-mismatch");
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("[WARN] Runtime Cache: runtime-cache-state PID does not match current supervisor PID");
+  });
+
+  it("renders supervisor-not-live runtime-cache-state warning", () => {
+    const data = baseDiagnoseData(undefined, "supervisor-not-live");
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("[WARN] Runtime Cache: runtime-cache-state exists but supervisor is not live");
   });
 });
 
