@@ -19,6 +19,7 @@ import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
+import { HookRegistry } from "./hook-registry.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -1221,36 +1222,53 @@ describe("supervisor 5E internals", () => {
   });
 
   describe("HookRegistry injection", () => {
-    it("constructs one HookRegistry and injects it into RuntimeCache and ChannelGateway", async () => {
-      const tmpDir = await makeTempDir();
-      const stateDir = join(tmpDir, "state");
-      const sessionDir = join(tmpDir, "sessions");
-      await mkdir(stateDir, { recursive: true });
-      await mkdir(sessionDir, { recursive: true });
+    it("constructs one HookRegistry and injects it into RuntimeCache, ChannelGateway, and adapter wrappers", async () => {
+      const capturedEmitCalls: Array<{ name: string; payload: unknown }> = [];
+      const originalEmit = HookRegistry.prototype.emit;
+      HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+        capturedEmitCalls.push({ name, payload });
+        return originalEmit.call(this, name, payload);
+      };
 
-      let receivedCacheHookRegistry: unknown;
-      let receivedGatewayHookRegistry: unknown;
+      try {
+        const tmpDir = await makeTempDir();
+        const stateDir = join(tmpDir, "state");
+        const sessionDir = join(tmpDir, "sessions");
+        await mkdir(stateDir, { recursive: true });
+        await mkdir(sessionDir, { recursive: true });
 
-      const result = await runGatewaySupervisor({
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        userConfigPath: join(tmpDir, "estacoda.yaml"),
-        projectConfigPath: join(tmpDir, "estacoda.project.yaml"),
-        factories: {
-          createChannelGateway: (opts) => {
-            receivedGatewayHookRegistry = (opts as { hookRegistry?: unknown }).hookRegistry;
-            return fakeChannelGateway() as any;
+        let receivedGatewayHookRegistry: unknown;
+
+        const result = await runGatewaySupervisor({
+          workspaceRoot: tmpDir,
+          homeDir: tmpDir,
+          userConfigPath: join(tmpDir, "estacoda.yaml"),
+          projectConfigPath: join(tmpDir, "estacoda.project.yaml"),
+          factories: {
+            createChannelGateway: (opts) => {
+              receivedGatewayHookRegistry = (opts as { hookRegistry?: unknown }).hookRegistry;
+              return fakeChannelGateway() as any;
+            },
+            createTelegramAdapter: () => fakeAdapter("telegram") as any,
           },
-        },
-        once: true,
-      });
+          once: true,
+        });
 
-      // The supervisor constructs RuntimeCache internally; we can verify
-      // the gateway received a HookRegistry.
-      expect(receivedGatewayHookRegistry).toBeDefined();
-      expect(result.ok).toBe(true);
+        // The supervisor constructs RuntimeCache internally; we can verify
+        // the gateway received a HookRegistry.
+        expect(receivedGatewayHookRegistry).toBeDefined();
+        expect(result.ok).toBe(true);
 
-      await rm(tmpDir, { recursive: true, force: true });
+        // Verify adapter wrappers received the same HookRegistry by checking
+        // that adapter:start was emitted through it.
+        const adapterStartEvents = capturedEmitCalls.filter((e) => e.name === "adapter:start");
+        expect(adapterStartEvents.length).toBeGreaterThan(0);
+        expect((adapterStartEvents[0].payload as any).kind).toBe("telegram");
+
+        await rm(tmpDir, { recursive: true, force: true });
+      } finally {
+        HookRegistry.prototype.emit = originalEmit;
+      }
     });
   });
 });

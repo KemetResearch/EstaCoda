@@ -651,7 +651,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           updatedAt: new Date().toISOString(),
           adapters: wrappers.map((w) => w.getState()),
         }).catch(() => {});
-      });
+      }, hookRegistry);
     });
 
     async function writeRuntimeState(): Promise<void> {

@@ -1,5 +1,7 @@
 import type { ChannelAdapter, ChannelKind, ChannelDelivery, ChannelMessage } from "../contracts/channel.js";
 import type { AdapterRuntimeState } from "./adapter-runtime-state.js";
+import type { GatewayHookEventName, GatewayHookPayloadByName } from "./hook-registry.js";
+import { HookRegistry, sanitizeHookError } from "./hook-registry.js";
 
 export const DEFAULT_ADAPTER_BACKOFF = {
   baseDelayMs: 1000,
@@ -31,11 +33,13 @@ export class AdapterResilienceSupervisor {
   #state: AdapterRuntimeState;
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #onStateChange: (() => void) | undefined;
+  #hookRegistry?: HookRegistry;
 
   constructor(
     adapter: ChannelAdapter,
     options?: BackoffOptions,
-    onStateChange?: () => void
+    onStateChange?: () => void,
+    hookRegistry?: HookRegistry,
   ) {
     this.rawAdapter = adapter;
     this.#options = {
@@ -46,6 +50,7 @@ export class AdapterResilienceSupervisor {
       randomFn: options?.randomFn ?? Math.random,
     };
     this.#onStateChange = onStateChange;
+    this.#hookRegistry = hookRegistry;
     this.#state = {
       kind: adapter.kind,
       state: "starting",
@@ -105,10 +110,10 @@ export class AdapterResilienceSupervisor {
       this.#state.pendingOperation = undefined;
       this.#state.lastError = undefined;
       this.#state.retry = undefined;
+      this.#emitHook("adapter:start", { kind: this.kind, state: "healthy" });
       this.#emitChange();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.#handleFailure("start", message);
+      this.#handleFailure("start", err);
     }
   }
 
@@ -117,12 +122,21 @@ export class AdapterResilienceSupervisor {
     this.#state.stoppedAt = new Date().toISOString();
     this.#state.pendingOperation = undefined;
     this.#state.retry = undefined;
+    this.#emitHook("adapter:stop", { kind: this.kind, state: "stopped" });
     this.#emitChange();
 
     try {
       await this.rawAdapter.stop?.();
-    } catch {
-      /* ignore stop errors */
+    } catch (err) {
+      const { errorClass, errorMessage } = sanitizeHookError(err);
+      this.#emitHook("adapter:error", {
+        kind: this.kind,
+        operation: "stop",
+        state: "stopped",
+        retryCount: 0,
+        errorClass,
+        errorMessage,
+      });
     }
   }
 
@@ -169,18 +183,19 @@ export class AdapterResilienceSupervisor {
         this.#state.pendingOperation = undefined;
         this.#state.lastError = undefined;
         this.#state.retry = undefined;
+        this.#emitHook("adapter:recovered", { kind: this.kind, operation: "poll", state: "healthy" });
       }
       this.#emitChange();
       return typeof count === "number" ? count : 0;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       this.#state.pollsFailed += 1;
-      this.#handleFailure("poll", message);
+      this.#handleFailure("poll", err);
       return 0;
     }
   }
 
-  #handleFailure(operation: "start" | "poll", message: string): void {
+  #handleFailure(operation: "start" | "poll", err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
     const now = new Date().toISOString();
     const isRetry = this.#state.lastError !== undefined && this.#state.pendingOperation === operation;
     const consecutiveCount = isRetry
@@ -194,13 +209,15 @@ export class AdapterResilienceSupervisor {
     };
     this.#state.pendingOperation = operation;
 
+    let attempt: number | undefined;
+
     if (!isRetry) {
       // First failure for this operation
       this.#state.state = "degraded";
       this.#state.retry = undefined;
     } else {
       // Subsequent failure - apply backoff
-      const attempt = this.#state.retry !== undefined
+      attempt = this.#state.retry !== undefined
         ? this.#state.retry.attempt + 1
         : 2;
       if (attempt > this.#options.maxAttempts) {
@@ -218,6 +235,36 @@ export class AdapterResilienceSupervisor {
       }
     }
 
+    const { errorClass, errorMessage } = sanitizeHookError(err);
+
+    // 2. Emit adapter:error after state fields updated
+    this.#emitHook("adapter:error", {
+      kind: this.kind,
+      operation,
+      state: this.#state.state,
+      retryCount: consecutiveCount,
+      errorClass,
+      errorMessage,
+    });
+
+    // 3. Emit adapter:degraded or adapter:retry if applicable
+    if (!isRetry) {
+      this.#emitHook("adapter:degraded", {
+        kind: this.kind,
+        operation,
+        state: "degraded",
+        retryCount: 1,
+      });
+    } else if (attempt !== undefined && attempt <= this.#options.maxAttempts) {
+      this.#emitHook("adapter:retry", {
+        kind: this.kind,
+        operation,
+        retryCount: attempt,
+        nextRetryAt: this.#state.retry!.nextRetryAt,
+      });
+    }
+
+    // 4. Call emitChange
     this.#emitChange();
   }
 
@@ -231,10 +278,10 @@ export class AdapterResilienceSupervisor {
         this.#state.pendingOperation = undefined;
         this.#state.lastError = undefined;
         this.#state.retry = undefined;
+        this.#emitHook("adapter:recovered", { kind: this.kind, operation: "start", state: "healthy" });
         this.#emitChange();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.#handleFailure("start", message);
+        this.#handleFailure("start", err);
       }
     } else {
       try {
@@ -245,16 +292,30 @@ export class AdapterResilienceSupervisor {
         this.#state.pendingOperation = undefined;
         this.#state.lastError = undefined;
         this.#state.retry = undefined;
+        this.#emitHook("adapter:recovered", { kind: this.kind, operation: "poll", state: "healthy" });
         this.#emitChange();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
         this.#state.pollsFailed += 1;
-        this.#handleFailure("poll", message);
+        this.#handleFailure("poll", err);
       }
     }
   }
 
   #emitChange(): void {
     this.#onStateChange?.();
+  }
+
+  #emitHook<N extends GatewayHookEventName>(
+    name: N,
+    payload: GatewayHookPayloadByName[N],
+  ): void {
+    try {
+      const p = this.#hookRegistry?.emit(name, payload);
+      if (p) {
+        p.catch(() => {});
+      }
+    } catch {
+      // HookRegistry.emit itself threw synchronously — ignore
+    }
   }
 }

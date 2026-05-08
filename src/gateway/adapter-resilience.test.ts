@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { AdapterResilienceSupervisor, DEFAULT_ADAPTER_BACKOFF, computeBackoffDelay } from "./adapter-resilience.js";
 import type { ChannelAdapter } from "../contracts/channel.js";
+import { HookRegistry } from "./hook-registry.js";
 
 function fakeAdapter(overrides?: Partial<ChannelAdapter> & { pollThrows?: boolean; startThrows?: boolean }): ChannelAdapter {
   return {
@@ -361,5 +362,246 @@ describe("AdapterResilienceSupervisor", () => {
     const state = wrapper.getState();
     expect(state.pollsTotal).toBe(1);
     expect(state.pollMessagesProcessed).toBe(7);
+  });
+});
+
+describe("AdapterResilienceSupervisor hook emissions", () => {
+  function createCapturingHookRegistry() {
+    const registry = new HookRegistry();
+    const events: Array<{ name: string; payload: unknown }> = [];
+    vi.spyOn(registry, "emit").mockImplementation(async (name: any, payload: any) => {
+      events.push({ name, payload });
+    });
+    return { registry, events };
+  }
+
+  it("emits adapter:start on successful initial start", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter(), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    const startEvent = events.find((e) => e.name === "adapter:start");
+    expect(startEvent).toBeDefined();
+    expect(startEvent!.payload).toEqual({ kind: "telegram", state: "healthy" });
+  });
+
+  it("does not emit adapter:recovered on initial start success", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter(), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeUndefined();
+  });
+
+  it("emits adapter:stop on stop", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter(), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.stop();
+    const stopEvent = events.find((e) => e.name === "adapter:stop");
+    expect(stopEvent).toBeDefined();
+    expect(stopEvent!.payload).toEqual({ kind: "telegram", state: "stopped" });
+  });
+
+  it("emits adapter:error with operation stop when raw stop throws", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const adapter = fakeAdapter({ stop: async () => { throw new Error("stop fail"); } });
+    const wrapper = new AdapterResilienceSupervisor(adapter, undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.stop();
+    const errorEvent = events.find((e) => e.name === "adapter:error");
+    expect(errorEvent).toBeDefined();
+    expect((errorEvent!.payload as any).operation).toBe("stop");
+    expect((errorEvent!.payload as any).state).toBe("stopped");
+    expect((errorEvent!.payload as any).retryCount).toBe(0);
+  });
+
+  it("raw stop failure does not throw to caller", async () => {
+    const adapter = fakeAdapter({ stop: async () => { throw new Error("stop fail"); } });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    await wrapper.start(async () => {});
+    await expect(wrapper.stop()).resolves.toBeUndefined();
+  });
+
+  it("emits adapter:error then adapter:degraded on first start failure in order", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    const names = events.map((e) => e.name);
+    expect(names).toEqual(["adapter:error", "adapter:degraded"]);
+    expect((events[0].payload as any).state).toBe("degraded");
+    expect((events[1].payload as any).state).toBe("degraded");
+  });
+
+  it("emits adapter:error then adapter:retry on retry-scheduled failure in order", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    events.length = 0;
+    await wrapper.tick();
+    const names = events.map((e) => e.name);
+    expect(names).toEqual(["adapter:error", "adapter:retry"]);
+    const retryPayload = events[1].payload as any;
+    expect(retryPayload.retryCount).toBe(2);
+    expect(retryPayload.nextRetryAt).toBeDefined();
+  });
+
+  it("max-attempt failure emits adapter:error and no adapter:retry", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(
+      fakeAdapter({ startThrows: true }),
+      { maxAttempts: 2 },
+      undefined,
+      registry,
+    );
+    await wrapper.start(async () => {});
+    await wrapper.tick();
+    // Clear and force past backoff
+    events.length = 0;
+    const s = wrapper.getState();
+    if (s.retry) {
+      const next = new Date(s.retry.nextRetryAt);
+      const original = Date.now;
+      globalThis.Date.now = () => next.getTime() + 1;
+      await wrapper.tick();
+      globalThis.Date.now = original;
+    }
+    const names = events.map((e) => e.name);
+    expect(names).toEqual(["adapter:error"]);
+    expect(wrapper.getState().state).toBe("failed");
+  });
+
+  it("emits adapter:recovered on retry start success via tick", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      start: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("start fail");
+        }
+      },
+    });
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(adapter, undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    expect(wrapper.getState().state).toBe("degraded");
+    await wrapper.tick();
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeDefined();
+    expect((recoveredEvent!.payload as any).operation).toBe("start");
+  });
+
+  it("does not emit adapter:start on retry success", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      start: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("start fail");
+        }
+      },
+    });
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(adapter, undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.tick();
+    const startEvent = events.find((e) => e.name === "adapter:start");
+    expect(startEvent).toBeUndefined();
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeDefined();
+  });
+
+  it("emits adapter:recovered on degraded direct poll success", async () => {
+    let throws = true;
+    const adapter = fakeAdapter({
+      pollOnce: async () => {
+        if (throws) {
+          throws = false;
+          throw new Error("poll fail");
+        }
+        return 5;
+      },
+    });
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(adapter, undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.poll();
+    events.length = 0;
+    const count = await wrapper.poll();
+    expect(count).toBe(5);
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeDefined();
+    expect((recoveredEvent!.payload as any).operation).toBe("poll");
+  });
+
+  it("emits adapter:recovered on retry-scheduled poll success via tick", async () => {
+    let failCount = 2;
+    const adapter = fakeAdapter({
+      pollOnce: async () => {
+        if (failCount > 0) {
+          failCount -= 1;
+          throw new Error("poll fail");
+        }
+        return 3;
+      },
+    });
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(adapter, undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.poll(); // healthy -> degraded
+    await wrapper.poll(); // degraded -> retry_scheduled
+    events.length = 0;
+    const s = wrapper.getState();
+    if (s.retry) {
+      const next = new Date(s.retry.nextRetryAt);
+      const original = Date.now;
+      globalThis.Date.now = () => next.getTime() + 1;
+      await wrapper.tick(); // tick retries poll -> healthy
+      globalThis.Date.now = original;
+    }
+    expect(wrapper.getState().state).toBe("healthy");
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeDefined();
+    expect((recoveredEvent!.payload as any).operation).toBe("poll");
+  });
+
+  it("does not emit adapter:recovered on healthy poll success", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ pollOnce: async () => 3 }), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    events.length = 0;
+    await wrapper.poll();
+    const recoveredEvent = events.find((e) => e.name === "adapter:recovered");
+    expect(recoveredEvent).toBeUndefined();
+  });
+
+  it("emits adapter:error on every consecutive failure", async () => {
+    const { registry, events } = createCapturingHookRegistry();
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await wrapper.tick();
+    const errorEvents = events.filter((e) => e.name === "adapter:error");
+    expect(errorEvents.length).toBe(2);
+    expect((errorEvents[0].payload as any).retryCount).toBe(1);
+    expect((errorEvents[1].payload as any).retryCount).toBe(2);
+  });
+
+  it("hook failures do not affect state transitions", async () => {
+    const registry = new HookRegistry();
+    vi.spyOn(registry, "emit").mockImplementation(() => {
+      throw new Error("hook boom");
+    });
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter({ startThrows: true }), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    expect(wrapper.getState().state).toBe("degraded");
+  });
+
+  it("hook failures during stop do not throw", async () => {
+    const registry = new HookRegistry();
+    vi.spyOn(registry, "emit").mockImplementation(() => {
+      throw new Error("hook boom");
+    });
+    const wrapper = new AdapterResilienceSupervisor(fakeAdapter(), undefined, undefined, registry);
+    await wrapper.start(async () => {});
+    await expect(wrapper.stop()).resolves.toBeUndefined();
   });
 });
