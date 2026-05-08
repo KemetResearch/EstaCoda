@@ -1,7 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runCliCommand } from "./cli.js";
+import * as supervisorModule from "../gateway/supervisor.js";
 
 describe("cli gateway start", () => {
+  let supervisorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
+      ok: true,
+      output: "Gateway started",
+      polls: 0,
+      processed: 0,
+    });
+  });
+
+  afterEach(() => {
+    supervisorSpy.mockRestore();
+  });
   it("rejects --telegram with deprecation error", async () => {
     const result = await runCliCommand({
       argv: ["gateway", "start", "--telegram"],
@@ -47,5 +62,26 @@ describe("cli gateway start", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("estacoda gateway start");
     expect(result.output).not.toContain("--telegram");
+    expect(result.output).toContain("estacoda gateway restart");
+    expect(result.output).toContain("estacoda gateway restart --graceful");
+  });
+
+  it("parses gateway restart subcommand", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "restart"],
+      workspaceRoot: "/tmp",
+    });
+    expect(result.handled).toBe(true);
+    // Will fail to start due to no config, but command is handled
+    expect(result.output).toContain("Gateway was not running");
+  });
+
+  it("parses gateway restart --graceful", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "restart", "--graceful"],
+      workspaceRoot: "/tmp",
+    });
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("Gateway was not running");
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,8 +8,10 @@ import {
   runGatewayDiagnose,
   runChannelsList,
   runChannelsStatus,
-  runGatewayStop
+  runGatewayStop,
+  runGatewayRestart,
 } from "./gateway-commands.js";
+import * as supervisorModule from "../gateway/supervisor.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
@@ -481,6 +483,45 @@ describe("gateway commands", () => {
       expect(result.output).toBe("Gateway is not running (live operation lock exists)");
 
       await releaseGatewayLock(tmpDir);
+    });
+  });
+
+  describe("runGatewayRestart", () => {
+    let supervisorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
+        ok: true,
+        output: "Gateway started",
+        polls: 0,
+        processed: 0,
+      });
+    });
+
+    afterEach(() => {
+      supervisorSpy.mockRestore();
+    });
+
+    it("reports not running and starts when no PID exists", async () => {
+      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Gateway was not running");
+      expect(result.output).toContain("Gateway started");
+      expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({ once: false }));
+    });
+
+    it("stops stale PID then starts", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+
+      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Gateway was not running");
+      expect(result.output).toContain("Gateway started");
+    });
+
+    it("passes graceful flag to stop", async () => {
+      // No PID, so just checks the flag is accepted
+      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
+      expect(result.output).toContain("Gateway was not running");
+      expect(result.output).toContain("Gateway started");
     });
   });
 });

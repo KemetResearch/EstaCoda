@@ -89,7 +89,8 @@ import {
   runGatewayDiagnose,
   runChannelsList,
   runChannelsStatus,
-  runGatewayStop
+  runGatewayStop,
+  runGatewayRestart,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -1954,6 +1955,14 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
+  if (subcommand === "restart") {
+    const result = await runGatewayRestart({
+      ...options,
+      graceful: hasFlag(rest, "--graceful"),
+    });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
   if (subcommand === "start") {
     const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
     const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
@@ -1998,6 +2007,8 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway diagnose",
       "  estacoda gateway stop",
       "  estacoda gateway stop --force",
+      "  estacoda gateway restart",
+      "  estacoda gateway restart --graceful",
       "  estacoda gateway start",
       "  estacoda gateway start --once",
     ].join("\n"),

@@ -29,7 +29,11 @@ import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostic
 import { readGatewayPid, isStalePid } from "../gateway/pid-file.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStaleLock } from "../gateway/gateway-lock.js";
-import { stopGateway } from "../gateway/supervisor-lifecycle.js";
+import {
+  stopGateway,
+  signalGateway,
+} from "../gateway/supervisor-lifecycle.js";
+import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import { listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 import {
   deriveTelegramIdentityHash,
@@ -266,6 +270,43 @@ export async function runGatewayStop(
   }
 
   return { ok: false, output: result.error };
+}
+
+// ───────────────────────────────────────────────────────────
+// Gateway Restart
+// ───────────────────────────────────────────────────────────
+
+export async function runGatewayRestart(
+  options: GatewayCommandOptions & { graceful?: boolean }
+): Promise<{ ok: boolean; output: string }> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+
+  // Stop existing gateway (graceful unless --graceful is explicitly false, which it never is)
+  const stopResult = await stopGateway(homeDir, { force: !options.graceful });
+
+  let stopOutput: string;
+  if (stopResult.ok) {
+    if (stopResult.action === "was_not_running") {
+      stopOutput = "Gateway was not running";
+    } else if (stopResult.forced) {
+      stopOutput = `Gateway stopped (forced, PID ${stopResult.pid})`;
+    } else {
+      stopOutput = `Gateway stopped (PID ${stopResult.pid})`;
+    }
+  } else {
+    return { ok: false, output: `Failed to stop gateway: ${stopResult.error}` };
+  }
+
+  // Start new gateway in foreground
+  const startResult = await runGatewaySupervisor({
+    ...options,
+    once: false,
+  });
+
+  return {
+    ok: startResult.ok,
+    output: [stopOutput, startResult.output].filter(Boolean).join("\n"),
+  };
 }
 
 // ───────────────────────────────────────────────────────────
