@@ -2,7 +2,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
-import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicy, ChannelKind } from "../contracts/channel.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
@@ -314,8 +314,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       let drained = false;
 
       while (Date.now() < deadline) {
-        const activeCount = state.activeTurnRegistry?.stats().activeTurnCount ?? 0;
-        if (activeCount === 0) {
+        const hasPending = state.channelGateway?.hasPendingWork() ?? false;
+        if (!hasPending) {
           drained = true;
           break;
         }
@@ -731,6 +731,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
+          busyPolicyResolver: (channelKind) => {
+            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
+              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
+              | undefined;
+            return {
+              busyPolicy: channelConfig?.busyPolicy ?? "reject",
+              queueDepth: channelConfig?.queueDepth ?? 3,
+            };
+          },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,
@@ -778,6 +787,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
+          busyPolicyResolver: (channelKind) => {
+            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
+              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
+              | undefined;
+            return {
+              busyPolicy: channelConfig?.busyPolicy ?? "reject",
+              queueDepth: channelConfig?.queueDepth ?? 3,
+            };
+          },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,

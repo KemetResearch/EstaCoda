@@ -39,6 +39,7 @@ export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
 export type ActivityLabelsLocale = "en" | "ar";
 export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
+export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral";
 export type ImageGenerationProvider = "fal" | "byteplus";
@@ -275,6 +276,8 @@ export type TelegramChannelConfig = {
   sessionIdleResetMinutes?: number;
   pollTimeoutSeconds?: number;
   maxAttachmentBytes?: number;
+  busyPolicy?: ChannelBusyPolicy;
+  queueDepth?: number;
   pairing?: {
     code?: string;
     createdAt?: string;
@@ -289,6 +292,8 @@ export type DiscordChannelConfig = {
   allowedGuilds?: string[];
   allowedChannels?: string[];
   freeResponseChannels?: string[];
+  busyPolicy?: ChannelBusyPolicy;
+  queueDepth?: number;
 };
 
 export type EmailChannelConfig = {
@@ -305,6 +310,8 @@ export type EmailChannelConfig = {
   allowAllUsers?: boolean;
   pollIntervalSeconds?: number;
   maxAttachmentBytes?: number;
+  busyPolicy?: ChannelBusyPolicy;
+  queueDepth?: number;
 };
 
 export type WhatsAppChannelConfig = {
@@ -314,6 +321,8 @@ export type WhatsAppChannelConfig = {
   allowedUsers?: string[];
   pairingMode?: "qr" | "code";
   pairingCodePhoneNumber?: string;
+  busyPolicy?: ChannelBusyPolicy;
+  queueDepth?: number;
 };
 
 export type LoadedRuntimeConfig = {
@@ -539,6 +548,7 @@ export async function loadRuntimeConfig(options: {
   const telegramMissing = telegram.enabled === true && telegram.botTokenEnv !== undefined && process.env[telegram.botTokenEnv] === undefined
     ? [telegram.botTokenEnv]
     : [];
+  const warnedInvalidBusyPolicies = new Set<string>();
 
   return {
     config,
@@ -583,22 +593,30 @@ export async function loadRuntimeConfig(options: {
       telegram: {
         ...telegram,
         ready: telegram.enabled === true && telegram.botTokenEnv !== undefined && telegramMissing.length === 0,
-        missing: telegramMissing.length === 0 ? undefined : telegramMissing
+        missing: telegramMissing.length === 0 ? undefined : telegramMissing,
+        busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(telegram.queueDepth)
       },
       discord: {
         ...(config.channels?.discord ?? {}),
         ready: false,
-        missing: []
+        missing: [],
+        busyPolicy: normalizeChannelBusyPolicy(config.channels?.discord?.busyPolicy, "discord", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(config.channels?.discord?.queueDepth)
       },
       email: {
         ...(config.channels?.email ?? {}),
         ready: false,
-        missing: []
+        missing: [],
+        busyPolicy: normalizeChannelBusyPolicy(config.channels?.email?.busyPolicy, "email", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(config.channels?.email?.queueDepth)
       },
       whatsapp: {
         ...(config.channels?.whatsapp ?? {}),
         ready: false,
-        missing: []
+        missing: [],
+        busyPolicy: normalizeChannelBusyPolicy(config.channels?.whatsapp?.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(config.channels?.whatsapp?.queueDepth)
       }
     }
   };
@@ -2119,4 +2137,24 @@ function normalizePairingCode(code: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function normalizeChannelBusyPolicy(
+  value: unknown,
+  channelName: string,
+  warned: Set<string>
+): ChannelBusyPolicy {
+  if (value === "reject" || value === "queue" || value === "interrupt") {
+    return value;
+  }
+  if (value !== undefined && !warned.has(`${channelName}:${String(value)}`)) {
+    warned.add(`${channelName}:${String(value)}`);
+    console.warn(`Invalid busyPolicy "${String(value)}" for ${channelName}; falling back to "reject"`);
+  }
+  return "reject";
+}
+
+function normalizeQueueDepth(value: unknown): number {
+  const num = typeof value === "number" && Number.isFinite(value) ? value : 3;
+  return Math.min(Math.max(num, 1), 10);
 }

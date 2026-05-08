@@ -49,6 +49,7 @@ function fakeChannelGateway() {
   return {
     start: async () => {},
     stop: async () => {},
+    hasPendingWork: () => false,
   };
 }
 
@@ -486,7 +487,7 @@ describe("runGatewaySupervisor", () => {
 
   it("ChannelGateway receives runtimeCache, activeTurnRegistry, runtimeFingerprint, securityMode, securityAssessor", async () => {
     let capturedOpts: any;
-    const gateway = { start: async () => {}, stop: async () => {} };
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
     await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -513,7 +514,7 @@ describe("runGatewaySupervisor", () => {
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {
     let capturedOpts: any;
-    const gateway = { start: async () => {}, stop: async () => {} };
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
     await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -595,7 +596,11 @@ describe("runGatewaySupervisor", () => {
   it("drain timeout aborts remaining turns and does NOT write clean marker", async () => {
     const exited = fakeExit();
     let capturedRegistry: ActiveTurnRegistry | undefined;
-    const gateway = fakeChannelGateway();
+    const gateway = {
+      start: async () => {},
+      stop: async () => {},
+      hasPendingWork: () => (capturedRegistry?.stats().activeTurnCount ?? 0) > 0,
+    };
 
     const promise = runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -630,7 +635,11 @@ describe("runGatewaySupervisor", () => {
   it("second signal during drain forces immediate exit without clean marker", async () => {
     const exited = fakeExit();
     let capturedRegistry: ActiveTurnRegistry | undefined;
-    const gateway = fakeChannelGateway();
+    const gateway = {
+      start: async () => {},
+      stop: async () => {},
+      hasPendingWork: () => (capturedRegistry?.stats().activeTurnCount ?? 0) > 0,
+    };
 
     const promise = runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -761,7 +770,7 @@ describe("runGatewaySupervisor", () => {
 
   it("isDraining callback is passed to ChannelGateway", async () => {
     let capturedOpts: any;
-    const gateway = { start: async () => {}, stop: async () => {} };
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
     await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -778,6 +787,72 @@ describe("runGatewaySupervisor", () => {
 
     expect(typeof capturedOpts.isDraining).toBe("function");
     expect(capturedOpts.isDraining()).toBe(false);
+  });
+
+  it("busyPolicyResolver is passed to ChannelGateway", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(typeof capturedOpts.busyPolicyResolver).toBe("function");
+    const policy = capturedOpts.busyPolicyResolver("telegram");
+    expect(policy.busyPolicy).toBe("reject");
+    expect(policy.queueDepth).toBe(3);
+  });
+
+  it("busyPolicyResolver reads per-channel config from loaded config", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
+
+    const configPath = join(tmpDir, ".estacoda", "config.json");
+    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        telegram: {
+          enabled: false,
+          busyPolicy: "queue",
+          queueDepth: 5,
+        },
+        discord: {
+          enabled: false,
+          busyPolicy: "interrupt",
+          queueDepth: 2,
+        },
+      },
+    }));
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    const telegramPolicy = capturedOpts.busyPolicyResolver("telegram");
+    expect(telegramPolicy.busyPolicy).toBe("queue");
+    expect(telegramPolicy.queueDepth).toBe(5);
+
+    const discordPolicy = capturedOpts.busyPolicyResolver("discord");
+    expect(discordPolicy.busyPolicy).toBe("interrupt");
+    expect(discordPolicy.queueDepth).toBe(2);
   });
 });
 

@@ -5,6 +5,9 @@ import type {
   ChannelMessage,
   ChannelSessionKey
 } from "../contracts/channel.js";
+import type { ChannelKind } from "../contracts/channel.js";
+import type { ChannelBusyPolicy } from "../config/runtime-config.js";
+import { SessionMessageQueue } from "./session-message-queue.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
@@ -24,6 +27,11 @@ import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
 import type { DeliveryRouter } from "./delivery-router.js";
+
+export type BusyPolicyConfig = {
+  busyPolicy: ChannelBusyPolicy;
+  queueDepth: number;
+};
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -66,6 +74,8 @@ export type ChannelGatewayOptions = {
   runtimeFingerprint?: RuntimeFingerprint;
   /** Stage 6: drain callback to reject new turns while supervisor is shutting down gracefully. */
   isDraining?: () => boolean;
+  /** Stage 7: resolver for per-channel busy policy and queue depth config. */
+  busyPolicyResolver?: (channelKind: ChannelKind) => BusyPolicyConfig;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -191,6 +201,11 @@ export class ChannelGateway {
   // Stage 6
   readonly #isDraining: (() => boolean) | undefined;
 
+  // Stage 7
+  readonly #busyPolicyResolver: ((channelKind: ChannelKind) => BusyPolicyConfig) | undefined;
+  readonly #sessionMessageQueue = new SessionMessageQueue();
+  readonly #drainingQueue = new Set<string>();
+
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
@@ -216,9 +231,22 @@ export class ChannelGateway {
     // Stage 6
     this.#isDraining = options.isDraining;
 
+    // Stage 7
+    this.#busyPolicyResolver = options.busyPolicyResolver;
+
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
     }
+  }
+
+  /** Stage 7: check if there is any pending work (active turns, queued messages, draining). */
+  hasPendingWork(): boolean {
+    const hasActiveTurns = this.#activeTurnRegistry !== undefined
+      ? this.#activeTurnRegistry.stats().activeTurnCount > 0
+      : this.#activeTurns.size > 0;
+    const hasQueued = this.#sessionMessageQueue.totalSize() > 0;
+    const hasDraining = this.#drainingQueue.size > 0;
+    return hasActiveTurns || hasQueued || hasDraining;
   }
 
   async #deliverText(
@@ -327,9 +355,74 @@ export class ChannelGateway {
     const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
     const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
+    const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
+    const isBusy = this.#activeTurnRegistry !== undefined
+      ? this.#activeTurnRegistry.isBusy(activeTurnKey)
+      : this.#activeTurns.has(activeTurnKey);
+    const hasQueued = this.#sessionMessageQueue.size(activeTurnKey) > 0;
+    const isDrainingQueued = this.#drainingQueue.has(activeTurnKey);
+
+    if (isBusy || hasQueued || isDrainingQueued) {
+      switch (policy.busyPolicy) {
+        case "reject": {
+          if (this.#activeTurnRegistry !== undefined) {
+            if (this.#activeTurnRegistry.consumeBusyAck(activeTurnKey)) {
+              const busyText = "EstaCoda is busy with another request in this chat. Please wait.";
+              await this.#deliverText(adapter, normalizedSessionKey, busyText);
+            }
+          }
+          return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        }
+        case "queue": {
+          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
+          const enqueueResult = this.#sessionMessageQueue.enqueue(
+            activeTurnKey,
+            processedMessage,
+            policy.busyPolicy,
+            policy.queueDepth
+          );
+          if (enqueueResult.accepted) {
+            const position = enqueueResult.position;
+            if (position !== undefined) {
+              await this.#deliverText(adapter, normalizedSessionKey, `Queued (position ${position})`);
+            }
+          } else {
+            await this.#deliverText(adapter, normalizedSessionKey, "Queue is full. Please try again later.");
+          }
+          return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        }
+        case "interrupt": {
+          this.#sessionMessageQueue.clear(activeTurnKey);
+          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
+          this.#sessionMessageQueue.unshift(
+            activeTurnKey,
+            processedMessage,
+            policy.busyPolicy,
+            policy.queueDepth
+          );
+          // Abort active turn if one exists
+          if (this.#activeTurnRegistry !== undefined) {
+            this.#activeTurnRegistry.abortTurn(activeTurnKey, "interrupt");
+          } else {
+            this.#activeTurns.get(activeTurnKey)?.abort("interrupt");
+          }
+          return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        }
+      }
+    }
+
+    // Not busy — process immediately
+    return this.#processTurn(processedMessage, adapter);
+  }
+
+  async #processTurn(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+
     // --- Busy check (early, before any expensive work) ---
     const controller = new AbortController();
     let turnId: string | undefined;
+    let turnStarted = false;
 
     if (this.#activeTurnRegistry !== undefined) {
       const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller);
@@ -347,6 +440,7 @@ export class ChannelGateway {
       }
       this.#activeTurns.set(activeTurnKey, controller);
     }
+    turnStarted = true;
 
     // --- Single try/finally: every path after startTurn must endTurn ---
     let runtime: Runtime | undefined;
@@ -354,8 +448,8 @@ export class ChannelGateway {
     let progressCount = 0;
     try {
       // Session resolution
-      sessionId = await this.#sessionStore.getOrCreateSessionId(processedMessage.sessionKey, {
-        receivedAt: processedMessage.receivedAt
+      sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
+        receivedAt: message.receivedAt
       });
 
       // Update turn metadata with sessionId (for Stage 5E stuck-loop mapping)
@@ -385,7 +479,7 @@ export class ChannelGateway {
       );
 
       // Runtime acquisition
-      runtime = await this.#acquireRuntime(sessionId, securityPolicy, processedMessage, normalizedSessionKey);
+      runtime = await this.#acquireRuntime(sessionId, securityPolicy, message, normalizedSessionKey);
 
       const trustedWorkspace = typeof this.#trustedWorkspace === "function"
         ? await this.#trustedWorkspace(message)
@@ -393,9 +487,9 @@ export class ChannelGateway {
 
       // Handle the turn
       const response = await runtime.handle({
-        text: processedMessage.text,
-        attachments: processedMessage.attachments,
-        channel: processedMessage.channel,
+        text: message.text,
+        attachments: message.attachments,
+        channel: message.channel,
         trustedWorkspace,
         signal: controller.signal,
         inputMetadata: {
@@ -475,7 +569,7 @@ export class ChannelGateway {
 
       return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
     } finally {
-      // End the active turn — always, every path
+      // 1. End the active turn
       if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
         this.#activeTurnRegistry.endTurn(activeTurnKey, turnId);
       } else {
@@ -484,7 +578,7 @@ export class ChannelGateway {
         }
       }
 
-      // Release runtime only if it was successfully acquired
+      // 2. Release runtime only if it was successfully acquired
       if (runtime !== undefined) {
         try {
           await runtime.dispose();
@@ -494,6 +588,75 @@ export class ChannelGateway {
           );
         }
       }
+
+      // 3. Drain queued turns only if this turn actually started
+      // Fire-and-owned: the completed turn must resolve its receive promise
+      // independently of how long the queue takes to drain.
+      if (turnStarted) {
+        void this.#drainQueuedTurns(activeTurnKey).catch((err) => {
+          this.#logWarning?.(
+            `Drain queued turns failed for ${activeTurnKey}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        });
+      }
+    }
+  }
+
+  async #drainQueuedTurns(activeTurnKey: string): Promise<void> {
+    if (this.#drainingQueue.has(activeTurnKey)) {
+      return;
+    }
+
+    while (true) {
+      if (this.#drainingQueue.has(activeTurnKey)) {
+        return;
+      }
+
+      const queued = this.#sessionMessageQueue.dequeue(activeTurnKey);
+      if (queued === undefined) {
+        return;
+      }
+
+      this.#drainingQueue.add(activeTurnKey);
+
+      let adapter: ChannelAdapter;
+      try {
+        adapter = this.#adapterFor(queued.channelKind);
+      } catch {
+        this.#logWarning?.(`No adapter found for channel kind ${queued.channelKind}; dropping queued message`);
+        this.#drainingQueue.delete(activeTurnKey);
+        continue;
+      }
+
+      // Launch turn. #processTurn registers the active turn synchronously
+      // before its first await, so we can clear the guard immediately.
+      const turnPromise = this.#processTurn(queued.message, adapter);
+
+      // Clear guard NOW, before awaiting. The active turn is already registered.
+      this.#drainingQueue.delete(activeTurnKey);
+
+      let result: ChannelGatewayResult;
+      try {
+        result = await turnPromise;
+      } catch (err) {
+        this.#logWarning?.(`Queued turn failed for ${activeTurnKey}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+
+      // If the turn didn't actually start (busy race), re-enqueue and stop draining
+      if (result.sessionId === "") {
+        this.#sessionMessageQueue.unshift(
+          activeTurnKey,
+          queued.message,
+          queued.policyAtArrival,
+          queued.queueDepthAtArrival
+        );
+        return;
+      }
+
+      // Turn completed successfully. Loop to drain the next queued message.
     }
   }
 
@@ -1235,21 +1398,29 @@ export class ChannelGateway {
     if (command === "/stop") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-      if (this.#activeTurnRegistry !== undefined) {
-        const result = this.#activeTurnRegistry.abortTurn(key, "channel-stop");
-        if (result.ok) {
-          const text = "Cancelled the active EstaCoda turn for this chat.";
-          await this.#deliverText(adapter, message.sessionKey, text);
-          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      const hasActiveTurn = this.#activeTurnRegistry !== undefined
+        ? this.#activeTurnRegistry.isBusy(key)
+        : this.#activeTurns.has(key);
+
+      if (hasActiveTurn) {
+        // Active turn exists: abort it, leave queued messages intact
+        if (this.#activeTurnRegistry !== undefined) {
+          this.#activeTurnRegistry.abortTurn(key, "channel-stop");
+        } else {
+          this.#activeTurns.get(key)?.abort("channel-stop");
         }
-      } else {
-        const activeTurn = this.#activeTurns.get(key);
-        if (activeTurn !== undefined) {
-          activeTurn.abort("channel-stop");
-          const text = "Cancelled the active EstaCoda turn for this chat.";
-          await this.#deliverText(adapter, message.sessionKey, text);
-          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
-        }
+        const text = "Cancelled the active EstaCoda turn for this chat.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      const queueSize = this.#sessionMessageQueue.size(key);
+      if (queueSize > 0) {
+        // No active turn, but queued messages: clear them
+        this.#sessionMessageQueue.clear(key);
+        const text = `Stopped. Cleared ${queueSize} queued message${queueSize === 1 ? "" : "s"}.`;
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
       const text = "Stopping the EstaCoda gateway after this update.";

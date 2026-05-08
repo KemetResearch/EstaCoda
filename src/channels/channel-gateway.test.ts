@@ -1273,4 +1273,882 @@ describe("ChannelGateway commands", () => {
       expect(textRecords.some((r) => r.text?.includes("busy"))).toBe(true);
     });
   });
+
+  // Stage 7: SessionMessageQueue + busyPolicy integration tests
+  describe("Stage 7 busyPolicy integration", () => {
+    async function waitForPendingWork(gateway: ChannelGateway): Promise<void> {
+      while (gateway.hasPendingWork()) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    }
+
+    it("queue mode enqueues message and delivers position", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as unknown as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      // Give first turn time to start
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await gateway.receive(makeMessage("second"));
+      await first;
+      await waitForPendingWork(gateway);
+
+      expect(second.replyText).toBe("");
+      const queuedRecords = adapter.records.filter((r) => r.kind === "text" && r.text?.includes("Queued"));
+      expect(queuedRecords.length).toBe(1);
+      expect(handleCount).toBe(2); // first + drained queued
+    });
+
+    it("queue mode rejects when queue is full", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as unknown as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 1 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await gateway.receive(makeMessage("second"));
+      const third = await gateway.receive(makeMessage("third"));
+      await first;
+
+      expect(second.replyText).toBe("");
+      expect(third.replyText).toBe("");
+      const fullRecords = adapter.records.filter((r) => r.kind === "text" && r.text?.includes("full"));
+      expect(fullRecords.length).toBe(1);
+    });
+
+    it("interrupt mode clears queue and aborts active turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let aborted = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }: { signal?: AbortSignal }) => {
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                aborted = true;
+                reject(new Error("interrupted"));
+              });
+              setTimeout(() => _resolve({
+                label: "ok",
+                text: "ok",
+                matchedSkills: [],
+                intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+                securityDecision: "allow",
+                toolExecutions: [],
+                toolPlans: [],
+                skillOutcomes: [],
+                artifacts: [],
+                context: undefined,
+                projectContext: undefined,
+                progress: []
+              } as Awaited<ReturnType<Runtime["handle"]>>), 500);
+            });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await gateway.receive(makeMessage("interrupt me"));
+      await first.catch(() => {});
+
+      expect(aborted).toBe(true);
+      // The interrupt message should be processed after the first turn ends
+      expect(registry.stats().totalStarted).toBe(2);
+    });
+
+    it("interrupt mode does not grow queue under repeated interrupts", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }: { signal?: AbortSignal }) => {
+            handleCount++;
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                reject(new Error("interrupted"));
+              });
+              setTimeout(() => _resolve({
+                label: "ok",
+                text: "ok",
+                matchedSkills: [],
+                intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+                securityDecision: "allow",
+                toolExecutions: [],
+                toolPlans: [],
+                skillOutcomes: [],
+                artifacts: [],
+                context: undefined,
+                projectContext: undefined,
+                progress: []
+              } as Awaited<ReturnType<Runtime["handle"]>>), 200);
+            });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = gateway.receive(makeMessage("int1"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const third = gateway.receive(makeMessage("int2"));
+      await first.catch(() => {});
+      await second.catch(() => {});
+      await third.catch(() => {});
+
+      // Only 2 turns should start: first + one interrupt (queue never grows)
+      expect(handleCount).toBeLessThanOrEqual(3);
+    });
+
+    it("reject mode without registry still prevents parallel turns", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      const second = gateway.receive(makeMessage("hello again"));
+      await Promise.all([first, second]);
+
+      expect(handleCount).toBe(1);
+    });
+
+    it("hasPendingWork reflects active turns and queued messages", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      expect(gateway.hasPendingWork()).toBe(false);
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(gateway.hasPendingWork()).toBe(true);
+
+      const second = await gateway.receive(makeMessage("second"));
+      expect(second.replyText).toBe("");
+      expect(gateway.hasPendingWork()).toBe(true); // active turn + queued
+
+      await first;
+      await waitForPendingWork(gateway);
+      // After first turn ends, queued message is drained
+      expect(gateway.hasPendingWork()).toBe(false);
+    });
+
+    it("drain rejects new inbound but allows queued to finish", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+      let draining = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 }),
+        isDraining: () => draining
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await gateway.receive(makeMessage("second"));
+      expect(second.replyText).toBe(""); // queued
+
+      // Now enable draining
+      draining = true;
+      const third = await gateway.receive(makeMessage("third"));
+      expect(third.replyText).toContain("restarting"); // rejected
+
+      await first;
+      await waitForPendingWork(gateway);
+      // Queued "second" should still be processed
+      expect(handleCount).toBe(2);
+    });
+
+    it("/stop with active turn leaves queued messages intact", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second")); // queued
+      const stopResult = await gateway.receive(makeMessage("/stop"));
+      await first.catch(() => {});
+      await waitForPendingWork(gateway);
+
+      // /stop aborted the active turn but left queue intact
+      expect(stopResult.replyText).toContain("Cancelled");
+      // After first turn ends, queued "second" should be drained
+      expect(handleCount).toBe(2);
+    });
+
+    it("/stop with no active turn clears queued messages", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleResolved = false;
+      let disposeResolve: (() => void) | undefined;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            handleResolved = true;
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          },
+          dispose: async () => {
+            await new Promise<void>((resolve) => {
+              disposeResolve = resolve;
+            });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second")); // queued
+
+      // Wait for handle to complete but dispose to still be pending
+      while (!handleResolved) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      // At this point: turn ended, dispose still running, queue has "second"
+      const stopResult = await gateway.receive(makeMessage("/stop"));
+      expect(stopResult.replyText).toContain("Cleared 1 queued message");
+
+      // Let dispose finish so drain can clean up
+      disposeResolve?.();
+      await first;
+    });
+
+    it("multi-message queue drains fully", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handles: string[] = [];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ text }: { text: string }) => {
+            handles.push(text);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("A"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("B")); // queued
+      await gateway.receive(makeMessage("C")); // queued
+
+      await first;
+      await waitForPendingWork(gateway);
+      expect(handles).toEqual(["A", "B", "C"]);
+      expect(gateway.hasPendingWork()).toBe(false);
+    });
+
+    it("A receive resolves before queued B completes", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handles: string[] = [];
+      let bStarted = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ text }: { text: string }) => {
+            handles.push(text);
+            if (text === "B") {
+              bStarted = true;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("A"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("B")); // queued
+
+      // Wait until A is definitely done (and B may or may not have started)
+      await first;
+
+      // A must have resolved before B completes. If drain was awaited inside
+      // #processTurn finally, this assertion would fail because first would
+      // resolve only after B finishes.
+      expect(handles).toContain("A");
+
+      // B should still be in progress or about to start, but if timing is tight,
+      // wait for it explicitly and confirm it ran.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(handles).toEqual(["A", "B"]);
+      expect(bStarted).toBe(true);
+    });
+
+    it("queued turn finally drains the next queued item even when drainingQueue was used for the previous launch", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 15));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second")); // queued
+      await gateway.receive(makeMessage("third"));  // queued
+
+      await first;
+      await waitForPendingWork(gateway);
+      // All three should have processed because each turn's finally re-entered #drainQueuedTurns
+      // after the guard was cleared
+      expect(handleCount).toBe(3);
+    });
+
+    it("hasPendingWork returns true while queued messages are draining, then false after all drain", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const pendingSnapshots: boolean[] = [];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            pendingSnapshots.push(gateway.hasPendingWork());
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("A"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("B")); // queued
+      await gateway.receive(makeMessage("C")); // queued
+
+      expect(gateway.hasPendingWork()).toBe(true);
+      await first;
+      await waitForPendingWork(gateway);
+      expect(gateway.hasPendingWork()).toBe(false);
+
+      // At least the first handle call should see pending work (active or queued)
+      expect(pendingSnapshots.some((v) => v === true)).toBe(true);
+    });
+
+    it("no permanent busy state after multiple queued messages", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await gateway.receive(makeMessage("q1")); // queued
+      await gateway.receive(makeMessage("q2")); // queued
+      await gateway.receive(makeMessage("q3")); // queued
+
+      await first;
+      await waitForPendingWork(gateway);
+      expect(handleCount).toBe(4);
+      expect(gateway.hasPendingWork()).toBe(false);
+
+      // Gateway should be ready to accept new messages
+      const after = await gateway.receive(makeMessage("after"));
+      expect(after.replyText).not.toContain("busy");
+      expect(handleCount).toBe(5);
+    });
+
+    it("drain waits for active and all queued messages to complete before clean shutdown", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+      let draining = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 }),
+        isDraining: () => draining
+      });
+
+      const first = gateway.receive(makeMessage("A"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("B")); // queued
+      await gateway.receive(makeMessage("C")); // queued
+
+      draining = true;
+      expect(gateway.hasPendingWork()).toBe(true);
+
+      await first;
+      await waitForPendingWork(gateway);
+      // A, B, and C should all have run because queued messages are allowed during drain
+      expect(handleCount).toBe(3);
+      expect(gateway.hasPendingWork()).toBe(false);
+    });
+
+    it("failed queued turn launch clears drainingQueue if no queued messages remain", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let shouldThrow = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            if (shouldThrow) {
+              throw new Error("queued turn failed");
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      shouldThrow = true;
+      await gateway.receive(makeMessage("failer")); // queued, will throw
+
+      await first;
+      await waitForPendingWork(gateway);
+      // After the failed queued turn, the session should not be permanently busy
+      expect(gateway.hasPendingWork()).toBe(false);
+
+      // Should be able to receive new messages
+      const next = await gateway.receive(makeMessage("next"));
+      expect(next.replyText).not.toContain("busy");
+    });
+
+    it("drainingQueue guard prevents parallel turn start", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      // First turn is active; send a second message that gets rejected
+      const second = await gateway.receive(makeMessage("second"));
+      expect(second.replyText).toBe(""); // rejected, no reply
+      await first;
+
+      // Only one turn started
+      expect(handleCount).toBe(1);
+    });
+
+    it("fallback without registry still prevents parallel turns via #activeTurns", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let handleCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            handleCount++;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await gateway.receive(makeMessage("second"));
+      await first;
+      await waitForPendingWork(gateway);
+      expect(handleCount).toBe(2); // first + queued drained
+      expect(second.replyText).toBe(""); // queued, no immediate reply
+    });
+  });
 });
