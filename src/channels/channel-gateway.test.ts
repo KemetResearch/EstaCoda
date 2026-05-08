@@ -513,9 +513,9 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).toBe("Gateway is restarting, please try again shortly.");
       expect(registry.stats().totalStarted).toBe(0);
       expect(runtimeCreated).toBe(false);
-      expect(adapter.records.length).toBeGreaterThanOrEqual(1);
-      const drainRecord = adapter.records.find((r) => r.text === "Gateway is restarting, please try again shortly.");
-      expect(drainRecord).toBeDefined();
+      // Exactly one drain message via #deliverText; no duplicate adapter.send
+      const drainRecords = adapter.records.filter((r) => r.text === "Gateway is restarting, please try again shortly.");
+      expect(drainRecords.length).toBe(1);
     });
 
     it("receive() busy ack is delivered via adapter when busy", async () => {

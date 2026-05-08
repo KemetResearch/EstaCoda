@@ -21,6 +21,7 @@ import { writeGatewayPid, removeGatewayPid } from "../gateway/pid-file.js";
 import { writeGatewayState, removeGatewayState } from "../gateway/supervisor-state.js";
 import { acquireGatewayLock, releaseGatewayLock } from "../gateway/gateway-lock.js";
 import { stopGateway } from "../gateway/supervisor-lifecycle.js";
+import * as lifecycleModule from "../gateway/supervisor-lifecycle.js";
 import { acquireAdapterIdentityLock, listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 import { writeRuntimeCacheState, runtimeCacheStatePath } from "../gateway/runtime-cache-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
@@ -488,6 +489,7 @@ describe("gateway commands", () => {
 
   describe("runGatewayRestart", () => {
     let supervisorSpy: ReturnType<typeof vi.spyOn>;
+    let stopGatewaySpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
       supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
@@ -496,10 +498,15 @@ describe("gateway commands", () => {
         polls: 0,
         processed: 0,
       });
+      stopGatewaySpy = vi.spyOn(lifecycleModule, "stopGateway").mockResolvedValue({
+        ok: true,
+        action: "was_not_running",
+      });
     });
 
     afterEach(() => {
       supervisorSpy.mockRestore();
+      stopGatewaySpy.mockRestore();
     });
 
     it("reports not running and starts when no PID exists", async () => {
@@ -522,6 +529,16 @@ describe("gateway commands", () => {
       const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
       expect(result.output).toContain("Gateway was not running");
       expect(result.output).toContain("Gateway started");
+    });
+
+    it("does not force-kill on plain restart", async () => {
+      await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ force: false }));
+    });
+
+    it("does not force-kill on graceful restart", async () => {
+      await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
+      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ force: false }));
     });
   });
 });

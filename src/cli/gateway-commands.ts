@@ -281,8 +281,8 @@ export async function runGatewayRestart(
 ): Promise<{ ok: boolean; output: string }> {
   const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
 
-  // Stop existing gateway (graceful unless --graceful is explicitly false, which it never is)
-  const stopResult = await stopGateway(homeDir, { force: !options.graceful });
+  // Stop existing gateway (always graceful — plain restart should not force-kill)
+  const stopResult = await stopGateway(homeDir, { force: false });
 
   let stopOutput: string;
   if (stopResult.ok) {

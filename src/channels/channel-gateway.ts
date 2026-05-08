@@ -320,11 +320,6 @@ export class ChannelGateway {
     if (this.#isDraining?.()) {
       const drainText = "Gateway is restarting, please try again shortly.";
       await this.#deliverText(adapter, message.sessionKey, drainText);
-      await adapter.send?.({
-        conversationId: message.sessionKey.chatId,
-        sessionKey: message.sessionKey,
-        text: drainText,
-      });
       return { sessionId: "", replyText: drainText, artifactCount: 0, progressCount: 0 };
     }
 
