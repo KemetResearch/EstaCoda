@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import * as supervisorModule from "../gateway/supervisor.js";
+
+async function makeTempDir(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "estacoda-cli-gateway-test-"));
+}
 
 describe("cli gateway start", () => {
   let supervisorSpy: ReturnType<typeof vi.spyOn>;
@@ -83,5 +90,71 @@ describe("cli gateway start", () => {
     });
     expect(result.handled).toBe(true);
     expect(result.output).toContain("Gateway was not running");
+  });
+});
+
+describe("cli channels enable extra arguments", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects extra arguments and does not modify config", async () => {
+    const configDir = join(tmpDir, ".estacoda");
+    const configPath = join(configDir, "config.json");
+    const originalConfig = JSON.stringify({ channels: { telegram: { enabled: false } } }, null, 2) + "\n";
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configPath, originalConfig, "utf8");
+
+    const result = await runCliCommand({
+      argv: ["channels", "enable", "telegram", "discord"],
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Usage: estacoda channels enable <channel>");
+
+    const after = await readFile(configPath, "utf8");
+    expect(after).toBe(originalConfig);
+  });
+});
+
+describe("cli channels disable extra arguments", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects extra arguments and does not modify config", async () => {
+    const configDir = join(tmpDir, ".estacoda");
+    const configPath = join(configDir, "config.json");
+    const originalConfig = JSON.stringify({ channels: { telegram: { enabled: true } } }, null, 2) + "\n";
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configPath, originalConfig, "utf8");
+
+    const result = await runCliCommand({
+      argv: ["channels", "disable", "telegram", "discord"],
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Usage: estacoda channels disable <channel>");
+
+    const after = await readFile(configPath, "utf8");
+    expect(after).toBe(originalConfig);
   });
 });

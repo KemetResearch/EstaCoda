@@ -89,6 +89,8 @@ import {
   runGatewayDiagnose,
   runChannelsList,
   runChannelsStatus,
+  runChannelsEnable,
+  runChannelsDisable,
   runGatewayStop,
   runGatewayRestart,
 } from "./gateway-commands.js";
@@ -2814,13 +2816,39 @@ async function channels(options: CliOptions, args: string[]): Promise<CliCommand
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
+  if (subcommand === "enable") {
+    if (rest.length !== 1) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Usage: estacoda channels enable <channel>",
+      };
+    }
+    const result = await runChannelsEnable({ ...options, channel: rest[0] });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand === "disable") {
+    if (rest.length !== 1) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Usage: estacoda channels disable <channel>",
+      };
+    }
+    const result = await runChannelsDisable({ ...options, channel: rest[0] });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
   return {
     handled: true,
     exitCode: 0,
     output: [
       "EstaCoda channels",
-      "  estacoda channels list              List configured channels",
-      "  estacoda channels status [channel]  Show channel status"
+      "  estacoda channels list               List configured channels",
+      "  estacoda channels status [channel]   Show channel status",
+      "  estacoda channels enable <channel>   Enable a channel",
+      "  estacoda channels disable <channel>  Disable a channel",
     ].join("\n")
   };
 }

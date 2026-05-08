@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from "node:fs/promises";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
 import {
@@ -8,6 +8,8 @@ import {
   runGatewayDiagnose,
   runChannelsList,
   runChannelsStatus,
+  runChannelsEnable,
+  runChannelsDisable,
   runGatewayStop,
   runGatewayRestart,
 } from "./gateway-commands.js";
@@ -540,6 +542,368 @@ describe("gateway commands", () => {
     it("does not force-kill on graceful restart", async () => {
       await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
       expect(stopGatewaySpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ force: false }));
+    });
+  });
+
+  describe("runChannelsEnable", () => {
+    it("enables a disabled channel", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram enabled");
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.enabled).toBe(true);
+    });
+
+    it("is idempotent when channel already enabled", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const original = JSON.stringify({ channels: { telegram: { enabled: true, botTokenEnv: "X" } } }, null, 2);
+      await writeFile(configPath, original, "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram is already enabled");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(original);
+    });
+
+    it("rejects unknown channel", async () => {
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "unknown" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Unknown channel: unknown");
+      expect(result.output).toContain("Supported: telegram, discord, email, whatsapp");
+    });
+
+    it("rejects missing channel argument", async () => {
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Usage: estacoda channels enable <channel>");
+    });
+
+    it("preserves other channel fields", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { botTokenEnv: "X", allowedUserIds: ["u1"] } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.botTokenEnv).toBe("X");
+      expect(parsed.channels.telegram.allowedUserIds).toEqual(["u1"]);
+      expect(parsed.channels.telegram.enabled).toBe(true);
+    });
+
+    it("preserves other channels", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { discord: { enabled: true }, telegram: { enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.discord.enabled).toBe(true);
+    });
+
+    it("preserves non-channel config", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ model: { provider: "openai" }, channels: { telegram: { enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.model.provider).toBe("openai");
+    });
+
+    it("preserves unknown top-level fields", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ customField: 123, channels: { telegram: { enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.customField).toBe(123);
+    });
+
+    it("preserves unknown nested channel fields", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { customFlag: true, enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.customFlag).toBe(true);
+    });
+
+    it("preserves busyPolicy and queueDepth", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { busyPolicy: "queue", queueDepth: 7, enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.busyPolicy).toBe("queue");
+      expect(parsed.channels.telegram.queueDepth).toBe(7);
+    });
+
+    it("creates config file if missing", async () => {
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram enabled");
+
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.enabled).toBe(true);
+    });
+
+    it("writes to userConfigPath when overridden", async () => {
+      const customPath = join(tmpDir, "custom-config.json");
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, userConfigPath: customPath, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(customPath, "utf8"));
+      expect(parsed.channels.telegram.enabled).toBe(true);
+    });
+
+    it("does not write to projectConfigPath", async () => {
+      const projectPath = join(tmpDir, "project-config.json");
+      await writeFile(projectPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, projectConfigPath: projectPath, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(projectPath, "utf8"));
+      expect(parsed.channels.telegram.enabled).toBe(false);
+    });
+
+    it("fails on invalid JSON without overwriting", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const bad = "{ not json";
+      await writeFile(configPath, bad, "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Config file could not be parsed");
+      expect(result.output).toContain("No changes were made");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(bad);
+    });
+
+    it("fails on non-object JSON without overwriting", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const bad = "[]";
+      await writeFile(configPath, bad, "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Config file could not be parsed");
+      expect(result.output).toContain("No changes were made");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(bad);
+    });
+
+    it("fails on null JSON without overwriting", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const bad = "null";
+      await writeFile(configPath, bad, "utf8");
+
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Config file could not be parsed");
+      expect(result.output).toContain("No changes were made");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(bad);
+    });
+
+    it("accepts mixed-case channel names", async () => {
+      for (const name of ["Telegram", "TELEGRAM", "teLeGrAm"]) {
+        const configPath = join(tmpDir, ".estacoda", "config.json");
+        await rm(dirname(configPath), { recursive: true, force: true });
+        const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: name });
+        expect(result.ok).toBe(true);
+        expect(result.output).toBe("Telegram enabled");
+      }
+    });
+
+    it("outputs correct display name for WhatsApp", async () => {
+      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "whatsapp" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("WhatsApp enabled");
+    });
+
+    it("writes to temp file then renames", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
+
+      await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+
+      const files = await readdir(dirname(configPath));
+      const tempFiles = files.filter((f) => f.startsWith("config.json.tmp-"));
+      expect(tempFiles).toHaveLength(0);
+    });
+
+    it("leaves original intact on write failure", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const original = JSON.stringify({ channels: { telegram: { enabled: false } } });
+      await writeFile(configPath, original, "utf8");
+
+      const fsPromises = await import("node:fs/promises");
+      const renameSpy = vi.spyOn(fsPromises, "rename").mockImplementation(() => Promise.reject(new Error("rename failed")));
+
+      try {
+        await expect(runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" })).rejects.toThrow("rename failed");
+
+        const after = await readFile(configPath, "utf8");
+        expect(after).toBe(original);
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
+  });
+
+  describe("runChannelsDisable", () => {
+    it("disables an enabled channel", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: true } } }), "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram disabled");
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.enabled).toBe(false);
+    });
+
+    it("is idempotent when channel already disabled", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const original = JSON.stringify({ channels: { telegram: { enabled: false, botTokenEnv: "X" } } }, null, 2);
+      await writeFile(configPath, original, "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram is already disabled");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(original);
+    });
+
+    it("is idempotent when channel has no enabled field", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const original = JSON.stringify({ channels: { telegram: {} } }, null, 2);
+      await writeFile(configPath, original, "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram is already disabled");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(original);
+    });
+
+    it("is idempotent when config file does not exist", async () => {
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("Telegram is already disabled");
+
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await expect(readFile(configPath, "utf8")).rejects.toThrow();
+    });
+
+    it("rejects unknown channel", async () => {
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "unknown" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Unknown channel: unknown");
+      expect(result.output).toContain("Supported: telegram, discord, email, whatsapp");
+    });
+
+    it("rejects missing channel argument", async () => {
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Usage: estacoda channels disable <channel>");
+    });
+
+    it("preserves other fields on disable", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: true, botTokenEnv: "X", allowedUserIds: ["u1"], busyPolicy: "queue", queueDepth: 7, customFlag: true }, discord: { enabled: true } } }), "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(true);
+
+      const parsed = JSON.parse(await readFile(configPath, "utf8"));
+      expect(parsed.channels.telegram.botTokenEnv).toBe("X");
+      expect(parsed.channels.telegram.allowedUserIds).toEqual(["u1"]);
+      expect(parsed.channels.telegram.busyPolicy).toBe("queue");
+      expect(parsed.channels.telegram.queueDepth).toBe(7);
+      expect(parsed.channels.telegram.customFlag).toBe(true);
+      expect(parsed.channels.telegram.enabled).toBe(false);
+      expect(parsed.channels.discord.enabled).toBe(true);
+    });
+
+    it("fails on invalid JSON without overwriting", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const bad = "{ not json";
+      await writeFile(configPath, bad, "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Config file could not be parsed");
+      expect(result.output).toContain("No changes were made");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(bad);
+    });
+
+    it("fails on non-object JSON without overwriting", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      const bad = "[]";
+      await writeFile(configPath, bad, "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Config file could not be parsed");
+      expect(result.output).toContain("No changes were made");
+
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(bad);
+    });
+
+    it("outputs correct display name for WhatsApp", async () => {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({ channels: { whatsapp: { enabled: true } } }), "utf8");
+
+      const result = await runChannelsDisable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "whatsapp" });
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("WhatsApp disabled");
     });
   });
 });

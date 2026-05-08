@@ -1,5 +1,5 @@
-import { join } from "node:path";
-import { access, constants } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { access, constants, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
 import { Database } from "bun:sqlite";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
@@ -473,6 +473,151 @@ async function buildIdentityLockHealth(
   }
 
   return { staleLocks, duplicateHashes, missingLocks };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Channels Enable / Disable
+// ─────────────────────────────────────────────────────────────
+
+const VALID_CHANNELS = new Set(["telegram", "discord", "email", "whatsapp"]);
+
+const DISPLAY_NAMES: Record<string, string> = {
+  telegram: "Telegram",
+  discord: "Discord",
+  email: "Email",
+  whatsapp: "WhatsApp",
+};
+
+function normalizeChannel(channel: string | undefined): string | undefined {
+  if (channel === undefined || channel.trim() === "") return undefined;
+  return channel.toLowerCase().trim();
+}
+
+function validateChannel(
+  channel: string | undefined,
+  command: "enable" | "disable"
+): { ok: true; normalized: string; display: string } | { ok: false; output: string } {
+  const normalized = normalizeChannel(channel);
+  if (normalized === undefined) {
+    return { ok: false, output: `Usage: estacoda channels ${command} <channel>` };
+  }
+  if (!VALID_CHANNELS.has(normalized)) {
+    return { ok: false, output: `Unknown channel: ${channel}. Supported: telegram, discord, email, whatsapp.` };
+  }
+  return { ok: true, normalized, display: DISPLAY_NAMES[normalized] };
+}
+
+function resolveUserConfigPath(options: GatewayCommandOptions): string {
+  return options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+}
+
+async function readUserConfigRaw(path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const text = await readFile(path, "utf8");
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("Config file must contain a JSON object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function atomicWriteUserConfig(targetPath: string, config: Record<string, unknown>): Promise<void> {
+  const dir = dirname(targetPath);
+  await mkdir(dir, { recursive: true });
+  const tempPath = join(dir, `config.json.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  try {
+    await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await rename(tempPath, targetPath);
+  } catch (error) {
+    try { await rm(tempPath, { force: true }); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function runChannelsEnable(
+  options: GatewayCommandOptions & { channel?: string }
+): Promise<{ ok: boolean; output: string }> {
+  const validation = validateChannel(options.channel, "enable");
+  if (!validation.ok) {
+    return { ok: false, output: validation.output };
+  }
+
+  const targetPath = resolveUserConfigPath(options);
+  let raw: Record<string, unknown> | undefined;
+  try {
+    raw = await readUserConfigRaw(targetPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: `Config file could not be parsed: ${message}. No changes were made.` };
+  }
+
+  const channel = validation.normalized;
+  const display = validation.display;
+
+  const currentChannel = (raw?.channels as Record<string, unknown> | undefined)?.[channel] as Record<string, unknown> | undefined;
+  if (currentChannel?.enabled === true) {
+    return { ok: true, output: `${display} is already enabled` };
+  }
+
+  const updatedChannel = { ...(currentChannel ?? {}), enabled: true };
+  const updated: Record<string, unknown> = {
+    ...raw,
+    channels: {
+      ...(raw?.channels as Record<string, unknown> | undefined),
+      [channel]: updatedChannel,
+    },
+  };
+
+  await atomicWriteUserConfig(targetPath, updated);
+  return { ok: true, output: `${display} enabled` };
+}
+
+export async function runChannelsDisable(
+  options: GatewayCommandOptions & { channel?: string }
+): Promise<{ ok: boolean; output: string }> {
+  const validation = validateChannel(options.channel, "disable");
+  if (!validation.ok) {
+    return { ok: false, output: validation.output };
+  }
+
+  const targetPath = resolveUserConfigPath(options);
+  let raw: Record<string, unknown> | undefined;
+  try {
+    raw = await readUserConfigRaw(targetPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: `Config file could not be parsed: ${message}. No changes were made.` };
+  }
+
+  if (raw === undefined) {
+    return { ok: true, output: `${validation.display} is already disabled` };
+  }
+
+  const channel = validation.normalized;
+  const display = validation.display;
+
+  const currentChannel = (raw.channels as Record<string, unknown> | undefined)?.[channel] as Record<string, unknown> | undefined;
+  if (currentChannel?.enabled === false || currentChannel?.enabled === undefined) {
+    return { ok: true, output: `${display} is already disabled` };
+  }
+
+  const updatedChannel = { ...currentChannel, enabled: false };
+  const updated: Record<string, unknown> = {
+    ...raw,
+    channels: {
+      ...(raw.channels as Record<string, unknown> | undefined),
+      [channel]: updatedChannel,
+    },
+  };
+
+  await atomicWriteUserConfig(targetPath, updated);
+  return { ok: true, output: `${display} disabled` };
 }
 
 // ─────────────────────────────────────────────────────────────
