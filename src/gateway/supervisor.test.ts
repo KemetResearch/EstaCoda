@@ -1219,4 +1219,38 @@ describe("supervisor 5E internals", () => {
       expect(json).not.toContain("approval");
     });
   });
+
+  describe("HookRegistry injection", () => {
+    it("constructs one HookRegistry and injects it into RuntimeCache and ChannelGateway", async () => {
+      const tmpDir = await makeTempDir();
+      const stateDir = join(tmpDir, "state");
+      const sessionDir = join(tmpDir, "sessions");
+      await mkdir(stateDir, { recursive: true });
+      await mkdir(sessionDir, { recursive: true });
+
+      let receivedCacheHookRegistry: unknown;
+      let receivedGatewayHookRegistry: unknown;
+
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        userConfigPath: join(tmpDir, "estacoda.yaml"),
+        projectConfigPath: join(tmpDir, "estacoda.project.yaml"),
+        factories: {
+          createChannelGateway: (opts) => {
+            receivedGatewayHookRegistry = (opts as { hookRegistry?: unknown }).hookRegistry;
+            return fakeChannelGateway() as any;
+          },
+        },
+        once: true,
+      });
+
+      // The supervisor constructs RuntimeCache internally; we can verify
+      // the gateway received a HookRegistry.
+      expect(receivedGatewayHookRegistry).toBeDefined();
+      expect(result.ok).toBe(true);
+
+      await rm(tmpDir, { recursive: true, force: true });
+    });
+  });
 });

@@ -51,6 +51,7 @@ import {
   type RuntimeCacheState,
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
+import { HookRegistry } from "./hook-registry.js";
 import {
   writeCleanShutdownMarker,
   readCleanShutdownMarker,
@@ -463,12 +464,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     });
     state.activeTurnRegistry = activeTurnRegistry;
 
+    const hookRegistry = new HookRegistry({ logWarning });
+
     const runtimeCache = new RuntimeCache({
       createRuntime: (input) =>
         createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, input),
       maxEntries: 50,
       idleTtlMs: 1_800_000,
       logWarning,
+      hookRegistry,
     });
     state.runtimeCache = runtimeCache;
     state.runtimeFingerprint = runtimeFingerprint;
@@ -747,6 +751,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               metadata,
             });
           },
+          hookRegistry,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -803,6 +808,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               metadata,
             });
           },
+          hookRegistry,
         });
 
     state.channelGateway = gateway;

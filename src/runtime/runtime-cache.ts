@@ -1,6 +1,8 @@
 import type { Runtime } from "./create-runtime.js";
 import type { RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { SecurityPolicy } from "../contracts/security.js";
+import { HookRegistry } from "../gateway/hook-registry.js";
+import { createHash } from "node:crypto";
 
 export type RuntimeCacheOptions = {
   /** Max cached runtimes. Default 50. */
@@ -15,6 +17,8 @@ export type RuntimeCacheOptions = {
   }) => Promise<Runtime>;
   /** Optional logger. */
   logWarning?: (message: string) => void;
+  /** Optional hook registry for lifecycle events. */
+  hookRegistry?: HookRegistry;
 };
 
 export type CachedRuntimeEntry = {
@@ -50,6 +54,10 @@ export type SuspendedSummaryEntry = {
 type LeaseRef = { sessionId: string; entryId: string };
 
 const DISPOSE_TIMEOUT_MS = 10_000;
+
+function sessionKeyHash(sessionId: string): string {
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+}
 
 export async function safeDispose(
   runtime: Runtime,
@@ -103,6 +111,8 @@ export class RuntimeCache {
   #idleTtlMs: number;
   #createRuntime: RuntimeCacheOptions["createRuntime"];
   #logWarning?: (message: string) => void;
+  #hookRegistry?: HookRegistry;
+  #pendingEvictReason = new Map<string, string>();
 
   #activeEntries: Map<string, CachedRuntimeEntry> = new Map();
   #pendingEntries: Map<string, CachedRuntimeEntry> = new Map();
@@ -119,6 +129,7 @@ export class RuntimeCache {
     this.#idleTtlMs = options.idleTtlMs ?? 1_800_000;
     this.#createRuntime = options.createRuntime;
     this.#logWarning = options.logWarning;
+    this.#hookRegistry = options.hookRegistry;
   }
 
   async get(
@@ -146,6 +157,11 @@ export class RuntimeCache {
       };
       this.#activeEntries.set(sessionId, entry);
       this.#totalCreated++;
+      void this.#hookRegistry?.emit("session:cache:miss", {
+        sessionId,
+        entryId,
+        reason: "first-create",
+      });
       return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
     }
 
@@ -167,9 +183,11 @@ export class RuntimeCache {
         existing.disposePending = true;
         this.#activeEntries.delete(sessionId);
         this.#pendingEntries.set(existing.entryId, existing);
+        this.#pendingEvictReason.set(existing.entryId, "suspend");
         if (existing.borrowCount === 0) {
           await safeDispose(existing.runtime, this.#logWarning);
           this.#totalDisposed++;
+          this.#emitEvict(existing);
           this.#pendingEntries.delete(existing.entryId);
         }
       } else {
@@ -178,6 +196,11 @@ export class RuntimeCache {
       }
       this.#activeEntries.set(sessionId, entry);
       this.#totalCreated++;
+      void this.#hookRegistry?.emit("session:cache:miss", {
+        sessionId,
+        entryId,
+        reason: "suspended",
+      });
       return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
     }
 
@@ -198,13 +221,20 @@ export class RuntimeCache {
       existing.disposePending = true;
       this.#activeEntries.delete(sessionId);
       this.#pendingEntries.set(existing.entryId, existing);
+      this.#pendingEvictReason.set(existing.entryId, "fingerprint-mismatch");
       if (existing.borrowCount === 0) {
         await safeDispose(existing.runtime, this.#logWarning);
         this.#totalDisposed++;
+        this.#emitEvict(existing);
         this.#pendingEntries.delete(existing.entryId);
       }
       this.#activeEntries.set(sessionId, entry);
       this.#totalCreated++;
+      void this.#hookRegistry?.emit("session:cache:miss", {
+        sessionId,
+        entryId,
+        reason: "fingerprint-mismatch",
+      });
       return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
     }
 
@@ -214,6 +244,11 @@ export class RuntimeCache {
     existing.borrowCount++;
     this.#activeEntries.set(sessionId, existing);
     this.#totalReused++;
+    void this.#hookRegistry?.emit("session:cache:hit", {
+      sessionId,
+      entryId: existing.entryId,
+      borrowCount: existing.borrowCount,
+    });
     return createCachedRuntimeProxy(existing.runtime, this, { sessionId, entryId: existing.entryId });
   }
 
@@ -231,6 +266,7 @@ export class RuntimeCache {
       if (active.disposePending && active.borrowCount === 0) {
         await safeDispose(active.runtime, this.#logWarning);
         this.#totalDisposed++;
+        this.#emitEvict(active);
         this.#activeEntries.delete(sessionId);
       }
       return;
@@ -255,6 +291,7 @@ export class RuntimeCache {
       if (pending.disposePending && pending.borrowCount === 0) {
         await safeDispose(pending.runtime, this.#logWarning);
         this.#totalDisposed++;
+        this.#emitEvict(pending);
         this.#pendingEntries.delete(entryId);
       }
       return;
@@ -279,15 +316,23 @@ export class RuntimeCache {
 
     this.#activeEntries.delete(sessionId);
     this.#pendingEntries.set(entry.entryId, entry);
+    if (!this.#pendingEvictReason.has(entry.entryId)) {
+      this.#pendingEvictReason.set(entry.entryId, "suspend");
+    }
 
     if (entry.borrowCount === 0) {
       await safeDispose(entry.runtime, this.#logWarning);
       this.#totalDisposed++;
+      this.#emitEvict(entry);
       this.#pendingEntries.delete(entry.entryId);
     }
   }
 
   async invalidate(sessionId: string): Promise<void> {
+    const entry = this.#activeEntries.get(sessionId);
+    if (entry !== undefined) {
+      this.#pendingEvictReason.set(entry.entryId, "invalidate");
+    }
     await this.suspend(sessionId, "invalidated");
     this.#totalInvalidated++;
   }
@@ -302,8 +347,10 @@ export class RuntimeCache {
         entry.disposePending = true;
         this.#activeEntries.delete(key);
         this.#pendingEntries.set(entry.entryId, entry);
+        this.#pendingEvictReason.set(entry.entryId, "ttl");
         await safeDispose(entry.runtime, this.#logWarning);
         this.#totalDisposed++;
+        this.#emitEvict(entry);
         this.#pendingEntries.delete(entry.entryId);
       }
     }
@@ -323,8 +370,10 @@ export class RuntimeCache {
         entry.disposePending = true;
         this.#activeEntries.delete(key);
         this.#pendingEntries.set(entry.entryId, entry);
+        this.#pendingEvictReason.set(entry.entryId, "lru");
         await safeDispose(entry.runtime, this.#logWarning);
         this.#totalDisposed++;
+        this.#emitEvict(entry);
         this.#pendingEntries.delete(entry.entryId);
       }
 
@@ -353,11 +402,13 @@ export class RuntimeCache {
       entry.disposePending = true;
       this.#activeEntries.delete(sessionId);
       this.#pendingEntries.set(entry.entryId, entry);
+      this.#pendingEvictReason.set(entry.entryId, "disposeAll");
       if (entry.borrowCount === 0) {
         promises.push(
           safeDispose(entry.runtime, this.#logWarning)
             .then(() => {
               this.#totalDisposed++;
+              this.#emitEvict(entry);
               this.#pendingEntries.delete(entry.entryId);
             })
             .catch(() => {
@@ -369,10 +420,14 @@ export class RuntimeCache {
 
     // Pending entries that were already idle before we started
     for (const entry of pendingToDispose) {
+      if (!this.#pendingEvictReason.has(entry.entryId)) {
+        this.#pendingEvictReason.set(entry.entryId, "disposeAll");
+      }
       promises.push(
         safeDispose(entry.runtime, this.#logWarning)
           .then(() => {
             this.#totalDisposed++;
+            this.#emitEvict(entry);
             this.#pendingEntries.delete(entry.entryId);
           })
           .catch(() => {
@@ -471,5 +526,15 @@ export class RuntimeCache {
     if (this.#recentSuspensions.length > 20) {
       this.#recentSuspensions.shift();
     }
+  }
+
+  #emitEvict(entry: CachedRuntimeEntry): void {
+    const reason = this.#pendingEvictReason.get(entry.entryId) ?? "suspend";
+    this.#pendingEvictReason.delete(entry.entryId);
+    void this.#hookRegistry?.emit("session:cache:evict", {
+      sessionId: entry.sessionId,
+      entryId: entry.entryId,
+      reason: reason as "ttl" | "lru" | "suspend" | "invalidate" | "disposeAll" | "fingerprint-mismatch",
+    });
   }
 }

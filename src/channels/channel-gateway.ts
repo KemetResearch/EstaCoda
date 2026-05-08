@@ -23,10 +23,16 @@ import { createSecurityPolicyForMode } from "../security/security-policy-factory
 import type { RuntimeCache } from "../runtime/runtime-cache.js";
 import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import type { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
+import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
+import { createHash } from "node:crypto";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
 import type { DeliveryRouter } from "./delivery-router.js";
+
+function sessionKeyHash(sessionId: string): string {
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+}
 
 export type BusyPolicyConfig = {
   busyPolicy: ChannelBusyPolicy;
@@ -76,6 +82,8 @@ export type ChannelGatewayOptions = {
   isDraining?: () => boolean;
   /** Stage 7: resolver for per-channel busy policy and queue depth config. */
   busyPolicyResolver?: (channelKind: ChannelKind) => BusyPolicyConfig;
+  /** Stage 8B: optional hook registry for turn lifecycle events. */
+  hookRegistry?: HookRegistry;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -206,6 +214,10 @@ export class ChannelGateway {
   readonly #sessionMessageQueue = new SessionMessageQueue();
   readonly #drainingQueue = new Set<string>();
 
+  // Stage 8B
+  readonly #hookRegistry: HookRegistry | undefined;
+  readonly #abortReasonByKey = new Map<string, string>();
+
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
@@ -233,6 +245,9 @@ export class ChannelGateway {
 
     // Stage 7
     this.#busyPolicyResolver = options.busyPolicyResolver;
+
+    // Stage 8B
+    this.#hookRegistry = options.hookRegistry;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -402,8 +417,10 @@ export class ChannelGateway {
           );
           // Abort active turn if one exists
           if (this.#activeTurnRegistry !== undefined) {
+            this.#abortReasonByKey.set(activeTurnKey, "interrupt");
             this.#activeTurnRegistry.abortTurn(activeTurnKey, "interrupt");
           } else {
+            this.#abortReasonByKey.set(activeTurnKey, "interrupt");
             this.#activeTurns.get(activeTurnKey)?.abort("interrupt");
           }
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
@@ -442,10 +459,21 @@ export class ChannelGateway {
     }
     turnStarted = true;
 
+    const queueSize = this.#sessionMessageQueue.size(activeTurnKey);
+    void this.#hookRegistry?.emit("session:turn:start", {
+      turnId: turnId ?? activeTurnKey,
+      sessionKeyHash: sessionKeyHash(activeTurnKey),
+      channel: message.channel,
+      origin: message.text.startsWith("/") ? "command" : "message",
+      queueSize,
+    });
+
     // --- Single try/finally: every path after startTurn must endTurn ---
     let runtime: Runtime | undefined;
     let sessionId = "";
     let progressCount = 0;
+    let terminalEventEmitted = false;
+    const turnStartTime = Date.now();
     try {
       // Session resolution
       sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
@@ -542,6 +570,27 @@ export class ChannelGateway {
         });
       }
 
+      terminalEventEmitted = true;
+      const abortReason = this.#abortReasonByKey.get(activeTurnKey);
+      if (abortReason !== undefined) {
+        this.#abortReasonByKey.delete(activeTurnKey);
+        const reason = abortReason === "channel-stop" ? "stop" : abortReason as "unknown" | "interrupt" | "stop" | "drain-timeout" | "stuck-loop";
+        void this.#hookRegistry?.emit("session:turn:abort", {
+          turnId: turnId ?? activeTurnKey,
+          sessionKeyHash: sessionKeyHash(activeTurnKey),
+          channel: message.channel,
+          reason,
+        });
+      } else {
+        void this.#hookRegistry?.emit("session:turn:complete", {
+          turnId: turnId ?? activeTurnKey,
+          sessionKeyHash: sessionKeyHash(activeTurnKey),
+          channel: message.channel,
+          durationMs: Date.now() - turnStartTime,
+          replyTextLength: response.text.length,
+        });
+      }
+
       return { sessionId, replyText: response.text, artifactCount: response.artifacts.length, progressCount };
     } catch (turnErr) {
       // Classify abort vs runtime error
@@ -565,6 +614,31 @@ export class ChannelGateway {
         await this.#deliverText(adapter, normalizedSessionKey, errorText);
       } catch {
         // Delivery failure is secondary; already in error path
+      }
+
+      terminalEventEmitted = true;
+      if (isAbort) {
+        const rawReason = this.#abortReasonByKey.get(activeTurnKey)
+          ?? (controller.signal.reason as string | undefined)
+          ?? "unknown";
+        this.#abortReasonByKey.delete(activeTurnKey);
+        const reason = rawReason === "channel-stop" ? "stop" : rawReason as "unknown" | "interrupt" | "stop" | "drain-timeout" | "stuck-loop";
+        void this.#hookRegistry?.emit("session:turn:abort", {
+          turnId: turnId ?? activeTurnKey,
+          sessionKeyHash: sessionKeyHash(activeTurnKey),
+          channel: message.channel,
+          reason,
+        });
+      } else {
+        const suspendedCache = !isAbort && this.#runtimeCache !== undefined && runtime !== undefined;
+        void this.#hookRegistry?.emit("session:turn:error", {
+          turnId: turnId ?? activeTurnKey,
+          sessionId,
+          sessionKeyHash: sessionKeyHash(activeTurnKey),
+          channel: message.channel,
+          ...sanitizeHookError(turnErr),
+          suspendedCache,
+        });
       }
 
       return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
@@ -1405,8 +1479,10 @@ export class ChannelGateway {
       if (hasActiveTurn) {
         // Active turn exists: abort it, leave queued messages intact
         if (this.#activeTurnRegistry !== undefined) {
+          this.#abortReasonByKey.set(key, "channel-stop");
           this.#activeTurnRegistry.abortTurn(key, "channel-stop");
         } else {
+          this.#abortReasonByKey.set(key, "channel-stop");
           this.#activeTurns.get(key)?.abort("channel-stop");
         }
         const text = "Cancelled the active EstaCoda turn for this chat.";

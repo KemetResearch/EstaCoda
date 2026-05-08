@@ -9,6 +9,7 @@ import type { RuntimeCache } from "../runtime/runtime-cache.js";
 import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
+import { HookRegistry } from "../gateway/hook-registry.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -2149,6 +2150,256 @@ describe("ChannelGateway commands", () => {
       await waitForPendingWork(gateway);
       expect(handleCount).toBe(2); // first + queued drained
       expect(second.replyText).toBe(""); // queued, no immediate reply
+    });
+  });
+
+  describe("hook emissions", () => {
+    it("emits session:turn:start and session:turn:complete on success", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const startEvents: unknown[] = [];
+      const completeEvents: unknown[] = [];
+      registry.on("session:turn:start", (ev) => { startEvents.push(ev.payload); });
+      registry.on("session:turn:complete", (ev) => { completeEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        hookRegistry: registry,
+      });
+
+      await gateway.receive(makeMessage("hello"));
+      expect(startEvents).toHaveLength(1);
+      expect(completeEvents).toHaveLength(1);
+      expect((completeEvents[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("emits session:turn:error on runtime failure", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const errorEvents: unknown[] = [];
+      registry.on("session:turn:error", (ev) => { errorEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => { throw new Error("runtime boom"); }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        hookRegistry: registry,
+      });
+
+      await gateway.receive(makeMessage("hello"));
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { errorClass: string }).errorClass).toBe("Error");
+      expect((errorEvents[0] as { errorMessage: string }).errorMessage).toBe("runtime boom");
+    });
+
+    it("emits session:turn:abort on interrupt", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const abortEvents: unknown[] = [];
+      registry.on("session:turn:abort", (ev) => { abortEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }) => {
+            await new Promise((_, reject) => {
+              if (signal) {
+                signal.addEventListener("abort", () => reject(new Error("aborted")));
+              }
+            });
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 }),
+        hookRegistry: registry,
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second"));
+      await first.catch(() => {});
+
+      expect(abortEvents).toHaveLength(1);
+      expect((abortEvents[0] as { reason: string }).reason).toBe("interrupt");
+    });
+
+    it("emits session:turn:abort on /stop when runtime returns normally", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const abortEvents: unknown[] = [];
+      const completeEvents: unknown[] = [];
+      registry.on("session:turn:abort", (ev) => { abortEvents.push(ev.payload); });
+      registry.on("session:turn:complete", (ev) => { completeEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }) => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Return normally even if signal is aborted
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        hookRegistry: registry,
+      });
+
+      const turn = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("/stop"));
+      await turn;
+
+      expect(abortEvents).toHaveLength(1);
+      expect((abortEvents[0] as { reason: string }).reason).toBe("stop");
+      expect(completeEvents).toHaveLength(0);
+    });
+
+    it("emits session:turn:abort on interrupt when runtime returns normally", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const abortEvents: unknown[] = [];
+      const completeEvents: unknown[] = [];
+      registry.on("session:turn:abort", (ev) => { abortEvents.push(ev.payload); });
+      registry.on("session:turn:complete", (ev) => { completeEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }) => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Return normally even if signal is aborted
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 }),
+        hookRegistry: registry,
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second"));
+      await first;
+
+      expect(abortEvents).toHaveLength(1);
+      expect((abortEvents[0] as { reason: string }).reason).toBe("interrupt");
+      expect(completeEvents).toHaveLength(0);
+    });
+
+    it("does not emit start for busy reject", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      const startEvents: unknown[] = [];
+      registry.on("session:turn:start", (ev) => { startEvents.push(ev.payload); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return {
+              label: "ok",
+              text: "ok",
+              matchedSkills: [],
+              intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+              securityDecision: "allow",
+              toolExecutions: [],
+              toolPlans: [],
+              skillOutcomes: [],
+              artifacts: [],
+              context: undefined,
+              projectContext: undefined,
+              progress: []
+            } as Awaited<ReturnType<Runtime["handle"]>>;
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 }),
+        hookRegistry: registry,
+      });
+
+      const first = gateway.receive(makeMessage("hello"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gateway.receive(makeMessage("second"));
+      await first;
+
+      expect(startEvents).toHaveLength(1); // only first turn started
+    });
+
+    it("hook failures do not prevent runtime.dispose", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new HookRegistry();
+      let disposed = false;
+      registry.on("session:turn:complete", () => { throw new Error("hook boom"); });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          dispose: async () => { disposed = true; }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        hookRegistry: registry,
+      });
+
+      await gateway.receive(makeMessage("hello"));
+      expect(disposed).toBe(true);
     });
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   HookRegistry,
+  sanitizeHookError,
   type GatewayHookPayloadByName,
   type HookEvent,
 } from "./hook-registry.js";
@@ -291,7 +292,7 @@ describe("HookRegistry", () => {
     await registry.emit("session:cache:evict", {
       sessionId: "s1",
       entryId: "e1",
-      reason: "ttl",
+      reason: "fingerprint-mismatch",
     });
 
     expect(allEvents).toEqual([
@@ -299,7 +300,7 @@ describe("HookRegistry", () => {
       { type: "cache-miss", reason: "fingerprint-mismatch" },
       { type: "adapter-error", op: "poll" },
       { type: "delivery-error", kind: "artifact" },
-      { type: "cache-evict", reason: "ttl" },
+      { type: "cache-evict", reason: "fingerprint-mismatch" },
     ]);
   });
 
@@ -417,5 +418,67 @@ describe("HookRegistry", () => {
 
     expect(startEvents).toHaveLength(1);
     expect(stopEvents).toHaveLength(1);
+  });
+
+  describe("sanitizeHookError", () => {
+    it("extracts class and message from Error", () => {
+      const result = sanitizeHookError(new Error("boom"));
+      expect(result.errorClass).toBe("Error");
+      expect(result.errorMessage).toBe("boom");
+    });
+
+    it("handles named error subclasses", () => {
+      class CustomError extends Error {
+        constructor(message: string) {
+          super(message);
+          this.name = "CustomError";
+        }
+      }
+      const result = sanitizeHookError(new CustomError("custom"));
+      expect(result.errorClass).toBe("CustomError");
+      expect(result.errorMessage).toBe("custom");
+    });
+
+    it("handles non-Error values", () => {
+      const result = sanitizeHookError("string error");
+      expect(result.errorClass).toBe("UnknownError");
+      expect(result.errorMessage).toBe("string error");
+    });
+
+    it("handles null/undefined", () => {
+      expect(sanitizeHookError(null)).toEqual({ errorClass: "UnknownError", errorMessage: "null" });
+      expect(sanitizeHookError(undefined)).toEqual({ errorClass: "UnknownError", errorMessage: "undefined" });
+    });
+
+    it("redacts OpenAI-style project token", () => {
+      const result = sanitizeHookError(new Error("Request failed with token sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz"));
+      expect(result.errorMessage).toContain("[REDACTED]");
+      expect(result.errorMessage).not.toContain("sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz");
+    });
+
+    it("redacts generic sk token", () => {
+      const result = sanitizeHookError(new Error("Invalid key sk-1234567890abcdef1234567890abcdef"));
+      expect(result.errorMessage).toContain("[REDACTED]");
+      expect(result.errorMessage).not.toContain("sk-1234567890abcdef1234567890abcdef");
+    });
+
+    it("redacts Anthropic-style token", () => {
+      const result = sanitizeHookError(new Error("Auth failed with ant-1234567890abcdef1234567890abcdef"));
+      expect(result.errorMessage).toContain("[REDACTED]");
+      expect(result.errorMessage).not.toContain("ant-1234567890abcdef1234567890abcdef");
+    });
+
+    it("redacts Bearer token", () => {
+      const result = sanitizeHookError(new Error("Header: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"));
+      expect(result.errorMessage).toContain("Bearer [REDACTED]");
+      expect(result.errorMessage).not.toContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+    });
+
+    it("caps long messages", () => {
+      const longMessage = "a".repeat(300);
+      const result = sanitizeHookError(new Error(longMessage));
+      expect(result.errorMessage.length).toBeLessThanOrEqual(212); // 200 + " [truncated]"
+      expect(result.errorMessage).toContain(" [truncated]");
+    });
   });
 });

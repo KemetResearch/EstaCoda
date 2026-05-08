@@ -5,6 +5,7 @@ import {
   createCachedRuntimeProxy,
   type RuntimeCacheOptions,
 } from "./runtime-cache.js";
+import { HookRegistry } from "../gateway/hook-registry.js";
 import type { Runtime } from "./create-runtime.js";
 import type { RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -699,5 +700,136 @@ describe("RuntimeCache", () => {
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(1);
     expect(stats.totalReused).toBe(1);
+  });
+
+  describe("hook emissions", () => {
+    it("emits session:cache:miss on first create", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:miss", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy.dispose();
+      expect(events).toHaveLength(1);
+      expect((events[0] as { reason: string }).reason).toBe("first-create");
+    });
+
+    it("emits session:cache:hit on reuse", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:hit", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy1.dispose();
+      const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy2.dispose();
+      expect(events).toHaveLength(1);
+      expect((events[0] as { borrowCount: number }).borrowCount).toBe(1);
+    });
+
+    it("emits session:cache:miss with fingerprint-mismatch", async () => {
+      const registry = new HookRegistry();
+      const missEvents: unknown[] = [];
+      const evictEvents: unknown[] = [];
+      registry.on("session:cache:miss", (ev) => { missEvents.push(ev.payload); });
+      registry.on("session:cache:evict", (ev) => { evictEvents.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp1 = fakeFingerprint();
+      const proxy1 = await cache.get("s1", fp1, fakeSecurityPolicy);
+      await proxy1.dispose();
+      const fp2 = fakeFingerprint({ modelId: "gpt-5" });
+      const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
+      await proxy2.dispose();
+      expect(missEvents).toHaveLength(2);
+      expect((missEvents[1] as { reason: string }).reason).toBe("fingerprint-mismatch");
+      expect(evictEvents).toHaveLength(1);
+      expect((evictEvents[0] as { reason: string }).reason).toBe("fingerprint-mismatch");
+    });
+
+    it("emits session:cache:evict on suspend", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:evict", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy.dispose();
+      await cache.suspend("s1", "crash");
+      expect(events).toHaveLength(1);
+      expect((events[0] as { reason: string }).reason).toBe("suspend");
+    });
+
+    it("emits session:cache:evict on invalidate", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:evict", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy.dispose();
+      await cache.invalidate("s1");
+      expect(events).toHaveLength(1);
+      expect((events[0] as { reason: string }).reason).toBe("invalidate");
+    });
+
+    it("emits session:cache:evict on prune TTL", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:evict", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ idleTtlMs: 10, hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy.dispose();
+      await new Promise((r) => setTimeout(r, 20));
+      await cache.prune();
+      expect(events).toHaveLength(1);
+      expect((events[0] as { reason: string }).reason).toBe("ttl");
+    });
+
+    it("emits session:cache:evict on prune LRU", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:evict", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ maxEntries: 1, hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy1.dispose();
+      const proxy2 = await cache.get("s2", fp, fakeSecurityPolicy);
+      await proxy2.dispose();
+      await cache.prune();
+      expect(events).toHaveLength(1);
+      expect((events[0] as { reason: string }).reason).toBe("lru");
+    });
+
+    it("emits session:cache:evict on disposeAll", async () => {
+      const registry = new HookRegistry();
+      const events: unknown[] = [];
+      registry.on("session:cache:evict", (ev) => { events.push(ev.payload); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy1.dispose();
+      const proxy2 = await cache.get("s2", fp, fakeSecurityPolicy);
+      await proxy2.dispose();
+      await cache.disposeAll();
+      expect(events).toHaveLength(2);
+      expect((events[0] as { reason: string }).reason).toBe("disposeAll");
+      expect((events[1] as { reason: string }).reason).toBe("disposeAll");
+    });
+
+    it("hook failures do not prevent cache operations", async () => {
+      const registry = new HookRegistry();
+      registry.on("session:cache:hit", () => { throw new Error("hook boom"); });
+      const cache = createCache({ hookRegistry: registry });
+      const fp = fakeFingerprint();
+      const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy1.dispose();
+      const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
+      await proxy2.dispose();
+      const stats = cache.stats();
+      expect(stats.totalReused).toBe(1);
+    });
   });
 });

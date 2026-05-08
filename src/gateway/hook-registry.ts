@@ -145,7 +145,7 @@ export type GatewayHookPayloadByName = {
   "session:cache:evict": {
     sessionId: string;
     entryId: string;
-    reason: "ttl" | "lru" | "suspend" | "invalidate" | "disposeAll";
+    reason: "ttl" | "lru" | "suspend" | "invalidate" | "disposeAll" | "fingerprint-mismatch";
   };
   "delivery:success": {
     kind: "text" | "progress" | "artifact";
@@ -269,4 +269,36 @@ export class HookRegistry {
       }
     }
   }
+}
+
+export function sanitizeHookError(err: unknown): {
+  errorClass: string;
+  errorMessage: string;
+} {
+  let rawMessage: string;
+  let errorClass: string;
+
+  if (err instanceof Error) {
+    errorClass = err.name;
+    rawMessage = err.message;
+  } else {
+    errorClass = "UnknownError";
+    rawMessage = String(err);
+  }
+
+  // Redact known token patterns
+  const redacted = rawMessage
+    .replace(/\bsk-proj-[A-Za-z0-9_-]+\b/g, "[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9]{20,}\b/g, "[REDACTED]")
+    .replace(/\bant-[A-Za-z0-9]{20,}\b/g, "[REDACTED]")
+    .replace(/\bBearer\s+[A-Za-z0-9._-]+\b/g, "Bearer [REDACTED]");
+
+  // Cap length
+  const MAX_LEN = 200;
+  const errorMessage =
+    redacted.length > MAX_LEN
+      ? redacted.slice(0, MAX_LEN) + " [truncated]"
+      : redacted;
+
+  return { errorClass, errorMessage };
 }
