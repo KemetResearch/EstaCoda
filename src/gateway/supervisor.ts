@@ -51,6 +51,12 @@ import {
   type RuntimeCacheState,
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
+import {
+  writeCleanShutdownMarker,
+  readCleanShutdownMarker,
+  removeCleanShutdownMarker,
+  isCleanShutdownTrustworthy,
+} from "./supervisor-lifecycle.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 
@@ -69,6 +75,7 @@ export type SupervisorFactories = {
 export type GatewaySupervisorOptions = GatewayRunOptions & {
   once?: boolean;
   factories?: SupervisorFactories;
+  drainTimeoutMs?: number;
 };
 
 type AcquiredIdentityLock = {
@@ -85,7 +92,9 @@ export type SupervisorInternalState = {
   onSigint: (() => void) | undefined;
   onSigterm: (() => void) | undefined;
   shutdownStarted: boolean;
+  draining: boolean;
   running: boolean;
+  cleanupDone: boolean;
   exit: (code: number) => void;
   activeTurnRegistry?: ActiveTurnRegistry;
   runtimeCache?: RuntimeCache;
@@ -126,6 +135,7 @@ function createInitialState(homeDir: string, exitFn: (code: number) => void, sup
     onSigint: undefined,
     onSigterm: undefined,
     shutdownStarted: false,
+    draining: false,
     running: true,
     exit: exitFn,
     activeTurnRegistry: undefined,
@@ -139,10 +149,14 @@ function createInitialState(homeDir: string, exitFn: (code: number) => void, sup
     stuckAbortSent: new Set(),
     stuckEventRecorded: new Set(),
     stuckEventsBySession: new Map(),
+    cleanupDone: false,
   };
 }
 
 async function cleanupSupervisorStartupResources(state: SupervisorInternalState): Promise<void> {
+  if (state.cleanupDone) return;
+  state.cleanupDone = true;
+
   // 1. Clear timers
   if (state.pruneTimer !== undefined) {
     clearInterval(state.pruneTimer);
@@ -237,10 +251,27 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
   const state = createInitialState(homeDir, options.factories?.exit ?? ((code: number) => process.exit(code)), startedAt);
 
-  // 1. Stale state cleanup
-  const staleCleanup = await cleanupStaleGatewayState(homeDir);
-  if (staleCleanup.cleaned && staleCleanup.reason !== undefined) {
-    logInfo(`Cleaned up stale state: ${staleCleanup.reason}`);
+  // 1. Clean-shutdown marker consumption (before stale cleanup)
+  const cleanMarker = await readCleanShutdownMarker(homeDir);
+  if (cleanMarker !== undefined) {
+    const trustworthy = await isCleanShutdownTrustworthy(homeDir, cleanMarker);
+    if (trustworthy) {
+      logInfo(`Previous shutdown was clean (drain at ${cleanMarker.stoppedAt})`);
+      await removeCleanShutdownMarker(homeDir);
+    } else {
+      logInfo("Ignoring suspicious clean-shutdown marker (remaining PID/state/lock evidence)");
+      await removeCleanShutdownMarker(homeDir);
+      const staleCleanup = await cleanupStaleGatewayState(homeDir);
+      if (staleCleanup.cleaned && staleCleanup.reason !== undefined) {
+        logInfo(`Cleaned up stale state: ${staleCleanup.reason}`);
+      }
+    }
+  } else {
+    // 1a. Stale state cleanup (normal path when no marker)
+    const staleCleanup = await cleanupStaleGatewayState(homeDir);
+    if (staleCleanup.cleaned && staleCleanup.reason !== undefined) {
+      logInfo(`Cleaned up stale state: ${staleCleanup.reason}`);
+    }
   }
 
   // 2. Gateway lock acquisition
@@ -263,15 +294,54 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   const shutdown = (signalName?: string) => {
     if (state.shutdownStarted) {
       logWarning("Forced exit on second signal");
-      state.exit(1);
+      state.running = false;
+      cleanupSupervisorStartupResources(state).then(() => {
+        state.exit(1);
+      });
       return;
     }
     state.shutdownStarted = true;
-    state.running = false;
+    state.draining = true;
     logInfo(`Shutting down${signalName ? ` (${signalName})` : ""}...`);
-    cleanupSupervisorStartupResources(state).then(() => {
+
+    (async () => {
+      await writeGatewayState(homeDir, { lifecycle: "draining", startedAt, pid: process.pid, version });
+      logInfo("Draining, waiting for active turns...");
+
+      const drainTimeoutMs = options.drainTimeoutMs ?? 30_000;
+      const pollIntervalMs = 500;
+      const deadline = Date.now() + drainTimeoutMs;
+      let drained = false;
+
+      while (Date.now() < deadline) {
+        const activeCount = state.activeTurnRegistry?.stats().activeTurnCount ?? 0;
+        if (activeCount === 0) {
+          drained = true;
+          break;
+        }
+        await sleep(pollIntervalMs);
+      }
+
+      if (drained) {
+        logInfo("Drain complete");
+        await writeCleanShutdownMarker(homeDir, {
+          stoppedAt: new Date().toISOString(),
+          pid: process.pid,
+          version,
+          reason: "drain",
+        });
+      } else {
+        logWarning("Drain timeout, aborting remaining turns");
+        const abortedCount = state.activeTurnRegistry?.abortAllTurns("drain-timeout") ?? 0;
+        logWarning(`Aborted ${abortedCount} turn(s)`);
+        // Brief grace for aborts to propagate before cleanup
+        await sleep(500);
+      }
+
+      state.running = false;
+      await cleanupSupervisorStartupResources(state);
       state.exit(0);
-    });
+    })();
   };
 
   state.onSigint = () => shutdown("SIGINT");
@@ -660,6 +730,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           activeTurnRegistry,
           runtimeCache,
           runtimeFingerprint,
+          isDraining: () => state.draining,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,
@@ -706,6 +777,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           activeTurnRegistry,
           runtimeCache,
           runtimeFingerprint,
+          isDraining: () => state.draining,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,
@@ -753,7 +825,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const doTickCron = options.factories?.tickCron ?? tickCron;
 
     do {
-      await doTickCron({
+      if (!state.draining) {
+        await doTickCron({
         store: cronStore,
         executionStore: cronExecutionStore,
         jobLock: cronJobLock,
@@ -823,6 +896,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
         }),
       });
+      }
 
       for (const wrapper of wrappers) {
         await wrapper.tick();

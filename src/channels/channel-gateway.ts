@@ -64,6 +64,8 @@ export type ChannelGatewayOptions = {
   runtimeCache?: RuntimeCache;
   /** Static fingerprint for cache key comparison. Required when runtimeCache is provided. */
   runtimeFingerprint?: RuntimeFingerprint;
+  /** Stage 6: drain callback to reject new turns while supervisor is shutting down gracefully. */
+  isDraining?: () => boolean;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -186,6 +188,9 @@ export class ChannelGateway {
   readonly #sessionIdByTurnKey = new Map<string, string>();
   readonly #logWarning?: (message: string) => void;
 
+  // Stage 6
+  readonly #isDraining: (() => boolean) | undefined;
+
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
@@ -207,6 +212,9 @@ export class ChannelGateway {
     this.#activeTurnRegistry = options.activeTurnRegistry;
     this.#runtimeCache = options.runtimeCache;
     this.#runtimeFingerprint = options.runtimeFingerprint;
+
+    // Stage 6
+    this.#isDraining = options.isDraining;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -306,6 +314,18 @@ export class ChannelGateway {
 
     if (commandResult !== undefined) {
       return commandResult;
+    }
+
+    // --- Drain check (before any turn side effects) ---
+    if (this.#isDraining?.()) {
+      const drainText = "Gateway is restarting, please try again shortly.";
+      await this.#deliverText(adapter, message.sessionKey, drainText);
+      await adapter.send?.({
+        conversationId: message.sessionKey.chatId,
+        sessionKey: message.sessionKey,
+        text: drainText,
+      });
+      return { sessionId: "", replyText: drainText, artifactCount: 0, progressCount: 0 };
     }
 
     const processedMessage = await this.#preprocessMessage?.(message) ?? message;

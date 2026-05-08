@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises";
+import { rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import {
   readGatewayPid,
   removeGatewayPid,
@@ -15,6 +16,70 @@ import {
   releaseGatewayLock,
   readGatewayLockContent,
 } from "./gateway-lock.js";
+
+export const CLEAN_SHUTDOWN_FILE_NAME = ".clean_shutdown";
+
+export async function writeCleanShutdownMarker(homeDir: string, marker: CleanShutdownMarker): Promise<void> {
+  const dir = join(homeDir, ".estacoda", "gateway");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, CLEAN_SHUTDOWN_FILE_NAME), JSON.stringify(marker) + "\n", "utf8");
+}
+
+export async function readCleanShutdownMarker(homeDir: string): Promise<CleanShutdownMarker | undefined> {
+  try {
+    const raw = await readFile(join(homeDir, ".estacoda", "gateway", CLEAN_SHUTDOWN_FILE_NAME), "utf8");
+    const parsed = JSON.parse(raw) as Partial<CleanShutdownMarker>;
+    if (
+      typeof parsed.stoppedAt === "string" &&
+      typeof parsed.pid === "number" &&
+      typeof parsed.version === "string" &&
+      typeof parsed.reason === "string"
+    ) {
+      return {
+        stoppedAt: parsed.stoppedAt,
+        pid: parsed.pid,
+        version: parsed.version,
+        reason: parsed.reason as CleanShutdownMarker["reason"],
+      };
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function removeCleanShutdownMarker(homeDir: string): Promise<void> {
+  try {
+    await rm(join(homeDir, ".estacoda", "gateway", CLEAN_SHUTDOWN_FILE_NAME), { force: true });
+  } catch {
+    // ignore
+  }
+}
+
+export async function isCleanShutdownTrustworthy(homeDir: string, marker: CleanShutdownMarker): Promise<boolean> {
+  const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+  const stoppedAt = new Date(marker.stoppedAt).getTime();
+  if (Number.isNaN(stoppedAt) || stoppedAt < fiveMinutesAgo) {
+    return false;
+  }
+
+  const pidContent = await readGatewayPid(homeDir);
+  if (pidContent !== undefined) {
+    return false;
+  }
+
+  const state = await readGatewayState(homeDir);
+  if (state !== undefined) {
+    return false;
+  }
+
+  const lockContent = await readGatewayLockContent(homeDir);
+  if (lockContent !== undefined) {
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * CLEAN_SHUTDOWN_MARKER_SCHEMA — prepared for Stage 6 (Graceful Restart and Drain)

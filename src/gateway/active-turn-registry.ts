@@ -272,6 +272,18 @@ export class ActiveTurnRegistry {
     return this.#history.slice();
   }
 
+  /** Abort all active turns. Returns count of turns aborted. */
+  abortAllTurns(reason: string): number {
+    let count = 0;
+    for (const turn of this.#activeTurns.values()) {
+      turn.abortController?.abort(reason);
+      this.#abortedTurnIds.add(turn.turnId);
+      this.#totalAborted++;
+      count++;
+    }
+    return count;
+  }
+
   /** Remove all active turns and clear history. For testing / emergency reset. */
   clear(): void {
     this.#activeTurns.clear();

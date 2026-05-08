@@ -547,4 +547,44 @@ describe("ActiveTurnRegistry", () => {
     registry.endTurn("k1", result.ok ? result.turnId : "");
     expect(registry.consumeBusyAck("k1")).toBe(false);
   });
+
+  // abortAllTurns tests
+  it("abortAllTurns aborts every active turn and returns count", () => {
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    registry.startTurn("k1", c1);
+    registry.startTurn("k2", c2);
+
+    const count = registry.abortAllTurns("drain");
+    expect(count).toBe(2);
+    expect(c1.signal.aborted).toBe(true);
+    expect(c2.signal.aborted).toBe(true);
+  });
+
+  it("abortAllTurns leaves no active turns aborted", () => {
+    registry.startTurn("k1", new AbortController());
+    registry.startTurn("k2", new AbortController());
+
+    registry.abortAllTurns("drain");
+    expect(registry.stats().totalAborted).toBe(2);
+    // Turns remain in registry until endTurn is called
+    expect(registry.stats().activeTurnCount).toBe(2);
+  });
+
+  it("abortAllTurns is safe when no turns are active", () => {
+    const count = registry.abortAllTurns("drain");
+    expect(count).toBe(0);
+    expect(registry.stats().totalAborted).toBe(0);
+  });
+
+  it("abortAllTurns increments totalAborted correctly", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    registry.abortAllTurns("reason-1");
+    expect(registry.stats().totalAborted).toBe(1);
+
+    registry.endTurn("k1", result.ok ? result.turnId : "");
+    registry.startTurn("k2", new AbortController());
+    registry.abortAllTurns("reason-2");
+    expect(registry.stats().totalAborted).toBe(2);
+  });
 });

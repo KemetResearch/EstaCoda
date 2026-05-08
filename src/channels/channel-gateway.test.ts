@@ -491,6 +491,33 @@ describe("ChannelGateway commands", () => {
       expect(registry.stats().totalStarted).toBe(1);
     });
 
+    it("receive() rejects new turns while draining with no side effects", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let runtimeCreated = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => {
+          runtimeCreated = true;
+          return createMinimalRuntime();
+        },
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { mode: "allow-all" },
+        activeTurnRegistry: registry,
+        isDraining: () => true,
+      });
+
+      const result = await gateway.receive(makeMessage("hello"));
+
+      expect(result.replyText).toBe("Gateway is restarting, please try again shortly.");
+      expect(registry.stats().totalStarted).toBe(0);
+      expect(runtimeCreated).toBe(false);
+      expect(adapter.records.length).toBeGreaterThanOrEqual(1);
+      const drainRecord = adapter.records.find((r) => r.text === "Gateway is restarting, please try again shortly.");
+      expect(drainRecord).toBeDefined();
+    });
+
     it("receive() busy ack is delivered via adapter when busy", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const registry = new ActiveTurnRegistry({ busyAckCooldownMs: 30_000 });

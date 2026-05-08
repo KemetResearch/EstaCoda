@@ -18,6 +18,7 @@ import { readGatewayLockContent } from "./gateway-lock.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
+import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -548,6 +549,236 @@ describe("runGatewaySupervisor", () => {
     expect(parsed.version).toBe(1);
     expect(parsed.supervisorPid).toBe(process.pid);
   });
+
+  it("SIGTERM triggers drain, waits for active turns, writes clean marker", async () => {
+    const exited = fakeExit();
+    let capturedRegistry: ActiveTurnRegistry | undefined;
+    const gateway = fakeChannelGateway();
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      drainTimeoutMs: 5_000,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedRegistry = opts.activeTurnRegistry;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const ac = new AbortController();
+    capturedRegistry?.startTurn("test-key", ac);
+
+    process.emit("SIGTERM");
+
+    await new Promise((r) => setTimeout(r, 100));
+    const turn = capturedRegistry?.getTurn("test-key");
+    if (turn && capturedRegistry) {
+      capturedRegistry.endTurn("test-key", turn.turnId);
+    }
+
+    await promise;
+    await new Promise((r) => setTimeout(r, 600));
+
+    expect(exited.codes()).toContain(0);
+    const marker = await readCleanShutdownMarker(tmpDir);
+    expect(marker).toBeDefined();
+    expect(marker?.reason).toBe("drain");
+  });
+
+  it("drain timeout aborts remaining turns and does NOT write clean marker", async () => {
+    const exited = fakeExit();
+    let capturedRegistry: ActiveTurnRegistry | undefined;
+    const gateway = fakeChannelGateway();
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      drainTimeoutMs: 200,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedRegistry = opts.activeTurnRegistry;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const ac = new AbortController();
+    capturedRegistry?.startTurn("test-key", ac);
+
+    process.emit("SIGTERM");
+
+    await promise;
+    await new Promise((r) => setTimeout(r, 800));
+
+    expect(exited.codes()).toContain(0);
+    expect(ac.signal.aborted).toBe(true);
+    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+  });
+
+  it("second signal during drain forces immediate exit without clean marker", async () => {
+    const exited = fakeExit();
+    let capturedRegistry: ActiveTurnRegistry | undefined;
+    const gateway = fakeChannelGateway();
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      drainTimeoutMs: 5_000,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedRegistry = opts.activeTurnRegistry;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const ac = new AbortController();
+    capturedRegistry?.startTurn("test-key", ac);
+
+    process.emit("SIGTERM");
+    await new Promise((r) => setTimeout(r, 100));
+    process.emit("SIGTERM");
+
+    await promise;
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(exited.codes()).toContain(1);
+    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+  });
+
+  it("startup consumes clean-shutdown marker when PID/state/lock are clean", async () => {
+    const marker = {
+      stoppedAt: new Date().toISOString(),
+      pid: 12345,
+      version: "1.0.0",
+      reason: "drain" as const,
+    };
+    await writeCleanShutdownMarker(tmpDir, marker);
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+  });
+
+  it("startup ignores clean-shutdown marker when any PID/state/lock file remains, removes marker, runs normal cleanup", async () => {
+    const marker = {
+      stoppedAt: new Date().toISOString(),
+      pid: 12345,
+      version: "1.0.0",
+      reason: "drain" as const,
+    };
+    await writeCleanShutdownMarker(tmpDir, marker);
+    const { writeFile: wf, mkdir: md } = await import("node:fs/promises");
+    await md(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
+    await wf(join(tmpDir, ".estacoda", "gateway", "gateway.pid"), JSON.stringify({ pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" }));
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+  });
+
+  it("startup ignores stale clean-shutdown marker (>5min), removes marker", async () => {
+    const marker = {
+      stoppedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+      pid: 12345,
+      version: "1.0.0",
+      reason: "drain" as const,
+    };
+    await writeCleanShutdownMarker(tmpDir, marker);
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+  });
+
+  it("cron tick is skipped while draining", async () => {
+    const tick = fakeTickCron();
+    const gateway = fakeChannelGateway();
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      factories: {
+        tickCron: tick.tickCron,
+        createChannelGateway: () => gateway as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    process.emit("SIGTERM");
+    await promise;
+    await new Promise((r) => setTimeout(r, 600));
+
+    // Only one tick should have run before drain stopped the loop
+    expect(tick.calls()).toBe(1);
+  });
+
+  it("isDraining callback is passed to ChannelGateway", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {} };
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(typeof capturedOpts.isDraining).toBe("function");
+    expect(capturedOpts.isDraining()).toBe(false);
+  });
 });
 
 describe("supervisor 5E internals", () => {
@@ -573,7 +804,9 @@ describe("supervisor 5E internals", () => {
       onSigint: undefined,
       onSigterm: undefined,
       shutdownStarted: false,
+      draining: false,
       running: true,
+      cleanupDone: false,
       exit: () => {},
       activeTurnRegistry: undefined,
       runtimeCache: undefined,

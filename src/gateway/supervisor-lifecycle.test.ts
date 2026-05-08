@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -7,6 +7,12 @@ import { stopGateway, signalGateway } from "./supervisor-lifecycle.js";
 import { writeGatewayPid, readGatewayPid } from "./pid-file.js";
 import { writeGatewayState, readGatewayState } from "./supervisor-state.js";
 import { acquireGatewayLock, releaseGatewayLock, readGatewayLockContent } from "./gateway-lock.js";
+import {
+  writeCleanShutdownMarker,
+  readCleanShutdownMarker,
+  removeCleanShutdownMarker,
+  isCleanShutdownTrustworthy,
+} from "./supervisor-lifecycle.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-lifecycle-test-"));
@@ -321,6 +327,56 @@ describe("supervisor-lifecycle", () => {
       } finally {
         process.kill = originalKill;
       }
+    });
+  });
+
+  describe("clean shutdown marker", () => {
+    it("write/read roundtrip", async () => {
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      await writeCleanShutdownMarker(tmpDir, marker);
+      const read = await readCleanShutdownMarker(tmpDir);
+      expect(read).toEqual(marker);
+    });
+
+    it("remove deletes file", async () => {
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      await writeCleanShutdownMarker(tmpDir, marker);
+      await removeCleanShutdownMarker(tmpDir);
+      expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    });
+
+    it("missing file returns undefined", async () => {
+      expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    });
+
+    it("isCleanShutdownTrustworthy returns true when no PID/state/lock exist", async () => {
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      const result = await isCleanShutdownTrustworthy(tmpDir, marker);
+      expect(result).toBe(true);
+    });
+
+    it("isCleanShutdownTrustworthy returns false when PID file exists (even if stale)", async () => {
+      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      expect(await isCleanShutdownTrustworthy(tmpDir, marker)).toBe(false);
+    });
+
+    it("isCleanShutdownTrustworthy returns false when gateway-state.json exists", async () => {
+      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: 99999, version: "0.0.1" });
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      expect(await isCleanShutdownTrustworthy(tmpDir, marker)).toBe(false);
+    });
+
+    it("isCleanShutdownTrustworthy returns false when gateway.lock exists", async () => {
+      await acquireGatewayLock(tmpDir);
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      expect(await isCleanShutdownTrustworthy(tmpDir, marker)).toBe(false);
+      await releaseGatewayLock(tmpDir);
+    });
+
+    it("isCleanShutdownTrustworthy returns false when stale marker (>5min)", async () => {
+      const marker = { stoppedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      expect(await isCleanShutdownTrustworthy(tmpDir, marker)).toBe(false);
     });
   });
 });
