@@ -34,6 +34,7 @@ import {
   defaultImageModel,
   resolveImageModel
 } from "../contracts/image-generation.js";
+import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -416,6 +417,8 @@ export type ProviderSetupInput = {
   credentialPoolStrategy?: CredentialRotationStrategy;
   primary?: boolean;
   backupForMain?: boolean;
+  contextWindowTokens?: number;
+  requiresCredential?: boolean;
 };
 
 export type WebSetupInput = {
@@ -538,6 +541,7 @@ export async function loadRuntimeConfig(options: {
   userConfigPath?: string;
   projectConfigPath?: string;
   providerFetch?: ProviderFetchLike;
+  modelsDevOptions?: ModelsDevRegistryOptions;
 }): Promise<LoadedRuntimeConfig> {
   await loadDotEnvSecrets({ homeDir: options.homeDir });
   const sources = [
@@ -548,14 +552,16 @@ export async function loadRuntimeConfig(options: {
   const config = mergeConfig(...loaded.map((entry) => entry.config));
   const catalogProfiles = await resolveModelProfilesFromCatalog({
     homeDir: options.homeDir,
-    allowNetwork: false
+    allowNetwork: false,
+    ...options.modelsDevOptions
   });
   const model = await resolveModelProfileFromCatalog({
     provider: config.model?.provider ?? "unconfigured",
     model: config.model?.id ?? "unconfigured",
     contextWindowTokens: config.model?.contextWindowTokens,
     homeDir: options.homeDir,
-    allowNetwork: false
+    allowNetwork: false,
+    ...options.modelsDevOptions
   });
   const providerRegistry = buildProviderRegistry(config, {
     fetch: options.providerFetch,
@@ -589,7 +595,8 @@ export async function loadRuntimeConfig(options: {
       model: fallback.id,
       contextWindowTokens: fallback.contextWindowTokens,
       homeDir: options.homeDir,
-      allowNetwork: false
+      allowNetwork: false,
+      ...options.modelsDevOptions
     });
     const fallbackProviderConfig = config.providers?.[fallback.provider];
     modelFallbackRoutes.push({
@@ -1283,7 +1290,9 @@ export async function setupProviderConfig(options: {
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
-  const requiresCredential = options.input.provider !== "local" || options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
+  const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
+  const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
+  const requiresCredential = explicitlyProvidesCredential || forceCredential;
   const envName = requiresCredential ? options.input.apiKeyEnv ?? defaultEnvKey(options.input.provider) : undefined;
   let secretPath: string | undefined;
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
@@ -1308,12 +1317,16 @@ export async function setupProviderConfig(options: {
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
+  const contextWindowPatch = options.input.contextWindowTokens !== undefined
+    ? { contextWindowTokens: options.input.contextWindowTokens }
+    : {};
   const primaryModelPatch = options.input.primary === false
     ? {}
     : {
       model: {
         provider: options.input.provider,
-        id: options.input.model
+        id: options.input.model,
+        ...contextWindowPatch
       }
     };
   const config = mergeConfig(existing.config, {
@@ -2070,7 +2083,7 @@ export async function consumeTelegramPairingCode(options: {
   };
 }
 
-async function readConfig(path: string): Promise<{ path: string; loaded: boolean; config: EstaCodaConfig }> {
+export async function readConfig(path: string): Promise<{ path: string; loaded: boolean; config: EstaCodaConfig }> {
   try {
     return {
       path,

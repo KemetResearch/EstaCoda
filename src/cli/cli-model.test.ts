@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
+import { resetModelsDevRegistryForTest } from "../providers/model-selection-catalog.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-model-test-"));
@@ -25,6 +26,7 @@ describe("cli model", () => {
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
+    resetModelsDevRegistryForTest();
   });
 
   afterEach(async () => {
@@ -526,6 +528,507 @@ describe("cli model", () => {
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.fallbacks).toHaveLength(1);
+    });
+  });
+
+  describe("model list", () => {
+    async function writeBundledSnapshot(homeDir: string, snapshot: unknown): Promise<string> {
+      const fixturePath = join(homeDir, "models_dev_snapshot.json");
+      await writeFile(fixturePath, JSON.stringify(snapshot, null, 2), "utf8");
+      return fixturePath;
+    }
+
+    function mockSnapshot(): Record<string, unknown> {
+      return {
+        providers: [
+          { id: "openai", name: "OpenAI" },
+          { id: "anthropic", name: "Anthropic" },
+          { id: "deepseek", name: "DeepSeek" }
+        ],
+        models: [
+          {
+            id: "gpt-4o",
+            provider_id: "openai",
+            context_window: 128000,
+            input_modalities: ["text", "image"],
+            output_modalities: ["text"],
+            reasoning: false,
+            tool_call: true,
+            structured_output: true,
+            status: "stable"
+          },
+          {
+            id: "gpt-4o-deprecated",
+            provider_id: "openai",
+            context_window: 128000,
+            input_modalities: ["text"],
+            output_modalities: ["text"],
+            reasoning: false,
+            tool_call: true,
+            structured_output: true,
+            status: "deprecated"
+          },
+          {
+            id: "dall-e-3",
+            provider_id: "openai",
+            context_window: 0,
+            input_modalities: ["text"],
+            output_modalities: ["image"],
+            reasoning: false,
+            tool_call: false,
+            structured_output: false,
+            status: "stable"
+          },
+          {
+            id: "claude-3-opus",
+            provider_id: "anthropic",
+            context_window: 200000,
+            input_modalities: ["text", "image"],
+            output_modalities: ["text"],
+            reasoning: false,
+            tool_call: true,
+            structured_output: true,
+            status: "stable"
+          },
+          {
+            id: "deepseek-chat",
+            provider_id: "deepseek",
+            context_window: 64000,
+            input_modalities: ["text"],
+            output_modalities: ["text"],
+            reasoning: false,
+            tool_call: true,
+            structured_output: true,
+            status: "stable"
+          }
+        ],
+        fetchedAt: "2099-01-01T00:00:00.000Z",
+        source: "bundled"
+      };
+    }
+
+    it("renders offline catalog output", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Model catalog:");
+      expect(result.output).toContain("openai/gpt-4o");
+      expect(result.output).toContain("anthropic/claude-3-opus");
+    });
+
+    it("search filters offline catalog output by query", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "search", "claude"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("claude-3-opus");
+      expect(result.output).not.toContain("gpt-4o");
+    });
+
+    it("providers shows curated and configured providers", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "providers"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Providers:");
+      expect(result.output).toContain("openai");
+      expect(result.output).toContain("anthropic");
+      expect(result.output).toContain("deepseek");
+    });
+
+    it("distinguishes executable vs catalog-only providers", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "providers"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("openai - OpenAI (executable)");
+      expect(result.output).toContain("anthropic - Anthropic (catalog-only)");
+    });
+
+    it("refresh prints source domain, cache path, timestamp, models count, providers count, and cacheChanged", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      const cachePath = join(tmpDir, "models_dev_cache.json");
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "refresh"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, cachePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Catalog refresh complete");
+      expect(result.output).toContain("Source: models.dev");
+      expect(result.output).toContain(`Cache: ${cachePath}`);
+      expect(result.output).toContain("Timestamp:");
+      expect(result.output).toContain("Models:");
+      expect(result.output).toContain("Providers:");
+      expect(result.output).toContain("Changed:");
+    });
+
+    it("refresh does not mutate runtime config", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      const cachePath = join(tmpDir, "models_dev_cache.json");
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const before = await readUserConfig(tmpDir);
+      const result = await runCliCommand({
+        argv: ["model", "refresh"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, cachePath, allowNetwork: false }
+      });
+      expect(result.handled).toBe(true);
+      const after = await readUserConfig(tmpDir);
+      expect(after).toEqual(before);
+    });
+
+    it("filters by --provider", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--provider", "openai"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).not.toContain("claude-3-opus");
+    });
+
+    it("filters by --tools", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o", "dall-e-3"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--tools"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).not.toContain("dall-e-3");
+    });
+
+    it("filters by --vision", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o", "deepseek-chat"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--vision"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).not.toContain("deepseek-chat");
+    });
+
+    it("filters by --structured", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o", "dall-e-3"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--structured"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).not.toContain("dall-e-3");
+    });
+
+    it("filters by --reasoning", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--reasoning"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("deepseek-reasoner");
+      expect(result.output).not.toContain("gpt-4o");
+    });
+
+    it("filters by --configured", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--configured"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).toContain("claude-3-opus");
+      expect(result.output).not.toContain("deepseek-chat");
+    });
+
+    it("filters by --executable-only", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "list", "--executable-only"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(result.output).toContain("gpt-4o");
+      expect(result.output).not.toContain("claude-3-opus");
+    });
+
+    it("includes deprecated with --include-deprecated", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o", "gpt-4o-deprecated"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const without = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      const withFlag = await runCliCommand({
+        argv: ["model", "list", "--include-deprecated"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(without.output).not.toContain("gpt-4o-deprecated");
+      expect(withFlag.output).toContain("gpt-4o-deprecated");
+    });
+
+    it("includes beta with --include-beta", async () => {
+      const snapshot = mockSnapshot();
+      (snapshot.models as any[]).push({
+        id: "gpt-5-beta",
+        provider_id: "openai",
+        context_window: 128000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "beta"
+      });
+      const fixturePath = await writeBundledSnapshot(tmpDir, snapshot);
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-5-beta"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const without = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      const withFlag = await runCliCommand({
+        argv: ["model", "list", "--include-beta"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(without.output).not.toContain("gpt-5-beta");
+      expect(withFlag.output).toContain("gpt-5-beta");
+    });
+
+    it("includes non-chat with --include-non-chat", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const without = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      const withFlag = await runCliCommand({
+        argv: ["model", "list", "--include-non-chat"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(without.output).not.toContain("dall-e-3");
+      expect(withFlag.output).toContain("dall-e-3");
+    });
+
+    it("fails clearly when --live is passed", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const listResult = await runCliCommand({
+        argv: ["model", "list", "--live"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(listResult.handled).toBe(true);
+      expect(listResult.exitCode).toBe(1);
+      expect(listResult.output).toContain("Live catalog probing is not yet implemented");
+
+      const searchResult = await runCliCommand({
+        argv: ["model", "search", "gpt", "--live"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(searchResult.handled).toBe(true);
+      expect(searchResult.exitCode).toBe(1);
+      expect(searchResult.output).toContain("Live catalog probing is not yet implemented");
+    });
+
+    it("does not make network calls by default for list, search, providers, and diagnose", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      let fetchCalled = false;
+      const fakeFetch = () => { fetchCalled = true; throw new Error("should not fetch"); };
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const listResult = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false, fetchImpl: fakeFetch as any }
+      });
+      expect(listResult.exitCode).toBe(0);
+
+      const searchResult = await runCliCommand({
+        argv: ["model", "search", "gpt"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false, fetchImpl: fakeFetch as any }
+      });
+      expect(searchResult.exitCode).toBe(0);
+
+      const providersResult = await runCliCommand({
+        argv: ["model", "providers"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false, fetchImpl: fakeFetch as any }
+      });
+      expect(providersResult.exitCode).toBe(0);
+
+      const diagnoseResult = await runCliCommand({
+        argv: ["model", "diagnose"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false, fetchImpl: fakeFetch as any }
+      });
+      expect(diagnoseResult.handled).toBe(true);
+
+      expect(fetchCalled).toBe(false);
+    });
+
+    it("never shows catalog-only providers as executable", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: { kind: "openai-compatible", models: ["gpt-4o"] },
+          anthropic: { kind: "catalog", models: ["claude-3-opus"] }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      const result = await runCliCommand({
+        argv: ["model", "providers"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      const lines = result.output.split("\n");
+      for (const line of lines) {
+        if (line.includes("anthropic")) {
+          expect(line).toContain("catalog-only");
+          expect(line).not.toContain("executable");
+        }
+      }
     });
   });
 });

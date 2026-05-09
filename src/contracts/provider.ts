@@ -52,6 +52,19 @@ export type ProviderEndpoint = {
   headers?: Record<string, string>;
 };
 
+export type ProviderUxKind =
+  | "hosted"
+  | "local"
+  | "custom-openai-compatible"
+  | "openrouter"
+  | "aggregator";
+
+export type ProviderSetupMode =
+  | "api-key"
+  | "base-url"
+  | "api-key-and-base-url"
+  | "none";
+
 export type ProviderHealth = {
   available: boolean;
   reason?: string;

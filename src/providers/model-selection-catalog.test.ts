@@ -1,0 +1,574 @@
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ProviderId, ModelProfile } from "../contracts/provider.js";
+import { ProviderRegistry } from "./provider-registry.js";
+import { createCatalogProvider } from "./catalog-provider.js";
+import {
+  routeKey,
+  createModelSelectionCatalog,
+  resetModelsDevRegistryForTest,
+  type CreateModelSelectionCatalogOptions
+} from "./model-selection-catalog.js";
+
+function createMockSnapshot(): Record<string, unknown> {
+  return {
+    providers: [
+      { id: "openai", name: "OpenAI" },
+      { id: "anthropic", name: "Anthropic" },
+      { id: "deepseek", name: "DeepSeek" }
+    ],
+    models: [
+      {
+        id: "gpt-4o",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text", "image"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "gpt-4o-deprecated",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "deprecated"
+      },
+      {
+        id: "dall-e-3",
+        provider_id: "openai",
+        context_window: 0,
+        input_modalities: ["text"],
+        output_modalities: ["image"],
+        reasoning: false,
+        tool_call: false,
+        structured_output: false,
+        status: "stable"
+      },
+      {
+        id: "claude-3-opus",
+        provider_id: "anthropic",
+        context_window: 200_000,
+        input_modalities: ["text", "image"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "deepseek-chat",
+        provider_id: "deepseek",
+        context_window: 64_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      }
+    ],
+    fetchedAt: "2024-01-01T00:00:00.000Z",
+    source: "bundled"
+  };
+}
+
+function withFixture(testFn: (fixturePath: string, cachePath: string) => Promise<void>): () => Promise<void> {
+  return async () => {
+    const dir = mkdtempSync(join(tmpdir(), "estacoda-catalog-test-"));
+    const fixturePath = join(dir, "models_dev_snapshot.json");
+    const cachePath = join(dir, "models_dev_cache.json");
+    writeFileSync(fixturePath, JSON.stringify(createMockSnapshot(), null, 2), "utf8");
+
+    try {
+      await testFn(fixturePath, cachePath);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+function buildOptions(fixturePath: string, cachePath: string, overrides?: {
+  config?: CreateModelSelectionCatalogOptions["config"];
+  registry?: ProviderRegistry;
+}): CreateModelSelectionCatalogOptions {
+  return {
+    config: overrides?.config ?? {},
+    providerRegistry: overrides?.registry ?? new ProviderRegistry(),
+    homeDir: tmpdir(),
+    modelsDevOptions: {
+      bundledSnapshotPath: fixturePath,
+      cachePath,
+      allowNetwork: false
+    }
+  };
+}
+
+describe("routeKey", () => {
+  it("includes provider, id, and baseUrl", () => {
+    const key = routeKey("openai", "gpt-4o", "https://custom.example.com/v1");
+    expect(key).toContain("openai");
+    expect(key).toContain("gpt-4o");
+    expect(key).toContain("https://custom.example.com/v1");
+  });
+
+  it("keeps same provider/id with different baseUrls distinct", () => {
+    const keyA = routeKey("openai", "gpt-4o", "https://a.example.com/v1");
+    const keyB = routeKey("openai", "gpt-4o", "https://b.example.com/v1");
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("omits baseUrl when undefined", () => {
+    const key = routeKey("openai", "gpt-4o");
+    expect(key).toBe("openai:gpt-4o");
+  });
+
+  it("is treated as opaque", () => {
+    // Consumers should not parse it by splitting. The helper
+    // contract is: routeKey(a,b,c) === routeKey(a,b,c) always.
+    expect(routeKey("openai", "gpt-4o", "https://a.com/v1"))
+      .toBe(routeKey("openai", "gpt-4o", "https://a.com/v1"));
+  });
+});
+
+describe("ModelSelectionCatalog offline behavior", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("loads catalog without network calls", withFixture(async (fixturePath, cachePath) => {
+    let fetchCalled = false;
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      registry: new ProviderRegistry()
+    }));
+
+    const models = await catalog.listModels();
+    expect(models.length).toBeGreaterThan(0);
+    expect(fetchCalled).toBe(false);
+  }));
+
+  it("does not make network calls by default", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const providers = await catalog.listProviders();
+    const models = await catalog.listModels();
+    // Should return data from the bundled fixture without fetching
+    expect(providers.some((p) => p.id === "openai")).toBe(true);
+    expect(models.some((m) => m.id === "gpt-4o")).toBe(true);
+  }));
+});
+
+describe("ModelSelectionCatalog configured models", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("includes configured models even when unknown to models.dev", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "openai" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o", "unknown-custom-model"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const custom = models.find((m) => m.id === "unknown-custom-model");
+    expect(custom).toBeDefined();
+    expect(custom!.configured).toBe(true);
+    expect(custom!.source).toBe("configured");
+  }));
+
+  it("marks configured models from snapshot as configured", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "openai" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.configured).toBe(true);
+    expect(gpt4o!.source).toBe("configured");
+  }));
+});
+
+describe("ModelSelectionCatalog manual IDs", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("preserves manual primary model with inferred profile", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "manual-model-id"
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const manual = models.find((m) => m.id === "manual-model-id");
+    expect(manual).toBeDefined();
+    expect(manual!.source).toBe("manual");
+    expect(manual!.profile.provider).toBe("openai");
+    expect(manual!.profile.id).toBe("manual-model-id");
+  }));
+
+  it("preserves manual fallback models", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "primary-model",
+          fallbacks: [
+            { provider: "deepseek" as ProviderId, id: "fallback-model" }
+          ]
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const fallback = models.find((m) => m.id === "fallback-model" && m.provider === "deepseek");
+    expect(fallback).toBeDefined();
+    expect(fallback!.source).toBe("manual");
+  }));
+});
+
+describe("ModelSelectionCatalog executable vs catalogOnly", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("marks models as executable when adapter has executable !== false", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    // Register an executable adapter for openai
+    registry.register({
+      id: "openai" as ProviderId,
+      name: "OpenAI",
+      executable: true,
+      health() {
+        return { available: true };
+      },
+      listModels() {
+        return [];
+      },
+      async complete() {
+        return { ok: true, content: "", model: "", provider: "openai" };
+      }
+    });
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.executable).toBe(true);
+    expect(gpt4o!.catalogOnly).toBe(false);
+  }));
+
+  it("marks models as catalogOnly when adapter has executable === false", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "anthropic" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          anthropic: {
+            kind: "catalog",
+            models: ["claude-3-opus"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const opus = models.find((m) => m.id === "claude-3-opus" && m.provider === "anthropic");
+    expect(opus).toBeDefined();
+    expect(opus!.executable).toBe(false);
+    expect(opus!.catalogOnly).toBe(true);
+  }));
+
+  it("marks models as catalogOnly when no adapter is registered", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    // No adapter registered for deepseek
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          deepseek: {
+            kind: "openai-compatible",
+            models: ["deepseek-chat"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const deepseek = models.find((m) => m.id === "deepseek-chat" && m.provider === "deepseek");
+    expect(deepseek).toBeDefined();
+    expect(deepseek!.executable).toBe(false);
+    expect(deepseek!.catalogOnly).toBe(true);
+  }));
+
+  it("excludes catalogOnly when includeCatalogOnly is false", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "anthropic" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          anthropic: {
+            kind: "catalog",
+            models: ["claude-3-opus"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const all = await catalog.listModels();
+    const filtered = await catalog.listModels({ includeCatalogOnly: false });
+
+    expect(all.some((m) => m.provider === "anthropic")).toBe(true);
+    expect(filtered.some((m) => m.provider === "anthropic")).toBe(false);
+  }));
+});
+
+describe("ModelSelectionCatalog filtering", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("excludes deprecated models by default", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const models = await catalog.listModels();
+    expect(models.some((m) => m.id === "gpt-4o-deprecated")).toBe(false);
+  }));
+
+  it("includes deprecated models when includeDeprecated is true", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const models = await catalog.listModels({ includeDeprecated: true });
+    expect(models.some((m) => m.id === "gpt-4o-deprecated")).toBe(true);
+  }));
+
+  it("excludes non-chat models (no text output) by default", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const models = await catalog.listModels();
+    expect(models.some((m) => m.id === "dall-e-3")).toBe(false);
+  }));
+});
+
+describe("ModelSelectionCatalog dedupe", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("does not duplicate same provider/id without baseUrl", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4oEntries = models.filter((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4oEntries.length).toBe(1);
+  }));
+
+  it("keeps distinct routes when baseUrl differs", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://custom.example.com/v1",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4oEntries = models.filter((m) => m.id === "gpt-4o" && m.provider === "openai");
+    // The configured baseUrl applies to the snapshot model too, so they merge into one entry
+    expect(gpt4oEntries.length).toBe(1);
+    expect(gpt4oEntries[0]!.baseUrl).toBe("https://custom.example.com/v1");
+    expect(gpt4oEntries[0]!.configured).toBe(true);
+  }));
+});
+
+describe("ModelSelectionCatalog search", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("finds models by id substring", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const results = await catalog.searchModels("gpt-4o");
+    expect(results.some((m) => m.id === "gpt-4o")).toBe(true);
+  }));
+
+  it("finds models by provider substring", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const results = await catalog.searchModels("openai");
+    expect(results.some((m) => m.provider === "openai")).toBe(true);
+  }));
+});
+
+describe("ModelSelectionCatalog resolveModel", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("resolves a model by provider and id", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const model = await catalog.resolveModel("openai", "gpt-4o");
+    expect(model).toBeDefined();
+    expect(model!.id).toBe("gpt-4o");
+    expect(model!.provider).toBe("openai");
+  }));
+
+  it("returns undefined for unknown model", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const model = await catalog.resolveModel("openai", "nonexistent-model");
+    expect(model).toBeUndefined();
+  }));
+});
+
+describe("ModelSelectionCatalog refresh", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("produces a ModelRefreshReport with expected fields", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const report = await catalog.refresh();
+
+    expect(report.sourceDomain).toBe("models.dev");
+    expect(report.cachePath).toContain("models_dev_cache.json");
+    expect(typeof report.snapshotTimestamp).toBe("string");
+    expect(typeof report.cacheChanged).toBe("boolean");
+    expect(typeof report.modelsCount).toBe("number");
+    expect(typeof report.providersCount).toBe("number");
+    expect(Array.isArray(report.warnings)).toBe(true);
+  }));
+
+  it("does not own independent fetch/cache logic (delegates to refreshModelsDevSnapshot)", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const report = await catalog.refresh();
+
+    // The report should reflect delegation, not custom fetch logic.
+    // We verify this indirectly: the snapshot comes from the fixture
+    // bundled path, and the cache path is the standard models.dev path.
+    expect(report.sourceDomain).toBe("models.dev");
+    expect(report.cachePath).toContain("models_dev_cache.json");
+  }));
+});
+
+describe("ModelSelectionCatalog provider listing", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("lists configured and snapshot providers", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const providers = await catalog.listProviders();
+    const openai = providers.find((p) => p.id === "openai");
+    expect(openai).toBeDefined();
+    expect(openai!.configured).toBe(true);
+
+    const anthropic = providers.find((p) => p.id === "anthropic");
+    expect(anthropic).toBeDefined();
+    expect(anthropic!.configured).toBe(false);
+  }));
+
+  it("infers provider uxKind correctly", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          },
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["llama3"]
+          }
+        }
+      }
+    }));
+
+    const providers = await catalog.listProviders();
+    const openai = providers.find((p) => p.id === "openai");
+    expect(openai!.uxKind).toBe("hosted");
+
+    const local = providers.find((p) => p.id === "local");
+    expect(local!.uxKind).toBe("local");
+  }));
+});

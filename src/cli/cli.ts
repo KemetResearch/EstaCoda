@@ -48,7 +48,7 @@ import {
   IMAGE_MODEL_OPTIONS,
   resolveImageModel
 } from "../contracts/image-generation.js";
-import type { ModelProfile, ResolvedAuxiliaryRoute } from "../contracts/provider.js";
+import type { ModelProfile, ResolvedAuxiliaryRoute, ProviderId } from "../contracts/provider.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
@@ -113,6 +113,21 @@ import { runVersionCommand } from "./version-command.js";
 import { runInitCommand } from "./init-command.js";
 import { runUpdateCommand } from "./update-command.js";
 import { isBackupReady } from "../lifecycle/state-preservation.js";
+import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
+import {
+  createModelSelectionCatalog,
+  type SelectableModel,
+  type CatalogProvider,
+  type CatalogListOptions
+} from "../providers/model-selection-catalog.js";
+import type { ModelRefreshReport } from "../reports/model-reports.js";
+import { produceModelStatusReport } from "../diagnostics/model-diagnostics.js";
+import {
+  runModelSetupLocal,
+  runModelSetupCustom,
+  probeOpenAIModels,
+  type OpenAIModelProbe
+} from "./model-setup.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -133,6 +148,7 @@ export type CliOptions = {
   providerFetch?: ProviderFetchLike;
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
+  modelsDevOptions?: ModelsDevRegistryOptions;
 };
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
@@ -609,17 +625,128 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     };
   }
 
+  if (args[0] === "list") {
+    const flags = parseCatalogListFlags(args.slice(1));
+    if (flags.live) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Live catalog probing is not yet implemented. Use `estacoda model refresh` to update the catalog."
+      };
+    }
+    const catalog = await createModelSelectionCatalog({
+      config: config.config,
+      providerRegistry: config.providerRegistry,
+      homeDir: options.homeDir,
+      modelsDevOptions: options.modelsDevOptions
+    });
+    const { live: _liveList, ...listOpts } = flags;
+    const models = await catalog.listModels(listOpts);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderModelList(models)
+    };
+  }
+
+  if (args[0] === "search" && args[1] !== undefined) {
+    const query = args[1];
+    const flags = parseCatalogListFlags(args.slice(2));
+    if (flags.live) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Live catalog probing is not yet implemented. Use `estacoda model refresh` to update the catalog."
+      };
+    }
+    const catalog = await createModelSelectionCatalog({
+      config: config.config,
+      providerRegistry: config.providerRegistry,
+      homeDir: options.homeDir,
+      modelsDevOptions: options.modelsDevOptions
+    });
+    const { live: _liveSearch, ...searchOpts } = flags;
+    const models = await catalog.searchModels(query, searchOpts);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderModelSearchResults(query, models)
+    };
+  }
+
+  if (args[0] === "providers") {
+    const catalog = await createModelSelectionCatalog({
+      config: config.config,
+      providerRegistry: config.providerRegistry,
+      homeDir: options.homeDir,
+      modelsDevOptions: options.modelsDevOptions
+    });
+    const providers = await catalog.listProviders();
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderProviderList(providers)
+    };
+  }
+
+  if (args[0] === "refresh") {
+    const catalog = await createModelSelectionCatalog({
+      config: config.config,
+      providerRegistry: config.providerRegistry,
+      homeDir: options.homeDir,
+      modelsDevOptions: options.modelsDevOptions
+    });
+    const report = await catalog.refresh();
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderRefreshReport(report)
+    };
+  }
+
+  if (args[0] === "setup") {
+    if (args[1] === "local") {
+      return runModelSetupLocal(options, args.slice(2));
+    }
+    if (args[1] === "custom") {
+      return runModelSetupCustom(options, args.slice(2));
+    }
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Model setup commands:",
+        "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+        "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]"
+      ].join("\n")
+    };
+  }
+
   if (args[0] === "diagnose") {
     const diagnostic = await diagnoseProviderConfig(config);
     const auxiliaryRoutes = await resolveAllAuxiliaryRoutes(config.auxiliaryModels, {
       mainRoute: config.primaryModelRoute,
       providerRegistry: config.providerRegistry
     });
+    const report = await produceModelStatusReport(config);
+    const readinessLines: string[] = [];
+    readinessLines.push(`Primary: ${report.primary.route.provider}/${report.primary.route.id} (${report.primary.executable ? "executable" : "catalog-only"})`);
+    for (let i = 0; i < report.fallbacks.length; i++) {
+      const fb = report.fallbacks[i];
+      readinessLines.push(`Fallback ${i + 1}: ${fb.route.provider}/${fb.route.id} (${fb.executable ? "executable" : "catalog-only"})`);
+    }
+    for (const [task, aux] of Object.entries(report.auxiliary)) {
+      readinessLines.push(`Auxiliary ${task}: ${aux.route.provider}/${aux.route.id} (${aux.executable ? "executable" : "catalog-only"})`);
+    }
+
     return {
       handled: true,
       exitCode: diagnostic.status === "ready" ? 0 : 1,
       output: [
         "EstaCoda model diagnose",
+        "",
+        "Route execution readiness:",
+        ...readinessLines,
         "",
         renderProviderDiagnostic(diagnostic),
         "",
@@ -760,8 +887,10 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("Commands:");
   diagnosticLines.push("  estacoda model status");
   diagnosticLines.push("  estacoda model diagnose");
-  diagnosticLines.push("  estacoda model auxiliary status");
+  diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]");
+  diagnosticLines.push("  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model set <provider>/<model>");
+  diagnosticLines.push("  estacoda model auxiliary status");
   diagnosticLines.push("  estacoda model fallback status");
   diagnosticLines.push("  estacoda model fallback add <provider>/<model>");
   diagnosticLines.push("  estacoda model fallback remove <provider>/<model>");
@@ -1391,44 +1520,7 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
   }
 
   if (subcommand === "setup") {
-    const parsed = parseLocalArgs(args.slice(1));
-    const baseUrl = parsed.baseUrl ?? "http://localhost:11434/v1";
-    const discovery = await probeLocalModels(baseUrl, options.providerFetch);
-    const selectedModel = parsed.model ?? (discovery.models.length === 1 ? discovery.models[0] : "ollama/auto");
-    const result = await setupProviderConfig({
-      ...options,
-      input: {
-        provider: "local",
-        model: selectedModel,
-        models: discovery.models,
-        baseUrl,
-        enableNetwork: true,
-        scope: parsed.scope
-      }
-    });
-    const loaded = await loadRuntimeConfig(options);
-    const selectedProfile = loaded.providerRegistry
-      .listModels()
-      .then((models) => models.find((model) => model.provider === "local" && model.id === selectedModel));
-    const profile = await selectedProfile;
-
-    return {
-      handled: true,
-      exitCode: discovery.ok || parsed.model !== undefined ? 0 : 1,
-      output: [
-        "Configured local OpenAI-compatible provider.",
-        `Base URL: ${baseUrl}`,
-        `Model: ${selectedModel}`,
-        "API key: none",
-        `Config: ${result.path}`,
-        "",
-        renderLocalDiscovery(discovery),
-        renderLocalContextGuidance(profile),
-        discovery.ok
-          ? "Next: run estacoda local test, then estacoda."
-          : "Next: start Ollama or your local OpenAI-compatible server, then run estacoda local test."
-      ].join("\n")
-    };
+    return runModelSetupLocal(options, args.slice(1));
   }
 
   const config = await loadRuntimeConfig(options);
@@ -1436,7 +1528,7 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
   const baseUrl = providerConfig?.baseUrl ?? "http://localhost:11434/v1";
   const localModels = await config.providerRegistry.listModels();
   const selectedProfile = localModels.find((model) => model.provider === "local" && model.id === config.model.id);
-  const discovery = await probeLocalModels(baseUrl, options.providerFetch);
+  const discovery = await probeOpenAIModels(baseUrl, options.providerFetch);
   const configuredForLocal = config.model.provider === "local";
 
   return {
@@ -2662,119 +2754,7 @@ function parseSttProvider(value: string | undefined): VoiceSetupInput["sttProvid
   throw new Error("Expected --stt-provider local, groq, openai, or mistral");
 }
 
-type LocalSetupArgs = {
-  baseUrl?: string;
-  model?: string;
-  scope?: "user" | "project";
-};
-
-type LocalModelProbe = {
-  ok: boolean;
-  baseUrl: string;
-  models: string[];
-  message: string;
-};
-
-function parseLocalArgs(args: string[]): LocalSetupArgs {
-  const parsed: LocalSetupArgs = {};
-
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    const next = args[index + 1];
-
-    if (arg === "--base-url") {
-      parsed.baseUrl = next;
-      index += 1;
-    } else if (arg === "--model") {
-      parsed.model = next;
-      index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
-    }
-  }
-
-  return parsed;
-}
-
-async function probeLocalModels(baseUrl: string, fetchLike?: ProviderFetchLike): Promise<LocalModelProbe> {
-  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
-  const url = `${normalizedBaseUrl}/models`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3_000);
-
-  try {
-    const response = fetchLike === undefined
-      ? await globalThis.fetch(url, {
-          method: "GET",
-          headers: {},
-          signal: controller.signal
-        })
-      : await fetchLike(url, {
-          method: "GET",
-          headers: {},
-          body: "",
-          signal: controller.signal
-        });
-    const json = await response.json();
-    const models = extractLocalModelIds(json);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        baseUrl: normalizedBaseUrl,
-        models,
-        message: response.statusText || `HTTP ${response.status}`
-      };
-    }
-
-    return {
-      ok: true,
-      baseUrl: normalizedBaseUrl,
-      models,
-      message: models.length === 0
-        ? "endpoint responded, but no models were listed"
-        : `endpoint ready; ${models.length} model(s) visible`
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      baseUrl: normalizedBaseUrl,
-      models: [],
-      message: error instanceof Error ? error.message : "local endpoint did not respond"
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function extractLocalModelIds(value: unknown): string[] {
-  if (typeof value !== "object" || value === null) {
-    return [];
-  }
-  const record = value as {
-    data?: Array<{ id?: unknown }>;
-    models?: Array<{ name?: unknown; model?: unknown; id?: unknown }>;
-  };
-
-  if (Array.isArray(record.data)) {
-    return uniqueStrings(record.data.map((entry) => typeof entry.id === "string" ? entry.id : ""));
-  }
-
-  if (Array.isArray(record.models)) {
-    return uniqueStrings(record.models.map((entry) => {
-      if (typeof entry.id === "string") return entry.id;
-      if (typeof entry.model === "string") return entry.model;
-      if (typeof entry.name === "string") return entry.name;
-      return "";
-    }));
-  }
-
-  return [];
-}
-
-function renderLocalDiscovery(discovery: LocalModelProbe): string {
+function renderLocalDiscovery(discovery: OpenAIModelProbe): string {
   return [
     `Endpoint check: ${discovery.ok ? "ready" : "blocked"} (${discovery.message})`,
     `Discovered models: ${discovery.models.length === 0 ? "none" : discovery.models.join(", ")}`
@@ -3289,4 +3269,90 @@ function help(): string {
       (cmd) => `  estacoda ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
     ),
   ].join("\n");
+}
+
+function parseCatalogListFlags(rawArgs: string[]): { live?: boolean } & CatalogListOptions {
+  const flags: { live?: boolean } & CatalogListOptions = {};
+  let i = 0;
+  while (i < rawArgs.length) {
+    const arg = rawArgs[i];
+    if (arg === "--live") flags.live = true;
+    else if (arg === "--provider") {
+      i++;
+      if (i < rawArgs.length) flags.provider = rawArgs[i] as ProviderId;
+    } else if (arg.startsWith("--provider=")) {
+      flags.provider = arg.slice("--provider=".length) as ProviderId;
+    } else if (arg === "--tools") flags.requireTools = true;
+    else if (arg === "--vision") flags.requireVision = true;
+    else if (arg === "--structured") flags.requireStructuredOutput = true;
+    else if (arg === "--reasoning") flags.requireReasoning = true;
+    else if (arg === "--configured") flags.configuredOnly = true;
+    else if (arg === "--include-beta") flags.includeBeta = true;
+    else if (arg === "--include-deprecated") flags.includeDeprecated = true;
+    else if (arg === "--include-non-chat") flags.includeNonChat = true;
+    else if (arg === "--executable-only") flags.executableOnly = true;
+    i++;
+  }
+  return flags;
+}
+
+function renderModelList(models: SelectableModel[]): string {
+  if (models.length === 0) return "No models found.";
+  const lines = ["Model catalog:"];
+  for (const m of models) {
+    const tags: string[] = [];
+    if (m.profile.status === "beta") tags.push("beta");
+    if (m.profile.status === "deprecated") tags.push("deprecated");
+    if (m.executable) tags.push("executable");
+    else tags.push("catalog-only");
+    if (m.profile.supportsTools) tags.push("tools");
+    if (m.profile.supportsVision) tags.push("vision");
+    if (m.profile.supportsStructuredOutput) tags.push("structured");
+    if (m.profile.supportsReasoning) tags.push("reasoning");
+    const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
+    lines.push(`  ${m.provider}/${m.id}${tagStr}`);
+  }
+  return lines.join("\n");
+}
+
+function renderModelSearchResults(query: string, models: SelectableModel[]): string {
+  if (models.length === 0) return `No models matched "${query}".`;
+  const lines = [`Search results for "${query}":`];
+  for (const m of models) {
+    const tags: string[] = [];
+    if (m.profile.status === "beta") tags.push("beta");
+    if (m.profile.status === "deprecated") tags.push("deprecated");
+    if (m.executable) tags.push("executable");
+    else tags.push("catalog-only");
+    if (m.profile.supportsTools) tags.push("tools");
+    if (m.profile.supportsVision) tags.push("vision");
+    if (m.profile.supportsStructuredOutput) tags.push("structured");
+    if (m.profile.supportsReasoning) tags.push("reasoning");
+    const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
+    lines.push(`  ${m.provider}/${m.id}${tagStr}`);
+  }
+  return lines.join("\n");
+}
+
+function renderProviderList(providers: CatalogProvider[]): string {
+  if (providers.length === 0) return "No providers found.";
+  const lines = ["Providers:"];
+  for (const p of providers) {
+    const status = p.executable ? "executable" : "catalog-only";
+    lines.push(`  ${p.id} - ${p.name} (${status})`);
+  }
+  return lines.join("\n");
+}
+
+function renderRefreshReport(report: ModelRefreshReport): string {
+  const lines = [
+    "Catalog refresh complete",
+    `Source: ${report.sourceDomain}`,
+    `Cache: ${report.cachePath}`,
+    `Timestamp: ${report.snapshotTimestamp}`,
+    `Models: ${report.modelsCount}`,
+    `Providers: ${report.providersCount}`,
+    `Changed: ${report.cacheChanged ? "yes" : "no"}`
+  ];
+  return lines.join("\n");
 }

@@ -1,0 +1,579 @@
+import type {
+  ModelProfile,
+  ProviderId,
+  ProviderSetupMode,
+  ProviderUxKind,
+  ResolvedModelRoute
+} from "../contracts/provider.js";
+import type { EstaCodaConfig } from "../config/runtime-config.js";
+import { ProviderRegistry } from "./provider-registry.js";
+import {
+  fallbackKnownModelProfiles,
+  inferModelProfile,
+  resolveModelProfilesFromCatalog
+} from "./model-catalog.js";
+import type {
+  ModelInfo,
+  ModelsDevRegistryOptions,
+  ModelsDevSnapshot
+} from "../model-catalog/models-dev-registry.js";
+import {
+  modelsDevSnapshotToProfiles,
+  refreshModelsDevSnapshot,
+  resolveModelsDevSnapshot,
+  resetModelsDevRegistryForTest
+} from "../model-catalog/models-dev-registry.js";
+import type {
+  ModelCatalogEntryReport,
+  ModelRefreshReport
+} from "../reports/model-reports.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+/** Opaque route identity string. Never parse by splitting on punctuation. */
+export function routeKey(provider: ProviderId, id: string, baseUrl?: string): string {
+  return baseUrl ? `${provider}:${id}:${baseUrl}` : `${provider}:${id}`;
+}
+
+export type SelectableModel = ModelCatalogEntryReport;
+
+export type CatalogProvider = {
+  id: ProviderId;
+  name: string;
+  uxKind: ProviderUxKind;
+  setupMode: ProviderSetupMode;
+  configured: boolean;
+  executable: boolean;
+  catalogOnly: boolean;
+  modelsCount: number;
+  credentialReady: boolean;
+  endpointReady: boolean;
+};
+
+export type CatalogListOptions = {
+  includeCatalogOnly?: boolean;
+  includeDeprecated?: boolean;
+  includeAlpha?: boolean;
+  includeBeta?: boolean;
+  provider?: ProviderId;
+  requireTools?: boolean;
+  requireVision?: boolean;
+  requireStructuredOutput?: boolean;
+  requireReasoning?: boolean;
+  configuredOnly?: boolean;
+  executableOnly?: boolean;
+  includeNonChat?: boolean;
+};
+
+export type CreateModelSelectionCatalogOptions = {
+  config: EstaCodaConfig;
+  providerRegistry: ProviderRegistry;
+  homeDir?: string;
+  modelsDevOptions?: ModelsDevRegistryOptions;
+};
+
+export type ModelSelectionCatalog = {
+  listProviders(options?: { includeCatalogOnly?: boolean }): Promise<CatalogProvider[]>;
+  listModels(options?: CatalogListOptions): Promise<SelectableModel[]>;
+  searchModels(query: string, options?: CatalogListOptions): Promise<SelectableModel[]>;
+  resolveModel(provider: ProviderId, id: string, baseUrl?: string): Promise<SelectableModel | undefined>;
+  refresh(): Promise<ModelRefreshReport>;
+};
+
+export async function createModelSelectionCatalog(
+  options: CreateModelSelectionCatalogOptions
+): Promise<ModelSelectionCatalog> {
+  const snapshot = await resolveModelsDevSnapshot({
+    homeDir: options.homeDir,
+    allowNetwork: false,
+    ...options.modelsDevOptions
+  });
+
+  const snapshotProfiles = modelsDevSnapshotToProfiles(snapshot, {
+    includeAlpha: true,
+    includeBeta: true,
+    includeDeprecated: true
+  });
+
+  const snapshotModelMap = new Map<string, ModelProfile>();
+  for (const profile of snapshotProfiles) {
+    snapshotModelMap.set(routeKey(profile.provider, profile.id), profile);
+  }
+
+  const snapshotInfoMap = new Map<string, ModelInfo>();
+  for (const model of snapshot.models) {
+    snapshotInfoMap.set(routeKey(model.providerId as ProviderId, model.id), model);
+  }
+
+  return {
+    listProviders: async (listOpts) => listProvidersImpl(options, snapshot, listOpts),
+    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, listOpts),
+    searchModels: async (query, listOpts) => {
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, listOpts);
+      const normalized = normalizeLookupKey(query);
+      return all.filter((model) =>
+        normalizeLookupKey(model.id).includes(normalized) ||
+        normalizeLookupKey(model.provider).includes(normalized) ||
+        (model.profile.status !== undefined && normalizeLookupKey(model.profile.status).includes(normalized))
+      );
+    },
+    resolveModel: async (provider, id, baseUrl) => {
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap);
+      const key = routeKey(provider, id, baseUrl);
+      return all.find((model) => model.routeKey === key);
+    },
+    refresh: async () => refreshImpl(options)
+  };
+}
+
+async function listProvidersImpl(
+  options: CreateModelSelectionCatalogOptions,
+  snapshot: ModelsDevSnapshot,
+  listOpts?: { includeCatalogOnly?: boolean }
+): Promise<CatalogProvider[]> {
+  const config = options.config;
+  const registry = options.providerRegistry;
+  const seen = new Map<ProviderId, CatalogProvider>();
+
+  // Configured providers always appear
+  for (const [providerId, providerConfig] of Object.entries(config.providers ?? {})) {
+    const id = providerId as ProviderId;
+    const baseUrl = providerConfig.baseUrl;
+    const apiKeyEnv = providerConfig.apiKeyEnv;
+    const executable = isExecutable(id, registry);
+    const catalogOnly = !executable;
+
+    if (catalogOnly && listOpts?.includeCatalogOnly === false) {
+      continue;
+    }
+
+    const modelsCount = providerConfig.models?.length ?? 0;
+
+    seen.set(id, {
+      id,
+      name: providerDisplayName(id, snapshot),
+      uxKind: inferProviderUxKind(id, baseUrl),
+      setupMode: inferProviderSetupMode(id, baseUrl, apiKeyEnv),
+      configured: true,
+      executable,
+      catalogOnly,
+      modelsCount,
+      credentialReady: isCredentialReady(id, apiKeyEnv),
+      endpointReady: isEndpointReady(baseUrl)
+    });
+  }
+
+  // Snapshot providers (not already configured)
+  for (const provider of snapshot.providers) {
+    const id = provider.id as ProviderId;
+    if (seen.has(id)) continue;
+
+    const executable = isExecutable(id, registry);
+    const catalogOnly = !executable;
+    if (catalogOnly && listOpts?.includeCatalogOnly === false) {
+      continue;
+    }
+
+    const modelsCount = snapshot.models.filter((m) => m.providerId === provider.id).length;
+
+    seen.set(id, {
+      id,
+      name: provider.name || id,
+      uxKind: inferProviderUxKind(id),
+      setupMode: inferProviderSetupMode(id),
+      configured: false,
+      executable,
+      catalogOnly,
+      modelsCount,
+      credentialReady: isCredentialReady(id),
+      endpointReady: false
+    });
+  }
+
+  // Fallback-known providers (not already seen)
+  for (const profile of fallbackKnownModelProfiles) {
+    const id = profile.provider;
+    if (seen.has(id)) continue;
+
+    const executable = isExecutable(id, registry);
+    const catalogOnly = !executable;
+    if (catalogOnly && listOpts?.includeCatalogOnly === false) {
+      continue;
+    }
+
+    const existing = seen.get(id);
+    if (existing) {
+      existing.modelsCount = Math.max(existing.modelsCount, 1);
+      continue;
+    }
+
+    seen.set(id, {
+      id,
+      name: providerDisplayName(id, snapshot),
+      uxKind: inferProviderUxKind(id),
+      setupMode: inferProviderSetupMode(id),
+      configured: false,
+      executable,
+      catalogOnly,
+      modelsCount: 1,
+      credentialReady: isCredentialReady(id),
+      endpointReady: false
+    });
+  }
+
+  return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function listModelsImpl(
+  options: CreateModelSelectionCatalogOptions,
+  snapshot: ModelsDevSnapshot,
+  snapshotModelMap: Map<string, ModelProfile>,
+  snapshotInfoMap: Map<string, ModelInfo>,
+  listOpts?: CatalogListOptions
+): Promise<SelectableModel[]> {
+  const config = options.config;
+  const registry = options.providerRegistry;
+  const includeCatalogOnly = listOpts?.includeCatalogOnly ?? true;
+  const includeDeprecated = listOpts?.includeDeprecated ?? false;
+  const includeAlpha = listOpts?.includeAlpha ?? false;
+  const includeBeta = listOpts?.includeBeta ?? false;
+  const includeNonChat = listOpts?.includeNonChat ?? false;
+
+  const entries = new Map<string, SelectableModel>();
+
+  // 1. Snapshot models
+  for (const model of snapshot.models) {
+    const provider = model.providerId as ProviderId;
+    const id = model.id;
+    const baseUrl = config.providers?.[provider]?.baseUrl;
+    const key = routeKey(provider, id, baseUrl);
+
+    if (!shouldIncludeStatus(model.status, { includeAlpha, includeBeta, includeDeprecated })) {
+      continue;
+    }
+
+    if (!includeNonChat && !isChatModel(model)) {
+      continue;
+    }
+
+    const profile = snapshotModelMap.get(routeKey(provider, id)) ?? inferModelProfile({ provider, model: id });
+    const apiKeyEnv = config.providers?.[provider]?.apiKeyEnv;
+    const executable = isExecutable(provider, registry);
+
+    if (!executable && !includeCatalogOnly) {
+      continue;
+    }
+
+    entries.set(key, buildSelectableModel({
+      key,
+      provider,
+      id,
+      baseUrl,
+      profile,
+      source: "models-dev",
+      configured: config.providers?.[provider]?.models?.includes(id) ?? false,
+      executable,
+      apiKeyEnv
+    }));
+  }
+
+  // 2. Fallback-known models not in snapshot
+  for (const profile of fallbackKnownModelProfiles) {
+    const provider = profile.provider;
+    const id = profile.id;
+    const baseUrl = config.providers?.[provider]?.baseUrl;
+    const key = routeKey(provider, id, baseUrl);
+
+    if (entries.has(key)) continue;
+
+    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+      continue;
+    }
+
+    const apiKeyEnv = config.providers?.[provider]?.apiKeyEnv;
+    const executable = isExecutable(provider, registry);
+
+    if (!executable && !includeCatalogOnly) {
+      continue;
+    }
+
+    entries.set(key, buildSelectableModel({
+      key,
+      provider,
+      id,
+      baseUrl,
+      profile,
+      source: "fallback-known",
+      configured: config.providers?.[provider]?.models?.includes(id) ?? false,
+      executable,
+      apiKeyEnv
+    }));
+  }
+
+  // 3. Configured models (explicit in config.providers[*].models)
+  for (const [providerId, providerConfig] of Object.entries(config.providers ?? {})) {
+    const provider = providerId as ProviderId;
+    const baseUrl = providerConfig.baseUrl;
+    const apiKeyEnv = providerConfig.apiKeyEnv;
+    const executable = isExecutable(provider, registry);
+
+    for (const modelId of providerConfig.models ?? []) {
+      const key = routeKey(provider, modelId, baseUrl);
+
+      if (entries.has(key)) {
+        // Upgrade existing entry to configured
+        const existing = entries.get(key)!;
+        existing.configured = true;
+        existing.source = "configured";
+        continue;
+      }
+
+      // Resolve profile: snapshot > fallback-known > inferred
+      const snapshotProfile = snapshotModelMap.get(routeKey(provider, modelId));
+      const fallbackProfile = fallbackKnownModelProfiles.find((p) => p.provider === provider && p.id === modelId);
+      const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider, model: modelId });
+
+      if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+        continue;
+      }
+
+      if (!executable && !includeCatalogOnly) {
+        continue;
+      }
+
+      entries.set(key, buildSelectableModel({
+        key,
+        provider,
+        id: modelId,
+        baseUrl,
+        profile,
+        source: "configured",
+        configured: true,
+        executable,
+        apiKeyEnv
+      }));
+    }
+  }
+
+  // 4. Manual models: primary model and fallbacks
+  const manualRoutes: Array<{ provider: ProviderId; id: string; baseUrl?: string; apiKeyEnv?: string }> = [];
+  if (config.model?.provider && config.model?.id) {
+    manualRoutes.push({
+      provider: config.model.provider,
+      id: config.model.id,
+      baseUrl: config.providers?.[config.model.provider]?.baseUrl,
+      apiKeyEnv: config.providers?.[config.model.provider]?.apiKeyEnv
+    });
+  }
+  for (const fallback of config.model?.fallbacks ?? []) {
+    manualRoutes.push({
+      provider: fallback.provider,
+      id: fallback.id,
+      baseUrl: fallback.baseUrl ?? config.providers?.[fallback.provider]?.baseUrl,
+      apiKeyEnv: fallback.apiKeyEnv ?? config.providers?.[fallback.provider]?.apiKeyEnv
+    });
+  }
+
+  for (const route of manualRoutes) {
+    const key = routeKey(route.provider, route.id, route.baseUrl);
+
+    if (entries.has(key)) {
+      const existing = entries.get(key)!;
+      if (!existing.configured) {
+        existing.source = "manual";
+      }
+      continue;
+    }
+
+    const snapshotProfile = snapshotModelMap.get(routeKey(route.provider, route.id));
+    const fallbackProfile = fallbackKnownModelProfiles.find(
+      (p) => p.provider === route.provider && p.id === route.id
+    );
+    const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider: route.provider, model: route.id });
+    const executable = isExecutable(route.provider, registry);
+
+    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+      continue;
+    }
+
+    if (!executable && !includeCatalogOnly) {
+      continue;
+    }
+
+    entries.set(key, buildSelectableModel({
+      key,
+      provider: route.provider,
+      id: route.id,
+      baseUrl: route.baseUrl,
+      profile,
+      source: "manual",
+      configured: false,
+      executable,
+      apiKeyEnv: route.apiKeyEnv
+    }));
+  }
+
+  let result = [...entries.values()];
+
+  if (listOpts?.provider) {
+    result = result.filter((m) => m.provider === listOpts.provider);
+  }
+  if (listOpts?.requireTools) {
+    result = result.filter((m) => m.profile.supportsTools);
+  }
+  if (listOpts?.requireVision) {
+    result = result.filter((m) => m.profile.supportsVision);
+  }
+  if (listOpts?.requireStructuredOutput) {
+    result = result.filter((m) => m.profile.supportsStructuredOutput);
+  }
+  if (listOpts?.requireReasoning) {
+    result = result.filter((m) => m.profile.supportsReasoning === true);
+  }
+  if (listOpts?.configuredOnly) {
+    result = result.filter((m) => m.configured);
+  }
+  if (listOpts?.executableOnly) {
+    result = result.filter((m) => m.executable);
+  }
+
+  return result.sort((a, b) =>
+    a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id)
+  );
+}
+
+async function refreshImpl(
+  options: CreateModelSelectionCatalogOptions
+): Promise<ModelRefreshReport> {
+  const cachePath = options.modelsDevOptions?.cachePath
+    ?? join(options.homeDir ?? process.env.HOME ?? process.cwd(), ".estacoda", "models_dev_cache.json");
+
+  let previousRaw: string | undefined;
+  try {
+    previousRaw = await readFile(cachePath, "utf8");
+  } catch {
+    previousRaw = undefined;
+  }
+
+  const snapshot = await refreshModelsDevSnapshot({
+    homeDir: options.homeDir,
+    allowNetwork: true,
+    ...options.modelsDevOptions
+  });
+
+  const empty: ModelsDevSnapshot = {
+    providers: [],
+    models: [],
+    fetchedAt: new Date().toISOString(),
+    source: "empty"
+  };
+
+  const resolved = snapshot ?? empty;
+  const currentRaw = JSON.stringify(resolved);
+  const cacheChanged = previousRaw === undefined || previousRaw.trim() !== currentRaw.trim();
+
+  return {
+    sourceDomain: "models.dev",
+    cachePath,
+    snapshotTimestamp: resolved.fetchedAt,
+    cacheChanged,
+    modelsCount: resolved.models.length,
+    providersCount: resolved.providers.length,
+    warnings: []
+  };
+}
+
+function buildSelectableModel(params: {
+  key: string;
+  provider: ProviderId;
+  id: string;
+  baseUrl?: string;
+  profile: ModelProfile;
+  source: "models-dev" | "configured" | "manual" | "fallback-known";
+  configured: boolean;
+  executable: boolean;
+  apiKeyEnv?: string;
+}): SelectableModel {
+  return {
+    routeKey: params.key,
+    provider: params.provider,
+    id: params.id,
+    baseUrl: params.baseUrl,
+    profile: params.profile,
+    configured: params.configured,
+    executable: params.executable,
+    catalogOnly: !params.executable,
+    source: params.source,
+    credentialReady: isCredentialReady(params.provider, params.apiKeyEnv),
+    endpointReady: isEndpointReady(params.baseUrl),
+    warnings: []
+  };
+}
+
+function isExecutable(providerId: ProviderId, registry: ProviderRegistry): boolean {
+  const adapter = registry.get(providerId);
+  return adapter !== undefined && adapter.executable !== false;
+}
+
+function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean {
+  if (providerId === "local" && apiKeyEnv === undefined) return true;
+  if (apiKeyEnv !== undefined) return process.env[apiKeyEnv] !== undefined;
+  return false;
+}
+
+function isEndpointReady(baseUrl?: string): boolean {
+  if (baseUrl === undefined) return false;
+  try {
+    new URL(baseUrl);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function inferProviderUxKind(providerId: ProviderId, baseUrl?: string): ProviderUxKind {
+  if (providerId === "local") return "local";
+  if (providerId === "openrouter") return "openrouter";
+  if (baseUrl !== undefined) return "custom-openai-compatible";
+  return "hosted";
+}
+
+function inferProviderSetupMode(
+  providerId: ProviderId,
+  baseUrl?: string,
+  apiKeyEnv?: string
+): ProviderSetupMode {
+  const hasBaseUrl = baseUrl !== undefined;
+  const hasApiKey = apiKeyEnv !== undefined;
+
+  if (hasBaseUrl && hasApiKey) return "api-key-and-base-url";
+  if (hasBaseUrl) return "base-url";
+  if (hasApiKey) return "api-key";
+  if (providerId === "local") return "none";
+  return "api-key";
+}
+
+function providerDisplayName(providerId: ProviderId, snapshot: ModelsDevSnapshot): string {
+  const info = snapshot.providers.find((p) => p.id === providerId);
+  return info?.name || providerId;
+}
+
+function shouldIncludeStatus(
+  status: string,
+  options: { includeAlpha?: boolean; includeBeta?: boolean; includeDeprecated?: boolean }
+): boolean {
+  if (status === "deprecated" && options.includeDeprecated !== true) return false;
+  if (status === "alpha" && options.includeAlpha !== true) return false;
+  if (status === "beta" && options.includeBeta !== true) return false;
+  return true;
+}
+
+function isChatModel(model: ModelInfo): boolean {
+  return model.outputModalities.includes("text");
+}
+
+function normalizeLookupKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export { resetModelsDevRegistryForTest };
