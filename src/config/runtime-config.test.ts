@@ -1,133 +1,210 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig } from "./runtime-config.js";
+import { loadRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { readFile } from "node:fs/promises";
 
-async function makeTempDir(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-}
-
-describe("loadRuntimeConfig busyPolicy normalization", () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    tmpDir = await makeTempDir();
+describe("normalizeAuxiliaryModels", () => {
+  it("fills missing tasks with auto/enabled defaults", () => {
+    const result = normalizeAuxiliaryModels({});
+    expect(result.vision).toEqual({ provider: "auto", enabled: true });
+    expect(result.approval).toEqual({ provider: "auto", enabled: true });
+    expect(result.compression).toEqual({ provider: "auto", enabled: true });
+    expect(result.mcp).toEqual({ provider: "auto", enabled: true });
+    expect(result.memory_compaction).toEqual({ provider: "auto", enabled: true });
   });
 
-  afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+  it("preserves explicitly configured fields", () => {
+    const result = normalizeAuxiliaryModels({
+      vision: { provider: "openai", id: "gpt-4o", enabled: false, fallbackToMain: true },
+    });
+    expect(result.vision).toEqual({ provider: "openai", id: "gpt-4o", enabled: false, fallbackToMain: true });
+    expect(result.approval).toEqual({ provider: "auto", enabled: true });
   });
 
-  it("defaults busyPolicy to reject and queueDepth to 3", async () => {
-    const configPath = join(tmpDir, "config.json");
-    await writeFile(configPath, JSON.stringify({ model: { provider: "test", id: "test" } }));
+  it("does not include undefined optional fields", () => {
+    const result = normalizeAuxiliaryModels({
+      vision: { provider: "auto", enabled: true },
+    });
+    expect(Object.keys(result.vision!)).toEqual(["provider", "enabled"]);
+  });
+});
+
+describe("mergeConfig auxiliaryModels", () => {
+  it("deep-merges auxiliaryModels by task key", () => {
+    const merged = mergeConfig(
+      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
+      { auxiliaryModels: { vision: { enabled: false } } }
+    );
+    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o", enabled: false });
+  });
+
+  it("adds tasks from both configs", () => {
+    const merged = mergeConfig(
+      { auxiliaryModels: { vision: { provider: "openai" } } },
+      { auxiliaryModels: { approval: { provider: "main" } } }
+    );
+    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai" });
+    expect(merged.auxiliaryModels?.approval).toEqual({ provider: "main" });
+  });
+
+  it("strips default-only auxiliary slots after merge", () => {
+    const merged = mergeConfig(
+      { auxiliaryModels: {} },
+      { auxiliaryModels: {} }
+    );
+    expect(merged.auxiliaryModels).toBeUndefined();
+  });
+
+  it("preserves non-default slots after merge", () => {
+    const merged = mergeConfig(
+      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
+      { auxiliaryModels: {} }
+    );
+    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o" });
+  });
+});
+
+describe("loadRuntimeConfig auxiliaryModels", () => {
+  it("normalizes missing tasks to auto/enabled at load time", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
 
     const loaded = await loadRuntimeConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: configPath,
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
     });
 
-    expect(loaded.channels.telegram.busyPolicy).toBe("reject");
-    expect(loaded.channels.telegram.queueDepth).toBe(3);
-    expect(loaded.channels.discord.busyPolicy).toBe("reject");
-    expect(loaded.channels.discord.queueDepth).toBe(3);
-    expect(loaded.channels.email.busyPolicy).toBe("reject");
-    expect(loaded.channels.email.queueDepth).toBe(3);
-    expect(loaded.channels.whatsapp.busyPolicy).toBe("reject");
-    expect(loaded.channels.whatsapp.queueDepth).toBe(3);
+    expect(loaded.auxiliaryModels).toBeDefined();
+    expect(loaded.auxiliaryModels.vision).toEqual({ provider: "auto", enabled: true });
+    expect(loaded.auxiliaryModels.approval).toEqual({ provider: "auto", enabled: true });
   });
 
-  it("preserves explicit per-channel busyPolicy and queueDepth", async () => {
-    const configPath = join(tmpDir, "config.json");
+  it("ignores deprecated auxiliaryProviders without migrating and strips on save", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
     await writeFile(configPath, JSON.stringify({
-      model: { provider: "test", id: "test" },
-      channels: {
-        telegram: { enabled: false, busyPolicy: "queue", queueDepth: 5 },
-        discord: { enabled: false, busyPolicy: "interrupt", queueDepth: 2 },
-        email: { enabled: false, busyPolicy: "reject", queueDepth: 1 },
-        whatsapp: { enabled: false, busyPolicy: "queue", queueDepth: 10 },
-      },
+      model: { provider: "openai", id: "gpt-4o" },
+      auxiliaryProviders: { vision: { requireVision: true } }
     }));
 
     const loaded = await loadRuntimeConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: configPath,
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
     });
 
-    expect(loaded.channels.telegram.busyPolicy).toBe("queue");
-    expect(loaded.channels.telegram.queueDepth).toBe(5);
-    expect(loaded.channels.discord.busyPolicy).toBe("interrupt");
-    expect(loaded.channels.discord.queueDepth).toBe(2);
-    expect(loaded.channels.email.busyPolicy).toBe("reject");
-    expect(loaded.channels.email.queueDepth).toBe(1);
-    expect(loaded.channels.whatsapp.busyPolicy).toBe("queue");
-    expect(loaded.channels.whatsapp.queueDepth).toBe(10);
-  });
+    // auxiliaryProviders is not migrated into auxiliaryModels
+    expect(loaded.auxiliaryModels.vision).toEqual({ provider: "auto", enabled: true });
 
-  it("clamps queueDepth to [1, 10]", async () => {
-    const configPath = join(tmpDir, "config.json");
-    await writeFile(configPath, JSON.stringify({
-      model: { provider: "test", id: "test" },
-      channels: {
-        telegram: { enabled: false, queueDepth: 0 },
-        discord: { enabled: false, queueDepth: 100 },
-        email: { enabled: false, queueDepth: -5 },
-        whatsapp: { enabled: false, queueDepth: 5 },
+    // auxiliaryProviders is stripped on save
+    await saveRuntimeConfig(configPath, loaded.config);
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.auxiliaryProviders).toBeUndefined();
+    expect(saved.auxiliaryModels).toBeUndefined();
+  });
+});
+
+describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
+  it("resolves explicit fallback routes with provider defaults and overrides", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    const config = {
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat" },
+          { provider: "kimi", id: "kimi-k2.5", baseUrl: "https://custom.kimi.com/v1", contextWindowTokens: 131072 }
+        ]
       },
-    }));
+      providers: {
+        deepseek: {
+          kind: "catalog" as const,
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_KEY"
+        }
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
 
     const loaded = await loadRuntimeConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: configPath,
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
     });
 
-    expect(loaded.channels.telegram.queueDepth).toBe(1);
-    expect(loaded.channels.discord.queueDepth).toBe(10);
-    expect(loaded.channels.email.queueDepth).toBe(1);
-    expect(loaded.channels.whatsapp.queueDepth).toBe(5);
+    expect(loaded.modelFallbackRoutes.length).toBe(2);
+
+    const fb1 = loaded.modelFallbackRoutes[0];
+    expect(fb1.provider).toBe("deepseek");
+    expect(fb1.id).toBe("deepseek-chat");
+    expect(fb1.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(fb1.apiKeyEnv).toBe("DEEPSEEK_KEY");
+    expect(fb1.profile.provider).toBe("deepseek");
+    expect(fb1.profile.id).toBe("deepseek-chat");
+
+    const fb2 = loaded.modelFallbackRoutes[1];
+    expect(fb2.provider).toBe("kimi");
+    expect(fb2.id).toBe("kimi-k2.5");
+    expect(fb2.baseUrl).toBe("https://custom.kimi.com/v1");
+    expect(fb2.apiKeyEnv).toBeUndefined();
+    expect(fb2.contextWindowTokens).toBe(131072);
+    expect(fb2.profile.provider).toBe("kimi");
+    expect(fb2.profile.id).toBe("kimi-k2.5");
   });
 
-  it("falls back invalid busyPolicy to reject", async () => {
-    const configPath = join(tmpDir, "config.json");
-    await writeFile(configPath, JSON.stringify({
-      model: { provider: "test", id: "test" },
-      channels: {
-        telegram: { enabled: false, busyPolicy: "unknown" },
-      },
-    }));
+  it("returns empty modelFallbackRoutes when no fallbacks are configured", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    const config = {
+      model: {
+        provider: "openai",
+        id: "gpt-4o"
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
 
     const loaded = await loadRuntimeConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: configPath,
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
     });
 
-    expect(loaded.channels.telegram.busyPolicy).toBe("reject");
+    expect(loaded.modelFallbackRoutes).toEqual([]);
   });
 
-  it("isolates per-channel queueDepth", async () => {
-    const configPath = join(tmpDir, "config.json");
-    await writeFile(configPath, JSON.stringify({
-      model: { provider: "test", id: "test" },
-      channels: {
-        telegram: { enabled: false, queueDepth: 7 },
-        discord: { enabled: false, queueDepth: 3 },
-      },
-    }));
+  it("deduplicates fallback routes that match the primary route", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    const config = {
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "openai", id: "gpt-4o" },
+          { provider: "deepseek", id: "deepseek-chat" }
+        ]
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
 
     const loaded = await loadRuntimeConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: configPath,
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
     });
 
-    expect(loaded.channels.telegram.queueDepth).toBe(7);
-    expect(loaded.channels.discord.queueDepth).toBe(3);
-    expect(loaded.channels.email.queueDepth).toBe(3);
-    expect(loaded.channels.whatsapp.queueDepth).toBe(3);
+    expect(loaded.modelFallbackRoutes.length).toBe(1);
+    expect(loaded.modelFallbackRoutes[0].provider).toBe("deepseek");
   });
 });

@@ -36,6 +36,7 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       email: { ready: false },
       whatsapp: { ready: false },
     },
+    auxiliaryModels: {},
     ...overrides,
   } as LoadedRuntimeConfig;
 }
@@ -467,17 +468,17 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
-  it("auxiliary providers change changes fingerprint", () => {
+  it("auxiliary models change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig();
     const opts = fakeOptions();
     const fp1 = computeRuntimeFingerprint(base, opts);
     const fp2 = computeRuntimeFingerprint(
       fakeLoadedRuntimeConfig({
-        auxiliaryProviders: { vision: { providerOrder: ["openai"] } },
+        auxiliaryModels: { vision: { provider: "openai", enabled: true } },
       }),
       opts
     );
-    expect(fp2.auxiliaryProvidersHash).not.toBe(fp1.auxiliaryProvidersHash);
+    expect(fp2.auxiliaryModelsHash).not.toBe(fp1.auxiliaryModelsHash);
     expect(fp1).not.toEqual(fp2);
   });
 

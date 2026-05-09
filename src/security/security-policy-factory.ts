@@ -7,6 +7,7 @@ import {
   type SecurityPolicy,
   type SecurityRequest
 } from "../contracts/security.js";
+import type { ResolvedModelRoute } from "../contracts/provider.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
 
@@ -68,6 +69,7 @@ export function createSecurityPolicyForMode(
 export type SecurityAssessorRuntimeConfig = SecurityAssessorConfig & {
   providerExecutor?: ProviderExecutor;
   sessionId?: string;
+  route?: ResolvedModelRoute;
 };
 
 function assessStrict(request: SecurityRequest): SecurityAssessment {
@@ -102,11 +104,14 @@ async function assessAdaptive(
     return deterministic;
   }
 
+  const hasExecutableRoute =
+    assessor?.route !== undefined ||
+    (assessor?.provider !== undefined && assessor?.model !== undefined);
+
   if (
     assessor?.enabled !== true ||
     assessor.providerExecutor === undefined ||
-    assessor.provider === undefined ||
-    assessor.model === undefined
+    !hasExecutableRoute
   ) {
     return {
       ...deterministic,
@@ -225,6 +230,19 @@ async function assessWithAuxiliaryProvider(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const executionOptions: {
+      sessionId?: string;
+      signal?: AbortSignal;
+      primaryRoute?: ResolvedModelRoute;
+    } = {
+      sessionId: assessor.sessionId === undefined ? undefined : `${assessor.sessionId}:security-assessor`,
+      signal: controller.signal
+    };
+
+    if (assessor.route !== undefined) {
+      executionOptions.primaryRoute = assessor.route;
+    }
+
     const execution = await assessor.providerExecutor.complete({
       model: assessor.model,
       messages: [
@@ -258,11 +276,8 @@ async function assessWithAuxiliaryProvider(
       responseFormat: { type: "json_object" }
     }, {
       requireStructuredOutput: true,
-      providerOrder: [assessor.provider]
-    }, {
-      sessionId: assessor.sessionId === undefined ? undefined : `${assessor.sessionId}:security-assessor`,
-      signal: controller.signal
-    });
+      providerOrder: assessor.route === undefined ? [assessor.provider] : undefined
+    }, executionOptions);
 
     if (!execution.ok || execution.response === undefined) {
       return {

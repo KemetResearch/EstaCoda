@@ -2,7 +2,7 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProviderContext } from "../contracts/memory.js";
-import type { ModelProfile, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
+import type { ModelProfile, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -36,6 +36,8 @@ export type ProviderTurnLoopBudgets = {
 export type ProviderTurnLoopOptions = {
   providerExecutor: ProviderExecutor | undefined;
   model: ModelProfile | undefined;
+  primaryModelRoute?: ResolvedModelRoute;
+  modelFallbackRoutes?: ResolvedModelRoute[];
   providerPreferences: ProviderRoutePreferences;
   sessionDb: SessionDB;
   sessionId: string;
@@ -60,6 +62,8 @@ export type ProviderTurnLoopOptions = {
 export class ProviderTurnLoop {
   readonly #providerExecutor: ProviderExecutor | undefined;
   readonly #model: ModelProfile | undefined;
+  readonly #primaryModelRoute: ResolvedModelRoute | undefined;
+  readonly #modelFallbackRoutes: ResolvedModelRoute[];
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
@@ -77,6 +81,8 @@ export class ProviderTurnLoop {
   constructor(options: ProviderTurnLoopOptions) {
     this.#providerExecutor = options.providerExecutor;
     this.#model = options.model;
+    this.#primaryModelRoute = options.primaryModelRoute;
+    this.#modelFallbackRoutes = options.modelFallbackRoutes ?? [];
     this.#providerPreferences = options.providerPreferences;
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
@@ -343,6 +349,8 @@ export class ProviderTurnLoop {
       sessionId: this.#sessionId,
       stream: true,
       signal: input.signal,
+      primaryRoute: this.#primaryModelRoute,
+      fallbackChain: this.#modelFallbackRoutes,
       onEvent: async (event) => {
         await emit(input.onEvent, mapProviderRuntimeEvent(event));
       }
@@ -455,6 +463,8 @@ export class ProviderTurnLoop {
       sessionId: this.#sessionId,
       stream: true,
       signal: input.signal,
+      primaryRoute: this.#primaryModelRoute,
+      fallbackChain: this.#modelFallbackRoutes,
       onEvent: async (event) => {
         await emit(input.onEvent, mapProviderRuntimeEvent(event));
       }

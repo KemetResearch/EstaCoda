@@ -3,12 +3,14 @@ import { randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { BrowserBackendKind } from "../contracts/browser.js";
 import type {
-  AuxiliaryProviderConfig,
+  AuxiliaryModelConfig,
+  AuxiliaryModelTask,
   CredentialPoolEntry,
   CredentialRotationStrategy,
   ModelProfile,
   ProviderEndpoint,
-  ProviderId
+  ProviderId,
+  ResolvedModelRoute
 } from "../contracts/provider.js";
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { loadDotEnvSecrets, writeEnvSecret } from "./env-secret-store.js";
@@ -200,11 +202,20 @@ export type MCPServerConfig = {
   promptGetRiskClass?: ToolRiskClass;
 };
 
+export type ModelFallbackConfig = {
+  provider: ProviderId;
+  id: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+};
+
 export type EstaCodaConfig = {
   model?: {
     provider?: ProviderId;
     id?: string;
     contextWindowTokens?: number;
+    fallbacks?: ModelFallbackConfig[];
   };
   providers?: Record<string, {
     kind?: "openai-compatible" | "catalog";
@@ -218,7 +229,7 @@ export type EstaCodaConfig = {
     strategy?: CredentialRotationStrategy;
     entries?: CredentialPoolEntry[];
   }>;
-  auxiliaryProviders?: AuxiliaryProviderConfig;
+  auxiliaryModels?: AuxiliaryModelConfig;
   web?: {
     enableNetwork?: boolean;
     maxContentChars?: number;
@@ -329,9 +340,11 @@ export type LoadedRuntimeConfig = {
   config: EstaCodaConfig;
   sources: string[];
   model: ModelProfile;
+  primaryModelRoute: ResolvedModelRoute;
+  modelFallbackRoutes: ResolvedModelRoute[];
   providerRegistry: ProviderRegistry;
   credentialPools: CredentialPoolRegistry;
-  auxiliaryProviders?: AuxiliaryProviderConfig;
+  auxiliaryModels: AuxiliaryModelConfig;
   web: {
     enableNetwork: boolean;
     maxContentChars?: number;
@@ -496,6 +509,11 @@ export type SecuritySetupInput = {
   scope?: "user" | "project";
 };
 
+export type ModelFallbackSetupInput = {
+  fallbacks: ModelFallbackConfig[];
+  scope?: "user" | "project";
+};
+
 export type SkillSetupInput = {
   autonomy?: SkillAutonomy;
   scope?: "user" | "project";
@@ -549,14 +567,50 @@ export async function loadRuntimeConfig(options: {
     ? [telegram.botTokenEnv]
     : [];
   const warnedInvalidBusyPolicies = new Set<string>();
+  const normalizedFallbacks = normalizeModelFallbacks(config);
+  if (normalizedFallbacks.warnings.length > 0) {
+    for (const warning of normalizedFallbacks.warnings) {
+      console.warn(`[config] ${warning}`);
+    }
+  }
+  const primaryModelRoute: ResolvedModelRoute = {
+    provider: config.model?.provider ?? "unconfigured",
+    id: config.model?.id ?? "unconfigured",
+    profile: model,
+    baseUrl: config.providers?.[config.model?.provider ?? ""]?.baseUrl,
+    apiKeyEnv: config.providers?.[config.model?.provider ?? ""]?.apiKeyEnv,
+    contextWindowTokens: config.model?.contextWindowTokens
+  };
+
+  const modelFallbackRoutes: ResolvedModelRoute[] = [];
+  for (const fallback of normalizedFallbacks.fallbacks) {
+    const fallbackProfile = await resolveModelProfileFromCatalog({
+      provider: fallback.provider,
+      model: fallback.id,
+      contextWindowTokens: fallback.contextWindowTokens,
+      homeDir: options.homeDir,
+      allowNetwork: false
+    });
+    const fallbackProviderConfig = config.providers?.[fallback.provider];
+    modelFallbackRoutes.push({
+      provider: fallback.provider,
+      id: fallback.id,
+      profile: fallbackProfile,
+      baseUrl: fallback.baseUrl ?? fallbackProviderConfig?.baseUrl,
+      apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
+      contextWindowTokens: fallback.contextWindowTokens
+    });
+  }
 
   return {
     config,
     sources: loaded.filter((entry) => entry.loaded).map((entry) => entry.path),
     model,
+    primaryModelRoute,
+    modelFallbackRoutes,
     providerRegistry,
     credentialPools,
-    auxiliaryProviders: config.auxiliaryProviders,
+    auxiliaryModels: normalizeAuxiliaryModels(config.auxiliaryModels),
     web: {
       enableNetwork: config.web?.enableNetwork ?? false,
       maxContentChars: config.web?.maxContentChars
@@ -630,7 +684,7 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     },
     providers: mergeRecordEntries(merged.providers, config.providers),
     credentialPools: mergeRecordEntries(merged.credentialPools, config.credentialPools),
-    auxiliaryProviders: mergeRecordEntries(merged.auxiliaryProviders, config.auxiliaryProviders),
+    auxiliaryModels: mergeAuxiliaryModels(merged.auxiliaryModels, config.auxiliaryModels),
     web: {
       ...(merged.web ?? {}),
       ...(config.web ?? {})
@@ -731,7 +785,99 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
-  return (compactValue(config) ?? {}) as EstaCodaConfig;
+  const compacted = (compactValue(config) ?? {}) as EstaCodaConfig;
+  if (compacted.auxiliaryModels !== undefined) {
+    const stripped = stripDefaultAuxiliarySlots(compacted.auxiliaryModels);
+    if (Object.keys(stripped).length === 0) {
+      delete (compacted as Record<string, unknown>).auxiliaryModels;
+    } else {
+      compacted.auxiliaryModels = stripped;
+    }
+  }
+  // Strip deprecated auxiliaryProviders so it is never serialized
+  if ("auxiliaryProviders" in compacted) {
+    delete (compacted as Record<string, unknown>).auxiliaryProviders;
+  }
+  return compacted;
+}
+
+function stripDefaultAuxiliarySlots(
+  config: AuxiliaryModelConfig
+): AuxiliaryModelConfig {
+  const stripped: AuxiliaryModelConfig = {};
+  for (const [task, slot] of Object.entries(config)) {
+    if (slot === undefined) continue;
+    const isDefault =
+      slot.provider === "auto" &&
+      slot.enabled === true &&
+      slot.id === undefined &&
+      slot.baseUrl === undefined &&
+      slot.apiKeyEnv === undefined &&
+      slot.contextWindowTokens === undefined &&
+      slot.timeoutMs === undefined &&
+      slot.maxConcurrency === undefined &&
+      slot.extraBody === undefined &&
+      slot.fallbackToMain === undefined;
+    if (!isDefault) {
+      stripped[task as AuxiliaryModelTask] = slot;
+    }
+  }
+  return stripped;
+}
+
+function mergeAuxiliaryModels(
+  left: AuxiliaryModelConfig | undefined,
+  right: AuxiliaryModelConfig | undefined
+): AuxiliaryModelConfig | undefined {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
+  const merged: AuxiliaryModelConfig = { ...(left ?? {}) };
+  for (const [task, slot] of Object.entries(right ?? {})) {
+    const existing = merged[task as AuxiliaryModelTask];
+    merged[task as AuxiliaryModelTask] = {
+      ...(existing ?? {}),
+      ...(slot ?? {})
+    };
+  }
+  return merged;
+}
+
+export const ALL_AUXILIARY_MODEL_TASKS: AuxiliaryModelTask[] = [
+  "vision",
+  "compression",
+  "approval",
+  "web_extract",
+  "session_search",
+  "mcp",
+  "memory_flush",
+  "delegation",
+  "skills_library",
+  "title_generation",
+  "curator",
+  "memory_compaction"
+];
+
+export function normalizeAuxiliaryModels(
+  value: AuxiliaryModelConfig | undefined
+): AuxiliaryModelConfig {
+  const normalized: AuxiliaryModelConfig = {};
+  for (const task of ALL_AUXILIARY_MODEL_TASKS) {
+    const slot = value?.[task];
+    normalized[task] = {
+      provider: slot?.provider ?? "auto",
+      enabled: slot?.enabled ?? true,
+      ...(slot?.id !== undefined ? { id: slot.id } : {}),
+      ...(slot?.baseUrl !== undefined ? { baseUrl: slot.baseUrl } : {}),
+      ...(slot?.apiKeyEnv !== undefined ? { apiKeyEnv: slot.apiKeyEnv } : {}),
+      ...(slot?.contextWindowTokens !== undefined ? { contextWindowTokens: slot.contextWindowTokens } : {}),
+      ...(slot?.timeoutMs !== undefined ? { timeoutMs: slot.timeoutMs } : {}),
+      ...(slot?.maxConcurrency !== undefined ? { maxConcurrency: slot.maxConcurrency } : {}),
+      ...(slot?.extraBody !== undefined ? { extraBody: slot.extraBody } : {}),
+      ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {})
+    };
+  }
+  return normalized;
 }
 
 function compactValue(value: unknown): unknown {
@@ -1149,11 +1295,17 @@ export async function setupProviderConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
+  const previousModels = existing.config.providers?.[options.input.provider]?.models ?? [];
+  const nextModels = uniqueStrings([
+    ...previousModels,
+    ...(options.input.models ?? []),
+    options.input.model
+  ]);
   const providerConfig = {
     kind: "openai-compatible" as const,
     baseUrl: options.input.baseUrl ?? defaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
-    models: options.input.models ?? [options.input.model],
+    models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
   const primaryModelPatch = options.input.primary === false
@@ -1164,12 +1316,6 @@ export async function setupProviderConfig(options: {
         id: options.input.model
       }
     };
-  const mainProviderOrder = options.input.backupForMain === true
-    ? [
-      existing.config.model?.provider,
-      options.input.provider
-    ].filter((provider, index, providers): provider is ProviderId => provider !== undefined && providers.indexOf(provider) === index)
-    : undefined;
   const config = mergeConfig(existing.config, {
     ...primaryModelPatch,
     providers: {
@@ -1188,13 +1334,6 @@ export async function setupProviderConfig(options: {
               }
             ]
           }
-        },
-    auxiliaryProviders: mainProviderOrder === undefined
-      ? undefined
-      : {
-          main: {
-            providerOrder: mainProviderOrder
-          }
         }
   });
 
@@ -1204,6 +1343,145 @@ export async function setupProviderConfig(options: {
     path: targetPath,
     config,
     secretPath
+  };
+}
+
+export async function setupModelFallbackConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: ModelFallbackSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  validateModelFallbackSetupInput(options.input);
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const merged = mergeConfig(existing.config, {
+    model: {
+      fallbacks: options.input.fallbacks
+    }
+  });
+  const normalized = normalizeModelFallbacks(merged);
+  const config: EstaCodaConfig = {
+    ...merged,
+    model: {
+      ...merged.model,
+      fallbacks: normalized.fallbacks
+    }
+  };
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function removeModelFallbackConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: {
+    provider: ProviderId;
+    id: string;
+    baseUrl?: string;
+    scope?: "user" | "project";
+  };
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const targetKey = `${options.input.provider}/${options.input.id}/${options.input.baseUrl ?? ""}`;
+  const remaining = (existing.config.model?.fallbacks ?? []).filter((fb) => {
+    return `${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}` !== targetKey;
+  });
+  const config = mergeConfig(existing.config, {
+    model: {
+      fallbacks: remaining.length === 0 ? undefined : remaining
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function reorderModelFallbackConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  input: {
+    order: Array<{ provider: ProviderId; id: string; baseUrl?: string }>;
+    scope?: "user" | "project";
+  };
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.input.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const current = existing.config.model?.fallbacks ?? [];
+  const orderKeys = new Set(options.input.order.map((o) => `${o.provider}/${o.id}/${o.baseUrl ?? ""}`));
+  const ordered = options.input.order.map((o) => {
+    return current.find((fb) => `${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}` === `${o.provider}/${o.id}/${o.baseUrl ?? ""}`);
+  }).filter((fb): fb is ModelFallbackConfig => fb !== undefined);
+  const tail = current.filter((fb) => !orderKeys.has(`${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}`));
+  const config = mergeConfig(existing.config, {
+    model: {
+      fallbacks: [...ordered, ...tail]
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
+export async function clearModelFallbackConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  scope?: "user" | "project";
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = options.scope === "project"
+    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const existing = await readConfig(targetPath);
+  const config = mergeConfig(existing.config, {
+    model: {
+      fallbacks: undefined
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
   };
 }
 
@@ -1823,6 +2101,23 @@ function validateProviderSetupInput(input: ProviderSetupInput): void {
   }
 }
 
+function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
+  validateScope(input.scope);
+  if (!Array.isArray(input.fallbacks)) {
+    throw new Error("Expected fallbacks to be an array");
+  }
+  for (const fb of input.fallbacks) {
+    requireNonEmpty(fb.provider, "fallback provider");
+    requireNonEmpty(fb.id, "fallback id");
+    if (fb.baseUrl !== undefined) {
+      validateOptionalUrl(fb.baseUrl, "fallback baseUrl");
+    }
+    if (fb.apiKeyEnv !== undefined) {
+      validateOptionalEnvName(fb.apiKeyEnv, "fallback apiKeyEnv");
+    }
+  }
+}
+
 function validateWebSetupInput(input: WebSetupInput): void {
   validateScope(input.scope);
   if (input.maxContentChars !== undefined && (!Number.isInteger(input.maxContentChars) || input.maxContentChars <= 0)) {
@@ -2137,6 +2432,101 @@ function normalizePairingCode(code: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function fallbackRouteKey(fallback: ModelFallbackConfig): string {
+  return `${fallback.provider}/${fallback.id}/${fallback.baseUrl ?? ""}`;
+}
+
+function isValidEnvName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function normalizeModelFallbacks(
+  config: EstaCodaConfig
+): { fallbacks: ModelFallbackConfig[]; warnings: string[] } {
+  const raw = config.model?.fallbacks;
+  const warnings: string[] = [];
+
+  if (raw === undefined || !Array.isArray(raw)) {
+    return { fallbacks: [], warnings };
+  }
+
+  const seen = new Set<string>();
+  const fallbacks: ModelFallbackConfig[] = [];
+  const primaryProvider = config.model?.provider;
+  const primaryId = config.model?.id;
+  const primaryBaseUrl = config.providers?.[primaryProvider ?? ""]?.baseUrl;
+
+  for (const entry of raw) {
+    if (entry === undefined || entry === null || typeof entry !== "object") {
+      warnings.push("Ignored non-object fallback entry.");
+      continue;
+    }
+
+    const provider = (entry as Record<string, unknown>).provider;
+    const id = (entry as Record<string, unknown>).id;
+
+    if (typeof provider !== "string" || provider.length === 0) {
+      warnings.push("Ignored fallback entry missing required 'provider'.");
+      continue;
+    }
+    if (typeof id !== "string" || id.length === 0) {
+      warnings.push("Ignored fallback entry missing required 'id'.");
+      continue;
+    }
+
+    const baseUrl = (entry as Record<string, unknown>).baseUrl;
+    if (baseUrl !== undefined && (typeof baseUrl !== "string" || !isValidUrl(baseUrl))) {
+      warnings.push(`Ignored fallback entry for ${provider}/${id} with invalid baseUrl."`);
+      continue;
+    }
+
+    const apiKeyEnv = (entry as Record<string, unknown>).apiKeyEnv;
+    if (apiKeyEnv !== undefined && (typeof apiKeyEnv !== "string" || !isValidEnvName(apiKeyEnv))) {
+      warnings.push(`Ignored fallback entry for ${provider}/${id} with invalid apiKeyEnv.`);
+      continue;
+    }
+
+    const contextWindowTokens = (entry as Record<string, unknown>).contextWindowTokens;
+    const normalized: ModelFallbackConfig = {
+      provider: provider as ProviderId,
+      id,
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+      ...(typeof contextWindowTokens === "number" && Number.isFinite(contextWindowTokens)
+        ? { contextWindowTokens }
+        : {})
+    };
+
+    const key = fallbackRouteKey(normalized);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    if (
+      normalized.provider === primaryProvider &&
+      normalized.id === primaryId &&
+      (normalized.baseUrl ?? "") === (primaryBaseUrl ?? "")
+    ) {
+      warnings.push(`Ignored fallback entry that duplicates the primary route ${primaryProvider}/${primaryId}.`);
+      continue;
+    }
+
+    fallbacks.push(normalized);
+  }
+
+  return { fallbacks, warnings };
 }
 
 function normalizeChannelBusyPolicy(

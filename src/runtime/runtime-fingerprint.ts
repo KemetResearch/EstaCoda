@@ -48,7 +48,7 @@ export type RuntimeFingerprint = {
   agentResponseLanguage: string;
 
   // ── Media / auxiliary ──
-  auxiliaryProvidersHash?: string;
+  auxiliaryModelsHash?: string;
   imageGenHash: string;
   ttsHash: string;
   sttHash: string;
@@ -111,8 +111,8 @@ export function computeRuntimeFingerprint(
     activityLabels: config.ui.activityLabels,
     agentProfileMode: config.profile.mode,
     agentResponseLanguage: config.profile.responseLanguage,
-    auxiliaryProvidersHash: config.auxiliaryProviders
-      ? stableJsonHash(config.auxiliaryProviders)
+    auxiliaryModelsHash: config.auxiliaryModels
+      ? stableJsonHash(config.auxiliaryModels)
       : undefined,
     imageGenHash: stableJsonHash(config.imageGen),
     ttsHash: stableJsonHash(config.tts),

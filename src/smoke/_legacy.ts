@@ -61,7 +61,10 @@ import { createProcessTools } from "../process/process-tools.js";
 import type { ProviderAdapter, ProviderRequest, ProviderResponse, ProviderStreamEvent } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
-import { AuxiliaryProviderRouter, summarizeAuxiliaryRoutes } from "../providers/auxiliary-provider-router.js";
+import {
+  resolveAuxiliaryModelRoute,
+  summarizeAuxiliaryRoutes
+} from "../providers/auxiliary-model-resolver.js";
 import {
   inferModelProfile,
   resolveModelProfileFromCatalog,
@@ -603,10 +606,8 @@ await writeFile(
         models: ["kimi-k2.5"]
       }
     },
-    auxiliaryProviders: {
-      delegation: {
-        providerOrder: ["kimi"]
-      }
+    auxiliaryModels: {
+      delegation: { provider: "kimi", enabled: true }
     }
   }),
   "utf8"
@@ -630,11 +631,8 @@ const deepMergedConfig = mergeConfig(
         entries: [{ id: "primary", source: { kind: "env", name: "OPENAI_API_KEY" }, priority: 1 }]
       }
     },
-    auxiliaryProviders: {
-      delegation: {
-        providerOrder: ["openai"],
-        requireTools: true
-      }
+    auxiliaryModels: {
+      delegation: { provider: "openai", enabled: true, fallbackToMain: true }
     },
     mcpServers: {
       filesystem: {
@@ -655,10 +653,8 @@ const deepMergedConfig = mergeConfig(
         strategy: "round_robin"
       }
     },
-    auxiliaryProviders: {
-      delegation: {
-        providerOrder: ["kimi"]
-      }
+    auxiliaryModels: {
+      delegation: { provider: "kimi" }
     },
     mcpServers: {
       filesystem: {
@@ -1847,35 +1843,28 @@ const providerRoute = routeProvider(providerModels, {
 const providerFallbacks = buildFallbackChain(providerModels, providerRoute?.primary ?? providerModels[0], {
   requireTools: true
 });
-const auxiliaryRouter = new AuxiliaryProviderRouter({
-  models: providerModels,
-  config: {
-    vision: {
-      providerOrder: ["kimi"],
-      requireVision: false
-    },
-    delegation: {
-      providerOrder: ["deepseek"],
-      requireTools: true
-    }
-  }
-});
-const auxiliaryVisionRoute = auxiliaryRouter.resolve("vision");
-const auxiliaryDelegationRoute = auxiliaryRouter.resolve("delegation");
-const auxiliaryRouteSummary = summarizeAuxiliaryRoutes(auxiliaryRouter.resolveAll());
-const primaryAuxiliaryRouter = new AuxiliaryProviderRouter({
-  models: providerModels,
-  primaryProvider: "kimi",
-  config: {
-    main: {
-      providerOrder: ["deepseek"]
-    }
-  }
-});
-const primaryMainRoute = primaryAuxiliaryRouter.resolve("main");
-const primaryVisionRoute = primaryAuxiliaryRouter.resolve("vision");
-const primaryCompressionRoute = primaryAuxiliaryRouter.resolve("compression");
-const primaryDelegationRoute = primaryAuxiliaryRouter.resolve("delegation");
+const mainRoute = {
+  provider: providerModels[0].provider,
+  id: providerModels[0].id,
+  profile: providerModels[0]
+};
+const auxiliaryVisionRoute = resolveAuxiliaryModelRoute("vision", { provider: "kimi", enabled: true }, { mainRoute, providerRegistry, providerModels });
+const auxiliaryDelegationRoute = resolveAuxiliaryModelRoute("delegation", { provider: "deepseek", enabled: true }, { mainRoute, providerRegistry, providerModels });
+const allAuxiliaryRoutes = [
+  resolveAuxiliaryModelRoute("vision", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("approval", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("compression", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("delegation", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("memory_flush", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("web_extract", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("session_search", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("mcp", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("memory_compaction", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("skills_library", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("title_generation", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+  resolveAuxiliaryModelRoute("curator", { provider: "auto", enabled: true }, { mainRoute, providerRegistry, providerModels }),
+];
+const auxiliaryRouteSummary = summarizeAuxiliaryRoutes(allAuxiliaryRoutes);
 const preparedProviderRequest = buildOpenAICompatibleRequest(
   {
     baseUrl: "https://api.deepseek.com/v1",
@@ -3467,8 +3456,9 @@ assert(deepMergedConfig.providers?.openai?.baseUrl === "https://custom.example/v
 assert(deepMergedConfig.providers?.openai?.models?.[0] === "gpt-4.1-mini", "expected provider models to survive partial override");
 assert(deepMergedConfig.credentialPools?.openai?.strategy === "round_robin", "expected credential pool strategy override");
 assert(deepMergedConfig.credentialPools?.openai?.entries?.[0]?.id === "primary", "expected credential pool entries to survive partial override");
-assert(deepMergedConfig.auxiliaryProviders?.delegation?.requireTools === true, "expected auxiliary provider fields to survive partial override");
-assert(deepMergedConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi", "expected auxiliary provider route override");
+assert(deepMergedConfig.auxiliaryModels?.delegation?.provider === "kimi", "expected auxiliary model provider override");
+assert(deepMergedConfig.auxiliaryModels?.delegation?.enabled === true, "expected auxiliary model enabled to survive partial override");
+assert(deepMergedConfig.auxiliaryModels?.delegation?.fallbackToMain === true, "expected auxiliary model fallbackToMain to survive partial override");
 assert(deepMergedConfig.mcpServers?.filesystem?.command === "npx", "expected MCP command to survive partial server override");
 assert(deepMergedConfig.mcpServers?.filesystem?.timeoutMs === 30_000, "expected MCP timeout override");
 assert(deepMergedConfig.mcpServers?.filesystem?.tools?.include?.[0] === "read_file", "expected MCP nested tools include to survive partial override");
@@ -3526,8 +3516,8 @@ assert(consumedCryptoPairingCode.paired === true, "expected user-scoped Telegram
 assert(consumedCryptoPairingCode.path === pairingScopeUserPath, "expected Telegram pairing consumption to use user config path");
 assert((await readFile(pairingScopeProjectPath, "utf8").catch(() => "")) === "", "expected Telegram pairing to avoid project config state");
 assert(
-  loadedRuntimeConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi",
-  "expected configured auxiliary provider override"
+  loadedRuntimeConfig.auxiliaryModels?.delegation?.provider === "kimi",
+  "expected configured auxiliary model override"
 );
 const externalSkillsHome = await mkdtemp(join(tmpdir(), "estacoda-external-home-"));
 const externalSkillsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-external-workspace-"));
@@ -5439,9 +5429,10 @@ assert(
   pairedConfig.channels.telegram.allowedChatIds?.includes("987654321") === true,
   "expected paired Telegram chat allowlist"
 );
-assert(cliModel.output.includes("Current model: deepseek/deepseek-chat"), "expected CLI model output");
-assert(cliModel.output.includes("Web extraction: enabled"), "expected CLI model web status");
-assert(cliModel.output.includes("Browser backend: local-cdp"), "expected CLI model browser status");
+assert(cliModel.output.includes("Primary: deepseek/deepseek-chat"), "expected CLI model output");
+assert(cliModel.output.includes("Status: ready"), "expected CLI model status");
+assert(cliModel.output.includes("Fallbacks: none"), "expected CLI model fallback status");
+assert(cliModel.output.includes("estacoda model status"), "expected CLI model command guide");
 assert(cliTools.output.includes("Tools:"), "expected CLI tools output");
 assert(cliDoctor.output.includes("EstaCoda doctor"), "expected CLI doctor output");
 assert(cliDoctor.output.includes("Provider health:"), "expected CLI doctor provider diagnostic");
@@ -5468,19 +5459,12 @@ assert(localModel.freeOrOpenWeights === true, "expected local model to be free/o
 assert(providerModels.length === 4, "expected provider registry models");
 assert(providerRoute?.primary.provider === "deepseek", "expected provider order routing");
 assert(providerFallbacks.length === 3, "expected provider fallback chain");
-assert(auxiliaryVisionRoute.route?.primary.provider === "kimi", "expected auxiliary vision override");
-assert(auxiliaryDelegationRoute.route?.primary.provider === "deepseek", "expected auxiliary delegation route");
+assert(auxiliaryVisionRoute.route?.provider === "kimi", "expected auxiliary vision override");
+assert(auxiliaryDelegationRoute.route?.provider === "deepseek", "expected auxiliary delegation route");
 assert(auxiliaryRouteSummary.includes("memory_flush:"), "expected auxiliary route summary");
 assert(auxiliaryRouteSummary.includes("approval:"), "expected approval auxiliary route summary");
-assert(primaryMainRoute.preferences.providerOrder?.[0] === "kimi", "expected primary provider to lead auxiliary provider order");
-assert(primaryMainRoute.preferences.providerOrder?.[1] === "deepseek", "expected configured auxiliary provider order after primary");
-assert(primaryMainRoute.preferences.requireTools === true, "expected main auxiliary route to require tools");
-assert(primaryMainRoute.route?.primary.provider === "kimi", "expected primary provider to win when it satisfies main task");
-assert(primaryVisionRoute.preferences.requireVision === true, "expected vision auxiliary route to require vision");
-assert(primaryVisionRoute.route?.primary.provider === "kimi", "expected vision route to select vision-capable primary");
-assert(primaryCompressionRoute.preferences.requireStructuredOutput === true, "expected compression route to require structured output");
-assert(primaryDelegationRoute.preferences.requireTools === true, "expected delegation route to require tools");
-assert(!/apiKey|accessToken|baseUrl/u.test(JSON.stringify(primaryMainRoute)), "expected auxiliary routes to avoid credential and endpoint metadata");
+assert(mainRoute.provider === providerModels[0].provider, "expected main route provider to match primary model");
+assert(!/apiKey|accessToken|baseUrl/u.test(JSON.stringify(mainRoute)), "expected auxiliary routes to avoid credential and endpoint metadata");
 assert(
   preparedProviderRequest.url === "https://api.deepseek.com/v1/chat/completions",
   "expected OpenAI-compatible request URL"
@@ -5533,26 +5517,28 @@ assert(
   ),
   "expected strict normalization to avoid product identity injection"
 );
-assert(providerExecution.ok, "expected provider fallback execution to succeed");
-assert(providerExecution.attempts.length === 2, "expected provider fallback attempts");
+assert(!providerExecution.ok, "expected provider primary-only execution to fail without explicit fallback chain");
+assert(providerExecution.attempts.length === 1, "expected provider primary-only attempt");
 assert(providerExecution.attempts[0]?.credentialId === "deepseek-a", "expected first pooled credential");
-assert(providerFallbackEvents[0]?.willFallback === true, "expected failed provider attempt to announce fallback");
-assert(providerFallbackEvents[1]?.ok === true, "expected fallback provider attempt to succeed");
+assert(providerFallbackEvents[0]?.willFallback === false, "expected no fallback without explicit fallback chain");
 assert(
   credentialPoolsAfterFirstFallback[0]?.entries.some((entry) => entry.id === "deepseek-a" && entry.available),
   "expected first 429 to keep credential available"
 );
-assert(providerExecutionSecondFallback.attempts.length === 1, "expected one-shot fallback per session");
+assert(providerExecutionSecondFallback.attempts.length === 1, "expected primary-only execution on each legacy turn");
 assert(pooledCredentialExecution.ok, "expected credential-pool override to bypass missing endpoint env health");
 assert(pooledExecutionFetchCalls[0]?.authorization === "Bearer pooled-execution-key", "expected pooled execution credential to be sent");
 assert(explicitCollisionExecution.response?.provider === "kimi", "expected explicit provider/model route to disambiguate shared model IDs");
 assert(explicitCollisionExecution.response?.content === "explicit provider", "expected explicit provider response");
-assert(explicitProviderFallbackExecution.ok, "expected explicit provider/model route to fall back on eligible failure");
-assert(explicitProviderFallbackExecution.fallbackUsed, "expected fallback marker after explicit route failure");
+assert(!explicitProviderFallbackExecution.ok, "expected explicit provider/model legacy route to fail without fallback chain");
+assert(!explicitProviderFallbackExecution.fallbackUsed, "expected no fallback used without explicit fallback chain");
 assert(
-  explicitProviderFallbackExecution.attempts.map((attempt) => `${attempt.provider}/${attempt.model}`).join(",") ===
-    "deepseek/shared-model,kimi/kimi-k2.5",
-  "expected explicit route fallback chain"
+  explicitProviderFallbackExecution.attempts.length === 1,
+  "expected single primary attempt in legacy execution"
+);
+assert(
+  explicitProviderFallbackExecution.attempts[0]?.provider === "deepseek",
+  "expected primary provider attempted"
 );
 assert(streamingExecution.ok, "expected streaming provider execution to succeed");
 assert(streamingExecution.response?.content === "stream success", "expected streaming provider content aggregation");
@@ -11277,7 +11263,7 @@ const configuredProviderRuntime = await createRuntime({
   model: configuredLoadedRuntimeConfig.model,
   providerRegistry: configuredLoadedRuntimeConfig.providerRegistry,
   credentialPools: configuredLoadedRuntimeConfig.credentialPools,
-  auxiliaryProviders: configuredLoadedRuntimeConfig.auxiliaryProviders,
+  auxiliaryModels: configuredLoadedRuntimeConfig.auxiliaryModels,
   enableWebNetwork: configuredLoadedRuntimeConfig.web.enableNetwork,
   webMaxContentChars: configuredLoadedRuntimeConfig.web.maxContentChars,
   browser: configuredLoadedRuntimeConfig.browser

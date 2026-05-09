@@ -60,8 +60,9 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
       return models;
     },
     async complete(request: ProviderRequest, completionOptions?: ProviderCompletionOptions): Promise<ProviderResponse> {
+      const effectiveEndpoint = completionOptions?.endpoint ?? options.endpoint;
       const health = await this.health();
-      const preparedRequest = buildOpenAICompatibleRequest(options.endpoint, request, completionOptions?.credential?.value, options.id);
+      const preparedRequest = buildOpenAICompatibleRequest(effectiveEndpoint, request, completionOptions?.credential?.value, options.id);
 
       if (!health.available && completionOptions?.credential?.value === undefined) {
         return {
@@ -95,8 +96,9 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
       };
     },
     async *stream(request: ProviderRequest, completionOptions?: ProviderCompletionOptions): AsyncIterable<ProviderStreamEvent> {
+      const effectiveEndpoint = completionOptions?.endpoint ?? options.endpoint;
       const health = await this.health();
-      const preparedRequest = buildOpenAICompatibleRequest(options.endpoint, {
+      const preparedRequest = buildOpenAICompatibleRequest(effectiveEndpoint, {
         ...request,
         stream: true
       }, completionOptions?.credential?.value, options.id);

@@ -10,7 +10,6 @@ import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../setup/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
-import { setupProviderConfig, loadRuntimeConfig } from "../config/runtime-config.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildToolsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -208,46 +207,10 @@ export async function handleSlashCommand(input: {
       return false;
     case "model": {
       if (args[0] === "set" && args[1] !== undefined) {
-        const providerModel = args[1];
-        const slashIndex = providerModel.indexOf("/");
-        if (slashIndex === -1) {
-          input.output.write(`Error: expected <provider>/<model>, got "${providerModel}"\n\n`);
-          return false;
-        }
-        const provider = providerModel.slice(0, slashIndex);
-        const modelId = providerModel.slice(slashIndex + 1);
-
-        const config = await loadRuntimeConfig({ workspaceRoot: input.workspaceRoot ?? process.cwd(), homeDir: input.homeDir });
-        const providerConfig = config.config.providers?.[provider];
-        if (providerConfig === undefined) {
-          input.output.write(`Error: provider "${provider}" is not configured.\n\n`);
-          return false;
-        }
-        if (!providerConfig.models?.includes(modelId)) {
-          input.output.write(`Error: model "${modelId}" is not listed for provider "${provider}".\n\n`);
-          return false;
-        }
-
-        await setupProviderConfig({
-          workspaceRoot: input.workspaceRoot ?? process.cwd(),
-          homeDir: input.homeDir,
-          input: {
-            provider,
-            model: modelId,
-            models: providerConfig.models,
-            primary: true
-          }
-        });
-
-        if (input.refreshRuntime === undefined) {
-          input.output.write(`Switched to ${provider}/${modelId}. Start a new session to use the updated model.\n\n`);
-          return false;
-        }
-
-        return {
-          runtime: await input.refreshRuntime({ preserveSession: true }),
-          notice: (runtime) => `Switched to ${provider}/${modelId}. Session ${runtime.sessionId} is using the new model.`
-        };
+        input.output.write(
+          "Session-scoped model switching is not supported. Use `estacoda model set <provider>/<model>` to change the persistent configuration.\n\n"
+        );
+        return false;
       }
 
       input.output.write(`${input.renderer.render(input.runtime.getModelInfo())}\n\n`);

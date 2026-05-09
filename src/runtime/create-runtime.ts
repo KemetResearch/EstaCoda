@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { AuxiliaryProviderConfig, ModelProfile } from "../contracts/provider.js";
+import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { SkillCatalogEntry } from "../contracts/skill.js";
@@ -24,7 +24,7 @@ import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
-import { AuxiliaryProviderRouter } from "../providers/auxiliary-provider-router.js";
+import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
@@ -87,6 +87,8 @@ import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErro
 export type RuntimeOptions = {
   theme: ThemeDefinition;
   model: ModelProfile;
+  primaryModelRoute?: ResolvedModelRoute;
+  modelFallbackRoutes?: ResolvedModelRoute[];
   profileId?: string;
   sessionId?: string;
   sessionDb?: SessionDB;
@@ -103,7 +105,7 @@ export type RuntimeOptions = {
   memoryProvider?: MemoryProvider;
   userMemoryRoot?: string;
   projectMemoryRoot?: string;
-  auxiliaryProviders?: AuxiliaryProviderConfig;
+  auxiliaryModels?: AuxiliaryModelConfig;
   homeDir?: string;
   userConfigPath?: string;
   projectConfigPath?: string;
@@ -223,14 +225,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const cronStore = options.cronStore ?? new CronStore({ homeDir: options.homeDir });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
   const providerModels = await providerRegistry.listModels();
-  const auxiliaryProviderRouter = new AuxiliaryProviderRouter({
-    models: providerModels,
-    config: options.auxiliaryProviders,
-    primaryProvider: options.model.provider
-  });
-  const approvalAuxiliaryRoute = options.model.provider === "unconfigured"
+  const mainRoute: ResolvedModelRoute = options.primaryModelRoute ?? {
+    provider: options.model.provider,
+    id: options.model.id,
+    profile: options.model
+  };
+  const auxiliaryModels = options.auxiliaryModels ?? {};
+  const approvalRoute = options.model.provider === "unconfigured"
     ? undefined
-    : auxiliaryProviderRouter.resolve("approval");
+    : resolveAuxiliaryModelRoute("approval", auxiliaryModels.approval ?? { provider: "auto", enabled: true }, {
+      mainRoute,
+      providerRegistry,
+      providerModels
+    });
+  const visionRoute = options.model.provider === "unconfigured"
+    ? undefined
+    : resolveAuxiliaryModelRoute("vision", auxiliaryModels.vision ?? { provider: "auto", enabled: true }, {
+      mainRoute,
+      providerRegistry,
+      providerModels
+    });
   const processManager = new ProcessManager({ workspaceRoot });
   const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
   const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
@@ -342,9 +356,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     visionAnalyzer: (input, signal) => analyzeImageWithVision({
       workspaceRoot,
       allowedRoots: [channelMediaRoot],
-      providerRegistry,
-      credentialPools: options.credentialPools,
-      routePreferences: auxiliaryProviderRouter.resolve("vision").preferences
+      resolvedVisionRoute: visionRoute?.route,
+      mainRoute,
+      fallbackToMain: visionRoute?.fallbackToMain,
+      providerExecutor: new ProviderExecutor({
+        registry: providerRegistry,
+        credentialPools: options.credentialPools
+      })
     }, input, signal)
   })) {
     toolRegistry.register(tool);
@@ -384,9 +402,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createVisionTools({
     workspaceRoot,
     allowedRoots: [channelMediaRoot],
-    providerRegistry,
-    credentialPools: options.credentialPools,
-    routePreferences: auxiliaryProviderRouter.resolve("vision").preferences
+    resolvedVisionRoute: visionRoute?.route,
+    mainRoute,
+    fallbackToMain: visionRoute?.fallbackToMain,
+    providerExecutor: new ProviderExecutor({
+      registry: providerRegistry,
+      credentialPools: options.credentialPools
+    })
   })) {
     toolRegistry.register(tool);
   }
@@ -516,8 +538,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ? undefined
     : {
       ...options.securityAssessor,
-      provider: options.securityAssessor.provider ?? approvalAuxiliaryRoute?.route?.primary.provider,
-      model: options.securityAssessor.model ?? approvalAuxiliaryRoute?.route?.primary.id
+      provider: options.securityAssessor.provider ?? approvalRoute?.route?.provider,
+      model: options.securityAssessor.model ?? approvalRoute?.route?.id,
+      route: options.securityAssessor.route ?? approvalRoute?.route
     };
   const baseSecurityPolicyForActiveMode = () => options.securityPolicy ?? createSecurityPolicyForMode(activeSecurityMode, {
     assessor: effectiveSecurityAssessor === undefined
@@ -620,6 +643,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const providerTurnLoop = new ProviderTurnLoop({
     providerExecutor,
     model: options.model,
+    primaryModelRoute: options.primaryModelRoute,
+    modelFallbackRoutes: options.modelFallbackRoutes,
     providerPreferences: {
       providerOrder: [options.model.provider]
     },

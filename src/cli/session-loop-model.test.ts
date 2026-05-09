@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { handleSlashCommand } from "./session-loop.js";
-import { loadRuntimeConfig, setupProviderConfig } from "../config/runtime-config.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 
 function fakeRuntime(modelInfo: {
@@ -77,10 +76,36 @@ describe("session-loop /model", () => {
     expect(outputChunks.join("")).toContain("model: qwen2.5:3b");
   });
 
-  it("/model set switches the active model and persists to config", async () => {
+  it("/model set refuses with clear message", async () => {
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    });
+
+    const result = await handleSlashCommand({
+      text: "/model set local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    const text = outputChunks.join("");
+    expect(text).toContain("Session-scoped model switching is not supported");
+    expect(text).toContain("estacoda model set");
+  });
+
+  it("/model set does not write provider config", async () => {
     const estacodaDir = join(tempHome, ".estacoda");
     mkdirSync(estacodaDir, { recursive: true });
-    writeFileSync(join(estacodaDir, "config.json"), JSON.stringify({
+    const configPath = join(estacodaDir, "config.json");
+    const original = JSON.stringify({
       providers: {
         local: {
           kind: "openai-compatible",
@@ -89,8 +114,9 @@ describe("session-loop /model", () => {
           enableNetwork: true
         }
       },
-      primaryModel: "local/qwen2.5:3b"
-    }));
+      model: { provider: "local", id: "qwen2.5:3b" }
+    }, null, 2);
+    writeFileSync(configPath, original);
 
     const runtime = fakeRuntime({
       provider: "local",
@@ -101,36 +127,24 @@ describe("session-loop /model", () => {
       supportsStructuredOutput: true
     });
 
-    const refreshedModels: string[] = [];
-
-    const result = await handleSlashCommand({
+    await handleSlashCommand({
       text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
       workspaceRoot: tempHome,
-      homeDir: tempHome,
-      refreshRuntime: async () => {
-        refreshedModels.push("refreshed");
-        return runtime;
-      }
+      homeDir: tempHome
     });
 
-    expect(typeof result).not.toBe("boolean");
-    expect(result).toHaveProperty("runtime");
-    expect(result).toHaveProperty("notice");
-    const noticeText = (result as any).notice(runtime);
-    expect(noticeText).toContain("Switched to local/phi4:latest");
-
-    const config = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome });
-    expect(config.model.provider).toBe("local");
-    expect(config.model.id).toBe("phi4:latest");
+    const after = readFileSync(configPath, "utf8");
+    expect(after).toBe(original);
   });
 
-  it("/model set rejects unknown provider", async () => {
+  it("/model set does not change persistent config.model.provider or config.model.id", async () => {
     const estacodaDir = join(tempHome, ".estacoda");
     mkdirSync(estacodaDir, { recursive: true });
-    writeFileSync(join(estacodaDir, "config.json"), JSON.stringify({
+    const configPath = join(estacodaDir, "config.json");
+    const original = JSON.stringify({
       providers: {
         local: {
           kind: "openai-compatible",
@@ -139,8 +153,9 @@ describe("session-loop /model", () => {
           enableNetwork: true
         }
       },
-      primaryModel: "local/qwen2.5:3b"
-    }));
+      model: { provider: "local", id: "qwen2.5:3b" }
+    }, null, 2);
+    writeFileSync(configPath, original);
 
     const runtime = fakeRuntime({
       provider: "local",
@@ -151,8 +166,8 @@ describe("session-loop /model", () => {
       supportsStructuredOutput: true
     });
 
-    const result = await handleSlashCommand({
-      text: "/model set unknown/model",
+    await handleSlashCommand({
+      text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
@@ -160,14 +175,16 @@ describe("session-loop /model", () => {
       homeDir: tempHome
     });
 
-    expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain('provider "unknown" is not configured');
+    const after = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(after.model.provider).toBe("local");
+    expect(after.model.id).toBe("qwen2.5:3b");
   });
 
-  it("/model set rejects unknown model for known provider", async () => {
+  it("/model set does not add provider entries, API keys, or fallback routes", async () => {
     const estacodaDir = join(tempHome, ".estacoda");
     mkdirSync(estacodaDir, { recursive: true });
-    writeFileSync(join(estacodaDir, "config.json"), JSON.stringify({
+    const configPath = join(estacodaDir, "config.json");
+    const original = JSON.stringify({
       providers: {
         local: {
           kind: "openai-compatible",
@@ -176,8 +193,9 @@ describe("session-loop /model", () => {
           enableNetwork: true
         }
       },
-      primaryModel: "local/qwen2.5:3b"
-    }));
+      model: { provider: "local", id: "qwen2.5:3b" }
+    }, null, 2);
+    writeFileSync(configPath, original);
 
     const runtime = fakeRuntime({
       provider: "local",
@@ -188,8 +206,8 @@ describe("session-loop /model", () => {
       supportsStructuredOutput: true
     });
 
-    const result = await handleSlashCommand({
-      text: "/model set local/nonexistent",
+    await handleSlashCommand({
+      text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
@@ -197,11 +215,13 @@ describe("session-loop /model", () => {
       homeDir: tempHome
     });
 
-    expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain('model "nonexistent" is not listed');
+    const after = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(Object.keys(after.providers)).toEqual(["local"]);
+    expect(after.providers.local.apiKey).toBeUndefined();
+    expect(after.model.fallbacks).toBeUndefined();
   });
 
-  it("/model set rejects missing slash syntax", async () => {
+  it("/model set rejects missing slash syntax with unsupported message", async () => {
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -221,6 +241,6 @@ describe("session-loop /model", () => {
     });
 
     expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain('expected <provider>/<model>');
+    expect(outputChunks.join("")).toContain("Session-scoped model switching is not supported");
   });
 });

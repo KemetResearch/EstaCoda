@@ -14,6 +14,10 @@ import {
   setupUiConfig,
   setupVoiceConfig,
   setupWebConfig,
+  setupModelFallbackConfig,
+  removeModelFallbackConfig,
+  reorderModelFallbackConfig,
+  clearModelFallbackConfig,
   type AgentProfileMode,
   type AgentResponseLanguage,
   type BrowserSetupInput,
@@ -21,6 +25,7 @@ import {
   type ImageGenerationProvider,
   type ActivityLabelsLocale,
   type MCPSetupInput,
+  type ModelFallbackConfig,
   type ProviderSetupInput,
   type SecuritySetupInput,
   type TelegramSetupInput,
@@ -43,7 +48,8 @@ import {
   IMAGE_MODEL_OPTIONS,
   resolveImageModel
 } from "../contracts/image-generation.js";
-import type { ModelProfile } from "../contracts/provider.js";
+import type { ModelProfile, ResolvedAuxiliaryRoute } from "../contracts/provider.js";
+import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -594,7 +600,61 @@ async function profile(options: CliOptions, args: string[]): Promise<CliCommandR
 
 async function model(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const config = await loadRuntimeConfig(options);
-  const diagnostic = await diagnoseProviderConfig(config);
+
+  if (args[0] === "status") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderModelStatus(config)
+    };
+  }
+
+  if (args[0] === "diagnose") {
+    const diagnostic = await diagnoseProviderConfig(config);
+    const auxiliaryRoutes = await resolveAllAuxiliaryRoutes(config.auxiliaryModels, {
+      mainRoute: config.primaryModelRoute,
+      providerRegistry: config.providerRegistry
+    });
+    return {
+      handled: true,
+      exitCode: diagnostic.status === "ready" ? 0 : 1,
+      output: [
+        "EstaCoda model diagnose",
+        "",
+        renderProviderDiagnostic(diagnostic),
+        "",
+        renderFallbackDiagnostic(config),
+        "",
+        renderAuxiliaryDiagnostic(auxiliaryRoutes)
+      ].join("\n")
+    };
+  }
+
+  if (args[0] === "auxiliary") {
+    if (args[1] === "status") {
+      const auxiliaryRoutes = await resolveAllAuxiliaryRoutes(config.auxiliaryModels, {
+        mainRoute: config.primaryModelRoute,
+        providerRegistry: config.providerRegistry
+      });
+      return {
+        handled: true,
+        exitCode: 0,
+        output: renderAuxiliaryStatus(auxiliaryRoutes)
+      };
+    }
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Auxiliary model commands:",
+        "  estacoda model auxiliary status"
+      ].join("\n")
+    };
+  }
+
+  if (args[0] === "fallback") {
+    return modelFallback(options, args.slice(1), config);
+  }
 
   if (args[0] === "set" && args[1] !== undefined) {
     const providerModel = args[1];
@@ -638,8 +698,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
         output: [
           `Error: model "${modelId}" is not listed for provider "${provider}".`,
           "",
-          `Available models for ${provider}:`,
-          ...(providerConfig.models ?? []).map((m) => `  ${m}`),
+          `Available models for ${provider}:\n${(providerConfig.models ?? []).map((m) => `  ${m}`).join("\n")}`,
           "",
           "Add the model to the provider config, then try again."
         ].join("\n")
@@ -674,22 +733,390 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
   return {
     handled: true,
     exitCode: 0,
+    output: renderModelOverview(config)
+  };
+}
+
+function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  const diagnosticLines: string[] = [];
+  const route = config.primaryModelRoute;
+  const status = route.provider === "unconfigured" || route.id === "unconfigured" ? "not configured" : "ready";
+
+  diagnosticLines.push(`Primary: ${route.provider}/${route.id}`);
+  diagnosticLines.push(`Status: ${status}`);
+
+  if (config.modelFallbackRoutes.length > 0) {
+    diagnosticLines.push("");
+    diagnosticLines.push("Fallbacks:");
+    for (let i = 0; i < config.modelFallbackRoutes.length; i++) {
+      const fb = config.modelFallbackRoutes[i];
+      diagnosticLines.push(`${i + 1}. ${fb.provider}/${fb.id}`);
+    }
+  } else {
+    diagnosticLines.push("Fallbacks: none");
+  }
+
+  diagnosticLines.push("");
+  diagnosticLines.push("Commands:");
+  diagnosticLines.push("  estacoda model status");
+  diagnosticLines.push("  estacoda model diagnose");
+  diagnosticLines.push("  estacoda model auxiliary status");
+  diagnosticLines.push("  estacoda model set <provider>/<model>");
+  diagnosticLines.push("  estacoda model fallback status");
+  diagnosticLines.push("  estacoda model fallback add <provider>/<model>");
+  diagnosticLines.push("  estacoda model fallback remove <provider>/<model>");
+  diagnosticLines.push("  estacoda model fallback reorder <provider>/<model> ...");
+  diagnosticLines.push("  estacoda model fallback clear");
+
+  return diagnosticLines.join("\n");
+}
+
+function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  const route = config.primaryModelRoute;
+  const lines: string[] = [
+    `Primary: ${route.provider}/${route.id}`,
+    `Context window: ${formatCount(config.model.contextWindowTokens)} tokens`,
+    `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
+    `Vision: ${config.model.supportsVision ? "yes" : "no"}`,
+    `Structured output: ${config.model.supportsStructuredOutput ? "yes" : "no"}`,
+    `Network: ${config.web.enableNetwork ? "enabled" : "disabled"}`
+  ];
+
+  if (route.baseUrl !== undefined) {
+    lines.push(`Endpoint: ${route.baseUrl}`);
+  }
+  if (route.apiKeyEnv !== undefined) {
+    lines.push(`Credential: ${process.env[route.apiKeyEnv] === undefined ? `missing ${route.apiKeyEnv}` : "ready"}`);
+  }
+
+  if (config.modelFallbackRoutes.length > 0) {
+    lines.push("");
+    lines.push("Fallbacks:");
+    for (let i = 0; i < config.modelFallbackRoutes.length; i++) {
+      const fb = config.modelFallbackRoutes[i];
+      const credentialStatus = fb.apiKeyEnv !== undefined
+        ? (process.env[fb.apiKeyEnv] === undefined ? `missing ${fb.apiKeyEnv}` : "ready")
+        : "none required";
+      lines.push(`  ${i + 1}. ${fb.provider}/${fb.id} (${credentialStatus})`);
+    }
+  } else {
+    lines.push("Fallbacks: none");
+  }
+
+  return lines.join("\n");
+}
+
+function renderFallbackDiagnostic(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  if (config.modelFallbackRoutes.length === 0) {
+    return "Fallback chain: none configured";
+  }
+
+  const lines: string[] = ["Fallback chain:"];
+  for (let i = 0; i < config.modelFallbackRoutes.length; i++) {
+    const fb = config.modelFallbackRoutes[i];
+    const warnings: string[] = [];
+    if (fb.baseUrl !== undefined) {
+      lines.push(`  Endpoint: ${fb.baseUrl}`);
+    }
+    if (fb.apiKeyEnv !== undefined) {
+      if (process.env[fb.apiKeyEnv] === undefined) {
+        warnings.push(`missing env var ${fb.apiKeyEnv}`);
+      }
+    }
+    const capabilityLine = [
+      `Tools: ${fb.profile.supportsTools ? "yes" : "no"}`,
+      `Vision: ${fb.profile.supportsVision ? "yes" : "no"}`,
+      `Structured: ${fb.profile.supportsStructuredOutput ? "yes" : "no"}`
+    ].join(", ");
+    lines.push(`${i + 1}. ${fb.provider}/${fb.id}`);
+    lines.push(`   Context window: ${formatCount(fb.profile.contextWindowTokens)} tokens`);
+    lines.push(`   ${capabilityLine}`);
+    if (warnings.length > 0) {
+      lines.push(`   Warnings: ${warnings.join(", ")}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function renderAuxiliaryDiagnostic(routes: ResolvedAuxiliaryRoute[]): string {
+  const lines: string[] = ["Auxiliary models:"];
+  for (const route of routes) {
+    const status = route.route === undefined ? "unavailable" : `${route.route.provider}/${route.route.id}`;
+    lines.push(`  ${route.task}: ${status} (${route.source})`);
+    if (route.route !== undefined) {
+      const caps = [
+        `Tools: ${route.route.profile.supportsTools ? "yes" : "no"}`,
+        `Vision: ${route.route.profile.supportsVision ? "yes" : "no"}`,
+        `Structured: ${route.route.profile.supportsStructuredOutput ? "yes" : "no"}`
+      ].join(", ");
+      lines.push(`    ${caps}`);
+      if (route.route.baseUrl !== undefined) {
+        lines.push(`    Endpoint: ${route.route.baseUrl}`);
+      }
+      if (route.route.apiKeyEnv !== undefined) {
+        const cred = process.env[route.route.apiKeyEnv] === undefined ? `missing ${route.route.apiKeyEnv}` : "ready";
+        lines.push(`    Credential: ${cred}`);
+      }
+      lines.push(`    Fallback to main: ${route.fallbackToMain ? "yes" : "no"}`);
+    }
+    if (route.diagnostics.length > 0) {
+      lines.push(`    Diagnostics: ${route.diagnostics.join("; ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function renderAuxiliaryStatus(routes: ResolvedAuxiliaryRoute[]): string {
+  const lines: string[] = ["Auxiliary model status:"];
+  for (const route of routes) {
+    const status = route.route === undefined
+      ? "unavailable"
+      : `${route.route.provider}/${route.route.id}`;
+    const readiness = route.route === undefined
+      ? "unavailable"
+      : "ready";
+    lines.push(`  ${route.task}: ${status} [${readiness}]`);
+  }
+  return lines.join("\n");
+}
+
+async function modelFallback(
+  options: CliOptions,
+  args: string[],
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>
+): Promise<CliCommandResult> {
+  const subcommand = args[0];
+
+  if (subcommand === "status") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderFallbackStatus(config)
+    };
+  }
+
+  if (subcommand === "add" && args[1] !== undefined) {
+    const parsed = parseFallbackRoute(args[1]);
+    if (parsed === undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: expected <provider>/<model>, got "${args[1]}"`,
+          "",
+          "Usage:",
+          "  estacoda model fallback add <provider>/<model> [--base-url <url>] [--api-key-env <env>]"
+        ].join("\n")
+      };
+    }
+
+    const baseUrl = valueAfter(args, "--base-url");
+    const apiKeyEnv = valueAfter(args, "--api-key-env");
+    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
+
+    const fallback: ModelFallbackConfig = {
+      provider: parsed.provider,
+      id: parsed.id,
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {})
+    };
+
+    const existing = config.config.model?.fallbacks ?? [];
+    const result = await setupModelFallbackConfig({
+      ...options,
+      input: {
+        fallbacks: [...existing, fallback],
+        scope
+      }
+    });
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Added fallback ${parsed.provider}/${parsed.id}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "remove" && args[1] !== undefined) {
+    const parsed = parseFallbackRoute(args[1]);
+    if (parsed === undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: expected <provider>/<model>, got "${args[1]}"`,
+          "",
+          "Usage:",
+          "  estacoda model fallback remove <provider>/<model> [--base-url <url>]"
+        ].join("\n")
+      };
+    }
+
+    const baseUrl = valueAfter(args, "--base-url");
+    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
+
+    const result = await removeModelFallbackConfig({
+      ...options,
+      input: {
+        provider: parsed.provider,
+        id: parsed.id,
+        ...(baseUrl !== undefined ? { baseUrl } : {}),
+        scope
+      }
+    });
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Removed fallback ${parsed.provider}/${parsed.id}.`,
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "reorder") {
+    const order = args.slice(1).map((arg) => parseFallbackRoute(arg)).filter((r): r is { provider: string; id: string; baseUrl?: string } => r !== undefined);
+    if (order.length === 0) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          "Error: reorder requires at least one fallback route.",
+          "",
+          "Usage:",
+          "  estacoda model fallback reorder <provider1>/<model1> <provider2>/<model2> ..."
+        ].join("\n")
+      };
+    }
+
+    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
+
+    const result = await reorderModelFallbackConfig({
+      ...options,
+      input: {
+        order: order.map((o) => ({ provider: o.provider, id: o.id, ...(o.baseUrl !== undefined ? { baseUrl: o.baseUrl } : {}) })),
+        scope
+      }
+    });
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Reordered fallback chain.",
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "clear") {
+    if (!hasFlag(args, "--yes")) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          "This will remove all configured fallback routes.",
+          "Run with --yes to confirm.",
+          "",
+          "Usage:",
+          "  estacoda model fallback clear --yes"
+        ].join("\n")
+      };
+    }
+
+    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
+
+    const result = await clearModelFallbackConfig({
+      ...options,
+      scope
+    });
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "Cleared all fallback routes.",
+        `Config: ${result.path}`
+      ].join("\n")
+    };
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
     output: [
-      `Current model: ${config.model.provider}/${config.model.id}`,
-      `Context window: ${config.model.contextWindowTokens} tokens`,
-      `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
-      `Vision: ${config.model.supportsVision ? "yes" : "no"}`,
-      `Structured output: ${config.model.supportsStructuredOutput ? "yes" : "no"}`,
-      `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
-      `Browser backend: ${config.browser.backend}`,
-      `Config sources: ${config.sources.join(", ") || "none"}`,
-      "",
-      renderProviderDiagnostic(diagnostic),
-      "",
-      "Commands:",
-      "  estacoda model set <provider>/<model>"
+      "EstaCoda model fallback",
+      "  estacoda model fallback status",
+      "  estacoda model fallback add <provider>/<model> [--base-url <url>] [--api-key-env <env>]",
+      "  estacoda model fallback remove <provider>/<model> [--base-url <url>]",
+      "  estacoda model fallback reorder <provider>/<model> ...",
+      "  estacoda model fallback clear --yes"
     ].join("\n")
   };
+}
+
+function renderFallbackStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  const fbRoutes = config.modelFallbackRoutes;
+  if (fbRoutes.length === 0) {
+    return [
+      "Fallback status: empty",
+      "",
+      "No fallback routes are configured.",
+      "Add one with: estacoda model fallback add <provider>/<model>"
+    ].join("\n");
+  }
+
+  const lines: string[] = ["Fallback status: configured", ""];
+  for (let i = 0; i < fbRoutes.length; i++) {
+    const fb = fbRoutes[i];
+    lines.push(`${i + 1}. ${fb.provider}/${fb.id}`);
+    if (fb.baseUrl !== undefined) {
+      lines.push(`   Endpoint: ${fb.baseUrl}`);
+    }
+    if (fb.apiKeyEnv !== undefined) {
+      const ready = process.env[fb.apiKeyEnv] !== undefined;
+      lines.push(`   Credential: ${ready ? "ready" : `missing ${fb.apiKeyEnv}`}`);
+    }
+    lines.push(`   Context window: ${formatCount(fb.profile.contextWindowTokens)} tokens`);
+    lines.push(`   Tools: ${fb.profile.supportsTools ? "yes" : "no"}`);
+    lines.push(`   Vision: ${fb.profile.supportsVision ? "yes" : "no"}`);
+    lines.push(`   Structured output: ${fb.profile.supportsStructuredOutput ? "yes" : "no"}`);
+    const providerConfig = config.config.providers?.[fb.provider];
+    if (providerConfig !== undefined) {
+      lines.push(`   Network: ${providerConfig.enableNetwork === true ? "enabled" : "disabled"}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function parseFallbackRoute(value: string): { provider: string; id: string; baseUrl?: string } | undefined {
+  const slashIndex = value.indexOf("/");
+  if (slashIndex === -1) {
+    return undefined;
+  }
+  const provider = value.slice(0, slashIndex);
+  const id = value.slice(slashIndex + 1);
+  if (provider.length === 0 || id.length === 0) {
+    return undefined;
+  }
+  return { provider, id };
+}
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${Math.round(value / 1_000)}K`;
+  }
+  return String(value);
 }
 
 async function tools(options: CliOptions): Promise<CliCommandResult> {

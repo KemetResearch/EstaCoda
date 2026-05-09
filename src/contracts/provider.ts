@@ -91,11 +91,60 @@ export type ProviderRequest = {
   responseFormat?: unknown;
 };
 
+export type ResolvedModelRoute = {
+  provider: ProviderId;
+  id: string;
+  profile: ModelProfile;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+};
+
+export type AuxiliaryModelProvider = ProviderId | "auto" | "main";
+
+export type AuxiliaryModelSlotConfig = {
+  provider?: AuxiliaryModelProvider;
+  id?: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+  timeoutMs?: number;
+  maxConcurrency?: number;
+  extraBody?: Record<string, unknown>;
+  fallbackToMain?: boolean;
+  enabled?: boolean;
+};
+
+export type AuxiliaryModelTask =
+  | "vision"
+  | "compression"
+  | "approval"
+  | "web_extract"
+  | "session_search"
+  | "mcp"
+  | "memory_flush"
+  | "delegation"
+  | "skills_library"
+  | "title_generation"
+  | "curator"
+  | "memory_compaction";
+
+export type AuxiliaryModelConfig = Partial<Record<AuxiliaryModelTask, AuxiliaryModelSlotConfig>>;
+
+export type ResolvedAuxiliaryRoute = {
+  task: AuxiliaryModelTask;
+  route: ResolvedModelRoute | undefined;
+  source: "main" | "auto-main" | "auto-configured" | "explicit" | "custom" | "disabled";
+  fallbackToMain: boolean;
+  diagnostics: string[];
+};
+
 export type ProviderCompletionOptions = {
   credential?: {
     id: string;
     value?: string;
   };
+  endpoint?: ProviderEndpoint;
   signal?: AbortSignal;
 };
 
@@ -178,30 +227,11 @@ export type ProviderRoute = {
   reason: string;
 };
 
-export type AuxiliaryProviderTask =
-  | "main"
-  | "vision"
-  | "compression"
-  | "approval"
-  | "web_extract"
-  | "session_search"
-  | "skills_hub"
-  | "mcp"
-  | "memory_flush"
-  | "delegation";
-
-export type AuxiliaryProviderConfig = Partial<Record<AuxiliaryProviderTask, ProviderRoutePreferences>>;
-
-export type AuxiliaryProviderRoute = {
-  task: AuxiliaryProviderTask;
-  route?: ProviderRoute;
-  preferences: ProviderRoutePreferences;
-};
-
 export type ProviderAdapter = {
   id: ProviderId;
   name: string;
   endpoint?: ProviderEndpoint;
+  executable?: boolean;
   health(): Promise<ProviderHealth> | ProviderHealth;
   listModels(): Promise<ModelProfile[]> | ModelProfile[];
   complete(request: ProviderRequest, options?: ProviderCompletionOptions): Promise<ProviderResponse>;

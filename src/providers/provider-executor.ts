@@ -1,11 +1,13 @@
 import type {
   ModelProfile,
+  ProviderEndpoint,
   ProviderRequest,
   ProviderResponse,
   ProviderRoute,
   ProviderRoutePreferences,
   ProviderStreamEvent,
-  ProviderId
+  ProviderId,
+  ResolvedModelRoute
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
@@ -74,25 +76,23 @@ export type ProviderExecutionOptions = {
   sessionId?: string;
   stream?: boolean;
   signal?: AbortSignal;
+  primaryRoute?: ResolvedModelRoute;
+  fallbackChain?: ResolvedModelRoute[];
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
 };
 
 export type ProviderExecutorOptions = {
   registry: ProviderRegistry;
   credentialPools?: CredentialPoolRegistry;
-  oneShotFallbackPerSession?: boolean;
 };
 
 export class ProviderExecutor {
   readonly #registry: ProviderRegistry;
   readonly #credentialPools: CredentialPoolRegistry | undefined;
-  readonly #oneShotFallbackPerSession: boolean;
-  readonly #sessionsWithFallback = new Set<string>();
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
     this.#credentialPools = options.credentialPools;
-    this.#oneShotFallbackPerSession = options.oneShotFallbackPerSession ?? true;
   }
 
   async complete(
@@ -100,6 +100,10 @@ export class ProviderExecutor {
     preferences: ProviderRoutePreferences = {},
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
+    if (options.primaryRoute !== undefined) {
+      return this.#executeRouteChain(request, options);
+    }
+
     const models = await this.#registry.listModels();
     const route = resolveProviderExecutionRoute(models, request, preferences);
 
@@ -114,10 +118,7 @@ export class ProviderExecutor {
 
     const attempts: ProviderAttempt[] = [];
     const toolCalls: ProviderExecutionResult["toolCalls"] = [];
-    const canUseFallback = options.sessionId === undefined ||
-      !this.#oneShotFallbackPerSession ||
-      !this.#sessionsWithFallback.has(options.sessionId);
-    const chain = [route.primary, ...(canUseFallback ? route.fallbacks : [])];
+    const chain = [route.primary];
 
     for (let index = 0; index < chain.length; index++) {
       if (options.signal?.aborted === true) {
@@ -237,15 +238,200 @@ export class ProviderExecutor {
       if (!willFallback) {
         break;
       }
-
-      if (index === 0 && options.sessionId !== undefined && canUseFallback) {
-        this.#sessionsWithFallback.add(options.sessionId);
-      }
     }
 
     return {
       ok: false,
       route,
+      fallbackUsed: attempts.length > 1,
+      attempts,
+      toolCalls
+    };
+  }
+
+  async #executeRouteChain(
+    request: Omit<ProviderRequest, "model"> & { model?: string },
+    options: ProviderExecutionOptions
+  ): Promise<ProviderExecutionResult> {
+    const primaryRoute = options.primaryRoute!;
+    const fallbackChain = options.fallbackChain ?? [];
+    const attempts: ProviderAttempt[] = [];
+    const toolCalls: ProviderExecutionResult["toolCalls"] = [];
+    const chain = [primaryRoute, ...fallbackChain];
+
+    for (let index = 0; index < chain.length; index++) {
+      if (options.signal?.aborted === true) {
+        return {
+          ok: false,
+          fallbackUsed: attempts.length > 1,
+          attempts,
+          toolCalls
+        };
+      }
+
+      const route = chain[index];
+      const provider = this.#registry.get(route.provider);
+
+      if (provider === undefined || provider.executable === false) {
+        const reason = provider === undefined
+          ? `No provider adapter is registered for ${route.provider}.`
+          : `Provider ${route.provider} is registered for model discovery only and is not yet executable.`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: provider === undefined ? undefined : "unsupported",
+          content: reason
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: provider === undefined ? undefined : "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
+      // Credential resolution: route.apiKeyEnv takes precedence over pool
+      let credential: { id: string; value?: string } | undefined;
+      if (route.apiKeyEnv !== undefined) {
+        const value = process.env[route.apiKeyEnv];
+        if (value === undefined) {
+          const errorContent = `Missing env var ${route.apiKeyEnv}`;
+          attempts.push({
+            provider: route.provider,
+            model: route.id,
+            ok: false,
+            errorClass: "auth",
+            content: errorContent
+          });
+          await options.onEvent?.({
+            kind: "provider-attempt-end",
+            provider: route.provider,
+            model: route.id,
+            ok: false,
+            errorClass: "auth",
+            fallback: index > 0,
+            willFallback: index < chain.length - 1
+          });
+          continue;
+        }
+        credential = { id: route.apiKeyEnv, value };
+      } else {
+        const poolCredential = this.#credentialPools?.resolve(route.provider);
+        credential = poolCredential === undefined ? undefined : {
+          id: poolCredential.id,
+          value: poolCredential.value
+        };
+      }
+
+      await options.onEvent?.({
+        kind: "provider-attempt-start",
+        provider: route.provider,
+        model: route.id,
+        credentialId: credential?.id,
+        fallback: index > 0
+      });
+
+      const completionOptions: {
+        credential?: { id: string; value?: string };
+        endpoint?: ProviderEndpoint;
+        signal?: AbortSignal;
+      } = {
+        credential,
+        signal: options.signal
+      };
+
+      if (route.baseUrl !== undefined) {
+        completionOptions.endpoint = {
+          baseUrl: route.baseUrl,
+          apiKey: route.apiKeyEnv !== undefined ? { kind: "env", name: route.apiKeyEnv } : undefined
+        };
+      }
+
+      const response = options.stream === true && provider.stream !== undefined
+        ? await collectProviderStream({
+            provider: route.provider,
+            model: route.id,
+            stream: provider.stream({
+              ...request,
+              provider: route.provider,
+              model: route.id,
+              stream: true
+            }, completionOptions),
+            onEvent: options.onEvent,
+            toolCalls,
+            signal: options.signal
+          })
+        : await provider.complete({
+            ...request,
+            provider: route.provider,
+            model: route.id
+          }, completionOptions);
+
+      attempts.push({
+        provider: route.provider,
+        model: route.id,
+        credentialId: credential?.id,
+        ok: response.ok,
+        errorClass: response.errorClass,
+        content: response.content
+      });
+      const willFallback = !response.ok && shouldFallback(response, route.profile) && index < chain.length - 1;
+
+      await options.onEvent?.({
+        kind: "provider-attempt-end",
+        provider: route.provider,
+        model: route.id,
+        credentialId: credential?.id,
+        ok: response.ok,
+        errorClass: response.errorClass,
+        fallback: index > 0,
+        willFallback
+      });
+
+      if (response.ok) {
+        if (credential !== undefined && this.#credentialPools !== undefined && route.apiKeyEnv === undefined) {
+          this.#credentialPools.reportSuccess(route.provider, credential.id);
+        }
+
+        for (const toolCall of extractToolCallsFromProviderResponse(response.raw)) {
+          toolCalls.push(toolCall);
+          await options.onEvent?.({
+            kind: "provider-tool-call",
+            provider: route.provider,
+            model: route.id,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          });
+        }
+
+        return {
+          ok: true,
+          response,
+          fallbackUsed: index > 0,
+          attempts,
+          toolCalls
+        };
+      }
+
+      if (credential !== undefined && this.#credentialPools !== undefined && route.apiKeyEnv === undefined) {
+        this.#credentialPools.reportFailure(route.provider, credential.id, response.errorClass ?? "unknown");
+      }
+
+      if (!willFallback) {
+        break;
+      }
+    }
+
+    return {
+      ok: false,
       fallbackUsed: attempts.length > 1,
       attempts,
       toolCalls
@@ -428,6 +614,7 @@ function stableToolCallFragmentKey(
 
 function shouldFallback(response: ProviderResponse, _model: ModelProfile): boolean {
   return response.errorClass === undefined ||
+    response.errorClass === "unknown" ||
     response.errorClass === "auth" ||
     response.errorClass === "rate-limit" ||
     response.errorClass === "quota" ||

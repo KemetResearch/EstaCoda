@@ -687,9 +687,9 @@ describe("RuntimeCache", () => {
   it("cloneFingerprint normalizes undefined fields consistently with equality", async () => {
     const cache = createCache();
     // Create a fingerprint with an undefined optional field
-    const fpWithUndefined = fakeFingerprint({ auxiliaryProvidersHash: undefined });
+    const fpWithUndefined = fakeFingerprint({ auxiliaryModelsHash: undefined });
     const fpWithoutField = fakeFingerprint();
-    delete (fpWithoutField as Record<string, unknown>).auxiliaryProvidersHash;
+    delete (fpWithoutField as Record<string, unknown>).auxiliaryModelsHash;
 
     // Both should produce the same cache behavior because clone + equality
     // both use JSON serialization which drops undefined.

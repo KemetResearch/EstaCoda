@@ -32,12 +32,26 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     `Structured output: ${selectedProfile.supportsStructuredOutput ? "yes" : "no"}`
   ];
 
+  const route = config.primaryModelRoute;
+  if (route?.baseUrl !== undefined) {
+    lines.push(`Route baseUrl: ${route.baseUrl}`);
+  }
+  if (route?.apiKeyEnv !== undefined) {
+    lines.push(`Route apiKeyEnv: ${route.apiKeyEnv}`);
+    if (process.env[route.apiKeyEnv] === undefined) {
+      warnings.push(`Missing env var ${route.apiKeyEnv} for route.`);
+    }
+  }
+
   if (selectedProvider === "unconfigured" || selectedModel === "unconfigured") {
     warnings.push("Provider setup is incomplete.");
     lines.push("Provider health: not configured");
   } else if (provider === undefined) {
     warnings.push(`No provider adapter is registered for ${selectedProvider}.`);
     lines.push("Provider health: adapter missing");
+  } else if (provider.executable === false) {
+    warnings.push(`Provider ${selectedProvider} is registered for model discovery only and is not yet executable.`);
+    lines.push("Provider health: not executable");
   } else {
     const health = await provider.health();
     const blockedByMissingEndpointEnv = !health.available && /Missing\s+[A-Z0-9_]+/u.test(health.reason ?? "");
@@ -70,24 +84,25 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
 
   lines.push(`Credential pool: ${selectedPool === undefined ? "none" : `${selectedPool.entries.length} entr${selectedPool.entries.length === 1 ? "y" : "ies"}`}`);
 
-  if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && selectedPool === undefined) {
+  if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && selectedPool === undefined && route?.apiKeyEnv === undefined) {
     warnings.push(`No credential pool is configured for ${selectedProvider}.`);
   } else if (
     selectedProvider !== "local" &&
     selectedProvider !== "unconfigured" &&
     selectedPool !== undefined &&
     selectedPool.entries.length > 0 &&
-    !selectedPool.entries.some((entry) => entry.available)
+    !selectedPool.entries.some((entry) => entry.available) &&
+    route?.apiKeyEnv === undefined
   ) {
     warnings.push(`No available credential is configured for ${selectedProvider}.`);
   }
 
-  const fallbackCount = models.filter((model) => model.provider !== selectedProvider).length;
-  lines.push(`Fallback candidates: ${fallbackCount === 0 ? "none" : `${fallbackCount} configured`}`);
+  const fallbackRoutes = config.modelFallbackRoutes;
+  lines.push(`Fallback routes: ${fallbackRoutes.length === 0 ? "none" : fallbackRoutes.map((r) => `${r.provider}/${r.id}`).join(", ")}`);
 
   const status = warnings.length === 0
     ? "ready"
-    : warnings.some((warning) => /incomplete|missing|blocked|disabled|No provider|No credential|No available credential/u.test(warning))
+    : warnings.some((warning) => /incomplete|missing|blocked|disabled|No provider|No credential|No available credential/iu.test(warning))
       ? "blocked"
       : "warning";
 
@@ -118,8 +133,7 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
 
   const executor = new ProviderExecutor({
     registry: config.providerRegistry,
-    credentialPools: config.credentialPools,
-    oneShotFallbackPerSession: false
+    credentialPools: config.credentialPools
   });
   const execution = await executor.complete({
     provider: config.model.provider,
@@ -138,6 +152,8 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
     maxTokens: 8
   }, {
     providerOrder: [config.model.provider]
+  }, {
+    primaryRoute: config.primaryModelRoute
   });
   const attemptSummary = execution.attempts.map((attempt) =>
     `${attempt.provider}/${attempt.model}:${attempt.ok ? "ok" : attempt.errorClass ?? "failed"}`

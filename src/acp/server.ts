@@ -759,6 +759,8 @@ export class AcpServer {
     const runtimeOptions: RuntimeOptions = {
       theme: kemetBlueTheme,
       model: config.model,
+      primaryModelRoute: config.primaryModelRoute,
+      modelFallbackRoutes: config.modelFallbackRoutes,
       workspaceRoot: options.workspaceRoot,
       sessionId: options.sessionId,
       sessionDb: this.#sessionDb,
@@ -769,7 +771,7 @@ export class AcpServer {
       agentProfile: config.profile,
       providerRegistry: config.providerRegistry,
       credentialPools: config.credentialPools,
-      auxiliaryProviders: config.auxiliaryProviders,
+      auxiliaryModels: config.auxiliaryModels,
       mcpServers: config.mcp.servers,
       browser: config.browser,
       imageGen: config.imageGen,

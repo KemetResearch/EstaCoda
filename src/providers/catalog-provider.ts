@@ -10,6 +10,7 @@ export function createCatalogProvider(options: CatalogProviderOptions): Provider
   return {
     id: options.id,
     name: options.name ?? `${options.id} catalog`,
+    executable: false,
     health() {
       return {
         available: true
@@ -21,7 +22,7 @@ export function createCatalogProvider(options: CatalogProviderOptions): Provider
     async complete(request: ProviderRequest): Promise<ProviderResponse> {
       return {
         ok: false,
-        content: `Provider ${options.id} is registered for model discovery, but its native inference adapter is not wired yet.`,
+        content: `Provider ${options.id} is registered for model discovery only and is not yet executable. Configure it as an openai-compatible provider or wait for its native adapter to be wired.`,
         model: request.model,
         provider: options.id,
         errorClass: "unsupported"

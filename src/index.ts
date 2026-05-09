@@ -61,6 +61,8 @@ async function buildRuntime(input: {
   return createRuntime({
     theme: kemetBlueTheme,
     model: latestConfig.model,
+    primaryModelRoute: latestConfig.primaryModelRoute,
+    modelFallbackRoutes: latestConfig.modelFallbackRoutes,
     workspaceRoot,
     sessionId: input.sessionId,
     sessionDb: input.sessionDb,
@@ -71,7 +73,7 @@ async function buildRuntime(input: {
     agentProfile: latestConfig.profile,
     providerRegistry: latestConfig.providerRegistry,
     credentialPools: latestConfig.credentialPools,
-    auxiliaryProviders: latestConfig.auxiliaryProviders,
+    auxiliaryModels: latestConfig.auxiliaryModels,
     mcpServers: latestConfig.mcp.servers,
     browser: latestConfig.browser,
     imageGen: latestConfig.imageGen,

@@ -1,17 +1,16 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import type { ProviderRoutePreferences } from "../contracts/provider.js";
-import type { CredentialPoolRegistry } from "../providers/credential-pool.js";
-import type { ProviderRegistry } from "../providers/provider-registry.js";
-import { routeProvider } from "../providers/provider-router.js";
+import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderExecutor } from "../providers/provider-executor.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
   allowedRoots?: string[];
-  providerRegistry: ProviderRegistry;
-  credentialPools?: CredentialPoolRegistry;
-  routePreferences?: ProviderRoutePreferences;
+  resolvedVisionRoute?: ResolvedModelRoute;
+  mainRoute?: ResolvedModelRoute;
+  fallbackToMain?: boolean;
+  providerExecutor?: ProviderExecutor;
   maxImageBytes?: number;
 };
 
@@ -41,7 +40,7 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       toolsets: ["media", "research", "telegram", "core"],
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
-      isAvailable: async () => (await resolveUsableVisionRoute(options.providerRegistry, options.routePreferences)) !== undefined,
+      isAvailable: async () => options.resolvedVisionRoute !== undefined,
       run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(options, input, context?.signal)
     }
   ];
@@ -83,8 +82,7 @@ export async function analyzeImageWithVision(
     };
   }
 
-  const route = await resolveUsableVisionRoute(options.providerRegistry, options.routePreferences);
-  if (route === undefined) {
+  if (options.resolvedVisionRoute === undefined) {
     return {
       ok: false,
       content: "No vision-capable provider route is configured and available in this runtime yet."
@@ -96,77 +94,68 @@ export async function analyzeImageWithVision(
   const displayRoot = resolved.root ?? workspaceRoot;
   const relativePath = makeRelativePath(displayRoot, resolved.path);
   const attempts: string[] = [];
-  const models = [route.primary, ...route.fallbacks];
 
-  for (const model of models) {
-    const provider = options.providerRegistry.get(model.provider);
-    if (provider?.endpoint === undefined) {
-      continue;
-    }
+  const visionResult = await executeVisionRequest({
+    route: options.resolvedVisionRoute,
+    dataUrl,
+    prompt: input.prompt,
+    providerExecutor: options.providerExecutor,
+    signal
+  });
 
-    const credential = options.credentialPools?.resolve(model.provider);
-    const response = await provider.complete({
-      model: model.id,
-      maxTokens: 500,
-      messages: [
-        {
-          role: "system",
-          content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: input.prompt?.trim().length
-                ? input.prompt.trim()
-                : "Describe this image so EstaCoda can help the user."
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl
-              }
-            }
-          ]
-        }
-      ] as any
-    } as any, {
-      credential: credential === undefined
-        ? undefined
-        : {
-            id: credential.id,
-            value: credential.value
-          },
+  attempts.push(visionResult.attempt);
+
+  if (visionResult.ok) {
+    return {
+      ok: true,
+      content: [
+        `Vision analysis: ${relativePath}`,
+        visionResult.content.trim()
+      ].filter((line) => line.length > 0).join("\n\n"),
+      metadata: {
+        path: relativePath,
+        bytes: fileStat.size,
+        mimeType,
+        provider: visionResult.provider,
+        model: visionResult.model,
+        attempts
+      }
+    };
+  }
+
+  // Fallback to main if allowed and main supports vision
+  if (
+    options.fallbackToMain === true &&
+    options.mainRoute !== undefined &&
+    options.mainRoute.profile.supportsVision &&
+    options.providerExecutor !== undefined
+  ) {
+    const fallbackResult = await executeVisionRequest({
+      route: options.mainRoute,
+      dataUrl,
+      prompt: input.prompt,
+      providerExecutor: options.providerExecutor,
       signal
     });
 
-    attempts.push(`${model.provider}/${model.id}:${response.ok ? "ok" : response.errorClass ?? "error"}`);
+    attempts.push(fallbackResult.attempt);
 
-    if (response.ok) {
-      if (credential !== undefined) {
-        options.credentialPools?.reportSuccess(model.provider, credential.id);
-      }
-
+    if (fallbackResult.ok) {
       return {
         ok: true,
         content: [
           `Vision analysis: ${relativePath}`,
-          response.content.trim()
+          fallbackResult.content.trim()
         ].filter((line) => line.length > 0).join("\n\n"),
         metadata: {
           path: relativePath,
           bytes: fileStat.size,
           mimeType,
-          provider: model.provider,
-          model: model.id,
+          provider: fallbackResult.provider,
+          model: fallbackResult.model,
           attempts
         }
       };
-    }
-
-    if (credential !== undefined) {
-      options.credentialPools?.reportFailure(model.provider, credential.id, response.errorClass ?? "unknown");
     }
   }
 
@@ -182,36 +171,78 @@ export async function analyzeImageWithVision(
   };
 }
 
-async function resolveUsableVisionRoute(
-  registry: ProviderRegistry,
-  preferences: ProviderRoutePreferences | undefined
-) {
-  const models = await registry.listModels();
-  const usable = [];
-
-  for (const model of models) {
-    if (!model.supportsVision) {
-      continue;
-    }
-
-    const provider = registry.get(model.provider);
-    if (provider?.endpoint === undefined) {
-      continue;
-    }
-
-    const health = await provider.health();
-    if (!health.available) {
-      continue;
-    }
-
-    usable.push(model);
+async function executeVisionRequest(options: {
+  route: ResolvedModelRoute;
+  dataUrl: string;
+  prompt?: string;
+  providerExecutor?: ProviderExecutor;
+  signal?: AbortSignal;
+}): Promise<{
+  ok: boolean;
+  content: string;
+  provider: string;
+  model: string;
+  attempt: string;
+}> {
+  if (options.providerExecutor === undefined) {
+    return {
+      ok: false,
+      content: "",
+      provider: options.route.provider,
+      model: options.route.id,
+      attempt: `${options.route.provider}/${options.route.id}:no-executor`
+    };
   }
 
-  return routeProvider(usable, {
-    requireVision: true,
-    preferFreeOrOpenWeights: true,
-    ...(preferences ?? {})
+  const result = await options.providerExecutor.complete({
+    model: options.route.id,
+    messages: [
+      {
+        role: "system",
+        content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: options.prompt?.trim().length
+              ? options.prompt.trim()
+              : "Describe this image so EstaCoda can help the user."
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: options.dataUrl
+            }
+          }
+        ]
+      }
+    ] as any,
+    maxTokens: 500
+  }, {}, {
+    primaryRoute: options.route,
+    signal: options.signal
   });
+
+  if (result.ok && result.response !== undefined) {
+    return {
+      ok: true,
+      content: result.response.content,
+      provider: result.response.provider,
+      model: result.response.model,
+      attempt: `${result.response.provider}/${result.response.model}:ok`
+    };
+  }
+
+  const lastAttempt = result.attempts[result.attempts.length - 1];
+  return {
+    ok: false,
+    content: "",
+    provider: options.route.provider,
+    model: options.route.id,
+    attempt: `${options.route.provider}/${options.route.id}:${lastAttempt?.errorClass ?? "error"}`
+  };
 }
 
 async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
