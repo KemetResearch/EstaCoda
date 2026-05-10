@@ -55,6 +55,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
+import { isolateLtr } from "../bidi.js";
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
@@ -552,6 +553,21 @@ describe("PlainRenderer — renderStartup", () => {
     expect(out).not.toContain("\n\n");
     expect(out).toContain("Valid");
   });
+
+  it("renders legacy startup chrome in Arabic with isolated technical tokens", () => {
+    const vm = buildStartupViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      model: { provider: "openrouter", id: "gpt-5.5" },
+      readiness: "ready",
+    });
+    const out = renderStartup(vm, "ar");
+    expect(out).toContain("النموذج");
+    expect(out).toContain("الجاهزية: جاهز");
+    expect(out).toContain(isolateLtr("openrouter"));
+    expect(out).toContain(isolateLtr("gpt-5.5"));
+    assertNoAnsi(out);
+  });
 });
 
 // ──────────────────────────────────────
@@ -651,6 +667,62 @@ describe("PlainRenderer — renderStartupDashboard", () => {
     expect(out).toContain("[WARN] Config: Missing");
     assertNoAnsi(out);
     assertAsciiSafe(out);
+  });
+
+  it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research"],
+      version: "v0.0.5",
+      sessionId: "sess-9f7a2c1b",
+      model: { provider: "openrouter", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = renderStartupDashboard(vm, "ar");
+    expect(out).toContain("الإصدار: " + isolateLtr("v0.0.5"));
+    expect(out).toContain("الجلسة: " + isolateLtr("sess-9f7a2c1b"));
+    expect(out).toContain("النموذج: " + isolateLtr("deepseek-reasoner") + " - جاهز");
+    expect(out).toContain("ثقة مساحة العمل: موثوقة");
+    expect(out).toContain("حالة تحقق مساحة العمل: متحقق منها");
+    expect(out).toContain("مسار مساحة العمل: " + isolateLtr("/workspace"));
+    expect(out).toContain("وضع الأمان: " + isolateLtr("high"));
+    expect(out).toContain("استقلالية المهارات: " + isolateLtr("autonomous"));
+    expect(out).toContain("حالة الإصدار: غير معروف");
+    expect(out).toContain("الأوامر التفاعلية:");
+    expect(out).toContain(isolateLtr("/tools"));
+    expect(out).toContain(isolateLtr("/skills"));
+    expect(out).toContain(isolateLtr("/model"));
+    expect(out).toContain(isolateLtr("/status"));
+    expect(out).toContain("استعرض أدوات التشغيل");
+    assertNoAnsi(out);
+  });
+
+  it("honors provided startup dashboard commands instead of localized fallbacks", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.1",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      securityMode: "high",
+      providerReadiness: "ready",
+      availableCommands: [{ name: "/verify", description: "Verify startup" }],
+      warnings: [],
+    });
+    const out = renderStartupDashboard(vm, "ar");
+    expect(out).toContain(isolateLtr("/verify"));
+    expect(out).toContain("Verify startup");
+    expect(out).not.toContain("استعرض أدوات التشغيل");
+    expect(out).not.toContain(isolateLtr("/tools"));
   });
 });
 

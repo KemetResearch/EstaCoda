@@ -2,7 +2,7 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, padVisibleAlign, truncateVisible } from "./layout.js";
+import { measureTextWidth, padVisibleAlign, padVisibleEnd, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { isolateLtr } from "../../ui/bidi.js";
@@ -58,9 +58,9 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
     case "picker":
       return renderPicker(viewModel);
     case "startup":
-      return renderStartup(viewModel);
+      return renderStartup(viewModel, locale);
     case "startupDashboard":
-      return renderStartupDashboard(viewModel);
+      return renderStartupDashboard(viewModel, locale);
     case "commandResult":
       return renderCommandResult(viewModel);
     case "plainFallback":
@@ -480,7 +480,89 @@ export function renderPicker(vm: PickerViewModel): string {
 // Startup
 // ─────────────────────────────────────────────────────────────
 
-export function renderStartup(vm: StartupViewModel): string {
+function technical(value: string, locale: UiLocale): string {
+  return locale === "ar" ? isolateLtr(value) : value;
+}
+
+function modelRoute(model: { readonly provider: string; readonly id: string }, locale: UiLocale): string {
+  return `${technical(model.provider, locale)}/${technical(model.id, locale)}`;
+}
+
+function startupReadinessLabel(
+  readiness: StartupViewModel["readiness"] | StartupDashboardViewModel["providerReadiness"],
+  locale: UiLocale
+): string {
+  const copy = chromeCopy(locale);
+  if (locale !== "ar") {
+    return readiness === "missing-config" ? copy.startupMissingConfig : readiness;
+  }
+  switch (readiness) {
+    case "ready":
+      return copy.startupReady;
+    case "degraded":
+      return copy.startupDegraded;
+    case "missing-config":
+      return copy.startupMissingConfig;
+    case "unknown":
+      return copy.startupUnknown;
+  }
+}
+
+function startupTrustLabel(value: StartupDashboardViewModel["workspaceTrust"], locale: UiLocale): string {
+  const copy = chromeCopy(locale);
+  if (locale !== "ar") return value;
+  switch (value) {
+    case "trusted":
+      return copy.startupTrusted;
+    case "untrusted":
+      return copy.startupUntrusted;
+    case "unknown":
+      return copy.startupUnknown;
+  }
+}
+
+function startupVerificationLabel(value: StartupDashboardViewModel["workspaceVerification"], locale: UiLocale): string {
+  const copy = chromeCopy(locale);
+  if (locale !== "ar") return value;
+  switch (value) {
+    case "verified":
+      return copy.startupVerified;
+    case "unverified":
+      return copy.startupUnverified;
+    case "unknown":
+      return copy.startupUnknown;
+  }
+}
+
+function startupVersionStatusLabel(value: StartupDashboardViewModel["versionStatus"], locale: UiLocale): string {
+  const copy = chromeCopy(locale);
+  if (value === undefined) return copy.startupUnknown;
+  if (value === "unknown") return locale === "ar" ? copy.startupUnknown : value;
+  return technical(value, locale);
+}
+
+function plainStartupLabel(locale: UiLocale, english: string, localized: string): string {
+  return locale === "ar" ? localized : english;
+}
+
+function startupCommands(
+  vm: StartupDashboardViewModel,
+  locale: UiLocale
+): readonly { readonly name: string; readonly description: string }[] {
+  if (vm.availableCommands.length > 0) {
+    return vm.availableCommands;
+  }
+  const copy = chromeCopy(locale);
+  return [
+    { name: "/tools", description: copy.startupCommandTools },
+    { name: "/skills", description: copy.startupCommandSkills },
+    { name: "/model", description: copy.startupCommandModel },
+    { name: "/status", description: copy.startupCommandStatus },
+  ];
+}
+
+export function renderStartup(vm: StartupViewModel, locale: UiLocale = "en"): string {
+  const copy = chromeCopy(locale);
   const lines: string[] = [vm.agentName];
 
   for (const tagline of vm.taglines) {
@@ -489,8 +571,9 @@ export function renderStartup(vm: StartupViewModel): string {
     }
   }
 
-  lines.push(`model: ${vm.model.provider}/${vm.model.id}`);
-  lines.push(`readiness: ${vm.readiness}`);
+  lines.push(`${plainStartupLabel(locale, "model", copy.startupModel)}: ${modelRoute(vm.model, locale)}`);
+  const readinessText = locale === "ar" ? startupReadinessLabel(vm.readiness, locale) : vm.readiness;
+  lines.push(`${plainStartupLabel(locale, "readiness", copy.startupReadiness)}: ${readinessText}`);
 
   for (const warning of vm.warnings) {
     lines.push("");
@@ -523,7 +606,8 @@ export function renderCommandResult(vm: CommandResultViewModel): string {
 // Startup Dashboard
 // ──────────────────────────────────────
 
-export function renderStartupDashboard(vm: StartupDashboardViewModel): string {
+export function renderStartupDashboard(vm: StartupDashboardViewModel, locale: UiLocale = "en"): string {
+  const copy = chromeCopy(locale);
   const lines: string[] = [vm.agentName];
 
   for (const tagline of vm.taglines) {
@@ -535,10 +619,10 @@ export function renderStartupDashboard(vm: StartupDashboardViewModel): string {
   lines.push("");
 
   if (vm.version !== undefined) {
-    lines.push(`version: ${vm.version}`);
+    lines.push(`${plainStartupLabel(locale, "version", copy.startupVersion)}: ${technical(vm.version, locale)}`);
   }
   if (vm.sessionId !== undefined) {
-    lines.push(`session: ${vm.sessionId}`);
+    lines.push(`${plainStartupLabel(locale, "session", copy.startupSession)}: ${technical(vm.sessionId, locale)}`);
   }
 
   // Model route readiness line
@@ -548,48 +632,48 @@ export function renderStartupDashboard(vm: StartupDashboardViewModel): string {
 
   switch (readiness) {
     case "ready":
-      modelLabel = vm.model.id;
-      readinessText = "ready";
+      modelLabel = technical(vm.model.id, locale);
+      readinessText = startupReadinessLabel(readiness, locale);
       break;
     case "degraded":
-      modelLabel = vm.model.id;
-      readinessText = "degraded";
+      modelLabel = technical(vm.model.id, locale);
+      readinessText = startupReadinessLabel(readiness, locale);
       break;
     case "missing-config":
-      modelLabel = "model not configured";
-      readinessText = "missing config";
+      modelLabel = copy.startupModelNotConfigured;
+      readinessText = copy.startupMissingConfig;
       break;
     case "unknown":
     default:
-      modelLabel = vm.model.id;
-      readinessText = "unknown";
+      modelLabel = technical(vm.model.id, locale);
+      readinessText = startupReadinessLabel(readiness, locale);
       break;
   }
 
-  lines.push(`model: ${modelLabel} - ${readinessText}`);
+  lines.push(`${plainStartupLabel(locale, "model", copy.startupModel)}: ${modelLabel} - ${readinessText}`);
 
-  lines.push(`workspace trust: ${vm.workspaceTrust}`);
-  lines.push(`workspace verification: ${vm.workspaceVerification}`);
+  lines.push(`${plainStartupLabel(locale, "workspace trust", copy.startupWorkspaceTrust)}: ${startupTrustLabel(vm.workspaceTrust, locale)}`);
+  lines.push(`${plainStartupLabel(locale, "workspace verification", copy.startupWorkspaceVerification)}: ${startupVerificationLabel(vm.workspaceVerification, locale)}`);
 
   if (vm.workspaceDirectory !== undefined) {
-    lines.push(`workspace: ${vm.workspaceDirectory}`);
+    lines.push(`${plainStartupLabel(locale, "workspace", copy.startupWorkspaceDirectory)}: ${technical(vm.workspaceDirectory, locale)}`);
   }
   if (vm.securityMode !== undefined) {
-    lines.push(`security: ${vm.securityMode}`);
+    lines.push(`${plainStartupLabel(locale, "security", copy.startupSecurityMode)}: ${technical(vm.securityMode, locale)}`);
   }
   if (vm.skillAutonomy !== undefined) {
-    lines.push(`skills: ${vm.skillAutonomy}`);
+    lines.push(`${plainStartupLabel(locale, "skills", copy.startupSkillAutonomy)}: ${technical(vm.skillAutonomy, locale)}`);
   }
   if (vm.versionStatus !== undefined) {
-    lines.push(`version status: ${vm.versionStatus}`);
+    lines.push(`${plainStartupLabel(locale, "version status", copy.startupVersionStatus)}: ${startupVersionStatusLabel(vm.versionStatus, locale)}`);
   }
 
   lines.push("");
-  lines.push("Interactive commands:");
-  lines.push("  /tools   Browse runtime tools");
-  lines.push("  /skills  Browse skills");
-  lines.push("  /model   Show or switch model");
-  lines.push("  /status  Show session status");
+  lines.push(plainStartupLabel(locale, "Interactive commands:", copy.startupInteractiveCommands));
+  for (const cmd of startupCommands(vm, locale)) {
+    const name = padVisibleEnd(technical(cmd.name, locale), 8);
+    lines.push(`  ${name} ${cmd.description}`);
+  }
 
   for (const warning of vm.warnings) {
     lines.push("");

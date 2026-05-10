@@ -781,6 +781,72 @@ export class StandardRenderer {
     return lines.join("\n");
   }
 
+  #technical(value: string): string {
+    return this.#locale === "ar" ? isolateLtr(value) : value;
+  }
+
+  #modelRoute(model: { readonly provider: string; readonly id: string }): string {
+    return `${this.#technical(model.provider)}/${this.#technical(model.id)}`;
+  }
+
+  #startupReadinessLabel(readiness: StartupViewModel["readiness"] | StartupDashboardViewModel["providerReadiness"]): string {
+    switch (readiness) {
+      case "ready":
+        return this.#copy.startupReady;
+      case "degraded":
+        return this.#copy.startupDegraded;
+      case "missing-config":
+        return this.#copy.startupMissingConfig;
+      case "unknown":
+        return this.#copy.startupUnknown;
+    }
+  }
+
+  #startupTrustLabel(value: StartupDashboardViewModel["workspaceTrust"]): string {
+    switch (value) {
+      case "trusted":
+        return this.#copy.startupTrusted;
+      case "untrusted":
+        return this.#copy.startupUntrusted;
+      case "unknown":
+        return this.#copy.startupUnknown;
+    }
+  }
+
+  #startupVerificationLabel(value: StartupDashboardViewModel["workspaceVerification"]): string {
+    switch (value) {
+      case "verified":
+        return this.#copy.startupVerified;
+      case "unverified":
+        return this.#copy.startupUnverified;
+      case "unknown":
+        return this.#copy.startupUnknown;
+    }
+  }
+
+  #startupVersionStatusLabel(value: StartupDashboardViewModel["versionStatus"]): string {
+    switch (value) {
+      case "up-to-date":
+      case "update-available":
+        return this.#technical(value);
+      case "unknown":
+      case undefined:
+        return this.#copy.startupUnknown;
+    }
+  }
+
+  #startupCommands(vm: StartupDashboardViewModel): readonly { readonly name: string; readonly description: string }[] {
+    if (vm.availableCommands.length > 0) {
+      return vm.availableCommands;
+    }
+    return [
+      { name: "/tools", description: this.#copy.startupCommandTools },
+      { name: "/skills", description: this.#copy.startupCommandSkills },
+      { name: "/model", description: this.#copy.startupCommandModel },
+      { name: "/status", description: this.#copy.startupCommandStatus },
+    ];
+  }
+
   // ──────────────────────────────────────
   // Startup
   // ──────────────────────────────────────
@@ -789,14 +855,15 @@ export class StandardRenderer {
     const lines: string[] = [this.#heroPanel(vm.agentName, vm.taglines)];
 
     lines.push("");
-    lines.push(this.#rail(`model: ${this.#dim(`${vm.model.provider}/${vm.model.id}`)}`));
+    lines.push(this.#rail(`${this.#copy.startupModel}: ${this.#dim(this.#modelRoute(vm.model))}`));
 
+    const readinessText = this.#locale === "ar" ? this.#startupReadinessLabel(vm.readiness) : vm.readiness;
     const readinessColor = vm.readiness === "ready"
-      ? this.#severity("ready", "ok")
+      ? this.#severity(readinessText, "ok")
       : vm.readiness === "degraded"
-        ? this.#caution("degraded")
-        : this.#severity("missing-config", "error");
-    lines.push(this.#rail(`readiness: ${readinessColor}`));
+        ? this.#caution(readinessText)
+        : this.#severity(readinessText, "error");
+    lines.push(this.#rail(`${this.#copy.startupReadiness}: ${readinessColor}`));
 
     for (const warning of vm.warnings) {
       lines.push("");
@@ -818,8 +885,8 @@ export class StandardRenderer {
     lines.push("");
 
     // Version / session separator line
-    const versionText = vm.version ?? "unknown";
-    const sessionText = vm.sessionId ?? "";
+    const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
+    const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
     const horiz = this.#useUnicode ? "─" : "-";
     const eye = this.#useUnicode ? "𓂀" : "*";
     const sepLabel = sessionText
@@ -843,24 +910,24 @@ export class StandardRenderer {
     switch (readiness) {
       case "ready":
         modelDot = this.#severity("●", "ok");
-        modelLabel = vm.model.id;
-        readinessColor = this.#severity("ready", "ok");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#severity(this.#startupReadinessLabel(readiness), "ok");
         break;
       case "degraded":
         modelDot = this.#caution("◐");
-        modelLabel = vm.model.id;
-        readinessColor = this.#caution("degraded");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#caution(this.#startupReadinessLabel(readiness));
         break;
       case "missing-config":
         modelDot = this.#dim("○");
-        modelLabel = "model not configured";
-        readinessColor = this.#severity("missing config", "error");
+        modelLabel = this.#copy.startupModelNotConfigured;
+        readinessColor = this.#severity(this.#copy.startupMissingConfig, "error");
         break;
       case "unknown":
       default:
         modelDot = this.#dim("○");
-        modelLabel = vm.model.id;
-        readinessColor = this.#dim("unknown");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#dim(this.#copy.startupUnknown);
         break;
     }
 
@@ -870,32 +937,28 @@ export class StandardRenderer {
 
     // Two-column layout: info (left) and commands (right)
     const infoRows: string[] = [];
-    infoRows.push(`Workspace Trust        :  ${vm.workspaceTrust}`);
-    infoRows.push(`Workspace Verification :  ${vm.workspaceVerification}`);
+    const infoLabelWidth = 23;
+    infoRows.push(`${padVisibleEnd(this.#copy.startupWorkspaceTrust, infoLabelWidth)}:  ${this.#startupTrustLabel(vm.workspaceTrust)}`);
+    infoRows.push(`${padVisibleEnd(this.#copy.startupWorkspaceVerification, infoLabelWidth)}:  ${this.#startupVerificationLabel(vm.workspaceVerification)}`);
     if (vm.workspaceDirectory !== undefined) {
-      infoRows.push(`Workspace Directory    :  ${vm.workspaceDirectory}`);
+      infoRows.push(`${padVisibleEnd(this.#copy.startupWorkspaceDirectory, infoLabelWidth)}:  ${this.#technical(vm.workspaceDirectory)}`);
     }
     if (vm.securityMode !== undefined) {
-      infoRows.push(`User Security Mode     :  ${vm.securityMode}`);
+      infoRows.push(`${padVisibleEnd(this.#copy.startupSecurityMode, infoLabelWidth)}:  ${this.#technical(vm.securityMode)}`);
     }
     if (vm.skillAutonomy !== undefined) {
-      infoRows.push(`User Skill Autonomy    :  ${vm.skillAutonomy}`);
+      infoRows.push(`${padVisibleEnd(this.#copy.startupSkillAutonomy, infoLabelWidth)}:  ${this.#technical(vm.skillAutonomy)}`);
     }
     if (vm.versionStatus !== undefined) {
-      infoRows.push(`Version Status         :  ${vm.versionStatus}`);
+      infoRows.push(`${padVisibleEnd(this.#copy.startupVersionStatus, infoLabelWidth)}:  ${this.#startupVersionStatusLabel(vm.versionStatus)}`);
     }
 
     const cmdRows: string[] = [];
-    cmdRows.push(this.#bold("Interactive Commands:"));
+    cmdRows.push(this.#bold(this.#copy.startupInteractiveCommands));
     cmdRows.push("");
-    const interactiveCommands = [
-      { name: "/tools", description: "Browse runtime tools" },
-      { name: "/skills", description: "Browse skills" },
-      { name: "/model", description: "Show or switch model" },
-      { name: "/status", description: "Show session status" },
-    ];
+    const interactiveCommands = this.#startupCommands(vm);
     for (const cmd of interactiveCommands) {
-      const name = this.#action(cmd.name);
+      const name = this.#action(this.#technical(cmd.name));
       const desc = this.#dim(cmd.description);
       cmdRows.push(`${name}   ${desc}`);
     }

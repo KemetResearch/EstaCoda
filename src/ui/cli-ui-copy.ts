@@ -62,6 +62,33 @@ export interface CliUiChromeCopy {
   readonly deleted: string;
   readonly omittedDiffLines: (count: number) => string;
 
+  // Startup chrome (Pass 12.5)
+  readonly startupVersion: string;
+  readonly startupSession: string;
+  readonly startupModel: string;
+  readonly startupReadiness: string;
+  readonly startupWorkspaceTrust: string;
+  readonly startupWorkspaceVerification: string;
+  readonly startupWorkspaceDirectory: string;
+  readonly startupSecurityMode: string;
+  readonly startupSkillAutonomy: string;
+  readonly startupVersionStatus: string;
+  readonly startupInteractiveCommands: string;
+  readonly startupReady: string;
+  readonly startupDegraded: string;
+  readonly startupMissingConfig: string;
+  readonly startupModelNotConfigured: string;
+  readonly startupUnknown: string;
+  readonly startupTrusted: string;
+  readonly startupUntrusted: string;
+  readonly startupVerified: string;
+  readonly startupUnverified: string;
+  readonly startupCommandTools: string;
+  readonly startupCommandSkills: string;
+  readonly startupCommandModel: string;
+  readonly startupCommandStatus: string;
+  readonly startupPromptHint: string;
+
   // Slash menu (Pass 13+)
   readonly commands: string;
   readonly typeToFilter: string;
@@ -116,6 +143,32 @@ const en: CliUiChromeCopy = {
   deleted: "deleted",
   omittedDiffLines: (count) => `omitted ${count} diff line(s).`,
 
+  startupVersion: "version",
+  startupSession: "session",
+  startupModel: "model",
+  startupReadiness: "readiness",
+  startupWorkspaceTrust: "Workspace Trust",
+  startupWorkspaceVerification: "Workspace Verification",
+  startupWorkspaceDirectory: "Workspace Directory",
+  startupSecurityMode: "User Security Mode",
+  startupSkillAutonomy: "User Skill Autonomy",
+  startupVersionStatus: "Version Status",
+  startupInteractiveCommands: "Interactive Commands:",
+  startupReady: "ready",
+  startupDegraded: "degraded",
+  startupMissingConfig: "missing config",
+  startupModelNotConfigured: "model not configured",
+  startupUnknown: "unknown",
+  startupTrusted: "trusted",
+  startupUntrusted: "untrusted",
+  startupVerified: "verified",
+  startupUnverified: "unverified",
+  startupCommandTools: "Browse runtime tools",
+  startupCommandSkills: "Browse skills",
+  startupCommandModel: "Show or switch model",
+  startupCommandStatus: "Show session status",
+  startupPromptHint: "Type a message. Use /help for commands or /exit to leave.",
+
   commands: "Commands",
   typeToFilter: "Type / then a command. Keep typing to filter.",
 };
@@ -169,6 +222,32 @@ const ar: CliUiChromeCopy = {
   edited: "عدّل",
   deleted: "حذف",
   omittedDiffLines: (count) => `تم إخفاء ${isolateLtr(String(count))} سطر/أسطر من الفرق.`,
+
+  startupVersion: "الإصدار",
+  startupSession: "الجلسة",
+  startupModel: "النموذج",
+  startupReadiness: "الجاهزية",
+  startupWorkspaceTrust: "ثقة مساحة العمل",
+  startupWorkspaceVerification: "حالة تحقق مساحة العمل",
+  startupWorkspaceDirectory: "مسار مساحة العمل",
+  startupSecurityMode: "وضع الأمان",
+  startupSkillAutonomy: "استقلالية المهارات",
+  startupVersionStatus: "حالة الإصدار",
+  startupInteractiveCommands: "الأوامر التفاعلية:",
+  startupReady: "جاهز",
+  startupDegraded: "جاهزية جزئية",
+  startupMissingConfig: "إعداد ناقص",
+  startupModelNotConfigured: "النموذج غير مهيأ",
+  startupUnknown: "غير معروف",
+  startupTrusted: "موثوقة",
+  startupUntrusted: "غير موثوقة",
+  startupVerified: "متحقق منها",
+  startupUnverified: "غير متحقق منها",
+  startupCommandTools: "استعرض أدوات التشغيل",
+  startupCommandSkills: "استعرض المهارات",
+  startupCommandModel: "اعرض النموذج أو غيّره",
+  startupCommandStatus: "اعرض حالة الجلسة",
+  startupPromptHint: `اكتب رسالة. استخدم ${isolateLtr("/help")} للأوامر أو ${isolateLtr("/exit")} للمغادرة.`,
 
   commands: "الأوامر",
   typeToFilter: "اكتب / ثم أمر. استمر في الكتابة للتصفية.",

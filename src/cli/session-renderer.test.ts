@@ -198,4 +198,17 @@ describe("createSessionRenderer — legacy command output stays English", () => 
     expect(out).toContain("Name");
     expect(out).toContain("daily");
   });
+
+  it("list output is English regardless of locale", () => {
+    const renderer = createSessionRenderer({ capabilities: plainCaps(), locale: "ar" });
+    const vm = {
+      kind: "list" as const,
+      title: "Tasks",
+      items: [{ label: "Review" }],
+    };
+    const out = renderer.render(vm);
+    expect(out).toContain("Tasks");
+    expect(out).toContain("- Review");
+    expect(out).not.toContain("الأوامر");
+  });
 });

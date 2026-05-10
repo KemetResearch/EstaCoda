@@ -5,6 +5,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import { isolateLtr } from "../ui/bidi.js";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -100,6 +101,36 @@ function createMockRuntime(): Runtime {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("renders the startup hint in Arabic with isolated slash commands", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      locale: "ar",
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("اكتب رسالة.");
+    expect(rendered).toContain(isolateLtr("/help"));
+    expect(rendered).toContain(isolateLtr("/exit"));
+  });
+
   it("renders a user prompt rail for normal non-slash input", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();

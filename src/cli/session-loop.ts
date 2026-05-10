@@ -32,6 +32,7 @@ import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import type { ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import { chromeCopy } from "../ui/cli-ui-copy.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -170,7 +171,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
     const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
     output.write(`${startupText}\n\n`);
-    output.write("Type a message. Use /help for commands or /exit to leave.\n\n");
+    output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
 
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
