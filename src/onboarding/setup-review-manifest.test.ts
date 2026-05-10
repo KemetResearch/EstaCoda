@@ -223,7 +223,64 @@ describe("setup review manifest", () => {
     expect(manifest.blockers.length).toBeGreaterThan(0);
     expect(manifest.sections["files-to-write-update"]).toEqual([]);
     expect(manifest.lines.some((line) => line.target?.kind === "config-scope")).toBe(false);
+    expect(manifest.suppressedNormalWrites).toEqual([{
+      bundleId: "setup-modules",
+      reason: "broken-config",
+    }]);
     expect(manifest.safeToReviewForApply).toBe(false);
+  });
+
+  it("missing-secret repairable blocker still shows normal proposed write lines plus credential repair lines", () => {
+    const bundle = repairableBlockedBundle(buildSetupModuleDraftBundle(moduleContext({
+      provider: {
+        id: "openai",
+        model: "gpt-4.1-mini",
+      },
+      credentials: {
+        envVars: [],
+      },
+    })), "Missing credential environment variable OPENAI_API_KEY.");
+    const manifest = buildSetupReviewManifest([bundle]);
+
+    expect(manifest.safeToReviewForApply).toBe(false);
+    expect(manifest.suppressedNormalWrites).toEqual([]);
+    expect(manifest.sections["files-to-write-update"].map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
+      "setup-module.provider.route",
+      "setup-module.security-mode.config",
+      "setup-module.workflow-learning.config",
+    ]));
+    expect(manifest.sections["secret-refs-to-store"].map((line) => line.sourceDraftIds[0])).toContain("setup-module.credentials.env-refs");
+    expect(manifest.blockers.map((line) => line.blockers).flat()).toContain("Missing credential environment variable OPENAI_API_KEY.");
+  });
+
+  it("untrusted-workspace repairable blocker still shows normal write lines plus workspace trust repair lines", () => {
+    const bundle = repairableBlockedBundle(buildSetupModuleDraftBundle(moduleContext({
+      workspaceTrust: {
+        trusted: false,
+      },
+    })), "Workspace is not trusted.");
+    const manifest = buildSetupReviewManifest([bundle]);
+
+    expect(manifest.safeToReviewForApply).toBe(false);
+    expect(manifest.suppressedNormalWrites).toEqual([]);
+    expect(manifest.sections["files-to-write-update"].map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
+      "setup-module.provider.route",
+      "setup-module.security-mode.config",
+      "setup-module.workflow-learning.config",
+    ]));
+    expect(manifest.sections["workspace-trust-grants"].map((line) => line.sourceDraftIds[0])).toContain("setup-module.workspace-trust.grant");
+    expect(manifest.blockers.map((line) => line.blockers).flat()).toContain("Workspace is not trusted.");
+  });
+
+  it("generic repairable blocker does not hide normal review lines", () => {
+    const bundle = repairableBlockedBundle(buildSetupModuleDraftBundle(moduleContext()), "Manual review required before apply.");
+    const manifest = buildSetupReviewManifest([bundle]);
+
+    expect(manifest.safeToReviewForApply).toBe(false);
+    expect(manifest.suppressedNormalWrites).toEqual([]);
+    expect(manifest.sections["files-to-write-update"].length).toBeGreaterThan(0);
+    expect(manifest.sections["provider-model-network"].length).toBeGreaterThan(0);
+    expect(manifest.blockers.map((line) => line.blockers).flat()).toContain("Manual review required before apply.");
   });
 
   it("omits skipped capabilities from review lines", () => {
@@ -316,6 +373,14 @@ function diagnosticBundle(): SetupDraftBundle {
       requiresReviewCount: 1,
       readOnlyCount: 1,
     },
+  };
+}
+
+function repairableBlockedBundle(bundle: SetupDraftBundle, blocker: string): SetupDraftBundle {
+  return {
+    ...bundle,
+    blockers: [...bundle.blockers, blocker],
+    safeToApplyLater: false,
   };
 }
 

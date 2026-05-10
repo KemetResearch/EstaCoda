@@ -21,6 +21,7 @@ export type SetupReviewManifestSection =
   | "warnings";
 
 export type SetupReviewManifestSeverity = "info" | "warning" | "blocker";
+export type SetupReviewManifestSuppressionReason = "broken-config" | "unsafe-diagnostic-only";
 
 export type SetupReviewManifestLine = {
   readonly id: string;
@@ -70,6 +71,10 @@ export type SetupReviewManifest = {
   readonly blockers: readonly SetupReviewManifestLine[];
   readonly warnings: readonly SetupReviewManifestLine[];
   readonly safeToReviewForApply: boolean;
+  readonly suppressedNormalWrites: readonly {
+    readonly bundleId: string;
+    readonly reason: SetupReviewManifestSuppressionReason;
+  }[];
   readonly metadata: {
     readonly bundleCount: number;
     readonly lineCount: number;
@@ -82,12 +87,9 @@ export type SetupReviewManifest = {
 export function buildSetupReviewManifest(
   bundles: readonly SetupDraftBundle[]
 ): SetupReviewManifest {
-  const unsafeBundleIds = new Set(
-    bundles
-      .filter((bundle) => !bundle.safeToApplyLater || bundle.drafts.some((draft) => draft.kind === "diagnostic-blocker"))
-      .map((bundle) => bundle.sourceId)
-  );
-  const lines = bundles.flatMap((bundle) => linesForBundle(bundle, unsafeBundleIds.has(bundle.sourceId)));
+  const suppressions = bundles.flatMap((bundle) => normalWriteSuppressions(bundle));
+  const suppressionMap = new Map(suppressions.map((suppression) => [suppression.bundleId, suppression.reason]));
+  const lines = bundles.flatMap((bundle) => linesForBundle(bundle, suppressionMap.get(bundle.sourceId)));
   const sections = groupSections(lines);
   const blockers = sections.blockers;
   const warnings = sections.warnings;
@@ -100,6 +102,7 @@ export function buildSetupReviewManifest(
     blockers,
     warnings,
     safeToReviewForApply: blockers.length === 0 && bundles.every((bundle) => bundle.safeToApplyLater),
+    suppressedNormalWrites: suppressions,
     metadata: {
       bundleCount: bundles.length,
       lineCount: lines.length,
@@ -110,11 +113,14 @@ export function buildSetupReviewManifest(
   };
 }
 
-function linesForBundle(bundle: SetupDraftBundle, unsafeNormalWrites: boolean): SetupReviewManifestLine[] {
+function linesForBundle(
+  bundle: SetupDraftBundle,
+  suppressionReason: SetupReviewManifestSuppressionReason | undefined
+): SetupReviewManifestLine[] {
   const lines: SetupReviewManifestLine[] = [];
 
   for (const draft of bundle.drafts) {
-    if (unsafeNormalWrites && draft.target.kind === "config-scope" && draft.kind !== "diagnostic-blocker") {
+    if (suppressionReason !== undefined && draft.target.kind === "config-scope" && draft.kind !== "diagnostic-blocker") {
       continue;
     }
     lines.push(...linesForDraft(draft));
@@ -140,6 +146,26 @@ function linesForBundle(bundle: SetupDraftBundle, unsafeNormalWrites: boolean): 
   })));
 
   return lines;
+}
+
+function normalWriteSuppressions(
+  bundle: SetupDraftBundle
+): readonly {
+  readonly bundleId: string;
+  readonly reason: SetupReviewManifestSuppressionReason;
+}[] {
+  const hasDiagnosticOnlyConfigRepair = bundle.drafts.some((draft) =>
+    draft.kind === "diagnostic-blocker" &&
+    draft.riskSurface === "config-repair" &&
+    draft.applyIntent.effect === "diagnostic-only"
+  );
+  if (!hasDiagnosticOnlyConfigRepair) return [];
+
+  const reason = bundle.sourceId.includes("broken-config") ||
+    bundle.blockers.some((blocker) => /config.*(parse|parsed|repair)|normal config editing is blocked/iu.test(blocker))
+    ? "broken-config"
+    : "unsafe-diagnostic-only";
+  return [{ bundleId: bundle.sourceId, reason }];
 }
 
 function linesForDraft(draft: SetupDraft): SetupReviewManifestLine[] {
