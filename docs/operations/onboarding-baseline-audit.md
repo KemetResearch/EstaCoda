@@ -94,6 +94,48 @@ It reuses structured verification and provider diagnostics, reports exact config
 
 The router does not replace `estacoda setup` yet and does not write config. Existing noninteractive setup flags remain on the current CLI path.
 
+## O3 Status
+
+`buildFirstRunOnboardingPlan()` now exists as the first-run onboarding plan/state layer beside the current POC wizard. It models stable step primitives for:
+
+- `welcome`
+- `interface-language`
+- `workspace-root`
+- `workspace-trust`
+- `primary-provider`
+- `primary-model`
+- `primary-credential`
+- `security-mode`
+- `workflow-learning`
+- `optional-capabilities`
+- `review`
+- `save`
+- `verify`
+- `launch`
+
+Each step exposes structured metadata only: step id, copy key, required flag, sensitive surface, inputs, outputs, validation rules, skip rules, and next-step behavior. The layer has no terminal rendering and does not write config.
+
+O3 also adds pure state helpers for advancing across active steps. Language selection remains early, Arabic selection changes subsequent onboarding-owned copy context to Arabic, workspace trust remains explicit, local providers skip hosted credential collection, hosted providers require a credential reference, and optional capabilities remain independently skippable without degrading core setup.
+
+Fallback setup is not reintroduced as the removed backup-provider POC path. The only fallback representation in the plan layer is an optional future shared `model.fallbacks` primitive.
+
+## O3.5 Status
+
+The setup router now connects first-run route decisions to the first-run plan through a structured `firstRunPlanSession` seam. New-user routes produce an initial plan session with:
+
+- initial state
+- current step
+- active steps
+- selected locale
+- copy locale
+- plan metadata
+
+The initial current step is `welcome`. Seeded first-run selections flow into the session, including Arabic copy locale selection and local-provider hosted credential skipping.
+
+Configured, degraded, repair, and verify routes do not include a first-run plan session by default. An explicit internal `run-first-run` selection can request a first-run plan session without cutting over user-facing setup paths.
+
+O3.5 does not change the current wizard, does not add prompt-card rendering, and does not write config.
+
 ## Next Step
 
-Build O3: the first-run onboarding plan/state machine as structured steps, still beside the POC. Defer user-facing cutover until new-user, existing-user, partial-config, repair, verify, and launch behavior are all covered.
+Build O4: Guided Setup Editor Architecture for existing-user reconfiguration and repair paths, still beside the POC. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
