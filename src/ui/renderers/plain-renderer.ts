@@ -6,6 +6,7 @@ import { measureTextWidth, padVisibleAlign } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import type {
+  ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
   ApprovalSecurityViewModel,
   CommandResultViewModel,
@@ -70,9 +71,10 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderShortcutHintRail(viewModel, locale);
     case "userPromptRail":
       return renderUserPromptRail(viewModel);
+    case "activeTurnSpinner":
+      return renderActiveTurnSpinner(viewModel, locale);
     case "startupDashboard":
     case "startupRuntime":
-    case "activeTurnSpinner":
     case "toolActivityRail":
     case "fileChangePreview":
     case "slashMenu":
@@ -641,6 +643,16 @@ export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
   const width = 60;
   const line = `+${"-".repeat(Math.max(0, width - 2))}+`;
   return `> ${vm.text}\n${line}`;
+}
+
+export function renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel, locale?: UiLocale): string {
+  const copy = chromeCopy(locale ?? "en");
+  const eye = "*";
+  const label = vm.label ?? (vm.phase !== undefined ? ((copy as unknown) as Record<string, string>)[vm.phase] : undefined);
+  if (label !== undefined) {
+    return `${eye} ${label}`;
+  }
+  return eye;
 }
 
 function turnStateLabel(state: SessionStatusRailViewModel["turnState"], copy: ReturnType<typeof chromeCopy>): string {

@@ -3,6 +3,7 @@ import { runSessionLoop } from "./session-loop.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 
 function createMockRuntime(): Runtime {
   const sessionDb = new InMemorySessionDB();
@@ -138,5 +139,374 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("EstaCoda session commands");
     expect(rendered).not.toContain("\u25b8 /help");
     expect(rendered).not.toContain("> /help");
+  });
+});
+
+function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {
+  const base = createMockRuntime();
+  return {
+    ...base,
+    handle: async ({ onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }): Promise<AgentLoopResponse> => {
+      for (const event of events) {
+        onEvent?.(event);
+      }
+      return {
+        label: "EstaCoda",
+        text: "Mock response",
+        matchedSkills: [],
+        intent: {
+          nativeIntent: "general",
+          labels: ["chat"],
+          confidence: 1,
+          suggestedToolsets: [],
+          suggestedSkills: [],
+          evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+          confirmationRequired: false,
+          rationale: "mock",
+        },
+        securityDecision: "allow",
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: [],
+      };
+    },
+  };
+}
+
+describe("runSessionLoop — active turn spinner", () => {
+  it("renders active turn spinner phases in standard interactive mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "intent", labels: ["chat"], confidence: 0.95 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("contemplating");
+    expect(rendered).toContain("plotting");
+    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("polishing");
+  });
+
+  it("suppresses debug lines when chrome is enabled", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "intent", labels: ["chat"], confidence: 0.95 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).not.toContain("thinking:");
+    expect(rendered).not.toContain("intent:");
+    expect(rendered).not.toContain("provider:");
+  });
+
+  it("clears active spinner before assistant output", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "intent", labels: ["chat"], confidence: 0.95 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const assistantIndex = rendered.indexOf("Mock response");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(assistantIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(assistantIndex);
+  });
+
+  it("preserves debug lines in plain/noninteractive mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+    } as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "intent", labels: ["chat"], confidence: 0.95 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("thinking:");
+    expect(rendered).toContain("intent:");
+    expect(rendered).toContain("provider:");
+  });
+
+  it("uses Arabic spinner labels when locale is ar", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      locale: "ar",
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("\u0628\u0641\u0643\u0631");
+  });
+
+  it("clears active spinner before tool output and does not leave it in transcript", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-tool-call", provider: "mock", model: "mock-model", name: "browser.status", id: "tc1", argumentsText: "{}" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    // Spinner should appear during thinking/provider phases
+    expect(rendered).toContain("contemplating");
+    expect(rendered).toContain("scribbling");
+    // Tool output should be present
+    expect(rendered).toContain("browser.status");
+    // The ANSI clear sequence should appear before tool output
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const toolIndex = rendered.indexOf("browser.status");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(toolIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(toolIndex);
+    // After the final assistant response, no spinner label should remain in the durable scrollback
+    const assistantIndex = rendered.indexOf("Mock response");
+    const afterAssistant = rendered.slice(assistantIndex);
+    // The only "contemplating" or "scribbling" or "tinkering" occurrences should be
+    // before the assistant response, not after.
+    expect(afterAssistant).not.toContain("contemplating");
+    expect(afterAssistant).not.toContain("scribbling");
+    expect(afterAssistant).not.toContain("tinkering");
+  });
+
+  it("renders agent-cancelled as durable message in chrome mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-cancelled", reason: "user interrupt" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("cancelled: user interrupt");
+    // The clear sequence should appear before the cancellation message
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const cancelIndex = rendered.indexOf("cancelled: user interrupt");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(cancelIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(cancelIndex);
+  });
+
+  it("renders provider-budget-exhausted as durable message in chrome mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-budget-exhausted", budget: "tokens", limit: 100000, observed: 100001, reason: "token limit reached" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("provider budget: token limit reached");
+    // The clear sequence should appear before the budget message
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const budgetIndex = rendered.indexOf("provider budget: token limit reached");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(budgetIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(budgetIndex);
   });
 });

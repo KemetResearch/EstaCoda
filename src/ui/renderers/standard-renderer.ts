@@ -4,6 +4,7 @@
 
 import type { TerminalCapabilities } from "../../contracts/ui.js";
 import type {
+  ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
   ApprovalSecurityViewModel,
   CommandResultViewModel,
@@ -112,9 +113,10 @@ export class StandardRenderer {
         return this.renderShortcutHintRail(vm);
       case "userPromptRail":
         return this.renderUserPromptRail(vm);
+      case "activeTurnSpinner":
+        return this.renderActiveTurnSpinner(vm);
       case "startupDashboard":
       case "startupRuntime":
-      case "activeTurnSpinner":
       case "toolActivityRail":
       case "fileChangePreview":
       case "slashMenu":
@@ -890,6 +892,15 @@ export class StandardRenderer {
     const line = `+${fill.repeat(Math.max(0, width - 2))}+`;
     const promptText = truncateVisible(`${bullet} ${vm.text}`, width);
     return `${promptText}\n${line}`;
+  }
+
+  renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel): string {
+    const eye = this.#useUnicode ? "\uD80C\uDDE0" : "*";
+    const label = vm.label ?? (vm.phase !== undefined ? ((this.#copy as unknown) as Record<string, string>)[vm.phase] : undefined);
+    if (label !== undefined) {
+      return `${this.#brand(eye)} ${this.#action(label)}`;
+    }
+    return this.#brand(eye);
   }
 
   #turnStateLabel(state: SessionStatusRailViewModel["turnState"]): string {

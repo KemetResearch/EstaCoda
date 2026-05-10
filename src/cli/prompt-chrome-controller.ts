@@ -115,9 +115,9 @@ export class PromptChromeController {
       rendered.push(...this.#boundedLines(this.#renderViewModel(state.shortcutRail), width));
     }
 
-    // Pass 7B only carries the placeholder structurally. Rendering active
-    // spinner behavior starts in Pass 9; do not render it here.
-    void state.activeSpinner;
+    if (state.activeSpinner !== undefined) {
+      rendered.push(...this.#boundedLines(this.#renderViewModel(state.activeSpinner), width));
+    }
 
     return rendered;
   }

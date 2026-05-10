@@ -22,6 +22,7 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import {
+  buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
   buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
@@ -157,14 +158,48 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         output.write("\n");
         activeTurn = new AbortController();
         const streamState = { lastWriteEndedWithNewline: true };
+        const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
+
+        const writeSpinner = (phase: string) => {
+          if (turnOutput.spinnerPhase === phase) return;
+          if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
+            output.write(`\x1b[1A\x1b[2K\r`);
+          }
+          const vm = buildActiveTurnSpinnerViewModel({ phase });
+          const spinnerText = renderer.render(vm);
+          output.write(`${spinnerText}\n`);
+          turnOutput.spinnerPhase = phase;
+          turnOutput.lastOutputWasSpinner = true;
+        };
+
+        const clearSpinner = () => {
+          if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
+            output.write(`\x1b[1A\x1b[2K\r`);
+          }
+          turnOutput.spinnerPhase = undefined;
+          turnOutput.lastOutputWasSpinner = false;
+        };
+
+        if (chrome.enabled) {
+          writeSpinner("thinking");
+        }
+
         const response = await runtime.handle({
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
-            onEvent: (event) => renderRuntimeEvent(output, event, activityBuilder, renderer, streamState)
+            onEvent: (event) => {
+              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome.enabled, turnOutput);
+              if (newPhase !== undefined && chrome.enabled) {
+                writeSpinner(newPhase);
+              }
+            }
           })
           .finally(() => {
             activeTurn = undefined;
+          })
+          .finally(() => {
+            clearSpinner();
           });
 
         const assistantVm = buildAssistantResponseViewModel({
@@ -1064,8 +1099,10 @@ function renderRuntimeEvent(
   event: RuntimeEvent,
   activityBuilder: ToolActivityViewModelBuilder,
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
-  streamState: { lastWriteEndedWithNewline: boolean }
-): void {
+  streamState: { lastWriteEndedWithNewline: boolean },
+  chromeEnabled: boolean,
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
+): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
     // If the last write didn't end with a newline and this write doesn't
@@ -1076,59 +1113,92 @@ function renderRuntimeEvent(
     }
     output.write(text);
     streamState.lastWriteEndedWithNewline = endsWithNewline;
+    if (text.length > 0) {
+      turnOutput.hasOutput = true;
+      turnOutput.lastOutputWasSpinner = false;
+    }
+  }
+
+  function clearActiveSpinnerLine(): void {
+    if (chromeEnabled && turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
+      output.write(`\x1b[1A\x1b[2K\r`);
+      turnOutput.spinnerPhase = undefined;
+      turnOutput.lastOutputWasSpinner = false;
+    }
   }
 
   switch (event.kind) {
     case "agent-start":
-      safeWrite(`thinking: ${event.input}\n`);
-      return;
+      if (!chromeEnabled) {
+        safeWrite(`thinking: ${event.input}\n`);
+      }
+      return "thinking";
     case "intent":
-      safeWrite(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
-      return;
+      if (!chromeEnabled) {
+        safeWrite(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
+      }
+      return "routing";
     case "skill":
-      safeWrite(`☥ skill: ${event.name}\n`);
-      return;
+      if (!chromeEnabled) {
+        safeWrite(`☥ skill: ${event.name}\n`);
+      }
+      return undefined;
     case "tool-start": {
+      clearActiveSpinnerLine();
       const vm = activityBuilder.buildTimelineEvent(event);
       safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
-      return;
+      return "tool";
     }
     case "tool-result": {
+      clearActiveSpinnerLine();
       const vm = activityBuilder.buildTimelineEvent(event);
       safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
-      return;
+      return "tool";
     }
     case "provider-attempt":
-      safeWrite(event.fallback
-        ? `provider: switching to ${event.provider}/${event.model}\n`
-        : `provider: using ${event.provider}/${event.model}\n`);
-      return;
+      if (!chromeEnabled) {
+        safeWrite(event.fallback
+          ? `provider: switching to ${event.provider}/${event.model}\n`
+          : `provider: using ${event.provider}/${event.model}\n`);
+      }
+      return "provider";
     case "provider-token": {
-      // Provider tokens stream directly; never inject newlines here.
-      output.write(event.text);
-      streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
-      return;
+      if (!chromeEnabled) {
+        // Provider tokens stream directly; never inject newlines here.
+        output.write(event.text);
+        if (event.text.length > 0) {
+          turnOutput.hasOutput = true;
+          turnOutput.lastOutputWasSpinner = false;
+        }
+        streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
+      }
+      return "provider";
     }
     case "provider-tool-call":
+      clearActiveSpinnerLine();
       safeWrite(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
-      return;
+      return "tool";
     case "provider-result":
-      if (event.ok) {
-        safeWrite(`\nprovider: ${event.provider}/${event.model} ready\n`);
-        return;
+      if (!chromeEnabled) {
+        if (event.ok) {
+          safeWrite(`\nprovider: ${event.provider}/${event.model} ready\n`);
+        } else {
+          safeWrite(event.willFallback
+            ? `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}; trying fallback\n`
+            : `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}\n`);
+        }
       }
-      safeWrite(event.willFallback
-        ? `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}; trying fallback\n`
-        : `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}\n`);
-      return;
+      return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "provider-budget-exhausted":
+      clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
-      return;
+      return undefined;
     case "agent-cancelled":
+      clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
-      return;
+      return undefined;
     case "agent-final":
-      return;
+      return undefined;
   }
 }
 
@@ -1164,7 +1234,11 @@ function humanProviderIssue(errorClass: string | undefined): string {
   }
 }
 
-function buildPromptChromeState(runtime: Runtime, renderer: SessionRenderer) {
+function buildPromptChromeState(
+  runtime: Runtime,
+  renderer: SessionRenderer,
+  activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel
+) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
   const modelId = modelInfo?.kind === "kv"
     ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
@@ -1181,6 +1255,7 @@ function buildPromptChromeState(runtime: Runtime, renderer: SessionRenderer) {
         ? { filled: 0, total: contextWindow }
         : undefined,
     }),
+    activeSpinner,
   };
 }
 

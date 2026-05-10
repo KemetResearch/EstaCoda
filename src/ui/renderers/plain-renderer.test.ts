@@ -52,6 +52,7 @@ import {
   renderSessionStatusRail,
   renderShortcutHintRail,
   renderUserPromptRail,
+  renderActiveTurnSpinner,
 } from "./plain-renderer.js";
 
 function assertNoAnsi(text: string): void {
@@ -1016,5 +1017,35 @@ describe("PlainRenderer — prompt chrome rails", () => {
     expect(out).toBe("> Plain dispatch\n" + `+${"-".repeat(58)}+`);
     assertNoAnsi(out);
     assertAsciiSafe(out);
+  });
+});
+
+// ──────────────────────────────────────────────────
+describe("PlainRenderer — renderActiveTurnSpinner", () => {
+  it("renders English phase label with ASCII eye", () => {
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
+    const out = renderActiveTurnSpinner(vm, "en");
+    expect(out).toBe("* contemplating");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders Arabic phase label with ASCII eye", () => {
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
+    const out = renderActiveTurnSpinner(vm, "ar");
+    expect(out).toBe("* \u0628\u0641\u0643\u0631");
+    assertNoAnsi(out);
+  });
+
+  it("uses explicit label over phase lookup", () => {
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking", label: "custom" });
+    const out = renderActiveTurnSpinner(vm, "en");
+    expect(out).toBe("* custom");
+  });
+
+  it("falls back to eye-only when phase is unknown and no label given", () => {
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "unknown-phase" });
+    const out = renderActiveTurnSpinner(vm, "en");
+    expect(out).toBe("*");
   });
 });

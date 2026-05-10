@@ -964,4 +964,37 @@ describe("StandardRenderer — prompt chrome rails", () => {
     assertNoAnsi(out);
     expect(out).toContain("\u25b8 Plain text");
   });
+
+  it("renders active turn spinner with brand eye and localized label", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
+    const out = r.render(vm);
+    expect(out).toContain("contemplating");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders active turn spinner with explicit label overriding phase", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking", label: "custom label" });
+    const out = r.render(vm);
+    expect(out).toContain("custom label");
+    expect(out).not.toContain("contemplating");
+  });
+
+  it("renders active turn spinner with Arabic locale", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
+    const out = r.render(vm);
+    expect(out).toContain("\u0628\u0641\u0643\u0631");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders active turn spinner with ASCII fallback in no-Unicode mode", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const vm = buildActiveTurnSpinnerViewModel({ phase: "provider" });
+    const out = r.render(vm);
+    expect(out).not.toContain("\uD80C\uDDE0");
+    expect(out).toContain("scribbling");
+    expect(hasAnsi(out)).toBe(true);
+  });
 });
