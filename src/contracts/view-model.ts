@@ -292,6 +292,9 @@ export interface ToolActivityRailEvent {
   readonly status: TimelineEventStatus;
   readonly elapsedMs?: number;
   readonly glyph?: string;
+  readonly label?: string;
+  readonly target?: string;
+  readonly riskClass?: string;
 }
 
 export interface ToolActivityRailViewModel {

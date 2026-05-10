@@ -26,6 +26,7 @@ import {
   buildAssistantResponseViewModel,
   buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
+  buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
@@ -1113,7 +1114,7 @@ async function renderMemoryPromotions(runtime: Runtime): Promise<string> {
   ].join("\n");
 }
 
-function renderRuntimeEvent(
+export function renderRuntimeEvent(
   output: NodeJS.WritableStream,
   event: RuntimeEvent,
   activityBuilder: ToolActivityViewModelBuilder,
@@ -1168,14 +1169,16 @@ function renderRuntimeEvent(
       return undefined;
     case "tool-start": {
       clearActiveSpinnerLine();
-      const vm = activityBuilder.buildTimelineEvent(event);
-      safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
+      const railEvent = activityBuilder.buildToolActivityRailEvent(event);
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       return "tool";
     }
     case "tool-result": {
       clearActiveSpinnerLine();
-      const vm = activityBuilder.buildTimelineEvent(event);
-      safeWrite(`${renderer.render({ kind: "timeline", events: [vm] })}\n`);
+      const railEvent = activityBuilder.buildToolActivityRailEvent(event);
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       return "tool";
     }
     case "provider-attempt":
@@ -1199,7 +1202,9 @@ function renderRuntimeEvent(
     }
     case "provider-tool-call":
       clearActiveSpinnerLine();
-      safeWrite(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
+      const providerRailEvent = activityBuilder.buildToolActivityRailEvent(event);
+      const providerRailVm = buildToolActivityRailViewModel({ events: [providerRailEvent] });
+      safeWrite(`${renderer.render(providerRailVm)}\n`);
       return "tool";
     case "provider-result":
       if (!chrome?.enabled) {

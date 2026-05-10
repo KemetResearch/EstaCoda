@@ -16,10 +16,13 @@ import {
 import {
   buildActivityTimelineViewModel,
   buildProgressContextRailViewModel,
+  buildToolActivityRailViewModel,
   timelineEvent,
   progressStep,
+  toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
 import { ToolActivityRenderer } from "./tool-activity-renderer.js";
+import { renderRuntimeEvent } from "./session-loop.js";
 
 // ──────────────────────────────────────
 // Global deterministic timer for animated snapshots
@@ -350,6 +353,69 @@ function progressRailIdleVm(): ViewModel {
 }
 
 // ──────────────────────────────────────
+// Tool Activity Rail fixtures
+// ──────────────────────────────────────
+
+function emptyToolRailVm(): ViewModel {
+  return buildToolActivityRailViewModel({ events: [] });
+}
+
+function singleToolRunningVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [toolActivityRailEvent("readFile", "running", { label: "preparing", target: "/workspace/Stage-9B-plan.md" })],
+  });
+}
+
+function singleToolDoneVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [toolActivityRailEvent("readFile", "done", { elapsedMs: 1_400, label: "read", target: "/workspace/Stage-9B-plan.md" })],
+  });
+}
+
+function singleToolFailedVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [toolActivityRailEvent("terminal.exec", "failed", { elapsedMs: 500, label: "run", target: "npm test" })],
+  });
+}
+
+function singleToolGatedVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [toolActivityRailEvent("workspace.write", "gated", { elapsedMs: 50, label: "write", target: "src/index.ts", riskClass: "destructive-local" })],
+  });
+}
+
+function multipleToolMixedVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [
+      toolActivityRailEvent("readFile", "done", { elapsedMs: 1_400, label: "read", target: "/workspace/Stage-9B-plan.md" }),
+      toolActivityRailEvent("writeFile", "running", { label: "preparing", target: "/workspace/Stage-9B-plan.md" }),
+      toolActivityRailEvent("terminal.exec", "failed", { elapsedMs: 500, label: "run", target: "npm test" }),
+      toolActivityRailEvent("searchFiles", "done", { elapsedMs: 1_200, label: "review", target: "diff" }),
+    ],
+  });
+}
+
+function longPathToolRailVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [
+      toolActivityRailEvent("readFile", "done", {
+        elapsedMs: 1_400,
+        label: "read",
+        target: "/workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md",
+      }),
+    ],
+  });
+}
+
+function arabicToolRailVm(): ViewModel {
+  return buildToolActivityRailViewModel({
+    events: [
+      toolActivityRailEvent("writeFile", "done", { elapsedMs: 1_200, label: "write", target: "/workspace/Stage-9B-plan.md" }),
+    ],
+  });
+}
+
+// ──────────────────────────────────────
 // Test suites
 // ──────────────────────────────────────
 
@@ -499,6 +565,114 @@ describe("Progress context rail", () => {
       expect(output).toMatchSnapshot(`rail-idle-${ctx.name}`);
     });
   }
+});
+
+// ──────────────────────────────────────
+// Tool Activity Rail
+// ──────────────────────────────────────
+
+describe("Tool activity rail", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders empty in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(emptyToolRailVm());
+      expect(output).toMatchSnapshot(`tool-rail-empty-${ctx.name}`);
+    });
+
+    it(`renders single running in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(singleToolRunningVm());
+      expect(output).toMatchSnapshot(`tool-rail-running-${ctx.name}`);
+    });
+
+    it(`renders single done in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(singleToolDoneVm());
+      expect(output).toMatchSnapshot(`tool-rail-done-${ctx.name}`);
+    });
+
+    it(`renders single failed in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(singleToolFailedVm());
+      expect(output).toMatchSnapshot(`tool-rail-failed-${ctx.name}`);
+    });
+
+    it(`renders single gated in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(singleToolGatedVm());
+      expect(output).toMatchSnapshot(`tool-rail-gated-${ctx.name}`);
+    });
+
+    it(`renders multiple mixed in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(multipleToolMixedVm());
+      expect(output).toMatchSnapshot(`tool-rail-mixed-${ctx.name}`);
+    });
+
+    it(`renders long path truncated in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(longPathToolRailVm());
+      expect(output).toMatchSnapshot(`tool-rail-long-path-${ctx.name}`);
+    });
+  }
+
+  it("renders Arabic labels with LTR-isolated technical tokens", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const renderer = new StandardRenderer({ tokens, capabilities: fullCaps(), locale: "ar" });
+    const output = renderer.render(arabicToolRailVm());
+    expect(output).toMatchSnapshot("tool-rail-arabic-standard");
+  });
+
+  it("renders Arabic in plain mode with LTR-isolated tokens", () => {
+    const output = renderPlain(arabicToolRailVm(), "ar");
+    expect(output).toMatchSnapshot("tool-rail-arabic-plain");
+  });
+
+  it("static running marker does not animate", () => {
+    const renderer = standardDarkRenderer();
+    const vm = singleToolRunningVm();
+    const output1 = renderer.render(vm);
+    const output2 = renderer.render(vm);
+    expect(output1).toBe(output2);
+  });
+});
+
+// ──────────────────────────────────────
+// Session-loop tool activity rail wiring
+// ──────────────────────────────────────
+
+describe("Session-loop tool activity rail wiring", () => {
+  it("emits rail output for tool-start", () => {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    const event: RuntimeEvent = { kind: "tool-start", tool: "readFile", stepId: "1" };
+    renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput);
+    expect(output.write).toHaveBeenCalled();
+    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(written).toContain("readFile");
+  });
+
+  it("emits rail output for tool-result", () => {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    const event: RuntimeEvent = { kind: "tool-result", tool: "readFile", ok: true };
+    renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput);
+    expect(output.write).toHaveBeenCalled();
+    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(written).toContain("read");
+  });
+
+  it("emits rail output for provider-tool-call", () => {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    const event: RuntimeEvent = { kind: "provider-tool-call", provider: "openai", model: "gpt-4", name: "readFile", argumentsText: '{"path": "/workspace/file.md"}' };
+    renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput);
+    expect(output.write).toHaveBeenCalled();
+    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(written).toContain("read");
+  });
 });
 
 // ──────────────────────────────────────

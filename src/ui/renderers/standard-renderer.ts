@@ -26,6 +26,8 @@ import type {
   SessionStatusRailViewModel,
   ShortcutHintRailViewModel,
   UserPromptRailViewModel,
+  ToolActivityRailViewModel,
+  ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
@@ -115,9 +117,10 @@ export class StandardRenderer {
         return this.renderUserPromptRail(vm);
       case "activeTurnSpinner":
         return this.renderActiveTurnSpinner(vm);
+      case "toolActivityRail":
+        return this.renderToolActivityRail(vm);
       case "startupDashboard":
       case "startupRuntime":
-      case "toolActivityRail":
       case "fileChangePreview":
       case "slashMenu":
         return `[unsupported view model: ${vm.kind}]`;
@@ -617,6 +620,86 @@ export class StandardRenderer {
       case "failed":
         return this.#severity("✗", "error");
     }
+  }
+
+  // ──────────────────────────────────────
+  // Tool Activity Rail
+  // ──────────────────────────────────────
+
+  renderToolActivityRail(vm: ToolActivityRailViewModel): string {
+    if (vm.events.length === 0) {
+      return this.#dim("No activity.");
+    }
+    const lines = vm.events.map((event) => this.#renderToolActivityEvent(event));
+    return lines.join("\n");
+  }
+
+  #renderToolActivityEvent(event: ToolActivityRailEvent): string {
+    const glyph = this.#toolActivityGlyph(event);
+    const labelKey = event.label ?? "run";
+    const label = (this.#copy as unknown as Record<string, string>)[labelKey] ?? labelKey;
+    const targetRaw = event.target ?? "";
+    const target = this.#locale === "ar" && targetRaw.length > 0 ? isolateLtr(targetRaw) : targetRaw;
+    const elapsed = event.elapsedMs !== undefined ? formatDuration(event.elapsedMs) : "";
+
+    const parts: string[] = [];
+    parts.push(glyph);
+    parts.push(label);
+    if (target.length > 0) {
+      parts.push(target);
+    }
+    if (elapsed.length > 0) {
+      parts.push(this.#dim(elapsed));
+    }
+
+    const content = parts.join("  ");
+    const line = this.#rail(content);
+    return truncateVisible(line, this.#capabilities.terminalWidth);
+  }
+
+  #toolActivityGlyph(event: ToolActivityRailEvent): string {
+    if (event.glyph) {
+      return this.#useUnicode ? event.glyph : this.#asciiToolIcon(event.tool, event.glyph);
+    }
+    if (event.status === "failed") {
+      return this.#useUnicode ? this.#severity("✗", "error") : "[-]";
+    }
+    if (event.status === "gated") {
+      return this.#useUnicode ? this.#caution("⚠") : "[?]";
+    }
+    const icon = this.#tokens.contract.toolIcon[event.tool];
+    if (icon) {
+      return this.#useUnicode ? icon : this.#asciiToolIcon(event.tool, icon);
+    }
+    if (event.status === "running") {
+      return this.#useUnicode ? this.#dim("○") : "[>]";
+    }
+    if (event.status === "done") {
+      return this.#useUnicode ? this.#severity("✓", "ok") : "[x]";
+    }
+    return this.#useUnicode ? this.#dim("○") : "[ ]";
+  }
+
+  #asciiToolIcon(tool: string, _unicode: string): string {
+    const map: Record<string, string> = {
+      terminal: "$",
+      webSearch: "O",
+      readFile: "R",
+      writeFile: "W",
+      searchFiles: "S",
+      executeCode: "X",
+      browserNavigate: "B",
+      delegateTask: "D",
+      mixtureOfAgents: "M",
+      memory: "m",
+      clarify: "?",
+      cronjob: "C",
+      process: "P",
+      todo: "t",
+      telegram: "T",
+      media: "m",
+    };
+    return map[tool] ?? _unicode;
   }
 
   // ──────────────────────────────────────
