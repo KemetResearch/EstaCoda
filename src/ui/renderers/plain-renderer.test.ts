@@ -21,6 +21,7 @@ import {
   buildSessionStatusRailViewModel,
   buildShortcutHintRailViewModel,
   buildSlashMenuViewModel,
+  buildUserPromptRailViewModel,
   kv,
   listItem,
   timelineEvent,
@@ -48,6 +49,9 @@ import {
   renderAssistantResponse,
   renderStartupDashboard,
   renderConversationMessage,
+  renderSessionStatusRail,
+  renderShortcutHintRail,
+  renderUserPromptRail,
 } from "./plain-renderer.js";
 
 function assertNoAnsi(text: string): void {
@@ -698,6 +702,7 @@ describe("PlainRenderer — renderPlain dispatcher", () => {
       buildCommandResultViewModel({ ok: true, title: "T", blocks: [] }),
       buildPlainFallbackViewModel({ lines: ["line"] }),
       buildConversationMessageViewModel({ role: "assistant", text: "Hello" }),
+      buildUserPromptRailViewModel({ text: "Hello" }),
     ];
 
     for (const vm of vms) {
@@ -940,6 +945,75 @@ describe("PlainRenderer — renderConversationMessage", () => {
     });
     const out = renderConversationMessage(vm);
     expect(out).toBe("Hello, assistant!\nSecond line.");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+});
+
+describe("PlainRenderer — prompt chrome rails", () => {
+  it("renders deterministic status rail without ANSI", () => {
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      contextUsage: { filled: 32700, total: 128000 },
+      sessionElapsedMs: 58000,
+    });
+    const out = renderSessionStatusRail(vm);
+    expect(out).toBe("* deepseek-reasoner | context 32.7k/128k | 26% | session 58s | idle");
+    assertNoAnsi(out);
+  });
+
+  it("renders deterministic shortcut rail without ANSI", () => {
+    const out = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }));
+    expect(out).toBe("> /help · /tools · /model · /status · Ctrl+C exit");
+    assertNoAnsi(out);
+  });
+
+  it("dispatches rails through renderPlain", () => {
+    expect(renderPlain(buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" }))).toBe("* m | idle");
+    expect(renderPlain(buildShortcutHintRailViewModel({ hints: [{ key: "/help", description: "help" }] }))).toBe("> /help help");
+  });
+
+  it("renders Arabic status rail labels when locale is ar", () => {
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "openai/gpt-4.1",
+      turnState: "idle",
+      contextUsage: { filled: 1024, total: 128000 },
+    });
+    const out = renderSessionStatusRail(vm, "ar");
+    expect(out).toContain("السياق");
+    expect(out).toContain("خامل");
+    assertNoAnsi(out);
+  });
+
+  it("renders Arabic shortcut rail labels when locale is ar", () => {
+    const out = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }), "ar");
+    expect(out).toContain("خروج");
+    expect(out).toContain("\u2066/help\u2069");
+    assertNoAnsi(out);
+  });
+
+  it("keeps plain Arabic technical tokens LTR-isolated", () => {
+    const vm = buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" });
+    const status = renderSessionStatusRail(vm, "ar");
+    const shortcuts = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }), "ar");
+    expect(status).toContain("deepseek-reasoner");
+    expect(shortcuts).toContain("\u2066/help\u2069");
+    expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+  });
+
+  it("renders user prompt rail with ASCII bullet and horizontal rule", () => {
+    const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
+    const out = renderUserPromptRail(vm);
+    expect(out).toBe("> Hello, world!\n" + `+${"-".repeat(58)}+`);
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("dispatches user prompt rail through renderPlain", () => {
+    const vm = buildUserPromptRailViewModel({ text: "Plain dispatch" });
+    const out = renderPlain(vm);
+    expect(out).toBe("> Plain dispatch\n" + `+${"-".repeat(58)}+`);
     assertNoAnsi(out);
     assertAsciiSafe(out);
   });

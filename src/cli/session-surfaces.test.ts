@@ -12,7 +12,7 @@ import { buildSessionHelpViewModel, renderSessionHelp } from "./session-help.js"
 import { createSessionRenderer } from "./session-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel, buildStartupDashboardViewModel } from "../ui/view-models/builders.js";
+import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel, buildStartupDashboardViewModel, buildUserPromptRailViewModel } from "../ui/view-models/builders.js";
 import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
 // ──────────────────────────────────────
@@ -418,7 +418,7 @@ describe("Session surfaces — assistant response", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildAssistantResponseViewModel({
-        label: "𓂀 EstaCoda",
+        label: "\uD80C\uDDE0 EstaCoda",
         text: "Here is the analysis you requested.\n\nThe codebase is well-structured.",
         matchedSkills: ["code-review", "security-audit"],
         progress: ["intent routed", "security assessed", "tools executed"],
@@ -427,4 +427,40 @@ describe("Session surfaces — assistant response", () => {
       expect(output).toMatchSnapshot(`assistant-response-${ctx.name}`);
     });
   }
+});
+
+// ──────────────────────────────────────
+describe("Session surfaces — user prompt rail", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const vm = buildUserPromptRailViewModel({ text: "Tell me about quantum computing" });
+      const output = ctx.renderer.render(vm);
+      expect(output).toMatchSnapshot(`user-prompt-rail-${ctx.name}`);
+    });
+  }
+
+  it("does not render slash commands as user prompt rails", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps() });
+    const slashMenu = buildSlashMenuViewModel(fakeRuntime, "");
+    const userPromptRail = buildUserPromptRailViewModel({ text: "/help" });
+
+    // Slash menu renders as a command result (tables), not as a prompt rail
+    const slashOutput = renderer.render(slashMenu);
+    expect(slashOutput).toContain("Commands");
+    expect(slashOutput).toContain("/exit");
+
+    // User prompt rail renders as bullet + rule even when text starts with /
+    const railOutput = renderer.render(userPromptRail);
+    expect(railOutput).toContain("\u25b8 /help");
+    expect(railOutput).toContain("\u2500");
+  });
+
+  it("plain renderer produces no ANSI for user prompt rail", () => {
+    const renderer = createSessionRenderer({ capabilities: plainCaps() });
+    const vm = buildUserPromptRailViewModel({ text: "Hello" });
+    const output = renderer.render(vm);
+    expect(output).not.toMatch(/\x1b\[/);
+    expect(output).toContain("> Hello");
+    expect(output).toContain(`+${"-".repeat(58)}+`);
+  });
 });

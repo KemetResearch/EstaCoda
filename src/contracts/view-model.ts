@@ -367,6 +367,15 @@ export interface SlashMenuViewModel {
 }
 
 // ─────────────────────────────────────────────────────────────
+// User Prompt Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface UserPromptRailViewModel {
+  readonly kind: "userPromptRail";
+  readonly text: string;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Discriminated Union
 // ─────────────────────────────────────────────────────────────
 
@@ -392,4 +401,5 @@ export type ViewModel =
   | FileChangePreviewViewModel
   | SessionStatusRailViewModel
   | ShortcutHintRailViewModel
-  | SlashMenuViewModel;
+  | SlashMenuViewModel
+  | UserPromptRailViewModel;

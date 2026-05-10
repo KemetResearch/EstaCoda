@@ -22,11 +22,15 @@ import type {
   ViewModelSeverity,
   WarningErrorViewModel,
   AssistantResponseViewModel,
+  SessionStatusRailViewModel,
+  ShortcutHintRailViewModel,
+  UserPromptRailViewModel,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
-import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleAlign, openHorizontalFrame } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
+import { isolateLtr } from "../../ui/bidi.js";
 
 export interface StandardRendererOptions {
   readonly tokens: ResolvedTokens;
@@ -102,13 +106,17 @@ export class StandardRenderer {
         return this.renderAssistantResponse(vm);
       case "conversationMessage":
         return this.renderConversationMessage(vm);
+      case "sessionStatusRail":
+        return this.renderSessionStatusRail(vm);
+      case "shortcutHintRail":
+        return this.renderShortcutHintRail(vm);
+      case "userPromptRail":
+        return this.renderUserPromptRail(vm);
       case "startupDashboard":
       case "startupRuntime":
       case "activeTurnSpinner":
       case "toolActivityRail":
       case "fileChangePreview":
-      case "sessionStatusRail":
-      case "shortcutHintRail":
       case "slashMenu":
         return `[unsupported view model: ${vm.kind}]`;
       default: {
@@ -835,6 +843,79 @@ export class StandardRenderer {
     // User messages: plain text until user prompt rail is implemented
     return vm.text;
   }
+
+  // ──────────────────────────────────────
+  // Prompt Chrome Rails
+  // ──────────────────────────────────────
+
+  renderSessionStatusRail(vm: SessionStatusRailViewModel): string {
+    const eye = this.#useUnicode ? "\uD80C\uDDE0" : "*";
+    const modelLabel = this.#locale === "ar" ? isolateLtr(vm.modelLabel) : vm.modelLabel;
+    const parts: string[] = [`${this.#brand(eye)} ${modelLabel}`];
+
+    if (vm.contextUsage !== undefined) {
+      const filled = formatContextCount(vm.contextUsage.filled);
+      const total = formatContextCount(vm.contextUsage.total);
+      const contextValue = this.#locale === "ar" ? isolateLtr(`${filled}/${total}`) : `${filled}/${total}`;
+      parts.push(`${this.#copy.context} ${contextValue}`);
+      parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
+    }
+
+    if (vm.sessionElapsedMs !== undefined) {
+      const glyph = this.#useUnicode ? "◷" : "session";
+      parts.push(`${glyph} ${formatDuration(vm.sessionElapsedMs)}`);
+    }
+
+    if (vm.currentTurnSeconds !== undefined) {
+      const glyph = this.#useUnicode ? "⧖" : "turn";
+      parts.push(`${glyph} ${vm.currentTurnSeconds}s`);
+    }
+
+    parts.push(this.#turnStateLabel(vm.turnState));
+    return truncateVisible(parts.join(" | "), this.#capabilities.terminalWidth);
+  }
+
+  renderShortcutHintRail(vm: ShortcutHintRailViewModel): string {
+    const prompt = this.#action(this.#glyph("prompt"));
+    const text = vm.hints.length === 0
+      ? this.#copy.shortcuts
+      : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${hint.key} ${hint.description}`).join(" · ");
+    return truncateVisible(`${prompt} ${text}`, this.#capabilities.terminalWidth);
+  }
+
+  renderUserPromptRail(vm: UserPromptRailViewModel): string {
+    const bullet = this.#useUnicode ? "\u25b8" : ">";
+    const width = this.#capabilities.terminalWidth ?? 60;
+    const fill = this.#useUnicode ? "─" : "-";
+    const line = `+${fill.repeat(Math.max(0, width - 2))}+`;
+    const promptText = truncateVisible(`${bullet} ${vm.text}`, width);
+    return `${promptText}\n${line}`;
+  }
+
+  #turnStateLabel(state: SessionStatusRailViewModel["turnState"]): string {
+    switch (state) {
+      case "idle":
+        return this.#copy.idle;
+      case "running":
+        return this.#copy.running;
+      case "blocked":
+        return this.#copy.blocked;
+      case "error":
+        return this.#copy.error;
+      case "unknown":
+        return "unknown";
+    }
+  }
+
+  #contextBeads(filled: number, total: number): string {
+    if (total <= 0) return "0%";
+    const percent = Math.max(0, Math.min(100, Math.round((filled / total) * 100)));
+    const active = Math.round(percent / 10);
+    if (!this.#useUnicode) {
+      return `${percent}%`;
+    }
+    return `${"◉".repeat(active)}${"·".repeat(10 - active)} ${percent}%`;
+  }
 }
 
 // ──────────────────────────────────────
@@ -861,6 +942,13 @@ function hexToAnsi256(hex: string): number {
   const gi = Math.min(5, Math.round((g / 255) * 5));
   const bi = Math.min(5, Math.round((b / 255) * 5));
   return 16 + 36 * ri + 6 * gi + bi;
+}
+
+function formatContextCount(value: number): string {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}k`;
+  }
+  return String(value);
 }
 
 function computeColumnWidths(

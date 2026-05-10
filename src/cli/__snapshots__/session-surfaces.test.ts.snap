@@ -769,23 +769,23 @@ exports[`Session surfaces — input rail-frame renders prompt prefix in plain: p
 
 exports[`Session surfaces — input rail-frame renders horizontal rule in standard dark: rail-frame-standard dark 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────\x1B[0m"`;
 
-exports[`Session surfaces — input rail-frame renders prompt prefix in standard dark: prompt-prefix-standard dark 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+exports[`Session surfaces — input rail-frame renders prompt prefix in standard dark: prompt-prefix-standard dark 1`] = `"\x1B[38;2;64;224;208m> \x1B[0m"`;
 
 exports[`Session surfaces — input rail-frame renders horizontal rule in standard light: rail-frame-standard light 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────────────────────────────────────────────\x1B[0m"`;
 
-exports[`Session surfaces — input rail-frame renders prompt prefix in standard light: prompt-prefix-standard light 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+exports[`Session surfaces — input rail-frame renders prompt prefix in standard light: prompt-prefix-standard light 1`] = `"\x1B[38;2;64;224;208m> \x1B[0m"`;
 
 exports[`Session surfaces — input rail-frame renders horizontal rule in no color: rail-frame-no color 1`] = `"────────────────────────────────────────────────────────────────────────────────"`;
 
-exports[`Session surfaces — input rail-frame renders prompt prefix in no color: prompt-prefix-no color 1`] = `"𓂀 > "`;
+exports[`Session surfaces — input rail-frame renders prompt prefix in no color: prompt-prefix-no color 1`] = `"> "`;
 
 exports[`Session surfaces — input rail-frame renders horizontal rule in no Unicode: rail-frame-no Unicode 1`] = `"\x1B[38;2;42;42;42m--------------------------------------------------------------------------------\x1B[0m"`;
 
-exports[`Session surfaces — input rail-frame renders prompt prefix in no Unicode: prompt-prefix-no Unicode 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+exports[`Session surfaces — input rail-frame renders prompt prefix in no Unicode: prompt-prefix-no Unicode 1`] = `"\x1B[38;2;64;224;208m> \x1B[0m"`;
 
 exports[`Session surfaces — input rail-frame renders horizontal rule in narrow width: rail-frame-narrow width 1`] = `"\x1B[38;2;42;42;42m────────────────────────────────────────\x1B[0m"`;
 
-exports[`Session surfaces — input rail-frame renders prompt prefix in narrow width: prompt-prefix-narrow width 1`] = `"\x1B[38;2;64;224;208m𓂀 > \x1B[0m"`;
+exports[`Session surfaces — input rail-frame renders prompt prefix in narrow width: prompt-prefix-narrow width 1`] = `"\x1B[38;2;64;224;208m> \x1B[0m"`;
 
 exports[`Session surfaces — assistant response renders in plain: assistant-response-plain 1`] = `
 "EstaCoda:
@@ -800,7 +800,7 @@ progress: intent routed -> security assessed -> tools executed"
 exports[`Session surfaces — assistant response renders in standard dark: assistant-response-standard dark 1`] = `
 "
 ╭─────────────────────────────────────
-│ \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ \x1B[38;2;90;172;255m\x1B[1m𓇠 EstaCoda\x1B[0m\x1B[0m
 │ Here is the analysis you requested.
 │ 
 │ The codebase is well-structured.
@@ -812,7 +812,7 @@ exports[`Session surfaces — assistant response renders in standard dark: assis
 exports[`Session surfaces — assistant response renders in standard light: assistant-response-standard light 1`] = `
 "
 ╭─────────────────────────────────────
-│ \x1B[38;2;0;87;217m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ \x1B[38;2;0;87;217m\x1B[1m𓇠 EstaCoda\x1B[0m\x1B[0m
 │ Here is the analysis you requested.
 │ 
 │ The codebase is well-structured.
@@ -824,7 +824,7 @@ exports[`Session surfaces — assistant response renders in standard light: assi
 exports[`Session surfaces — assistant response renders in no color: assistant-response-no color 1`] = `
 "
 ╭─────────────────────────────────────
-│ 𓂀 EstaCoda
+│ 𓇠 EstaCoda
 │ Here is the analysis you requested.
 │ 
 │ The codebase is well-structured.
@@ -836,7 +836,7 @@ progress: intent routed -> security assessed -> tools executed"
 exports[`Session surfaces — assistant response renders in no Unicode: assistant-response-no Unicode 1`] = `
 "
 +-------------------------------------
-| \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+| \x1B[38;2;90;172;255m\x1B[1m𓇠 EstaCoda\x1B[0m\x1B[0m
 | Here is the analysis you requested.
 | 
 | The codebase is well-structured.
@@ -848,11 +848,41 @@ exports[`Session surfaces — assistant response renders in no Unicode: assistan
 exports[`Session surfaces — assistant response renders in narrow width: assistant-response-narrow width 1`] = `
 "
 ╭─────────────────────────────────────
-│ \x1B[38;2;90;172;255m\x1B[1m𓂀 EstaCoda\x1B[0m\x1B[0m
+│ \x1B[38;2;90;172;255m\x1B[1m𓇠 EstaCoda\x1B[0m\x1B[0m
 │ Here is the analysis you requested.
 │ 
 │ The codebase is well-structured.
 ╰─────────────────────────────────────
 \x1B[2mskills: code-review, security-audit\x1B[0m
 \x1B[2mprogress: intent routed -> security assessed -> tools executed\x1B[0m"
+`;
+
+exports[`Session surfaces — user prompt rail renders in plain: user-prompt-rail-plain 1`] = `
+"> Tell me about quantum computing
++----------------------------------------------------------+"
+`;
+
+exports[`Session surfaces — user prompt rail renders in standard dark: user-prompt-rail-standard dark 1`] = `
+"▸ Tell me about quantum computing
++──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
+`;
+
+exports[`Session surfaces — user prompt rail renders in standard light: user-prompt-rail-standard light 1`] = `
+"▸ Tell me about quantum computing
++──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
+`;
+
+exports[`Session surfaces — user prompt rail renders in no color: user-prompt-rail-no color 1`] = `
+"▸ Tell me about quantum computing
++──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
+`;
+
+exports[`Session surfaces — user prompt rail renders in no Unicode: user-prompt-rail-no Unicode 1`] = `
+"> Tell me about quantum computing
++----------------------------------------------------------------------------------------------------------------------+"
+`;
+
+exports[`Session surfaces — user prompt rail renders in narrow width: user-prompt-rail-narrow width 1`] = `
+"▸ Tell me about quantum computing
++──────────────────────────────────────+"
 `;

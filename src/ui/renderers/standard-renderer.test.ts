@@ -23,6 +23,7 @@ import {
   buildSessionStatusRailViewModel,
   buildShortcutHintRailViewModel,
   buildSlashMenuViewModel,
+  buildUserPromptRailViewModel,
   kv,
   listItem,
   timelineEvent,
@@ -146,6 +147,7 @@ describe("StandardRenderer — dispatch", () => {
       buildCommandResultViewModel({ ok: true, title: "T", blocks: [] }),
       buildPlainFallbackViewModel({ lines: ["line"] }),
       buildConversationMessageViewModel({ role: "assistant", text: "Hello" }),
+      buildUserPromptRailViewModel({ text: "Hello" }),
     ];
 
     for (const vm of vms) {
@@ -879,5 +881,87 @@ describe("StandardRenderer — conversation message", () => {
     });
     const out = r.renderConversationMessage(vm);
     expect(out).toBe("Hello, assistant!");
+  });
+});
+
+describe("StandardRenderer — prompt chrome rails", () => {
+  it("renders session status rail as one bounded line", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      contextUsage: { filled: 32700, total: 128000 },
+      sessionElapsedMs: 58000,
+    });
+    const out = r.render(vm);
+    expect(out).toContain("deepseek-reasoner");
+    expect(out).toContain("context 32.7k/128k");
+    expect(out).toContain("◷ 58s");
+    expect(out).toContain("idle");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("renders shortcut hint rail with chrome copy", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildShortcutHintRailViewModel({ hints: [] });
+    const out = r.render(vm);
+    expect(out).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("uses ASCII/no-ANSI fallback for no-color and no-Unicode rail rendering", () => {
+    const tokens = resolveTokens("plain", "light", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: noUnicodeCaps() });
+    const out = r.render(buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" }));
+    expect(out).toContain("* m");
+    expect(out).toContain("idle");
+    assertNoAnsi(out);
+  });
+
+  it("keeps Arabic technical tokens LTR-stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const status = r.render(buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" }));
+    const shortcuts = r.render(buildShortcutHintRailViewModel({ hints: [] }));
+    expect(status).toContain("\u2066deepseek-reasoner\u2069");
+    expect(status).toContain("\u062e\u0627\u0645\u0644");
+    expect(shortcuts).toContain("\u2066/help\u2069");
+    expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+  });
+
+  it("renders user prompt rail with Unicode bullet and horizontal rule", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
+    const out = r.render(vm);
+    expect(out).toContain("\u25b8 Hello, world!");
+    expect(out).toContain(`+${"\u2500".repeat(118)}+`);
+    expect(out.split("\n")).toHaveLength(2);
+  });
+
+  it("renders user prompt rail with ASCII fallback when Unicode is disabled", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
+    const out = r.render(vm);
+    expect(out).toContain("> Hello, world!");
+    expect(out).toContain(`+${"-".repeat(118)}+`);
+    expect(out.split("\n")).toHaveLength(2);
+  });
+
+  it("renders user prompt rail within narrow terminal width", () => {
+    const r = renderer("dark", narrowCaps());
+    const vm = buildUserPromptRailViewModel({ text: "This is a very long user prompt that should be truncated to fit within the narrow terminal width of forty characters" });
+    const out = r.render(vm);
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("\u25b8");
+    expect(lines[0].length).toBeLessThanOrEqual(40);
+    expect(lines[1]).toBe(`+${"\u2500".repeat(38)}+`);
+  });
+
+  it("produces no ANSI for user prompt rail in no-color mode", () => {
+    const r = renderer("dark", noColorCaps());
+    const vm = buildUserPromptRailViewModel({ text: "Plain text" });
+    const out = r.render(vm);
+    assertNoAnsi(out);
+    expect(out).toContain("\u25b8 Plain text");
   });
 });

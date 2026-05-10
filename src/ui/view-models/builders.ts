@@ -35,6 +35,7 @@ import type {
   TimelineEvent,
   ToolActivityRailEvent,
   ToolActivityRailViewModel,
+  UserPromptRailViewModel,
   WarningErrorViewModel,
   ViewModel,
   ViewModelSeverity,
@@ -521,6 +522,23 @@ export function buildShortcutHintRailViewModel(
   return {
     kind: "shortcutHintRail",
     hints: input.hints,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// User Prompt Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildUserPromptRailInput {
+  readonly text: string;
+}
+
+export function buildUserPromptRailViewModel(
+  input: BuildUserPromptRailInput
+): UserPromptRailViewModel {
+  return {
+    kind: "userPromptRail",
+    text: input.text,
   };
 }
 

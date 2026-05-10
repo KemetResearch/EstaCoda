@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
+import { buildSessionStatusRailViewModel, buildShortcutHintRailViewModel } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { ViewModel } from "../contracts/view-model.js";
 
 function makeCaps(partial: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -26,40 +28,58 @@ function mockOutput(): { chunks: string[]; stream: NodeJS.WritableStream } {
   return { chunks, stream };
 }
 
+function rail(text = "● model | idle") {
+  return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
+}
+
+function shortcut(text = "/help · /tools") {
+  return buildShortcutHintRailViewModel({ hints: [{ key: "", description: text }] });
+}
+
+function renderViewModel(vm: ViewModel): string {
+  if (vm.kind === "sessionStatusRail") return vm.modelLabel ?? "";
+  if (vm.kind === "shortcutHintRail") return vm.hints?.[0]?.description ?? "";
+  return `[unsupported view model: ${vm.kind}]`;
+}
+
+function makeController(stream: NodeJS.WritableStream, caps: TerminalCapabilities = makeCaps(), enabled?: boolean): PromptChromeController {
+  return new PromptChromeController({ output: stream, capabilities: caps, renderViewModel, enabled });
+}
+
 describe("PromptChromeController — capability gating", () => {
   it("is enabled for full TTY capabilities", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
+    const ctrl = makeController(stream);
     expect(ctrl.enabled).toBe(true);
   });
 
   it("is disabled for non-TTY", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isTTY: false }) });
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
     expect(ctrl.enabled).toBe(false);
   });
 
   it("is disabled for CI", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isCI: true }) });
+    const ctrl = makeController(stream, makeCaps({ isCI: true }));
     expect(ctrl.enabled).toBe(false);
   });
 
   it("is disabled for dumb terminal", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isDumb: true }) });
+    const ctrl = makeController(stream, makeCaps({ isDumb: true }));
     expect(ctrl.enabled).toBe(false);
   });
 
   it("is disabled for no-color", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ supportsColor: false }) });
+    const ctrl = makeController(stream, makeCaps({ supportsColor: false }));
     expect(ctrl.enabled).toBe(false);
   });
 
   it("respects explicit enabled override", () => {
     const { stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps(), enabled: false });
+    const ctrl = makeController(stream, makeCaps(), false);
     expect(ctrl.enabled).toBe(false);
   });
 });
@@ -67,55 +87,88 @@ describe("PromptChromeController — capability gating", () => {
 describe("PromptChromeController — chrome lifecycle", () => {
   it("renders status line when enabled", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "● model | idle" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("● model | idle") });
     expect(chunks).toEqual(["● model | idle\n"]);
   });
 
   it("emits nothing when disabled", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isTTY: false }) });
-    ctrl.renderChrome({ statusRail: "● model | idle" });
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+    ctrl.renderChrome({ statusRail: rail("● model | idle") });
     expect(chunks).toEqual([]);
   });
 
   it("clears previous chrome before re-rendering", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "first" });
-    ctrl.renderChrome({ statusRail: "second" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("first") });
+    ctrl.renderChrome({ statusRail: rail("second") });
     expect(chunks).toEqual(["first\n", "\x1b[2A\x1b[2K\x1b[2B", "second\n"]);
+  });
+
+
+  it("renders status and shortcut rails as bounded chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status"), shortcutRail: shortcut("/help · Ctrl+C exit") });
+    expect(chunks).toEqual(["status\n/help · Ctrl+C exit\n"]);
+  });
+
+  it("trims rail output to terminal width", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
+    ctrl.renderChrome({ statusRail: rail("deepseek-reasoner | idle") });
+    expect(chunks.join("")).toBe("deepseek-...\n");
   });
 
   it("clearChrome emits escape sequence when active", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "status" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
     chunks.length = 0;
     ctrl.clearChrome();
     expect(chunks).toEqual(["\x1b[2A\x1b[2K\x1b[2B"]);
   });
 
+  it("clearChrome clears multiple rail lines without restoring them", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status"), shortcutRail: shortcut("shortcuts") });
+    chunks.length = 0;
+    ctrl.clearChrome();
+    expect(chunks).toEqual(["\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[2B"]);
+  });
+
   it("clearChrome is a no-op when not active", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
+    const ctrl = makeController(stream);
     ctrl.clearChrome();
     expect(chunks).toEqual([]);
   });
 
   it("dispose clears active chrome", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "status" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
     chunks.length = 0;
     ctrl.dispose();
     expect(chunks).toEqual(["\x1b[2A\x1b[2K\x1b[2B"]);
   });
 
+  it("invalidate clears active chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
+    chunks.length = 0;
+    ctrl.invalidate();
+    expect(chunks).toEqual(["\x1b[2A\x1b[2K\x1b[2B"]);
+  });
+
   it("suspendChromeForTranscript clears before fn and does not restore", async () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "status" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
     chunks.length = 0;
 
     let fnRan = false;
@@ -131,7 +184,7 @@ describe("PromptChromeController — chrome lifecycle", () => {
 
   it("suspendChromeForTranscript is a no-op when inactive", async () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
+    const ctrl = makeController(stream);
     const result = await ctrl.suspendChromeForTranscript(() => 42);
     expect(result).toBe(42);
     expect(chunks).toEqual([]);
@@ -139,7 +192,7 @@ describe("PromptChromeController — chrome lifecycle", () => {
 
   it("suspendChromeForTranscript is a no-op when disabled", async () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isTTY: false }) });
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
     const result = await ctrl.suspendChromeForTranscript(() => 42);
     expect(result).toBe(42);
     expect(chunks).toEqual([]);
@@ -147,10 +200,27 @@ describe("PromptChromeController — chrome lifecycle", () => {
 });
 
 describe("PromptChromeController — scrollback safety", () => {
+  it("clears rails before transcript output and does not redraw them into scrollback", async () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status"), shortcutRail: shortcut("shortcuts") });
+    await ctrl.suspendChromeForTranscript(() => {
+      stream.write("assistant transcript\n");
+    });
+
+    expect(chunks).toEqual([
+      "status\nshortcuts\n",
+      "\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[2B",
+      "assistant transcript\n",
+    ]);
+    expect(chunks.slice(2).join("")).not.toContain("status");
+    expect(chunks.slice(2).join("")).not.toContain("shortcuts");
+  });
+
   it("never writes cursor-control sequences when disabled", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps({ isTTY: false }) });
-    ctrl.renderChrome({ statusRail: "x" });
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+    ctrl.renderChrome({ statusRail: rail("x") });
     ctrl.clearChrome();
     ctrl.dispose();
     ctrl.suspendChromeForTranscript(() => {});
@@ -160,8 +230,8 @@ describe("PromptChromeController — scrollback safety", () => {
 
   it("writes only deterministic output when enabled", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = new PromptChromeController({ output: stream, capabilities: makeCaps() });
-    ctrl.renderChrome({ statusRail: "● deepseek-reasoner | idle" });
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("● deepseek-reasoner | idle") });
     ctrl.clearChrome();
     const joined = chunks.join("");
     // The only non-escape output is the status line.

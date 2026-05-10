@@ -38,7 +38,7 @@ export const kemetBlueSkin: ThemeAwareSkin = {
       helpHeader: "𓂀 Available Commands",
       taglinePrimary: "☥ Kemet Research ☥",
       taglineSecondary: "السيادة التكنولوجية العربية",
-      promptPrefix: "𓂀 > ",
+      promptPrefix: "> ",
     },
   },
   dark: {

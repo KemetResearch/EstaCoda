@@ -3,8 +3,12 @@ import { createSessionRenderer } from "./session-renderer.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { buildConversationMessageViewModel } from "../ui/view-models/builders.js";
+import { buildConversationMessageViewModel, buildSessionStatusRailViewModel, buildShortcutHintRailViewModel } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+
+function assertNoAnsi(text: string): void {
+  expect(text).not.toMatch(/\x1b\[/);
+}
 
 function fullCaps(): TerminalCapabilities {
   return {
@@ -40,6 +44,22 @@ describe("createSessionRenderer — locale default", () => {
     expect(renderer.locale).toBe("en");
   });
 
+  it("renders English status rail by default", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps() });
+    const vm = buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" });
+    const out = renderer.render(vm);
+    expect(out).toContain("idle");
+    expect(out).not.toContain("خامل");
+  });
+
+  it("renders English shortcut rail by default", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps() });
+    const vm = buildShortcutHintRailViewModel({ hints: [] });
+    const out = renderer.render(vm);
+    expect(out).toContain("exit");
+    expect(out).not.toContain("خروج");
+  });
+
   it("preserves explicit en locale", () => {
     const renderer = createSessionRenderer({ capabilities: fullCaps(), locale: "en" });
     expect(renderer.locale).toBe("en");
@@ -66,6 +86,29 @@ describe("createSessionRenderer — standard renderer locale", () => {
     expect(out).toContain("إستاكودا");
   });
 
+  it("renders Arabic status rail through session renderer", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps(), locale: "ar" });
+    const vm = buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" });
+    const out = renderer.render(vm);
+    expect(out).toContain("خامل");
+  });
+
+  it("renders Arabic shortcut rail through session renderer", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps(), locale: "ar" });
+    const vm = buildShortcutHintRailViewModel({ hints: [] });
+    const out = renderer.render(vm);
+    expect(out).toContain("خروج");
+  });
+
+  it("keeps Arabic technical tokens LTR-isolated through session renderer", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps(), locale: "ar" });
+    const status = renderer.render(buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" }));
+    const shortcuts = renderer.render(buildShortcutHintRailViewModel({ hints: [] }));
+    expect(status).toContain("\u2066deepseek-reasoner\u2069");
+    expect(shortcuts).toContain("\u2066/help\u2069");
+    expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+  });
+
   it("uses ASCII assistant title in no-Unicode mode even for ar", () => {
     const caps = { ...fullCaps(), supportsUnicode: false };
     const renderer = createSessionRenderer({ capabilities: caps, locale: "ar" });
@@ -89,6 +132,23 @@ describe("createSessionRenderer — plain renderer locale", () => {
     const vm = buildConversationMessageViewModel({ role: "assistant", text: "Hello." });
     const out = renderer.render(vm);
     expect(out).toContain("إستاكودا:");
+  });
+
+  it("renders Arabic status rail in plain mode", () => {
+    const renderer = createSessionRenderer({ capabilities: plainCaps(), locale: "ar" });
+    const vm = buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle", contextUsage: { filled: 1024, total: 128000 } });
+    const out = renderer.render(vm);
+    expect(out).toContain("السياق");
+    expect(out).toContain("خامل");
+    assertNoAnsi(out);
+  });
+
+  it("renders Arabic shortcut rail in plain mode", () => {
+    const renderer = createSessionRenderer({ capabilities: plainCaps(), locale: "ar" });
+    const vm = buildShortcutHintRailViewModel({ hints: [] });
+    const out = renderer.render(vm);
+    expect(out).toContain("خروج");
+    assertNoAnsi(out);
   });
 
   it("respects explicit vm.label over copy boundary in plain mode", () => {

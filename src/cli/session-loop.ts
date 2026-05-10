@@ -21,7 +21,11 @@ import {
   buildSecurityAuditViewModel,
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
-import { buildAssistantResponseViewModel } from "../ui/view-models/builders.js";
+import {
+  buildAssistantResponseViewModel,
+  buildSessionStatusRailViewModel,
+  buildUserPromptRailViewModel,
+} from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
@@ -38,11 +42,12 @@ export type SessionLoopOptions = {
   close?: () => void;
   workspaceRoot?: string;
   homeDir?: string;
+  locale?: import("../contracts/ui.js").UiLocale;
 };
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
-  const renderer = createSessionRenderer({ output });
+  const renderer = createSessionRenderer({ output, locale: options.locale });
   let runtime = options.runtime;
   let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
@@ -53,6 +58,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const chrome = new PromptChromeController({
     output,
     capabilities: renderer.capabilities,
+    renderViewModel: (vm) => renderer.render(vm),
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb && renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
   });
   const onSigint = () => {
@@ -82,7 +88,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       if (chrome.enabled) {
-        chrome.renderChrome({ statusRail: buildMinimalStatusRail(runtime, renderer) });
+        chrome.renderChrome(buildPromptChromeState(runtime, renderer));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -133,6 +139,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         continue;
+      }
+
+      // Render submitted non-slash user prompts as lightweight transcript rails
+      const userPromptRail = buildUserPromptRailViewModel({ text });
+      const userPromptRailText = renderer.render(userPromptRail);
+      if (chrome.enabled) {
+        await chrome.suspendChromeForTranscript(() => {
+          output.write(`${userPromptRailText}\n`);
+        });
+      } else {
+        output.write(`${userPromptRailText}\n`);
       }
 
       let retryText: string | undefined = text;
@@ -1147,22 +1164,24 @@ function humanProviderIssue(errorClass: string | undefined): string {
   }
 }
 
-function buildMinimalStatusRail(runtime: Runtime, renderer: SessionRenderer): string {
+function buildPromptChromeState(runtime: Runtime, renderer: SessionRenderer) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
   const modelId = modelInfo?.kind === "kv"
     ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
     : "unknown";
-  const useUnicode = renderer.capabilities.supportsUnicode;
-  const copy = chromeCopy(renderer.locale);
-  const eye = useUnicode ? "\uD80C\uDDE0" : "*";
-  const idleLabel = copy.idle;
+  const contextWindow = modelInfo?.kind === "kv"
+    ? Number(modelInfo.entries.find((e) => e.key === "context window")?.value)
+    : Number.NaN;
 
-  if (!renderer.capabilities.supportsColor || !renderer.tokens.contract.behavior.allowAnsiColor) {
-    return `${eye} ${modelId} | ${idleLabel}`;
-  }
-
-  const { r, g, b } = hexToRgb(renderer.tokens.contract.palette.brand);
-  return `\x1B[38;2;${r};${g};${b}m${eye}\x1B[0m ${modelId} | ${idleLabel}`;
+  return {
+    statusRail: buildSessionStatusRailViewModel({
+      modelLabel: modelId,
+      turnState: "idle",
+      contextUsage: Number.isFinite(contextWindow) && contextWindow > 0
+        ? { filled: 0, total: contextWindow }
+        : undefined,
+    }),
+  };
 }
 
 export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {

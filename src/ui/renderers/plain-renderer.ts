@@ -22,6 +22,9 @@ import type {
   TimelineEvent,
   WarningErrorViewModel,
   AssistantResponseViewModel,
+  SessionStatusRailViewModel,
+  ShortcutHintRailViewModel,
+  UserPromptRailViewModel,
   ViewModel,
 } from "../../contracts/view-model.js";
 
@@ -61,13 +64,17 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderAssistantResponse(viewModel);
     case "conversationMessage":
       return renderConversationMessage(viewModel, locale);
+    case "sessionStatusRail":
+      return renderSessionStatusRail(viewModel, locale);
+    case "shortcutHintRail":
+      return renderShortcutHintRail(viewModel, locale);
+    case "userPromptRail":
+      return renderUserPromptRail(viewModel);
     case "startupDashboard":
     case "startupRuntime":
     case "activeTurnSpinner":
     case "toolActivityRail":
     case "fileChangePreview":
-    case "sessionStatusRail":
-    case "shortcutHintRail":
     case "slashMenu":
       return `[unsupported view model: ${viewModel.kind}]`;
     default: {
@@ -341,6 +348,13 @@ function formatCount(value: number): string {
   return String(value);
 }
 
+function formatContextCount(value: number): string {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}k`;
+  }
+  return String(value);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Progress / Context Rail
 // ─────────────────────────────────────────────────────────────
@@ -586,4 +600,60 @@ export function renderConversationMessage(vm: ConversationMessageViewModel, loca
 
   // User messages: plain text until user prompt rail is implemented
   return vm.text;
+}
+
+// ──────────────────────────────────────
+// Prompt Chrome Rails
+// ──────────────────────────────────────
+
+export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?: UiLocale): string {
+  const copy = chromeCopy(locale ?? "en");
+  const parts: string[] = [`* ${vm.modelLabel}`];
+
+  if (vm.contextUsage !== undefined) {
+    const filled = formatContextCount(vm.contextUsage.filled);
+    const total = formatContextCount(vm.contextUsage.total);
+    parts.push(`${copy.context} ${filled}/${total}`);
+    parts.push(`${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
+  }
+
+  if (vm.sessionElapsedMs !== undefined) {
+    parts.push(`session ${formatDuration(vm.sessionElapsedMs)}`);
+  }
+
+  if (vm.currentTurnSeconds !== undefined) {
+    parts.push(`turn ${vm.currentTurnSeconds}s`);
+  }
+
+  parts.push(turnStateLabel(vm.turnState, copy));
+  return parts.join(" | ");
+}
+
+export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: UiLocale): string {
+  const copy = chromeCopy(locale ?? "en");
+  const text = vm.hints.length === 0
+    ? copy.shortcuts
+    : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${hint.key} ${hint.description}`).join(" · ");
+  return `> ${text}`;
+}
+
+export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
+  const width = 60;
+  const line = `+${"-".repeat(Math.max(0, width - 2))}+`;
+  return `> ${vm.text}\n${line}`;
+}
+
+function turnStateLabel(state: SessionStatusRailViewModel["turnState"], copy: ReturnType<typeof chromeCopy>): string {
+  switch (state) {
+    case "idle":
+      return copy.idle;
+    case "running":
+      return copy.running;
+    case "blocked":
+      return copy.blocked;
+    case "error":
+      return copy.error;
+    case "unknown":
+      return "unknown";
+  }
 }

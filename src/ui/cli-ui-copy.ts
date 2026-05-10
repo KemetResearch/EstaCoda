@@ -15,6 +15,7 @@ export interface CliUiChromeCopy {
   // Status rail labels (Pass 7+)
   readonly model: string;
   readonly readiness: string;
+  readonly context: string;
   readonly idle: string;
   readonly running: string;
   readonly blocked: string;
@@ -45,6 +46,7 @@ const en: CliUiChromeCopy = {
 
   model: "model",
   readiness: "readiness",
+  context: "context",
   idle: "idle",
   running: "running",
   blocked: "blocked",
@@ -71,6 +73,7 @@ const ar: CliUiChromeCopy = {
 
   model: "النموذج",
   readiness: "الجاهزية",
+  context: "السياق",
   idle: "خامل",
   running: "شغال",
   blocked: "محجوز",
