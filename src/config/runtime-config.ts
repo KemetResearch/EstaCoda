@@ -416,7 +416,6 @@ export type ProviderSetupInput = {
   scope?: "user" | "project";
   credentialPoolStrategy?: CredentialRotationStrategy;
   primary?: boolean;
-  backupForMain?: boolean;
   contextWindowTokens?: number;
   requiresCredential?: boolean;
 };

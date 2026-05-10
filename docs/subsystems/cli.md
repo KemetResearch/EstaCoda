@@ -98,13 +98,14 @@ Setup sequence:
 1. Interface language and expression style
 2. Workspace trust prompt
 3. Primary provider and model selection
-4. Optional backup model
-5. Hosted-provider API key capture (masked input, saved to `~/.estacoda/.env` with `0600`)
-6. Security mode selection
-7. Workflow-learning mode selection
-8. Optional capabilities (Telegram, voice, vision, browser)
-9. Setup verification
-10. Immediate session start
+4. Hosted-provider API key capture (masked input, saved to `~/.estacoda/.env` with `0600`)
+5. Security mode selection
+6. Workflow-learning mode selection
+7. Optional capabilities (Telegram, voice, vision, browser)
+8. Setup verification
+9. Immediate session start
+
+Backup/fallback routes are managed through `estacoda model fallback ...`; first-run onboarding no longer offers the legacy backup-provider prompt.
 
 **Arabic support:**
 - Selector chrome is localized

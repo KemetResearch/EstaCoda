@@ -462,8 +462,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           enableNetwork: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] },
           credentialPoolStrategy: { type: "string" },
-          primary: { type: "boolean" },
-          backupForMain: { type: "boolean" }
+          primary: { type: "boolean" }
         },
         required: ["provider", "model"]
       },
