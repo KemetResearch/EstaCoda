@@ -201,6 +201,31 @@ Optional modules are independently skippable. Telegram exposes remote-control id
 
 Broken config contexts produce diagnostic blocker drafts instead of normal config patch drafts. Fallback setup is still not represented as `backupForMain`; future fallback setup remains limited to the shared `model.fallbacks` intent.
 
+## O6 Status
+
+`buildSetupReviewManifest()` now assembles first-run, guided setup editor, and setup-module draft bundles into a structured pre-save review manifest. This is the trust boundary before any future apply/save implementation.
+
+The manifest groups review lines for:
+
+- files to write or update
+- secret references to store
+- workspace trust grants or repairs
+- provider/model/network changes
+- enabled optional capabilities
+- remote-control surfaces and identity constraints
+- security mode
+- workflow-learning mode
+- read-only verification checks
+- launch handoff preference
+- blockers
+- warnings
+
+Each manifest line has a stable id, section, source draft ids, copy and summary keys, risk surface, target path or config scope where applicable, redacted review metadata, severity, read-only status, blockers, and warnings. Scoped config lines preserve unrelated config by design.
+
+Manifest creation is pure. It does not write config, trust stores, or state files. Environment-variable names may appear, but raw secret values are removed from review metadata. Exact config, workspace, and trust-store paths appear where relevant. Workspace trust grants remain explicit. Telegram remote-control setup surfaces allowed identity constraints without bot token output. Browser setup records intent without auto-launching.
+
+Broken config bundles produce blocker manifest lines and suppress unsafe normal config write lines. Verification remains read-only. Skipped optional capabilities are omitted from the main review unless a later renderer needs explicit skipped items. `backupForMain` remains absent; future fallback setup remains limited to the shared `model.fallbacks` intent.
+
 ## Next Step
 
-After review, the likely next checkpoint is O6: a review manifest or review surface that assembles first-run, guided editor, and setup-module draft bundles for user inspection before any apply/save implementation. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture.
+After review, the likely next checkpoint is O7: define the dry-run apply/save planner that consumes approved manifest/draft data and prepares write plans without yet cutting over user-facing setup. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture.
