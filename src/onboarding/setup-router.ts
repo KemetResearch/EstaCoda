@@ -1,4 +1,14 @@
 import { collectSetupEntryState, type CollectSetupEntryStateOptions, type SetupEntryState } from "./setup-entry-state.js";
+import {
+  buildFirstRunOnboardingPlan,
+  createFirstRunOnboardingState,
+  getActiveFirstRunSteps,
+  type FirstRunOnboardingPlan,
+  type FirstRunOnboardingSelections,
+  type FirstRunOnboardingState,
+  type FirstRunOnboardingStep,
+} from "./first-run-plan.js";
+import { buildSetupEditorPlan, type SetupEditorPlan, type SetupEditorSection } from "./setup-editor-plan.js";
 
 export type SetupRouterSelection =
   | "entry"
@@ -33,6 +43,37 @@ export type SetupRouteAction = {
   readonly mutatesConfig: boolean;
 };
 
+export type FirstRunPlanSession = {
+  readonly kind: "first-run-plan-session";
+  readonly initialState: FirstRunOnboardingState;
+  readonly currentStep: FirstRunOnboardingStep;
+  readonly activeSteps: readonly FirstRunOnboardingStep[];
+  readonly selectedLocale: FirstRunOnboardingPlan["copyLocale"];
+  readonly copyLocale: FirstRunOnboardingPlan["copyLocale"];
+  readonly plan: FirstRunOnboardingPlan;
+  readonly metadata: {
+    readonly source: "setup-router";
+    readonly planKind: FirstRunOnboardingPlan["kind"];
+    readonly currentStepId: FirstRunOnboardingState["currentStepId"];
+    readonly totalStepCount: number;
+    readonly activeStepCount: number;
+  };
+};
+
+export type SetupEditorPlanSession = {
+  readonly kind: "guided-setup-editor-session";
+  readonly plan: SetupEditorPlan;
+  readonly activeSections: readonly SetupEditorSection[];
+  readonly metadata: {
+    readonly source: "setup-router";
+    readonly planKind: SetupEditorPlan["kind"];
+    readonly mode: SetupEditorPlan["mode"];
+    readonly sourceState: SetupEditorPlan["sourceState"];
+    readonly sectionCount: number;
+    readonly actionCount: number;
+  };
+};
+
 export type SetupRouteDecision = {
   readonly kind: SetupRouteKind;
   readonly title: string;
@@ -42,28 +83,41 @@ export type SetupRouteDecision = {
   readonly warnings: readonly string[];
   readonly blockers: readonly string[];
   readonly readOnly: boolean;
+  readonly firstRunPlanSession?: FirstRunPlanSession;
+  readonly setupEditorPlanSession?: SetupEditorPlanSession;
 };
 
 export type CollectSetupRouteOptions = CollectSetupEntryStateOptions & {
   readonly selection?: SetupRouterSelection;
+  readonly firstRunSelections?: FirstRunOnboardingSelections;
 };
 
 export async function collectSetupRoute(options: CollectSetupRouteOptions): Promise<SetupRouteDecision> {
   const state = await collectSetupEntryState(options);
-  return routeSetupEntryState(state, { selection: options.selection });
+  return routeSetupEntryState(state, {
+    selection: options.selection,
+    firstRunSelections: options.firstRunSelections,
+  });
 }
 
 export function routeSetupEntryState(
   state: SetupEntryState,
-  options: { readonly selection?: SetupRouterSelection } = {}
+  options: {
+    readonly selection?: SetupRouterSelection;
+    readonly firstRunSelections?: FirstRunOnboardingSelections;
+  } = {}
 ): SetupRouteDecision {
   if (options.selection === "verify") {
     return verifyDecision(state);
   }
 
+  if (options.selection === "run-first-run") {
+    return firstRunDecision(state, options.firstRunSelections);
+  }
+
   switch (state.kind) {
     case "new-user":
-      return firstRunDecision(state);
+      return firstRunDecision(state, options.firstRunSelections);
     case "configured-ready":
       return configuredDecision(state);
     case "configured-degraded":
@@ -106,7 +160,10 @@ export function renderSetupRouteDecision(decision: SetupRouteDecision): string {
   return lines.join("\n");
 }
 
-function firstRunDecision(state: SetupEntryState): SetupRouteDecision {
+function firstRunDecision(
+  state: SetupEntryState,
+  selections: FirstRunOnboardingSelections = {}
+): SetupRouteDecision {
   return {
     kind: "first-run-onboarding",
     title: "First-run setup",
@@ -120,6 +177,37 @@ function firstRunDecision(state: SetupEntryState): SetupRouteDecision {
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
+    firstRunPlanSession: createFirstRunPlanSession(selections),
+  };
+}
+
+function createFirstRunPlanSession(selections: FirstRunOnboardingSelections): FirstRunPlanSession {
+  const initialState = createFirstRunOnboardingState(selections, "welcome");
+  const plan = buildFirstRunOnboardingPlan({
+    currentStepId: initialState.currentStepId,
+    selections: initialState.selections,
+  });
+  const activeSteps = getActiveFirstRunSteps(plan);
+  const currentStep = activeSteps.find((step) => step.id === initialState.currentStepId) ?? activeSteps[0] ?? plan.steps[0];
+  if (currentStep === undefined) {
+    throw new Error("First-run onboarding plan has no steps.");
+  }
+
+  return {
+    kind: "first-run-plan-session",
+    initialState,
+    currentStep,
+    activeSteps,
+    selectedLocale: plan.selections.language ?? "en",
+    copyLocale: plan.copyLocale,
+    plan,
+    metadata: {
+      source: "setup-router",
+      planKind: plan.kind,
+      currentStepId: initialState.currentStepId,
+      totalStepCount: plan.steps.length,
+      activeStepCount: activeSteps.length,
+    },
   };
 }
 
@@ -133,6 +221,7 @@ function configuredDecision(state: SetupEntryState): SetupRouteDecision {
     warnings: state.warnings,
     blockers: [],
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -152,6 +241,7 @@ function configuredDegradedDecision(state: SetupEntryState): SetupRouteDecision 
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -172,6 +262,7 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -188,6 +279,24 @@ function untrustedConfiguredDecision(state: SetupEntryState): SetupRouteDecision
     warnings: [...new Set(["Workspace is not trusted.", ...state.warnings])],
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
+  };
+}
+
+function createSetupEditorPlanSession(state: SetupEntryState): SetupEditorPlanSession {
+  const plan = buildSetupEditorPlan(state);
+  return {
+    kind: "guided-setup-editor-session",
+    plan,
+    activeSections: plan.sections,
+    metadata: {
+      source: "setup-router",
+      planKind: plan.kind,
+      mode: plan.mode,
+      sourceState: plan.sourceState,
+      sectionCount: plan.sections.length,
+      actionCount: plan.actions.length,
+    },
   };
 }
 
