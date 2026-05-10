@@ -254,6 +254,14 @@ The represented end states are:
 
 `executeSetupApplyPlan()` provides a narrow future apply interface for tests and later implementation. It can consume structured verification reports, classify ready/degraded/blocked results, and produce launch handoff only for verified-ready or explicitly accepted degraded setup.
 
+## O8 Status
+
+`setup-copy.ts` now defines an onboarding-owned copy and bidi registry for the new setup architecture. It includes MVP English and Arabic setup copy for first-run setup, Guided Setup Editor, setup modules, review manifest, validation, and save/verify/launch handoff surfaces.
+
+The approved screenshot Arabic is treated as the O8 source of truth wherever it differs from earlier planning copy. Mixed copy key styles and exact placeholders are preserved, and Arabic technical tokens/placeholders are LTR-isolated through the existing bidi helper.
+
+O8 does not add prompt-card rendering, terminal layout changes, user-facing setup cutover, or full CLI localization claims. It only establishes the structured copy boundary needed by later rendering work.
+
 ## Next Step
 
-After review, the likely next checkpoint is O8 for the copy, bidi, and prompt-card-facing contracts that can render these structured plans without making them the user-facing setup path yet. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture and reviewed together.
+After review, the likely next checkpoint is O9 for prompt-card-facing rendering contracts that can consume structured setup copy and plans without making them the user-facing setup path yet. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, apply, copy, bidi, and rendering behavior are all covered by the new architecture and reviewed together.
