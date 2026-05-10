@@ -8,6 +8,7 @@ import {
   type FirstRunOnboardingState,
   type FirstRunOnboardingStep,
 } from "./first-run-plan.js";
+import { buildSetupEditorPlan, type SetupEditorPlan, type SetupEditorSection } from "./setup-editor-plan.js";
 
 export type SetupRouterSelection =
   | "entry"
@@ -59,6 +60,20 @@ export type FirstRunPlanSession = {
   };
 };
 
+export type SetupEditorPlanSession = {
+  readonly kind: "guided-setup-editor-session";
+  readonly plan: SetupEditorPlan;
+  readonly activeSections: readonly SetupEditorSection[];
+  readonly metadata: {
+    readonly source: "setup-router";
+    readonly planKind: SetupEditorPlan["kind"];
+    readonly mode: SetupEditorPlan["mode"];
+    readonly sourceState: SetupEditorPlan["sourceState"];
+    readonly sectionCount: number;
+    readonly actionCount: number;
+  };
+};
+
 export type SetupRouteDecision = {
   readonly kind: SetupRouteKind;
   readonly title: string;
@@ -69,6 +84,7 @@ export type SetupRouteDecision = {
   readonly blockers: readonly string[];
   readonly readOnly: boolean;
   readonly firstRunPlanSession?: FirstRunPlanSession;
+  readonly setupEditorPlanSession?: SetupEditorPlanSession;
 };
 
 export type CollectSetupRouteOptions = CollectSetupEntryStateOptions & {
@@ -205,6 +221,7 @@ function configuredDecision(state: SetupEntryState): SetupRouteDecision {
     warnings: state.warnings,
     blockers: [],
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -224,6 +241,7 @@ function configuredDegradedDecision(state: SetupEntryState): SetupRouteDecision 
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -244,6 +262,7 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
 }
 
@@ -260,6 +279,24 @@ function untrustedConfiguredDecision(state: SetupEntryState): SetupRouteDecision
     warnings: [...new Set(["Workspace is not trusted.", ...state.warnings])],
     blockers: state.blockers,
     readOnly: true,
+    setupEditorPlanSession: createSetupEditorPlanSession(state),
+  };
+}
+
+function createSetupEditorPlanSession(state: SetupEntryState): SetupEditorPlanSession {
+  const plan = buildSetupEditorPlan(state);
+  return {
+    kind: "guided-setup-editor-session",
+    plan,
+    activeSections: plan.sections,
+    metadata: {
+      source: "setup-router",
+      planKind: plan.kind,
+      mode: plan.mode,
+      sourceState: plan.sourceState,
+      sectionCount: plan.sections.length,
+      actionCount: plan.actions.length,
+    },
   };
 }
 

@@ -136,6 +136,28 @@ Configured, degraded, repair, and verify routes do not include a first-run plan 
 
 O3.5 does not change the current wizard, does not add prompt-card rendering, and does not write config.
 
+## O4 Status
+
+`buildSetupEditorPlan()` now exists as the Guided Setup Editor Architecture for existing-user reconfiguration and repair paths. It is the configured-user counterpart to the first-run plan and remains beside the current POC wizard.
+
+The setup editor plan models structured sections for:
+
+- existing config summary
+- primary provider/model route review and edit intent
+- credential status and credential edit/repair intent
+- security mode review/edit intent
+- workflow-learning review/edit intent
+- workspace trust review/repair intent
+- optional capability review/edit placeholders
+- read-only verification
+- exit/cancel
+
+The setup router now attaches a `setupEditorPlanSession` to configured-ready, configured-degraded, untrusted-workspace, and repair-first routes. First-run routes still use `firstRunPlanSession`, and verify routes remain read-only without setup editor or first-run sessions.
+
+O4 action objects are declarative drafts only. They do not write config, each scoped config patch intent declares `preserveUnrelatedConfig`, and missing credentials are represented as redacted environment-variable references without raw secret values. Broken config routes do not assume normal config editing is safe.
+
+Optional capabilities are represented as independent placeholders, workspace trust remains separate from provider readiness, and fallback setup is not reintroduced as `backupForMain`. If fallback setup is represented later, it should continue to use the shared `model.fallbacks` primitive.
+
 ## Next Step
 
-Build O4: Guided Setup Editor Architecture for existing-user reconfiguration and repair paths, still beside the POC. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
+After review, choose the next phase label and scope. The likely next checkpoint is O4.5: Save/apply boundary for setup drafts. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
