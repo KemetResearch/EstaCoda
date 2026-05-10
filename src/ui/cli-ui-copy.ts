@@ -41,6 +41,21 @@ export interface CliUiChromeCopy {
   readonly allowAlways: string;
   readonly deny: string;
 
+  // Tool activity rail (Pass 11A+)
+  readonly preparing: string;
+  readonly read: string;
+  readonly write: string;
+  readonly run: string;
+  readonly fetch: string;
+  readonly review: string;
+  readonly memo: string;
+  readonly delegate: string;
+  readonly config: string;
+  readonly media: string;
+  readonly plan: string;
+  readonly failed: string;
+  readonly gated: string;
+
   // Slash menu (Pass 13+)
   readonly commands: string;
   readonly typeToFilter: string;
@@ -76,6 +91,20 @@ const en: CliUiChromeCopy = {
   allowAlways: "Always allow",
   deny: "Deny",
 
+  preparing: "preparing",
+  read: "read",
+  write: "write",
+  run: "run",
+  fetch: "fetch",
+  review: "review",
+  memo: "memo",
+  delegate: "delegate",
+  config: "config",
+  media: "media",
+  plan: "plan",
+  failed: "failed",
+  gated: "gated",
+
   commands: "Commands",
   typeToFilter: "Type / then a command. Keep typing to filter.",
 };
@@ -110,6 +139,20 @@ const ar: CliUiChromeCopy = {
   allowSession: "السماح لهذه الجلسة",
   allowAlways: "السماح دائماً",
   deny: "رفض",
+
+  preparing: "تحضير",
+  read: "قراءة",
+  write: "كتابة",
+  run: "تشغيل",
+  fetch: "جلب",
+  review: "مراجعة",
+  memo: "تدوين",
+  delegate: "تفويض",
+  config: "إعداد",
+  media: "وسائط",
+  plan: "تخطيط",
+  failed: "فشل",
+  gated: "محجوب",
 
   commands: "الأوامر",
   typeToFilter: "اكتب / ثم أمر. استمر في الكتابة للتصفية.",

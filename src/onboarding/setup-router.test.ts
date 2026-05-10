@@ -113,6 +113,127 @@ describe("routeSetupEntryState", () => {
     expect(decision.readOnly).toBe(true);
   });
 
+  it("includes an initial first-run plan session for new-user routes", () => {
+    const decision = routeSetupEntryState(state("new-user"));
+    const session = decision.firstRunPlanSession;
+
+    expect(decision.kind).toBe("first-run-onboarding");
+    expect(session?.kind).toBe("first-run-plan-session");
+    expect(session?.initialState.currentStepId).toBe("welcome");
+    expect(session?.currentStep.id).toBe("welcome");
+    expect(session?.selectedLocale).toBe("en");
+    expect(session?.copyLocale).toBe("en");
+    expect(session?.metadata).toEqual({
+      source: "setup-router",
+      planKind: "first-run-onboarding-plan",
+      currentStepId: "welcome",
+      totalStepCount: session?.plan.steps.length,
+      activeStepCount: session?.activeSteps.length,
+    });
+  });
+
+  it("respects local provider credential skip when first-run selections are seeded", () => {
+    const decision = routeSetupEntryState(state("new-user"), {
+      firstRunSelections: { primaryProvider: "local", primaryModel: "ollama/auto" },
+    });
+    const activeStepIds = decision.firstRunPlanSession?.activeSteps.map((candidate) => candidate.id);
+
+    expect(activeStepIds).not.toContain("primary-credential");
+    expect(decision.firstRunPlanSession?.plan.selections.primaryCredential).toEqual({ kind: "none" });
+  });
+
+  it("seeds Arabic locale into the first-run plan session", () => {
+    const decision = routeSetupEntryState(state("new-user"), {
+      firstRunSelections: { language: "ar" },
+    });
+
+    expect(decision.firstRunPlanSession?.selectedLocale).toBe("ar");
+    expect(decision.firstRunPlanSession?.copyLocale).toBe("ar");
+    expect(decision.firstRunPlanSession?.plan.steps.find((candidate) => candidate.id === "workspace-root")?.copyLocale).toBe("ar");
+  });
+
+  it("keeps configured, degraded, repair, and verify routes without first-run sessions by default", () => {
+    const routeKinds: SetupEntryStateKind[] = [
+      "configured-ready",
+      "configured-degraded",
+      "partial-provider",
+      "missing-secret",
+      "broken-config",
+      "state-not-writable",
+      "untrusted-workspace",
+    ];
+
+    for (const kind of routeKinds) {
+      expect(routeSetupEntryState(state(kind)).firstRunPlanSession).toBeUndefined();
+    }
+    expect(routeSetupEntryState(state("new-user"), { selection: "verify" }).firstRunPlanSession).toBeUndefined();
+  });
+
+  it("attaches setup editor sessions to configured, degraded, and repair routes", () => {
+    const routeKinds: SetupEntryStateKind[] = [
+      "configured-ready",
+      "configured-degraded",
+      "partial-provider",
+      "missing-secret",
+      "broken-config",
+      "state-not-writable",
+      "untrusted-workspace",
+    ];
+
+    for (const kind of routeKinds) {
+      const decision = routeSetupEntryState(state(kind));
+      expect(decision.setupEditorPlanSession?.kind).toBe("guided-setup-editor-session");
+      expect(decision.setupEditorPlanSession?.metadata.sourceState).toBe(kind);
+      expect(decision.firstRunPlanSession).toBeUndefined();
+    }
+  });
+
+  it("keeps verify routes read-only and free of setup editor sessions", () => {
+    const decision = routeSetupEntryState(state("configured-ready"), { selection: "verify" });
+
+    expect(decision.kind).toBe("verify-readonly");
+    expect(decision.setupEditorPlanSession).toBeUndefined();
+    expect(decision.firstRunPlanSession).toBeUndefined();
+    expect(decision.actions.every((action) => action.mutatesConfig === false)).toBe(true);
+  });
+
+  it("can attach first-run plan sessions for explicit internal run-first-run selections", () => {
+    const decision = routeSetupEntryState(state("configured-ready"), {
+      selection: "run-first-run",
+      firstRunSelections: { language: "ar" },
+    });
+
+    expect(decision.kind).toBe("first-run-onboarding");
+    expect(decision.firstRunPlanSession?.currentStep.id).toBe("welcome");
+    expect(decision.firstRunPlanSession?.copyLocale).toBe("ar");
+  });
+
+  it("does not introduce terminal rendering fields in the first-run plan session", () => {
+    const decision = routeSetupEntryState(state("new-user"), {
+      firstRunSelections: { language: "ar", primaryProvider: "local" },
+    });
+    const session = decision.firstRunPlanSession;
+    const json = JSON.stringify(session);
+
+    expect(session).toBeDefined();
+    expect(json).not.toContain("\u001b[");
+    expect(json).not.toContain("Press Enter");
+    expect(json).not.toContain("Use ↑/↓");
+    assertNoRenderingFields(session);
+  });
+
+  it("does not introduce terminal rendering fields in setup editor sessions", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    const session = decision.setupEditorPlanSession;
+    const json = JSON.stringify(session);
+
+    expect(session).toBeDefined();
+    expect(json).not.toContain("\u001b[");
+    expect(json).not.toContain("Press Enter");
+    expect(json).not.toContain("Use ↑/↓");
+    assertNoRenderingFields(session);
+  });
+
   it("adds an explicit trust warning for untrusted workspaces", () => {
     const decision = routeSetupEntryState(state("untrusted-workspace"));
 
@@ -153,6 +274,15 @@ describe("collectSetupRoute", () => {
     expect(decision.kind).toBe("first-run-onboarding");
     expect(decision.state.kind).toBe("new-user");
     expect(decision.actions[0]?.id).toBe("run-guided-onboarding");
+    expect(decision.firstRunPlanSession?.currentStep.id).toBe("welcome");
     expect(existsSync(join(homeDir, ".estacoda", "config.json"))).toBe(false);
   });
 });
+
+function assertNoRenderingFields(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  for (const [key, nested] of Object.entries(value)) {
+    expect(["title", "body", "render", "terminal", "promptCard"].includes(key)).toBe(false);
+    assertNoRenderingFields(nested);
+  }
+}

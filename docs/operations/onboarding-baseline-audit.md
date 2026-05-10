@@ -94,6 +94,138 @@ It reuses structured verification and provider diagnostics, reports exact config
 
 The router does not replace `estacoda setup` yet and does not write config. Existing noninteractive setup flags remain on the current CLI path.
 
+## O3 Status
+
+`buildFirstRunOnboardingPlan()` now exists as the first-run onboarding plan/state layer beside the current POC wizard. It models stable step primitives for:
+
+- `welcome`
+- `interface-language`
+- `workspace-root`
+- `workspace-trust`
+- `primary-provider`
+- `primary-model`
+- `primary-credential`
+- `security-mode`
+- `workflow-learning`
+- `optional-capabilities`
+- `review`
+- `save`
+- `verify`
+- `launch`
+
+Each step exposes structured metadata only: step id, copy key, required flag, sensitive surface, inputs, outputs, validation rules, skip rules, and next-step behavior. The layer has no terminal rendering and does not write config.
+
+O3 also adds pure state helpers for advancing across active steps. Language selection remains early, Arabic selection changes subsequent onboarding-owned copy context to Arabic, workspace trust remains explicit, local providers skip hosted credential collection, hosted providers require a credential reference, and optional capabilities remain independently skippable without degrading core setup.
+
+Fallback setup is not reintroduced as the removed backup-provider POC path. The only fallback representation in the plan layer is an optional future shared `model.fallbacks` primitive.
+
+## O3.5 Status
+
+The setup router now connects first-run route decisions to the first-run plan through a structured `firstRunPlanSession` seam. New-user routes produce an initial plan session with:
+
+- initial state
+- current step
+- active steps
+- selected locale
+- copy locale
+- plan metadata
+
+The initial current step is `welcome`. Seeded first-run selections flow into the session, including Arabic copy locale selection and local-provider hosted credential skipping.
+
+Configured, degraded, repair, and verify routes do not include a first-run plan session by default. An explicit internal `run-first-run` selection can request a first-run plan session without cutting over user-facing setup paths.
+
+O3.5 does not change the current wizard, does not add prompt-card rendering, and does not write config.
+
+## O4 Status
+
+`buildSetupEditorPlan()` now exists as the Guided Setup Editor Architecture for existing-user reconfiguration and repair paths. It is the configured-user counterpart to the first-run plan and remains beside the current POC wizard.
+
+The setup editor plan models structured sections for:
+
+- existing config summary
+- primary provider/model route review and edit intent
+- credential status and credential edit/repair intent
+- security mode review/edit intent
+- workflow-learning review/edit intent
+- workspace trust review/repair intent
+- optional capability review/edit placeholders
+- read-only verification
+- exit/cancel
+
+The setup router now attaches a `setupEditorPlanSession` to configured-ready, configured-degraded, untrusted-workspace, and repair-first routes. First-run routes still use `firstRunPlanSession`, and verify routes remain read-only without setup editor or first-run sessions.
+
+O4 action objects are declarative drafts only. They do not write config, each scoped config patch intent declares `preserveUnrelatedConfig`, and missing credentials are represented as redacted environment-variable references without raw secret values. Broken config routes do not assume normal config editing is safe.
+
+Optional capabilities are represented as independent placeholders, workspace trust remains separate from provider readiness, and fallback setup is not reintroduced as `backupForMain`. If fallback setup is represented later, it should continue to use the shared `model.fallbacks` primitive.
+
+## O4.5 Status
+
+`buildFirstRunDraftBundle()` and `buildSetupEditorDraftBundle()` now define the save/apply boundary for setup drafts. They convert first-run plan sessions and guided setup editor sessions into reviewable setup draft bundles without writing config, trust stores, or state files.
+
+Drafts cover:
+
+- provider/model route changes
+- credential reference and repair intents
+- security mode changes
+- workflow-learning changes
+- workspace trust grants/repairs
+- optional capability enable/disable/configure intents
+- read-only verification requests
+- launch handoff preference
+
+Each draft has a stable id, kind, source step or section/action id, risk surface, target path or config scope where applicable, redacted review metadata, dry-run apply intent metadata, review requirement, and blockers/warnings. Scoped config drafts declare `preserveUnrelatedConfig`.
+
+Credential drafts expose environment variable names only and do not include raw secret values. Workspace trust drafts include the exact workspace root and trust store path but do not grant trust. Verification drafts remain read-only. Broken config produces diagnostic blocker drafts instead of unsafe normal config patch drafts.
+
+Fallback setup is still not reintroduced as `backupForMain`; future fallback representation remains limited to a shared `model.fallbacks` intent.
+
+## O5 Status
+
+`setup-modules.ts` now defines modular setup capability contracts that plug into the O4.5 setup draft boundary. Each module exposes structured `detect()`, `configure()`, `review()`, `toDrafts()`, and read-only `verify()` behavior without terminal rendering or direct mutation.
+
+The initial module set covers:
+
+- primary provider/model route
+- credential references
+- workspace trust
+- security mode
+- workflow learning
+- Telegram
+- voice
+- vision/image generation
+- browser
+
+Modules produce `SetupDraft` objects with a `setup-module` source and can be grouped into a `setup-module-session` draft bundle. Provider setup remains separate from optional capabilities, local providers skip hosted credential drafts, hosted providers require credential environment-variable references, and workspace trust remains separate from provider readiness.
+
+Optional modules are independently skippable. Telegram exposes remote-control identity constraints without printing bot token values. Browser setup records that auto-launch may be requested but does not launch anything during setup planning. Voice and vision/image generation expose provider, model, and environment-variable references without raw hosted secrets. Verification remains read-only.
+
+Broken config contexts produce diagnostic blocker drafts instead of normal config patch drafts. Fallback setup is still not represented as `backupForMain`; future fallback setup remains limited to the shared `model.fallbacks` intent.
+
+## O6 Status
+
+`buildSetupReviewManifest()` now assembles first-run, guided setup editor, and setup-module draft bundles into a structured pre-save review manifest. This is the trust boundary before any future apply/save implementation.
+
+The manifest groups review lines for:
+
+- files to write or update
+- secret references to store
+- workspace trust grants or repairs
+- provider/model/network changes
+- enabled optional capabilities
+- remote-control surfaces and identity constraints
+- security mode
+- workflow-learning mode
+- read-only verification checks
+- launch handoff preference
+- blockers
+- warnings
+
+Each manifest line has a stable id, section, source draft ids, copy and summary keys, risk surface, target path or config scope where applicable, redacted review metadata, severity, read-only status, blockers, and warnings. Scoped config lines preserve unrelated config by design.
+
+Manifest creation is pure. It does not write config, trust stores, or state files. Environment-variable names may appear, but raw secret values are removed from review metadata. Exact config, workspace, and trust-store paths appear where relevant. Workspace trust grants remain explicit. Telegram remote-control setup surfaces allowed identity constraints without bot token output. Browser setup records intent without auto-launching.
+
+Broken config bundles produce blocker manifest lines and suppress unsafe normal config write lines. Verification remains read-only. Skipped optional capabilities are omitted from the main review unless a later renderer needs explicit skipped items. `backupForMain` remains absent; future fallback setup remains limited to the shared `model.fallbacks` intent.
+
 ## Next Step
 
-Build O3: the first-run onboarding plan/state machine as structured steps, still beside the POC. Defer user-facing cutover until new-user, existing-user, partial-config, repair, verify, and launch behavior are all covered.
+After review, the likely next checkpoint is O7: define the dry-run apply/save planner that consumes approved manifest/draft data and prepares write plans without yet cutting over user-facing setup. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture.

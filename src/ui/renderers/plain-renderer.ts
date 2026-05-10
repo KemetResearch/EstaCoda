@@ -2,9 +2,10 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, padVisibleAlign } from "./layout.js";
+import { measureTextWidth, padVisibleAlign, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
+import { isolateLtr } from "../../ui/bidi.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -27,6 +28,8 @@ import type {
   ShortcutHintRailViewModel,
   UserPromptRailViewModel,
   ViewModel,
+  ToolActivityRailViewModel,
+  ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -73,9 +76,10 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderUserPromptRail(viewModel);
     case "activeTurnSpinner":
       return renderActiveTurnSpinner(viewModel, locale);
+    case "toolActivityRail":
+      return renderToolActivityRail(viewModel, locale);
     case "startupDashboard":
     case "startupRuntime":
-    case "toolActivityRail":
     case "fileChangePreview":
     case "slashMenu":
       return `[unsupported view model: ${viewModel.kind}]`;
@@ -407,9 +411,52 @@ function progressStatusMarker(status: ProgressContextRailViewModel["steps"][numb
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────
+// Tool Activity Rail
+// ──────────────────────────────────────
+
+export function renderToolActivityRail(vm: ToolActivityRailViewModel, locale?: UiLocale): string {
+  if (vm.events.length === 0) {
+    return "No activity.";
+  }
+  const copy = chromeCopy(locale ?? "en");
+  const lines = vm.events.map((event) => {
+    const marker = toolActivityStatusMarker(event.status);
+    const labelKey = event.label ?? "run";
+    const label = (copy as unknown as Record<string, string>)[labelKey] ?? labelKey;
+    const targetRaw = event.target ?? "";
+    const target = locale === "ar" && targetRaw.length > 0 ? isolateLtr(targetRaw) : targetRaw;
+    const elapsed = event.elapsedMs !== undefined ? formatDuration(event.elapsedMs) : "";
+    const parts: string[] = [`| ${marker} ${label}`];
+    if (target.length > 0) {
+      parts.push(target);
+    }
+    if (elapsed.length > 0) {
+      parts.push(elapsed);
+    }
+    return truncateVisible(parts.join("  "), 120);
+  });
+  return lines.join("\n");
+}
+
+function toolActivityStatusMarker(status: ToolActivityRailEvent["status"]): string {
+  switch (status) {
+    case "pending":
+      return "[ ]";
+    case "running":
+      return "[>]";
+    case "done":
+      return "[x]";
+    case "failed":
+      return "[-]";
+    case "gated":
+      return "[?]";
+  }
+}
+
+// ──────────────────────────────────────
 // Picker
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────
 
 export function renderPicker(vm: PickerViewModel): string {
   const lines: string[] = [vm.title];

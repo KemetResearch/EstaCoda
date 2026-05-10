@@ -571,3 +571,121 @@ exports[`tool-activity Progress context rail renders idle in narrow width: rail-
 "\x1B[1mTurn progress\x1B[0m
 ◷ 120s  ⧖ idle"
 `;
+
+exports[`tool-activity Tool activity rail renders empty in plain: tool-rail-empty-plain 1`] = `"No activity."`;
+
+exports[`tool-activity Tool activity rail renders single running in plain: tool-rail-running-plain 1`] = `"| [>] preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in plain: tool-rail-done-plain 1`] = `"| [x] read  /workspace/Stage-9B-plan.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders single failed in plain: tool-rail-failed-plain 1`] = `"| [-] run  npm test  500ms"`;
+
+exports[`tool-activity Tool activity rail renders single gated in plain: tool-rail-gated-plain 1`] = `"| [?] write  src/index.ts  50ms"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in plain: tool-rail-mixed-plain 1`] = `
+"| [x] read  /workspace/Stage-9B-plan.md  1.4s
+| [>] preparing  /workspace/Stage-9B-plan.md
+| [-] run  npm test  500ms
+| [x] review  diff  1.2s"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in plain: tool-rail-long-path-plain 1`] = `"| [x] read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders empty in standard dark: tool-rail-empty-standard dark 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in standard dark: tool-rail-running-standard dark 1`] = `"│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in standard dark: tool-rail-done-standard dark 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in standard dark: tool-rail-failed-standard dark 1`] = `"│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in standard dark: tool-rail-gated-standard dark 1`] = `"│ \x1B[38;2;255;180;84m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in standard dark: tool-rail-mixed-standard dark 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in standard dark: tool-rail-long-path-standard dark 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders empty in standard light: tool-rail-empty-standard light 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in standard light: tool-rail-running-standard light 1`] = `"│ \x1B[38;2;0;87;217m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in standard light: tool-rail-done-standard light 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in standard light: tool-rail-failed-standard light 1`] = `"│ \x1B[38;2;198;40;40m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in standard light: tool-rail-gated-standard light 1`] = `"│ \x1B[38;2;180;83;9m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in standard light: tool-rail-mixed-standard light 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+│ \x1B[38;2;0;87;217m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+│ \x1B[38;2;198;40;40m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in standard light: tool-rail-long-path-standard light 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders empty in no color: tool-rail-empty-no color 1`] = `"No activity."`;
+
+exports[`tool-activity Tool activity rail renders single running in no color: tool-rail-running-no color 1`] = `"│ 𓇠  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in no color: tool-rail-done-no color 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders single failed in no color: tool-rail-failed-no color 1`] = `"│ ✗  run  npm test  500ms"`;
+
+exports[`tool-activity Tool activity rail renders single gated in no color: tool-rail-gated-no color 1`] = `"│ ⚠  write  src/index.ts  50ms"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in no color: tool-rail-mixed-no color 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s
+│ 𓇠  preparing  /workspace/Stage-9B-plan.md
+│ ✗  run  npm test  500ms
+│ ◇  review  diff  1.2s"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in no color: tool-rail-long-path-no color 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders empty in no Unicode: tool-rail-empty-no Unicode 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in no Unicode: tool-rail-running-no Unicode 1`] = `"| \x1B[38;2;90;172;255m[>]\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in no Unicode: tool-rail-done-no Unicode 1`] = `"| R  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in no Unicode: tool-rail-failed-no Unicode 1`] = `"| [-]  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in no Unicode: tool-rail-gated-no Unicode 1`] = `"| [?]  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in no Unicode: tool-rail-mixed-no Unicode 1`] = `
+"| R  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+| \x1B[38;2;90;172;255m[>]\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+| [-]  run  npm test  \x1B[2m500ms\x1B[0m
+| S  review  diff  \x1B[2m1.2s\x1B[0m"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in no Unicode: tool-rail-long-path-no Unicode 1`] = `"| R  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders empty in narrow width: tool-rail-empty-narrow width 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in narrow width: tool-rail-running-narrow width 1`] = `"│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-p..."`;
+
+exports[`tool-activity Tool activity rail renders single done in narrow width: tool-rail-done-narrow width 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.m..."`;
+
+exports[`tool-activity Tool activity rail renders single failed in narrow width: tool-rail-failed-narrow width 1`] = `"│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in narrow width: tool-rail-gated-narrow width 1`] = `"│ \x1B[38;2;255;180;84m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in narrow width: tool-rail-mixed-narrow width 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.m...
+│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-p...
+│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
+`;
+
+exports[`tool-activity Tool activity rail renders long path truncated in narrow width: tool-rail-long-path-narrow width 1`] = `"│ ◰  read  /workspace/very/long/path/..."`;
+
+exports[`tool-activity Tool activity rail renders Arabic labels with LTR-isolated technical tokens: tool-rail-arabic-standard 1`] = `"│ ◆  كتابة  ⁦/workspace/Stage-9B-plan.md⁩  \x1B[2m1.2s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders Arabic in plain mode with LTR-isolated tokens: tool-rail-arabic-plain 1`] = `"| [x] كتابة  ⁦/workspace/Stage-9B-plan.md⁩  1.2s"`;
