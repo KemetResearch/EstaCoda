@@ -122,9 +122,9 @@ export class StandardRenderer {
         return this.renderToolActivityRail(vm);
       case "fileChangePreview":
         return this.renderFileChangePreview(vm);
-      case "startupDashboard":
-      case "startupRuntime":
       case "slashMenu":
+        return this.renderSlashMenu(vm);
+      case "startupRuntime":
         return `[unsupported view model: ${vm.kind}]`;
       default: {
         const _exhaustive: never = vm;
@@ -173,6 +173,18 @@ export class StandardRenderer {
 
   #action(text: string): string {
     return this.#color(text, this.#tokens.contract.palette.action);
+  }
+
+  #primary(text: string): string {
+    return this.#color(text, this.#tokens.contract.text.primary);
+  }
+
+  #secondary(text: string): string {
+    return this.#color(text, this.#tokens.contract.text.secondary);
+  }
+
+  #muted(text: string): string {
+    return this.#color(text, this.#tokens.contract.text.muted);
   }
 
   #caution(text: string): string {
@@ -781,8 +793,56 @@ export class StandardRenderer {
     return lines.join("\n");
   }
 
+  renderSlashMenu(vm: import("../../contracts/view-model.js").SlashMenuViewModel): string {
+    const visibleOptions = vm.options.slice(0, 6);
+    if (visibleOptions.length === 0) {
+      return this.#muted(this.#copy.slashNoMatches(this.#technical(vm.query)));
+    }
+
+    const markerWidth = 2;
+    const commandWidth = Math.min(
+      18,
+      Math.max(...visibleOptions.map((option) => measureVisibleWidth(this.#technical(option.label))))
+    );
+    const gap = 4;
+    const descriptionWidth = Math.max(8, this.#capabilities.terminalWidth - markerWidth - commandWidth - gap);
+
+    return visibleOptions
+      .map((option, index) => {
+        const selected = index === vm.selectedIndex;
+        const marker = selected ? `${this.#action(">")} ` : "  ";
+        const commandText = this.#technical(option.label);
+        const command = padVisibleEnd(selected ? this.#action(commandText) : this.#primary(commandText), commandWidth);
+        const description = truncateVisible(
+          this.#secondary(this.#slashDescription(option.id, option.description ?? "")),
+          descriptionWidth
+        );
+        return `${marker}${command}${" ".repeat(gap)}${description}`;
+      })
+      .join("\n");
+  }
+
   #technical(value: string): string {
     return this.#locale === "ar" ? isolateLtr(value) : value;
+  }
+
+  #slashDescription(commandName: string, fallback: string): string {
+    switch (commandName) {
+      case "help":
+        return this.#copy.slashCommandHelpDescription;
+      case "status":
+        return this.#copy.slashCommandStatusDescription;
+      case "model":
+        return this.#copy.slashCommandModelDescription;
+      case "tools":
+        return this.#copy.slashCommandToolsDescription;
+      case "skills":
+        return this.#copy.slashCommandSkillsDescription;
+      case "exit":
+        return this.#copy.slashCommandExitDescription;
+      default:
+        return fallback;
+    }
   }
 
   #modelRoute(model: { readonly provider: string; readonly id: string }): string {

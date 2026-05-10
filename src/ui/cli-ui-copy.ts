@@ -92,6 +92,13 @@ export interface CliUiChromeCopy {
   // Slash menu (Pass 13+)
   readonly commands: string;
   readonly typeToFilter: string;
+  readonly slashNoMatches: (query: string) => string;
+  readonly slashCommandHelpDescription: string;
+  readonly slashCommandStatusDescription: string;
+  readonly slashCommandModelDescription: string;
+  readonly slashCommandToolsDescription: string;
+  readonly slashCommandSkillsDescription: string;
+  readonly slashCommandExitDescription: string;
 }
 
 const en: CliUiChromeCopy = {
@@ -171,6 +178,13 @@ const en: CliUiChromeCopy = {
 
   commands: "Commands",
   typeToFilter: "Type / then a command. Keep typing to filter.",
+  slashNoMatches: (query) => `No slash commands match "${query}".`,
+  slashCommandHelpDescription: "Show command help",
+  slashCommandStatusDescription: "Show runtime, model, context, and session status",
+  slashCommandModelDescription: "Show or switch model",
+  slashCommandToolsDescription: "Browse runtime tools",
+  slashCommandSkillsDescription: "Browse skills",
+  slashCommandExitDescription: "Exit session",
 };
 
 const ar: CliUiChromeCopy = {
@@ -251,6 +265,13 @@ const ar: CliUiChromeCopy = {
 
   commands: "الأوامر",
   typeToFilter: "اكتب / ثم أمر. استمر في الكتابة للتصفية.",
+  slashNoMatches: (query) => `لا توجد أوامر تطابق ${isolateLtr(query)}.`,
+  slashCommandHelpDescription: "اعرض مساعدة الأوامر",
+  slashCommandStatusDescription: "اعرض حالة التشغيل والنموذج والسياق والجلسة",
+  slashCommandModelDescription: "اعرض النموذج أو غيّره",
+  slashCommandToolsDescription: "استعرض أدوات التشغيل",
+  slashCommandSkillsDescription: "استعرض المهارات",
+  slashCommandExitDescription: "غادر الجلسة",
 };
 
 export const cliUiChromeCopy: Record<UiLocale, CliUiChromeCopy> = {

@@ -9126,7 +9126,7 @@ assert(renderedSessionLoop.includes("Type a message"), "expected session loop in
 assert(renderedSessionLoop.includes("EstaCoda session commands"), "expected session /help output");
 assert(renderedSessionLoop.includes("Tools:"), "expected session /tools output");
 assert(renderedSessionLoop.includes("Browser backend: mock"), "expected session /browser status output");
-assert(renderedSessionLoop.includes("Commands"), "expected session slash menu commands");
+assert(!renderedSessionLoop.includes("> /help"), "expected bare slash completion to stay out of non-TTY transcript");
 assert(renderedSessionLoop.includes("Skills"), "expected session slash menu skills");
 assert(renderedSessionLoop.includes("/ascii-video"), "expected session slash menu to show ascii-video");
 assert(renderedSessionLoop.includes("/reload-mcp"), "expected session command surface to include /reload-mcp");

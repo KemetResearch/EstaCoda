@@ -1,11 +1,12 @@
 // v0.95 Prompt Chrome Controller — Pass 7B persistent rails.
 // Bounded prompt chrome using ANSI cursor control.
-// Disabled for non-TTY, CI, dumb, plain, or no-color terminals.
+// Disabled for non-TTY, CI, dumb, or plain terminals.
 
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type {
   ActiveTurnSpinnerViewModel,
   SessionStatusRailViewModel,
+  SlashMenuViewModel,
   ShortcutHintRailViewModel,
   ViewModel,
 } from "../contracts/view-model.js";
@@ -15,6 +16,7 @@ export interface PromptChromeState {
   readonly statusRail?: SessionStatusRailViewModel;
   readonly shortcutRail?: ShortcutHintRailViewModel;
   readonly activeSpinner?: ActiveTurnSpinnerViewModel;
+  readonly slashMenu?: SlashMenuViewModel;
 }
 
 export interface PromptChromeControllerOptions {
@@ -185,6 +187,10 @@ export class PromptChromeController {
       rendered.push(...this.#boundedLines(this.#renderViewModel(state.activeSpinner), width));
     }
 
+    if (state.slashMenu !== undefined) {
+      rendered.push(...this.#boundedLines(this.#renderViewModel(state.slashMenu), width));
+    }
+
     return rendered;
   }
 
@@ -197,5 +203,5 @@ export class PromptChromeController {
 }
 
 function detectEnabled(caps: TerminalCapabilities): boolean {
-  return caps.isTTY && !caps.isCI && !caps.isDumb && caps.supportsColor;
+  return caps.isTTY && !caps.isCI && !caps.isDumb;
 }

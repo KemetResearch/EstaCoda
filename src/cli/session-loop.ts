@@ -10,7 +10,7 @@ import { storeCapabilitySecret, type SetupNeededMetadata } from "../setup/capabi
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildToolsMenuViewModel } from "./slash-menu.js";
+import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
@@ -30,7 +30,7 @@ import {
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
-import type { ToolActivityRailEvent } from "../contracts/view-model.js";
+import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 
@@ -149,7 +149,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     output,
     capabilities: renderer.capabilities,
     renderViewModel: (vm) => renderer.render(vm),
-    enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb && renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
+    enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
   });
   const onSigint = () => {
     currentAnimator?.cancel();
@@ -168,6 +168,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.once("SIGINT", onSigint);
 
   try {
+    let pendingSlashCompletion: SlashMenuViewModel | undefined;
     const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
     const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
     output.write(`${startupText}\n\n`);
@@ -180,7 +181,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       if (chrome.enabled) {
-        chrome.renderChrome(buildPromptChromeState(runtime, renderer));
+        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -196,15 +197,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text.length === 0) {
+        pendingSlashCompletion = undefined;
         continue;
       }
 
       if (text === "/exit") {
+        pendingSlashCompletion = undefined;
         output.write("Ending EstaCoda session.\n");
         return;
       }
 
       if (text.startsWith("/")) {
+        const [submittedCommand = ""] = text.slice(1).trim().split(/\s+/u);
+        const resolvedSubmittedCommand = commandRegistry.resolve(submittedCommand);
+        if (
+          submittedCommand.length === 0 ||
+          resolvedSubmittedCommand === undefined ||
+          !isImplementedSlashCommand(resolvedSubmittedCommand.name)
+        ) {
+          pendingSlashCompletion = buildSlashCompletionViewModel(runtime, text);
+          continue;
+        }
+
+        pendingSlashCompletion = undefined;
         const shouldExit = await handleSlashCommand({
           text,
           runtime,
@@ -232,6 +247,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         continue;
       }
+
+      pendingSlashCompletion = undefined;
 
       // Render submitted non-slash user prompts as lightweight transcript rails
       const userPromptRail = buildUserPromptRailViewModel({ text });
@@ -1344,7 +1361,8 @@ function truncateSingleLine(value: string, maxLength: number): string {
 function buildPromptChromeState(
   runtime: Runtime,
   renderer: SessionRenderer,
-  activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel
+  activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
+  slashMenu?: SlashMenuViewModel
 ) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
   const modelId = modelInfo?.kind === "kv"
@@ -1363,6 +1381,7 @@ function buildPromptChromeState(
         : undefined,
     }),
     activeSpinner,
+    slashMenu,
   };
 }
 

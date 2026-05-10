@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
-import { buildSessionStatusRailViewModel, buildShortcutHintRailViewModel } from "../ui/view-models/builders.js";
+import { buildSessionStatusRailViewModel, buildShortcutHintRailViewModel, buildSlashMenuViewModel, slashMenuOption } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 
@@ -39,6 +39,7 @@ function shortcut(text = "/help · /tools") {
 function renderViewModel(vm: ViewModel): string {
   if (vm.kind === "sessionStatusRail") return vm.modelLabel ?? "";
   if (vm.kind === "shortcutHintRail") return vm.hints?.[0]?.description ?? "";
+  if (vm.kind === "slashMenu") return vm.options.map((option) => `${option.label} ${option.description ?? ""}`.trim()).join("\n");
   return `[unsupported view model: ${vm.kind}]`;
 }
 
@@ -71,10 +72,10 @@ describe("PromptChromeController — capability gating", () => {
     expect(ctrl.enabled).toBe(false);
   });
 
-  it("is disabled for no-color", () => {
+  it("stays enabled for no-color TTY fallback", () => {
     const { stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ supportsColor: false }));
-    expect(ctrl.enabled).toBe(false);
+    expect(ctrl.enabled).toBe(true);
   });
 
   it("respects explicit enabled override", () => {
@@ -113,6 +114,20 @@ describe("PromptChromeController — chrome lifecycle", () => {
     const ctrl = makeController(stream);
     ctrl.renderChrome({ statusRail: rail("status"), shortcutRail: shortcut("/help · Ctrl+C exit") });
     expect(chunks).toEqual(["status\n/help · Ctrl+C exit\n"]);
+  });
+
+  it("renders slash completion rows as bounded chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({
+      statusRail: rail("status"),
+      slashMenu: buildSlashMenuViewModel({
+        query: "/",
+        options: [slashMenuOption("help", "/help", { description: "Show command help" })],
+        selectedIndex: 0,
+      }),
+    });
+    expect(chunks).toEqual(["status\n/help Show command help\n"]);
   });
 
   it("trims rail output to terminal width", () => {

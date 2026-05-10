@@ -187,6 +187,132 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("\u25b8 /help");
     expect(rendered).not.toContain("> /help");
   });
+
+  it("renders slash completion chrome for submitted slash prefix without table transcript", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/", "hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("/help");
+    expect(rendered).toContain("Show command help");
+    expect(rendered).not.toContain("Commands");
+    expect(rendered).not.toContain("Name  Description");
+    const promptIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("hello"));
+    expect(promptIndexInOutput).toBeGreaterThanOrEqual(0);
+    expect(outputChunks.slice(promptIndexInOutput).join("")).not.toContain("Show command help");
+  });
+
+  it("filters slash completion chrome for submitted partial slash input", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/mo", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("/model");
+    expect(rendered).toContain("Show or switch model");
+    expect(rendered).not.toContain("Show command help");
+  });
+
+  it("renders slash completion empty state for unknown slash input", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/zzzz", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(outputChunks.join("")).toContain('No slash commands match "/zzzz".');
+  });
+
+  it("keeps slash completion out of plain non-TTY transcript fallback", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      capabilities: { ...interactiveCaps(), isTTY: false, supportsColor: false, supportsTrueColor: false, supportsUnicode: false },
+      prompt: Object.assign(
+        async () => {
+          const values = ["/", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).not.toContain("Show command help");
+    expect(rendered).not.toContain("Commands");
+  });
 });
 
 function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {

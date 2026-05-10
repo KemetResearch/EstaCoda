@@ -101,6 +101,15 @@ function hasAnsi(text: string): boolean {
   return /\x1b\[/.test(text);
 }
 
+function hexToRgbForTest(hex: string): { r: number; g: number; b: number } {
+  const value = hex.replace(/^#/u, "");
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+}
+
 describe("StandardRenderer — dispatch", () => {
   it("renders all ViewModel kinds without throwing", () => {
     const r = renderer("dark", fullCaps());
@@ -1119,6 +1128,28 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const out = r.render(vm);
     expect(out).toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("renders slash completion rows with token colors and no brand chrome", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.render(buildSlashMenuViewModel({
+      query: "/",
+      options: [
+        slashMenuOption("help", "/help", { description: "Show command help" }),
+        slashMenuOption("status", "/status", { description: "Show status" }),
+      ],
+      selectedIndex: 0,
+    }));
+    const { r: ar, g: ag, b: ab } = hexToRgbForTest(tokens.contract.palette.action);
+    const { r: pr, g: pg, b: pb } = hexToRgbForTest(tokens.contract.text.primary);
+    const { r: sr, g: sg, b: sb } = hexToRgbForTest(tokens.contract.text.secondary);
+    expect(out).toContain(`\x1b[38;2;${ar};${ag};${ab}m>\x1b[0m`);
+    expect(out).toContain(`\x1b[38;2;${ar};${ag};${ab}m/help\x1b[0m`);
+    expect(out).toContain(`\x1b[38;2;${pr};${pg};${pb}m/status\x1b[0m`);
+    expect(out).toContain(`\x1b[38;2;${sr};${sg};${sb}mShow command help\x1b[0m`);
+    expect(out).not.toContain("Commands");
+    expect(out).not.toContain("𓂀");
   });
 
   it("uses ASCII/no-ANSI fallback for no-color and no-Unicode rail rendering", () => {

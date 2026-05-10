@@ -4,7 +4,9 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import {
   buildSlashMenuViewModel,
+  buildSlashCompletionViewModel,
   buildToolsMenuViewModel,
+  renderSlashCompletion,
   renderSlashMenu,
   renderToolsMenu,
 } from "./slash-menu.js";
@@ -232,6 +234,75 @@ describe("Session surfaces — slash menu", () => {
   }
 });
 
+describe("Session surfaces — slash completion list", () => {
+  it("renders lightweight command rows without table chrome", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/");
+    const output = standardDarkRenderer().render(vm);
+    expect(output).toContain("/help");
+    expect(output).toContain("Show command help");
+    expect(output).toContain("/status");
+    expect(output).not.toContain("Commands");
+    expect(output).not.toContain("Name");
+    expect(output).not.toContain("Description");
+    expect(output).not.toContain("𓂀");
+  });
+
+  it("filters partial slash input", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/mo");
+    const output = renderPlain(vm);
+    expect(output).toContain("/model");
+    expect(output).toContain("Show or switch model");
+    expect(output).not.toContain("/help");
+  });
+
+  it("renders readable empty state for unknown slash input", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/zzzz");
+    expect(renderPlain(vm)).toBe('No slash commands match "/zzzz".');
+  });
+
+  it("keeps completion commands limited to implemented slash commands", () => {
+    const all = buildSlashCompletionViewModel(fakeRuntime, "/", { limit: 100 });
+    const labels = all.options.map((option) => option.label);
+    expect(labels).toContain("/tools");
+    expect(labels).toContain("/exit");
+    expect(labels).not.toContain("/version");
+    expect(labels).not.toContain("/packs");
+  });
+
+  it("keeps /tools as its own command behavior", () => {
+    const completion = renderPlain(buildSlashCompletionViewModel(fakeRuntime, "/tools"));
+    const toolsOutput = renderPlain(buildToolsMenuViewModel(fakeRuntime, ""));
+    expect(completion).toContain("/tools");
+    expect(completion).toContain("Browse runtime tools");
+    expect(toolsOutput).toContain("No tools match");
+  });
+
+  it("renders no-color and no-Unicode fallbacks without ANSI or ceremonial chrome", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/");
+    const noColorOutput = noColorRenderer().render(vm);
+    const noUnicodeOutput = noUnicodeRenderer().render(vm);
+    expect(noColorOutput).not.toMatch(/\x1b\[/);
+    expect(noColorOutput).toContain("/help");
+    expect(noUnicodeOutput).not.toContain("𓂀");
+    expect(noUnicodeOutput).toContain("/help");
+  });
+
+  it("renders Arabic descriptions with isolated slash commands", () => {
+    const renderer = createSessionRenderer({ capabilities: fullCaps(), locale: "ar" });
+    const output = renderer.render(buildSlashCompletionViewModel(fakeRuntime, "/"));
+    expect(output).toContain("\u2066/help\u2069");
+    expect(output).toContain("اعرض مساعدة الأوامر");
+    expect(output).toContain("\u2066/status\u2069");
+    expect(output).toContain("اعرض حالة التشغيل والنموذج والسياق والجلسة");
+  });
+
+  it("renderSlashCompletion still returns deterministic plain text", () => {
+    const output = renderSlashCompletion(fakeRuntime, "/mo");
+    expect(output).toContain("/model");
+    expect(output).not.toMatch(/\x1b\[/);
+  });
+});
+
 describe("Session surfaces — unknown-command fallback", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
@@ -350,12 +421,7 @@ describe("Session surfaces — startup dashboard", () => {
         skillAutonomy: "autonomous",
         providerReadiness: "ready",
         versionStatus: "unknown",
-        availableCommands: [
-          { name: "verify", description: "Check workspace, model, and skill integrity" },
-          { name: "tools", description: "Browse available runtime tools" },
-          { name: "skills", description: "List, search, install, or remove skills" },
-          { name: "model", description: "Show or switch the active model" },
-        ],
+        availableCommands: [],
         warnings: [],
       });
       const output = ctx.renderer.render(vm);

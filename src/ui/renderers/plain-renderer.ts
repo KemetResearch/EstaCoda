@@ -2,7 +2,7 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, padVisibleAlign, padVisibleEnd, truncateVisible } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { isolateLtr } from "../../ui/bidi.js";
@@ -26,6 +26,7 @@ import type {
   AssistantResponseViewModel,
   FileChangePreviewViewModel,
   SessionStatusRailViewModel,
+  SlashMenuViewModel,
   ShortcutHintRailViewModel,
   UserPromptRailViewModel,
   ViewModel,
@@ -81,10 +82,10 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderToolActivityRail(viewModel, locale);
     case "fileChangePreview":
       return renderFileChangePreview(viewModel, locale);
-    case "startupDashboard":
     case "startupRuntime":
-    case "slashMenu":
       return `[unsupported view model: ${viewModel.kind}]`;
+    case "slashMenu":
+      return renderSlashMenu(viewModel, locale);
     default: {
       const _exhaustive: never = viewModel;
       return String(_exhaustive);
@@ -476,12 +477,58 @@ export function renderPicker(vm: PickerViewModel): string {
   return lines.join("\n");
 }
 
+export function renderSlashMenu(vm: SlashMenuViewModel, locale: UiLocale = "en"): string {
+  const copy = chromeCopy(locale);
+  const visibleOptions = vm.options.slice(0, 6);
+  if (visibleOptions.length === 0) {
+    return copy.slashNoMatches(technical(vm.query, locale));
+  }
+
+  const commandWidth = Math.min(
+    18,
+    Math.max(...visibleOptions.map((option) => measureVisibleWidth(technical(option.label, locale))))
+  );
+  const gap = 4;
+  const descriptionWidth = Math.max(8, 80 - commandWidth - gap);
+
+  return visibleOptions
+    .map((option) => {
+      const command = padVisibleEnd(technical(option.label, locale), commandWidth);
+      const description = truncateVisible(
+        slashDescription(option.id, option.description ?? "", locale),
+        descriptionWidth
+      );
+      return `${command}${" ".repeat(gap)}${description}`;
+    })
+    .join("\n");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Startup
 // ─────────────────────────────────────────────────────────────
 
 function technical(value: string, locale: UiLocale): string {
   return locale === "ar" ? isolateLtr(value) : value;
+}
+
+function slashDescription(commandName: string, fallback: string, locale: UiLocale): string {
+  const copy = chromeCopy(locale);
+  switch (commandName) {
+    case "help":
+      return copy.slashCommandHelpDescription;
+    case "status":
+      return copy.slashCommandStatusDescription;
+    case "model":
+      return copy.slashCommandModelDescription;
+    case "tools":
+      return copy.slashCommandToolsDescription;
+    case "skills":
+      return copy.slashCommandSkillsDescription;
+    case "exit":
+      return copy.slashCommandExitDescription;
+    default:
+      return fallback;
+  }
 }
 
 function modelRoute(model: { readonly provider: string; readonly id: string }, locale: UiLocale): string {

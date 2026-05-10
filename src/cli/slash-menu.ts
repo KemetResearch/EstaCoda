@@ -4,14 +4,97 @@ import {
   buildTableViewModel,
   buildListViewModel,
   buildCommandResultViewModel,
+  buildSlashMenuViewModel as buildSlashCompletionListViewModel,
   listItem,
+  slashMenuOption,
 } from "../ui/view-models/builders.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import type { ViewModel } from "../contracts/view-model.js";
+import type { SlashMenuViewModel, ViewModel } from "../contracts/view-model.js";
+import type { UiLocale } from "../ui/cli-ui-copy.js";
+import { chromeCopy } from "../ui/cli-ui-copy.js";
 
 // ─────────────────────────────────────────────────────────────
 // ViewModel builders (pure data, no rendering)
 // ─────────────────────────────────────────────────────────────
+
+const DEFAULT_COMPLETION_LIMIT = 6;
+
+const implementedSlashCommands = new Set([
+  "help",
+  "status",
+  "model",
+  "reset",
+  "tools",
+  "browser",
+  "memory",
+  "skills",
+  "reload-mcp",
+  "resume",
+  "approvals",
+  "security",
+  "yolo",
+  "cron",
+  "revoke",
+  "sessions",
+  "search",
+  "switch",
+  "trust",
+  "untrust",
+  "workspace.trust.status",
+  "doctor",
+  "flow",
+  "handoff",
+  "clear",
+  "exit",
+]);
+
+export function isImplementedSlashCommand(commandName: string): boolean {
+  return implementedSlashCommands.has(commandName);
+}
+
+const completionPriority = new Map([
+  ["help", 0],
+  ["status", 1],
+  ["model", 2],
+  ["tools", 3],
+  ["skills", 4],
+  ["exit", 5],
+]);
+
+export function buildSlashCompletionViewModel(
+  runtime: Runtime,
+  query = "/",
+  options: { readonly limit?: number } = {}
+): SlashMenuViewModel {
+  const normalizedFilter = normalizeFilter(query);
+  const limit = Math.max(1, options.limit ?? DEFAULT_COMPLETION_LIMIT);
+  const commands = commandRegistry
+    .list({
+      scope: "slash",
+      visibility: "public",
+      filter: normalizedFilter || undefined,
+    })
+    .filter((command) => implementedSlashCommands.has(command.name))
+    .sort((a, b) => {
+      const aPriority = completionPriority.get(a.name) ?? 100;
+      const bPriority = completionPriority.get(b.name) ?? 100;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, limit);
+
+  void runtime;
+
+  return buildSlashCompletionListViewModel({
+    query: query.startsWith("/") ? query : `/${query}`,
+    options: commands.map((command) =>
+      slashMenuOption(command.name, `/${command.name}`, {
+        description: completionDescription(command.name, "en") ?? command.description,
+      })
+    ),
+    selectedIndex: 0,
+  });
+}
 
 export function buildSlashMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
   const normalizedFilter = normalizeFilter(filter);
@@ -135,6 +218,10 @@ export function renderSlashMenu(runtime: Runtime, filter = ""): string {
   return renderPlain(buildSlashMenuViewModel(runtime, filter));
 }
 
+export function renderSlashCompletion(runtime: Runtime, query = "/", locale: UiLocale = "en"): string {
+  return renderPlain(buildSlashCompletionViewModel(runtime, query), locale);
+}
+
 export function renderToolsMenu(runtime: Runtime, filter = ""): string {
   return renderPlain(buildToolsMenuViewModel(runtime, filter));
 }
@@ -153,4 +240,24 @@ function matches(filter: string, ...values: string[]): boolean {
 
 function normalizeFilter(value: string): string {
   return value.trim().replace(/^\//u, "").toLowerCase();
+}
+
+export function completionDescription(commandName: string, locale: UiLocale): string | undefined {
+  const copy = chromeCopy(locale);
+  switch (commandName) {
+    case "help":
+      return copy.slashCommandHelpDescription;
+    case "status":
+      return copy.slashCommandStatusDescription;
+    case "model":
+      return copy.slashCommandModelDescription;
+    case "tools":
+      return copy.slashCommandToolsDescription;
+    case "skills":
+      return copy.slashCommandSkillsDescription;
+    case "exit":
+      return copy.slashCommandExitDescription;
+    default:
+      return undefined;
+  }
 }
