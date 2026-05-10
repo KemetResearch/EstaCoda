@@ -940,7 +940,7 @@ const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-inter
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
 const cliInteractivePromptSecrets: boolean[] = [];
-const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "TEST_KIMI_SECRET", "", "", "", "", ""];
+const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "TEST_KIMI_SECRET", "", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -966,7 +966,7 @@ const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
 const cliMissingWorkspaceHome = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-workspace-home-"));
 const cliMissingWorkspaceBase = await mkdtemp(join(tmpdir(), "estacoda-cli-missing-workspace-base-"));
 const cliMissingWorkspace = join(cliMissingWorkspaceBase, "dogfood-workspace");
-const cliMissingWorkspaceAnswers = ["", "", "", cliMissingWorkspace, "", "2", "", "TEST_MISSING_WORKSPACE_KIMI_SECRET", "", "", "", "", ""];
+const cliMissingWorkspaceAnswers = ["", "", "", cliMissingWorkspace, "", "2", "", "TEST_MISSING_WORKSPACE_KIMI_SECRET", "", "", "", ""];
 const cliMissingWorkspaceSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -981,7 +981,7 @@ const cliMissingWorkspaceSetup = await runCliCommand({
 const cliMissingWorkspaceStats = await stat(cliMissingWorkspace);
 const cliProjectOverridePrompts: string[] = [];
 const cliProjectOverridePromptSecrets: boolean[] = [];
-const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", "", ""];
+const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", ""];
 const cliProjectOverrideSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: firstRunProjectConfigWorkspace,
@@ -1004,7 +1004,7 @@ const cliProjectOverrideConfig = await loadRuntimeConfig({
 const cliArabicInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-arabic-workspace-"));
 const cliArabicInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-cli-arabic-home-"));
 const cliArabicInteractivePrompts: string[] = [];
-const cliArabicInteractiveAnswers = ["", "2", "", "", "", "2", "", "TEST_ARABIC_KIMI_SECRET", "", "", "", ""];
+const cliArabicInteractiveAnswers = ["", "2", "", "", "", "2", "", "TEST_ARABIC_KIMI_SECRET", "", "", ""];
 const cliArabicInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliArabicInteractiveWorkspace,
@@ -1028,7 +1028,7 @@ const cliEmptySecretWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-empty
 const cliEmptySecretHome = await mkdtemp(join(tmpdir(), "estacoda-cli-empty-secret-home-"));
 const cliEmptySecretPrompts: string[] = [];
 const cliEmptySecretPromptSecrets: boolean[] = [];
-const cliEmptySecretAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET_RETRY", "", "", "", "", ""];
+const cliEmptySecretAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET_RETRY", "", "", "", ""];
 const cliEmptySecretSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliEmptySecretWorkspace,
@@ -1047,7 +1047,7 @@ const cliEmptySecretSetup = await runCliCommand({
 const cliOptionalDoneWorkspace = await mkdtemp(join(tmpdir(), "estacoda-cli-optional-done-workspace-"));
 const cliOptionalDoneHome = await mkdtemp(join(tmpdir(), "estacoda-cli-optional-done-home-"));
 const cliOptionalDonePrompts: string[] = [];
-const cliOptionalDoneAnswers = ["", "", "", "", "", "2", "", "TEST_OPTIONAL_KIMI_SECRET", "", "", "", "5", "2", "", ""];
+const cliOptionalDoneAnswers = ["", "", "", "", "", "2", "", "TEST_OPTIONAL_KIMI_SECRET", "", "", "5", "2", "", ""];
 const cliOptionalDoneSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliOptionalDoneWorkspace,
@@ -4797,11 +4797,11 @@ assert(cliInteractiveSetup.output.includes("EstaCoda is ready to use this worksp
 assert(cliInteractiveSetup.output.includes("Secret store:"), "expected interactive setup secret store output");
 assert(cliInteractiveSetup.output.includes("Setup check"), "expected interactive setup diagnostics");
 assert(!cliInteractiveSetup.output.includes("EstaCoda verify"), "expected successful interactive setup to use compact verification output");
-assert(cliInteractivePrompts.length === 13, "expected interactive setup prompts");
+assert(cliInteractivePrompts.length === 12, "expected interactive setup prompts");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose interface language")), "expected interactive setup to ask for interface language");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("OpenAI")), "expected interactive setup to offer OpenAI");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose Kimi model")), "expected interactive setup to split provider and model selection");
-assert(cliInteractivePrompts.some((prompt) => prompt.includes("Choose backup model")), "expected interactive setup to offer backup model selection");
+assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Choose backup model")), "expected interactive setup to omit removed backup model selection");
 assert(cliInteractivePrompts.some((prompt) => prompt.includes("Optional capabilities")), "expected interactive setup to offer optional capabilities");
 assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Credential storage")), "expected first-run setup to default to local credential storage");
 assert(!cliInteractivePrompts.some((prompt) => prompt.includes("Environment variable for Kimi K2.5 API key")), "expected local key storage not to ask for env var name");
@@ -5612,7 +5612,6 @@ assert(classifyHttpError(401) === "auth", "expected auth HTTP classification");
 const providerSetupSchema = tools.get("config.provider.setup")?.inputSchema as { properties?: Record<string, { type?: string }> } | undefined;
 const imageSetupSchema = tools.get("config.image.setup")?.inputSchema as { properties?: Record<string, { type?: string }> } | undefined;
 assert(providerSetupSchema?.properties?.primary?.type === "boolean", "expected config.provider.setup to expose primary");
-assert(providerSetupSchema?.properties?.backupForMain?.type === "boolean", "expected config.provider.setup to expose backupForMain");
 assert(imageSetupSchema?.properties?.apiKey?.type === "string", "expected config.image.setup to expose apiKey");
 assert(
   parseOpenAICompatibleResponse({

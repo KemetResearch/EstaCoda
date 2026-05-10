@@ -10,7 +10,6 @@ import {
   loadRuntimeConfig,
   setupBrowserConfig,
   setupImageGenerationConfig,
-  setupProviderConfig,
   setupSecurityConfig,
   setupSkillConfig,
   setupTelegramConfig,
@@ -20,7 +19,6 @@ import {
   type UiLanguage
 } from "../config/runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
-import type { ProviderId } from "../contracts/provider.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -51,13 +49,6 @@ import { runSetupVerification } from "./verification.js";
 export type Prompt = ((question: string, options?: { secret?: boolean }) => Promise<string>) & {
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   close?: () => void;
-};
-
-type BackupRouteChoice = {
-  provider: ProviderChoice;
-  model: ModelChoice;
-  apiKeyEnv?: string;
-  apiKey?: string;
 };
 
 type TelegramSetupDraft = {
@@ -144,7 +135,6 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const apiKey = selected.provider === "local" || normalizedEnvName === undefined
       ? undefined
       : await promptForRequiredSecret(prompt, copy.providers.apiKeyPrompt(selected.label, normalizedEnvName), `${selected.label} API key`, copy);
-    const backup = await selectBackupRoute(prompt, selected.provider, copy);
     const securityMode = await selectSecurityMode(prompt, locale, copy);
     const skillAutonomy = await selectSkillAutonomy(prompt, locale, copy);
     const optionalCapabilities = await collectOptionalCapabilities(prompt, copy);
@@ -153,7 +143,6 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
       interfaceLabel: `${interfaceLanguage.label} / ${interfaceStyle.label}`,
       provider: technical(copy, selected.provider),
       model: technical(copy, selected.model),
-      backup: backup === undefined ? copy.review.backupSkipped : technical(copy, formatProviderModel(backup.model.provider, backup.model.model)),
       credential: normalizedEnvName === undefined
         ? copy.review.noHostedKey
         : copy.review.credentialLine(normalizedEnvName),
@@ -185,22 +174,6 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         enableNetwork: selected.provider !== "local"
       }
     });
-    if (backup !== undefined) {
-      await setupProviderConfig({
-        ...options,
-        workspaceRoot,
-        input: {
-          scope: "user",
-          provider: backup.model.provider,
-          model: backup.model.model,
-          apiKeyEnv: backup.apiKeyEnv,
-          apiKey: backup.apiKey,
-          enableNetwork: backup.model.provider !== "local",
-          primary: false,
-          backupForMain: true
-        }
-      });
-    }
     await setupSecurityConfig({
       ...options,
       workspaceRoot,
@@ -257,7 +230,6 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         copy.final.complete,
         copy.final.ready,
         `${copy.final.configured}: ${technical(copy, formatProviderModel(selected.provider, selected.model))}`,
-        backup === undefined ? undefined : `${copy.final.backupRoute}: ${technical(copy, formatProviderModel(backup.model.provider, backup.model.model))}`,
         `${copy.final.config}: ${technical(copy, result.configPath)}`,
         result.secretPath === undefined ? undefined : `${copy.final.secretStore}: ${technical(copy, result.secretPath)}`,
         normalizedEnvName === undefined ? undefined : `${copy.final.usingCredential} ${technical(copy, normalizedEnvName)}.`,
@@ -413,77 +385,6 @@ async function selectProvider(
   const parsedIndex = Number.parseInt(selectedRaw, 10) - 1;
   const selectedIndex = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? parsedIndex : defaultIndex;
   return choices[selectedIndex] ?? choices[defaultIndex] ?? choices[0]!;
-}
-
-async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId, copy: OnboardingCopy): Promise<BackupRouteChoice | undefined> {
-  const choices = [
-    {
-      value: "skip" as const,
-      label: copy.backup.skipLabel,
-      description: copy.backup.skipDescription
-    },
-    {
-      value: "add" as const,
-      label: copy.backup.addLabel,
-      description: copy.backup.addDescription
-    }
-  ];
-  const decision = prompt.select === undefined
-    ? choices[parseChoiceIndex(await prompt(`${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`), choices.length, 0)]?.value ?? "skip"
-    : await prompt.select(withSelectChrome(copy, {
-      title: copy.backup.title,
-      body: copy.backup.body,
-      defaultIndex: 0,
-      options: choices,
-      fallbackPrompt: `${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    }));
-
-  if (decision === "skip") {
-    return undefined;
-  }
-
-  const backupProviders = providerChoices(copy).filter((provider) => provider.provider !== primaryProvider);
-  const provider = await selectProviderFromChoices(prompt, backupProviders, {
-    title: copy.backup.providerTitle,
-    body: copy.backup.providerBody
-  }, copy);
-  const model = await selectModel(prompt, provider, copy);
-  const apiKeyEnv = model.provider === "local" ? undefined : defaultEnvKey(model.provider);
-  const apiKey = model.provider === "local" || apiKeyEnv === undefined
-    ? undefined
-    : await promptForRequiredSecret(prompt, copy.providers.apiKeyPrompt(model.label, apiKeyEnv), `${model.label} API key`, copy);
-
-  return {
-    provider,
-    model,
-    apiKeyEnv,
-    apiKey
-  };
-}
-
-async function selectProviderFromChoices(
-  prompt: Prompt,
-  choices: ProviderChoice[],
-  input: { title: string; body: string },
-  copy: OnboardingCopy
-): Promise<ProviderChoice> {
-  if (prompt.select !== undefined) {
-    return await prompt.select(withSelectChrome(copy, {
-      title: input.title,
-      body: input.body,
-      defaultIndex: 0,
-      options: choices.map((choice) => ({
-        value: choice,
-        label: choice.label,
-        description: choice.description
-      })),
-      fallbackPrompt: `${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
-    }));
-  }
-
-  const selectedRaw = await prompt(`${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
-  const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
-  return choices[selectedIndex] ?? choices[0]!;
 }
 
 async function selectModel(prompt: Prompt, provider: ProviderChoice, copy: OnboardingCopy): Promise<ModelChoice> {
@@ -1026,7 +927,6 @@ function renderReview(input: {
   interfaceLabel: string;
   provider: string;
   model: string;
-  backup: string;
   credential: string;
   trust: string;
   securityMode: string;
@@ -1039,7 +939,6 @@ function renderReview(input: {
     `${labels.interface}:  ${input.interfaceLabel}`,
     `${labels.provider}:   ${input.provider}`,
     `${labels.model}:      ${input.model}`,
-    `${labels.backup}:     ${input.backup}`,
     `${labels.credential}: ${input.credential}`,
     `${labels.workspace}:  ${input.trust}`,
     `${labels.security}:   ${input.securityMode}`,

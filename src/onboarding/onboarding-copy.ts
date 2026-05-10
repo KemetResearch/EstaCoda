@@ -58,16 +58,6 @@ export type OnboardingCopy = {
       models: Record<string, { label: string; description: string }>;
     }>;
   };
-  backup: {
-    title: string;
-    body: string;
-    skipLabel: string;
-    skipDescription: string;
-    addLabel: string;
-    addDescription: string;
-    providerTitle: string;
-    providerBody: string;
-  };
   security: {
     title: string;
     body: string;
@@ -173,7 +163,6 @@ export type OnboardingCopy = {
       interface: string;
       provider: string;
       model: string;
-      backup: string;
       credential: string;
       workspace: string;
       security: string;
@@ -182,7 +171,6 @@ export type OnboardingCopy = {
     };
     noHostedKey: string;
     notTrusted: string;
-    backupSkipped: string;
     optionalSkipped: string;
     credentialLine: (envName: string) => string;
     note: string;
@@ -237,7 +225,6 @@ export type OnboardingCopy = {
     complete: string;
     ready: string;
     configured: string;
-    backupRoute: string;
     config: string;
     secretStore: string;
     usingCredential: string;
@@ -278,7 +265,6 @@ export const onboardingCopyEn: OnboardingCopy = {
       "Choose interface language and style.",
       "Trust this workspace for local file and terminal work.",
       "Choose a primary model provider.",
-      "Add a backup model, or skip for now.",
       "Set security and workflow-learning defaults.",
       "Add optional capabilities: Telegram, voice, vision, browser, or skip for now.",
       "Verify setup before entering the agent session."
@@ -350,16 +336,6 @@ export const onboardingCopyEn: OnboardingCopy = {
         }
       }
     }
-  },
-  backup: {
-    title: "Choose backup model",
-    body: "EstaCoda can use this if the primary provider fails.",
-    skipLabel: "Skip for now",
-    skipDescription: "Use only the primary model.",
-    addLabel: "Add backup model",
-    addDescription: "Choose another provider and model.",
-    providerTitle: "Choose backup provider",
-    providerBody: "Pick the account EstaCoda should try if the primary provider fails."
   },
   security: {
     title: "Choose security mode",
@@ -511,7 +487,6 @@ export const onboardingCopyEn: OnboardingCopy = {
       interface: "Interface",
       provider: "Provider",
       model: "Model",
-      backup: "Backup",
       credential: "Credential",
       workspace: "Workspace",
       security: "Security",
@@ -520,7 +495,6 @@ export const onboardingCopyEn: OnboardingCopy = {
     },
     noHostedKey: "local provider, no hosted API key",
     notTrusted: "not trusted",
-    backupSkipped: "skipped",
     optionalSkipped: "skipped",
     credentialLine: (envName) => `save to ~/.estacoda/.env as ${envName}`,
     note: "EstaCoda stores configuration and credential references. Raw hosted keys go only into ~/.estacoda/.env."
@@ -577,7 +551,6 @@ export const onboardingCopyEn: OnboardingCopy = {
     complete: "Setup complete.",
     ready: "EstaCoda is ready to use this workspace configuration.",
     configured: "Configured",
-    backupRoute: "Backup route",
     config: "Config",
     secretStore: "Secret store",
     usingCredential: "Using credential from",
@@ -712,16 +685,6 @@ export const onboardingCopyAr: OnboardingCopy = {
         }
       }
     }
-  },
-  backup: {
-    title: "اختر نموذجاً احتياطياً",
-    body: `يمكن لـ ${ltr("EstaCoda")} استخدامه إذا تعطل المزوّد الأساسي.`,
-    skipLabel: "تخطي الآن",
-    skipDescription: "استخدم النموذج الأساسي فقط.",
-    addLabel: "إضافة نموذج احتياطي",
-    addDescription: "اختر مزوّداً ونموذجاً آخر.",
-    providerTitle: "اختر المزوّد الاحتياطي",
-    providerBody: `اختر الحساب الذي ستجربه ${ltr("EstaCoda")} إذا تعطل المزوّد الأساسي.`
   },
   security: {
     title: "اختر وضع الأمان",
@@ -872,7 +835,6 @@ export const onboardingCopyAr: OnboardingCopy = {
       interface: "الواجهة",
       provider: "المزوّد",
       model: "النموذج",
-      backup: "الاحتياطي",
       credential: "المفتاح",
       workspace: "مجلد العمل",
       security: "الأمان",
@@ -881,7 +843,6 @@ export const onboardingCopyAr: OnboardingCopy = {
     },
     noHostedKey: "مزوّد محلي، لا يحتاج مفتاح API مستضافاً",
     notTrusted: "غير موثوق",
-    backupSkipped: "تم التخطي",
     optionalSkipped: "تم التخطي",
     credentialLine: (envName) => `حفظ في ${ltr("~/.estacoda/.env")} باسم ${ltr(envName)}`,
     note: `تحفظ ${ltr("EstaCoda")} الإعدادات ومراجع المفاتيح. المفاتيح الخام للمزوّدين المستضافين تُحفظ فقط في ${ltr("~/.estacoda/.env")}.`
@@ -938,7 +899,6 @@ export const onboardingCopyAr: OnboardingCopy = {
     complete: "اكتمل الإعداد.",
     ready: `${ltr("EstaCoda")} جاهزة لاستخدام إعدادات هذا المشروع.`,
     configured: "تم الإعداد",
-    backupRoute: "المسار الاحتياطي",
     config: "ملف الإعداد",
     secretStore: "مخزن المفاتيح",
     usingCredential: "استخدام المفتاح من",
