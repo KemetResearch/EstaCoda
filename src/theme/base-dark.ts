@@ -2,15 +2,15 @@ import type { UiTokenContract } from "../contracts/ui-tokens.js";
 
 export const darkTheme: UiTokenContract = {
   palette: {
-    brand: "#5AACFF",
-    action: "#40E0D0",
-    caution: "#FFB454",
+    brand: "#B0B0B0",
+    action: "#B0B0B0",
+    caution: "#B0B0B0",
   },
   severity: {
     ok: "#4CAF50",
     error: "#EF5350",
     warn: "#FFA726",
-    info: "#5AACFF",
+    info: "#888888",
   },
   surface: {
     bg: "#1A1A1A",

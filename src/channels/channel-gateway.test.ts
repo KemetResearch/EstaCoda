@@ -52,6 +52,14 @@ function createMinimalRuntime(): Runtime {
       readiness: "ready" as const,
       warnings: [],
     }),
+    getStartupReadiness: async () => ({
+      workspaceTrust: "untrusted" as const,
+      workspaceVerification: "unverified" as const,
+      providerReadiness: "missing-config" as const,
+      versionStatus: "unknown" as const,
+      model: { provider: "test", id: "test" },
+      warnings: [],
+    }),
     getModelInfo: () => ({
       kind: "kv" as const,
       title: "Model",

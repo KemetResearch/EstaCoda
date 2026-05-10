@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import {
   checkForUpdate,
   canApplyUpdate,
-  prepareUpdateInfo
+  prepareUpdateInfo,
+  readCachedUpdateStatus
 } from "./update-engine.js";
 
 describe("checkForUpdate", () => {
@@ -81,5 +83,66 @@ describe("prepareUpdateInfo", () => {
       breakingChanges: true
     });
     expect(text).toContain("breaking changes");
+  });
+});
+
+describe("readCachedUpdateStatus", () => {
+  it("returns unknown when cache file is missing", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("unknown");
+  });
+
+  it("returns cached up-to-date when cache is fresh", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({ checkedAt: new Date().toISOString(), versionStatus: "up-to-date" })
+    );
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("up-to-date");
+  });
+
+  it("returns cached update-available when cache is fresh", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({ checkedAt: new Date().toISOString(), versionStatus: "update-available" })
+    );
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("update-available");
+  });
+
+  it("returns unknown when cache is stale", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({ checkedAt: oldDate, versionStatus: "up-to-date" })
+    );
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("unknown");
+  });
+
+  it("returns unknown when cache contains invalid JSON", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(join(tempDir, ".estacoda", "update-cache.json"), "not json");
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("unknown");
+  });
+
+  it("returns unknown when cache has invalid versionStatus", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({ checkedAt: new Date().toISOString(), versionStatus: "bogus" })
+    );
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("unknown");
   });
 });

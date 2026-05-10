@@ -12,7 +12,7 @@ import { buildSessionHelpViewModel, renderSessionHelp } from "./session-help.js"
 import { createSessionRenderer } from "./session-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel } from "../ui/view-models/builders.js";
+import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel, buildStartupDashboardViewModel } from "../ui/view-models/builders.js";
 import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
 // ──────────────────────────────────────
@@ -326,6 +326,40 @@ describe("Session surfaces — startup", () => {
       });
       const output = ctx.renderer.render(vm);
       expect(output).toMatchSnapshot(`startup-${ctx.name}`);
+    });
+  }
+});
+
+// ──────────────────────────────────────
+// Phase 9.5: Startup dashboard snapshots
+// ──────────────────────────────────────
+
+describe("Session surfaces — startup dashboard", () => {
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const vm = buildStartupDashboardViewModel({
+        agentName: "EstaCoda",
+        taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+        version: "v0.0.5",
+        sessionId: "sess-9f7a2c1b",
+        model: { provider: "openrouter", id: "deepseek-reasoner" },
+        workspaceTrust: "trusted",
+        workspaceVerification: "verified",
+        workspaceDirectory: "/workspace",
+        securityMode: "high",
+        skillAutonomy: "autonomous",
+        providerReadiness: "ready",
+        versionStatus: "unknown",
+        availableCommands: [
+          { name: "verify", description: "Check workspace, model, and skill integrity" },
+          { name: "tools", description: "Browse available runtime tools" },
+          { name: "skills", description: "List, search, install, or remove skills" },
+          { name: "model", description: "Show or switch the active model" },
+        ],
+        warnings: [],
+      });
+      const output = ctx.renderer.render(vm);
+      expect(output).toMatchSnapshot(`startup-dashboard-${ctx.name}`);
     });
   }
 });

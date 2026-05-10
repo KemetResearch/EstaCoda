@@ -3,6 +3,7 @@
 
 export type { UiMode, UiTheme, SkinName } from "./ui-tokens.js";
 export type { UiTokenContract, ResolvedTokens } from "./ui-tokens.js";
+export type { UiLocale } from "../ui/cli-ui-copy.js";
 
 export interface TerminalCapabilities {
   isTTY: boolean;

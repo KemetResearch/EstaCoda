@@ -2,11 +2,15 @@
 // Pure factory functions. No formatting, ANSI, terminal-width, or rendering logic.
 
 import type {
+  ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
   ApprovalAction,
   ApprovalSecurityViewModel,
   AssistantResponseViewModel,
   CommandResultViewModel,
+  ConversationMessageViewModel,
+  FileChangeHunk,
+  FileChangePreviewViewModel,
   KeyValueBlockViewModel,
   KeyValueEntry,
   ListItem,
@@ -17,11 +21,20 @@ import type {
   ProgressContextRailViewModel,
   ProgressStep,
   ProgressStepStatus,
+  SessionStatusRailViewModel,
+  ShortcutHint,
+  ShortcutHintRailViewModel,
+  SlashMenuOption,
+  SlashMenuViewModel,
+  StartupDashboardViewModel,
+  StartupRuntimeViewModel,
   StartupViewModel,
   StatusViewModel,
   TableColumn,
   TableViewModel,
   TimelineEvent,
+  ToolActivityRailEvent,
+  ToolActivityRailViewModel,
   WarningErrorViewModel,
   ViewModel,
   ViewModelSeverity,
@@ -313,9 +326,226 @@ export function buildAssistantResponseViewModel(
   };
 }
 
-// ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Startup Dashboard
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildStartupDashboardInput {
+  readonly agentName: string;
+  readonly taglines: readonly string[];
+  readonly version: string;
+  readonly sessionId?: string;
+  readonly model: { readonly provider: string; readonly id: string };
+  readonly workspaceTrust: "trusted" | "untrusted" | "unknown";
+  readonly workspaceVerification: "verified" | "unverified" | "unknown";
+  readonly workspaceDirectory?: string;
+  readonly securityMode: string;
+  readonly skillAutonomy?: string;
+  readonly providerReadiness: "ready" | "degraded" | "missing-config" | "unknown";
+  readonly versionStatus?: "up-to-date" | "update-available" | "unknown";
+  readonly availableCommands: readonly { readonly name: string; readonly description: string }[];
+  readonly warnings?: readonly WarningErrorViewModel[];
+}
+
+export function buildStartupDashboardViewModel(
+  input: BuildStartupDashboardInput
+): StartupDashboardViewModel {
+  return {
+    kind: "startupDashboard",
+    agentName: input.agentName,
+    taglines: input.taglines,
+    version: input.version,
+    sessionId: input.sessionId,
+    model: input.model,
+    workspaceTrust: input.workspaceTrust,
+    workspaceVerification: input.workspaceVerification,
+    workspaceDirectory: input.workspaceDirectory,
+    securityMode: input.securityMode,
+    skillAutonomy: input.skillAutonomy,
+    providerReadiness: input.providerReadiness,
+    versionStatus: input.versionStatus,
+    availableCommands: input.availableCommands,
+    warnings: input.warnings ?? [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Startup Runtime
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildStartupRuntimeInput {
+  readonly workspaceTrust: "trusted" | "untrusted" | "unknown";
+  readonly workspaceVerification: "verified" | "unverified" | "unknown";
+  readonly providerReadiness: "ready" | "degraded" | "missing-config" | "unknown";
+  readonly versionStatus?: "up-to-date" | "update-available" | "unknown";
+  readonly warnings?: readonly WarningErrorViewModel[];
+}
+
+export function buildStartupRuntimeViewModel(
+  input: BuildStartupRuntimeInput
+): StartupRuntimeViewModel {
+  return {
+    kind: "startupRuntime",
+    workspaceTrust: input.workspaceTrust,
+    workspaceVerification: input.workspaceVerification,
+    providerReadiness: input.providerReadiness,
+    versionStatus: input.versionStatus,
+    warnings: input.warnings ?? [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conversation Message
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildConversationMessageInput {
+  readonly role: "assistant" | "user";
+  readonly text: string;
+  readonly label?: string;
+  readonly turnId?: string;
+  readonly matchedSkills?: readonly string[];
+  readonly progress?: readonly string[];
+}
+
+export function buildConversationMessageViewModel(
+  input: BuildConversationMessageInput
+): ConversationMessageViewModel {
+  return {
+    kind: "conversationMessage",
+    role: input.role,
+    text: input.text,
+    label: input.label,
+    turnId: input.turnId,
+    matchedSkills: input.matchedSkills,
+    progress: input.progress,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Active Turn Spinner
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildActiveTurnSpinnerInput {
+  readonly label?: string;
+  readonly phase?: string;
+  readonly elapsedMs?: number;
+}
+
+export function buildActiveTurnSpinnerViewModel(
+  input: BuildActiveTurnSpinnerInput
+): ActiveTurnSpinnerViewModel {
+  return {
+    kind: "activeTurnSpinner",
+    label: input.label,
+    phase: input.phase,
+    elapsedMs: input.elapsedMs,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tool Activity Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildToolActivityRailInput {
+  readonly events: readonly ToolActivityRailEvent[];
+}
+
+export function buildToolActivityRailViewModel(
+  input: BuildToolActivityRailInput
+): ToolActivityRailViewModel {
+  return {
+    kind: "toolActivityRail",
+    events: input.events,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// File Change Preview
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildFileChangePreviewInput {
+  readonly path: string;
+  readonly changeType: "added" | "modified" | "deleted";
+  readonly diff?: string;
+  readonly hunks?: readonly FileChangeHunk[];
+}
+
+export function buildFileChangePreviewViewModel(
+  input: BuildFileChangePreviewInput
+): FileChangePreviewViewModel {
+  return {
+    kind: "fileChangePreview",
+    path: input.path,
+    changeType: input.changeType,
+    diff: input.diff,
+    hunks: input.hunks,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Session Status Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildSessionStatusRailInput {
+  readonly modelLabel: string;
+  readonly turnState: "idle" | "running" | "blocked" | "error" | "unknown";
+  readonly sessionElapsedMs?: number;
+  readonly currentTurnSeconds?: number;
+  readonly contextUsage?: { readonly filled: number; readonly total: number };
+}
+
+export function buildSessionStatusRailViewModel(
+  input: BuildSessionStatusRailInput
+): SessionStatusRailViewModel {
+  return {
+    kind: "sessionStatusRail",
+    modelLabel: input.modelLabel,
+    turnState: input.turnState,
+    sessionElapsedMs: input.sessionElapsedMs,
+    currentTurnSeconds: input.currentTurnSeconds,
+    contextUsage: input.contextUsage,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Shortcut Hint Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildShortcutHintRailInput {
+  readonly hints: readonly ShortcutHint[];
+}
+
+export function buildShortcutHintRailViewModel(
+  input: BuildShortcutHintRailInput
+): ShortcutHintRailViewModel {
+  return {
+    kind: "shortcutHintRail",
+    hints: input.hints,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Slash Menu
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildSlashMenuInput {
+  readonly query: string;
+  readonly options: readonly SlashMenuOption[];
+  readonly selectedIndex: number;
+}
+
+export function buildSlashMenuViewModel(input: BuildSlashMenuInput): SlashMenuViewModel {
+  return {
+    kind: "slashMenu",
+    query: input.query,
+    options: input.options,
+    selectedIndex: input.selectedIndex,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // Convenience helpers (still pure, no rendering)
-// ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 
 export function kv(key: string, value: string | number | boolean, severity?: ViewModelSeverity): KeyValueEntry {
   return { key, value, severity };
@@ -351,4 +581,34 @@ export function approvalAction(
   severity?: ViewModelSeverity
 ): ApprovalAction {
   return { id, label, severity };
+}
+
+export function toolActivityRailEvent(
+  tool: string,
+  status: ToolActivityRailEvent["status"],
+  overrides?: Omit<Partial<ToolActivityRailEvent>, "tool" | "status">
+): ToolActivityRailEvent {
+  return { tool, status, ...overrides };
+}
+
+export function fileChangeHunk(
+  oldStart: number,
+  oldCount: number,
+  newStart: number,
+  newCount: number,
+  lines: readonly string[]
+): FileChangeHunk {
+  return { oldStart, oldCount, newStart, newCount, lines };
+}
+
+export function shortcutHint(key: string, description: string): ShortcutHint {
+  return { key, description };
+}
+
+export function slashMenuOption(
+  id: string,
+  label: string,
+  overrides?: Omit<Partial<SlashMenuOption>, "id" | "label">
+): SlashMenuOption {
+  return { id, label, ...overrides };
 }

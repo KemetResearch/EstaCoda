@@ -83,6 +83,9 @@ import { ProviderTurnLoop } from "./provider-turn-loop.js";
 import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
+import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
+import { collectSetupVerificationReport } from "../onboarding/verification.js";
+import { readCachedUpdateStatus } from "../lifecycle/update-engine.js";
 
 export type RuntimeOptions = {
   theme: ThemeDefinition;
@@ -153,6 +156,7 @@ export type Runtime = {
   getStatus(): import("../contracts/view-model.js").StatusViewModel;
   getModelInfo(): import("../contracts/view-model.js").KeyValueBlockViewModel;
   getStartup(): import("../contracts/view-model.js").StartupViewModel;
+  getStartupReadiness(): Promise<StartupReadinessSnapshot>;
   tools(): import("../contracts/tool.js").ToolDefinition[];
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
@@ -972,6 +976,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
+      });
+    },
+    async getStartupReadiness() {
+      const workspaceTrusted = await trustStore.isTrusted(workspaceRoot, { profileId });
+      const verificationReport = await collectSetupVerificationReport({
+        workspaceRoot,
+        homeDir: options.homeDir,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        trustStorePath: options.trustStorePath,
+        runtime: this as Runtime,
+      });
+      const versionStatus = options.homeDir !== undefined
+        ? await readCachedUpdateStatus(options.homeDir)
+        : "unknown";
+      return collectStartupReadinessSnapshot({
+        workspaceRoot,
+        workspaceTrusted,
+        verificationReport,
+        model: { provider: options.model.provider, id: options.model.id },
+        securityMode: activeSecurityMode,
+        skillAutonomy: options.skillAutonomy,
+        versionStatus,
       });
     },
     taskflow

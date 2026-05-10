@@ -209,7 +209,7 @@ export interface PlainFallbackViewModel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Assistant Response
+// Assistant Response (legacy — kept temporarily)
 // ─────────────────────────────────────────────────────────────
 
 export interface AssistantResponseViewModel {
@@ -218,6 +218,152 @@ export interface AssistantResponseViewModel {
   readonly text: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Startup Dashboard
+// ─────────────────────────────────────────────────────────────
+
+export interface StartupDashboardViewModel {
+  readonly kind: "startupDashboard";
+  readonly agentName: string;
+  readonly taglines: readonly string[];
+  readonly version: string;
+  readonly sessionId?: string;
+  readonly model: {
+    readonly provider: string;
+    readonly id: string;
+  };
+  readonly workspaceTrust: "trusted" | "untrusted" | "unknown";
+  readonly workspaceVerification: "verified" | "unverified" | "unknown";
+  readonly workspaceDirectory?: string;
+  readonly securityMode: string;
+  readonly skillAutonomy?: string;
+  readonly providerReadiness: "ready" | "degraded" | "missing-config" | "unknown";
+  readonly versionStatus?: "up-to-date" | "update-available" | "unknown";
+  readonly availableCommands: readonly { readonly name: string; readonly description: string }[];
+  readonly warnings: readonly WarningErrorViewModel[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Startup Runtime
+// ─────────────────────────────────────────────────────────────
+
+export interface StartupRuntimeViewModel {
+  readonly kind: "startupRuntime";
+  readonly workspaceTrust: "trusted" | "untrusted" | "unknown";
+  readonly workspaceVerification: "verified" | "unverified" | "unknown";
+  readonly providerReadiness: "ready" | "degraded" | "missing-config" | "unknown";
+  readonly versionStatus?: "up-to-date" | "update-available" | "unknown";
+  readonly warnings: readonly WarningErrorViewModel[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conversation Message
+// ─────────────────────────────────────────────────────────────
+
+export interface ConversationMessageViewModel {
+  readonly kind: "conversationMessage";
+  readonly role: "assistant" | "user";
+  readonly text: string;
+  readonly label?: string;
+  readonly turnId?: string;
+  readonly matchedSkills?: readonly string[];
+  readonly progress?: readonly string[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Active Turn Spinner
+// ─────────────────────────────────────────────────────────────
+
+export interface ActiveTurnSpinnerViewModel {
+  readonly kind: "activeTurnSpinner";
+  readonly label?: string;
+  readonly phase?: string;
+  readonly elapsedMs?: number;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tool Activity Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface ToolActivityRailEvent {
+  readonly tool: string;
+  readonly status: TimelineEventStatus;
+  readonly elapsedMs?: number;
+  readonly glyph?: string;
+}
+
+export interface ToolActivityRailViewModel {
+  readonly kind: "toolActivityRail";
+  readonly events: readonly ToolActivityRailEvent[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// File Change Preview
+// ─────────────────────────────────────────────────────────────
+
+export interface FileChangeHunk {
+  readonly oldStart: number;
+  readonly oldCount: number;
+  readonly newStart: number;
+  readonly newCount: number;
+  readonly lines: readonly string[];
+}
+
+export interface FileChangePreviewViewModel {
+  readonly kind: "fileChangePreview";
+  readonly path: string;
+  readonly changeType: "added" | "modified" | "deleted";
+  readonly diff?: string;
+  readonly hunks?: readonly FileChangeHunk[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Session Status Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface SessionStatusRailViewModel {
+  readonly kind: "sessionStatusRail";
+  readonly modelLabel: string;
+  readonly turnState: "idle" | "running" | "blocked" | "error" | "unknown";
+  readonly sessionElapsedMs?: number;
+  readonly currentTurnSeconds?: number;
+  readonly contextUsage?: {
+    readonly filled: number;
+    readonly total: number;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Shortcut Hint Rail
+// ─────────────────────────────────────────────────────────────
+
+export interface ShortcutHint {
+  readonly key: string;
+  readonly description: string;
+}
+
+export interface ShortcutHintRailViewModel {
+  readonly kind: "shortcutHintRail";
+  readonly hints: readonly ShortcutHint[];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Slash Menu
+// ─────────────────────────────────────────────────────────────
+
+export interface SlashMenuOption {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface SlashMenuViewModel {
+  readonly kind: "slashMenu";
+  readonly query: string;
+  readonly options: readonly SlashMenuOption[];
+  readonly selectedIndex: number;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -237,4 +383,13 @@ export type ViewModel =
   | StartupViewModel
   | CommandResultViewModel
   | PlainFallbackViewModel
-  | AssistantResponseViewModel;
+  | AssistantResponseViewModel
+  | StartupDashboardViewModel
+  | StartupRuntimeViewModel
+  | ConversationMessageViewModel
+  | ActiveTurnSpinnerViewModel
+  | ToolActivityRailViewModel
+  | FileChangePreviewViewModel
+  | SessionStatusRailViewModel
+  | ShortcutHintRailViewModel
+  | SlashMenuViewModel;

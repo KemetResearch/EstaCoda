@@ -13,11 +13,24 @@ import {
   buildStatusViewModel,
   buildTableViewModel,
   buildWarningErrorViewModel,
+  buildStartupDashboardViewModel,
+  buildStartupRuntimeViewModel,
+  buildConversationMessageViewModel,
+  buildActiveTurnSpinnerViewModel,
+  buildToolActivityRailViewModel,
+  buildFileChangePreviewViewModel,
+  buildSessionStatusRailViewModel,
+  buildShortcutHintRailViewModel,
+  buildSlashMenuViewModel,
   kv,
   listItem,
   pickerOption,
   progressStep,
   timelineEvent,
+  toolActivityRailEvent,
+  fileChangeHunk,
+  shortcutHint,
+  slashMenuOption,
 } from "./builders.js";
 
 describe("ViewModel builders", () => {
@@ -305,6 +318,210 @@ describe("ViewModel builders", () => {
     expect(vm.lines).toEqual(["EstaCoda is ready", "model: openrouter/claude-sonnet"]);
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
   });
+
+  it("buildStartupDashboardViewModel produces plain structured object", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      version: "v0.0.5",
+      sessionId: "sess-9f7a2c1b",
+      model: { provider: "openrouter", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [
+        { name: "verify", description: "Check workspace, model, and skill integrity" },
+        { name: "tools", description: "Browse available runtime tools" },
+      ],
+      warnings: [],
+    });
+
+    expect(vm.kind).toBe("startupDashboard");
+    expect(vm.agentName).toBe("EstaCoda");
+    expect(vm.taglines).toHaveLength(2);
+    expect(vm.version).toBe("v0.0.5");
+    expect(vm.sessionId).toBe("sess-9f7a2c1b");
+    expect(vm.model.provider).toBe("openrouter");
+    expect(vm.model.id).toBe("deepseek-reasoner");
+    expect(vm.workspaceTrust).toBe("trusted");
+    expect(vm.workspaceVerification).toBe("verified");
+    expect(vm.workspaceDirectory).toBe("/workspace");
+    expect(vm.securityMode).toBe("high");
+    expect(vm.skillAutonomy).toBe("autonomous");
+    expect(vm.providerReadiness).toBe("ready");
+    expect(vm.versionStatus).toBe("unknown");
+    expect(vm.availableCommands).toHaveLength(2);
+    expect(vm.warnings).toEqual([]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildStartupDashboardViewModel defaults warnings to empty array", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "unknown",
+      availableCommands: [],
+    });
+
+    expect(vm.warnings).toEqual([]);
+  });
+
+  it("buildStartupRuntimeViewModel produces plain structured object", () => {
+    const vm = buildStartupRuntimeViewModel({
+      workspaceTrust: "untrusted",
+      workspaceVerification: "unverified",
+      providerReadiness: "degraded",
+      versionStatus: "update-available",
+      warnings: [
+        buildWarningErrorViewModel({ severity: "warn", title: "T", message: "M" }),
+      ],
+    });
+
+    expect(vm.kind).toBe("startupRuntime");
+    expect(vm.workspaceTrust).toBe("untrusted");
+    expect(vm.workspaceVerification).toBe("unverified");
+    expect(vm.providerReadiness).toBe("degraded");
+    expect(vm.versionStatus).toBe("update-available");
+    expect(vm.warnings).toHaveLength(1);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildStartupRuntimeViewModel defaults warnings to empty array", () => {
+    const vm = buildStartupRuntimeViewModel({
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      providerReadiness: "missing-config",
+    });
+
+    expect(vm.warnings).toEqual([]);
+  });
+
+  it("buildConversationMessageViewModel produces plain structured object", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Here are the files:",
+      label: "EstaCoda",
+      turnId: "turn-1",
+      matchedSkills: ["file-search"],
+      progress: ["searching"],
+    });
+
+    expect(vm.kind).toBe("conversationMessage");
+    expect(vm.role).toBe("assistant");
+    expect(vm.text).toBe("Here are the files:");
+    expect(vm.label).toBe("EstaCoda");
+    expect(vm.turnId).toBe("turn-1");
+    expect(vm.matchedSkills).toEqual(["file-search"]);
+    expect(vm.progress).toEqual(["searching"]);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildActiveTurnSpinnerViewModel produces plain structured object", () => {
+    const vm = buildActiveTurnSpinnerViewModel({
+      label: "\u13080",
+      phase: "thinking",
+      elapsedMs: 1200,
+    });
+
+    expect(vm.kind).toBe("activeTurnSpinner");
+    expect(vm.label).toBe("\u13080");
+    expect(vm.phase).toBe("thinking");
+    expect(vm.elapsedMs).toBe(1200);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildToolActivityRailViewModel produces plain structured object", () => {
+    const vm = buildToolActivityRailViewModel({
+      events: [
+        toolActivityRailEvent("terminal", "running", { elapsedMs: 500 }),
+        toolActivityRailEvent("web.extract", "done", { elapsedMs: 1200, glyph: "→" }),
+      ],
+    });
+
+    expect(vm.kind).toBe("toolActivityRail");
+    expect(vm.events).toHaveLength(2);
+    expect(vm.events[0]).toEqual({ tool: "terminal", status: "running", elapsedMs: 500 });
+    expect(vm.events[1]).toEqual({ tool: "web.extract", status: "done", elapsedMs: 1200, glyph: "→" });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildFileChangePreviewViewModel produces plain structured object", () => {
+    const vm = buildFileChangePreviewViewModel({
+      path: "src/app.ts",
+      changeType: "modified",
+      diff: "-old\n+new",
+      hunks: [
+        fileChangeHunk(1, 2, 1, 2, ["-old", "+new"]),
+      ],
+    });
+
+    expect(vm.kind).toBe("fileChangePreview");
+    expect(vm.path).toBe("src/app.ts");
+    expect(vm.changeType).toBe("modified");
+    expect(vm.diff).toBe("-old\n+new");
+    expect(vm.hunks).toHaveLength(1);
+    expect(vm.hunks![0]).toEqual({ oldStart: 1, oldCount: 2, newStart: 1, newCount: 2, lines: ["-old", "+new"] });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildSessionStatusRailViewModel produces plain structured object", () => {
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "running",
+      sessionElapsedMs: 3600000,
+      currentTurnSeconds: 24,
+      contextUsage: { filled: 3, total: 8 },
+    });
+
+    expect(vm.kind).toBe("sessionStatusRail");
+    expect(vm.modelLabel).toBe("deepseek-reasoner");
+    expect(vm.turnState).toBe("running");
+    expect(vm.sessionElapsedMs).toBe(3600000);
+    expect(vm.currentTurnSeconds).toBe(24);
+    expect(vm.contextUsage).toEqual({ filled: 3, total: 8 });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildShortcutHintRailViewModel produces plain structured object", () => {
+    const vm = buildShortcutHintRailViewModel({
+      hints: [
+        shortcutHint("Ctrl+C", "Cancel"),
+        shortcutHint("Tab", "Complete"),
+      ],
+    });
+
+    expect(vm.kind).toBe("shortcutHintRail");
+    expect(vm.hints).toHaveLength(2);
+    expect(vm.hints[0]).toEqual({ key: "Ctrl+C", description: "Cancel" });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildSlashMenuViewModel produces plain structured object", () => {
+    const vm = buildSlashMenuViewModel({
+      query: "/ver",
+      options: [
+        slashMenuOption("verify", "verify", { description: "Check integrity" }),
+        slashMenuOption("version", "version"),
+      ],
+      selectedIndex: 0,
+    });
+
+    expect(vm.kind).toBe("slashMenu");
+    expect(vm.query).toBe("/ver");
+    expect(vm.options).toHaveLength(2);
+    expect(vm.options[0]).toEqual({ id: "verify", label: "verify", description: "Check integrity" });
+    expect(vm.selectedIndex).toBe(0);
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
 });
 
 describe("ViewModel convenience helpers", () => {
@@ -343,6 +560,26 @@ describe("ViewModel convenience helpers", () => {
     const action = approvalAction("allow", "Allow", "ok");
     expect(action).toEqual({ id: "allow", label: "Allow", severity: "ok" });
   });
+
+  it("toolActivityRailEvent creates a ToolActivityRailEvent with overrides", () => {
+    const event = toolActivityRailEvent("terminal", "running", { elapsedMs: 300 });
+    expect(event).toEqual({ tool: "terminal", status: "running", elapsedMs: 300 });
+  });
+
+  it("fileChangeHunk creates a FileChangeHunk", () => {
+    const hunk = fileChangeHunk(1, 2, 1, 2, ["-a", "+b"]);
+    expect(hunk).toEqual({ oldStart: 1, oldCount: 2, newStart: 1, newCount: 2, lines: ["-a", "+b"] });
+  });
+
+  it("shortcutHint creates a ShortcutHint", () => {
+    const hint = shortcutHint("Esc", "Cancel");
+    expect(hint).toEqual({ key: "Esc", description: "Cancel" });
+  });
+
+  it("slashMenuOption creates a SlashMenuOption with overrides", () => {
+    const option = slashMenuOption("verify", "verify", { description: "Check integrity" });
+    expect(option).toEqual({ id: "verify", label: "verify", description: "Check integrity" });
+  });
 });
 
 describe("ViewModel shape invariants", () => {
@@ -378,6 +615,29 @@ describe("ViewModel shape invariants", () => {
     });
     const result = buildCommandResultViewModel({ ok: true, title: "T", blocks: [] });
     const plain = buildPlainFallbackViewModel({ lines: [] });
+    const startupDashboard = buildStartupDashboardViewModel({
+      agentName: "A",
+      taglines: [],
+      version: "v0",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "unknown",
+      availableCommands: [],
+    });
+    const startupRuntime = buildStartupRuntimeViewModel({
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      providerReadiness: "unknown",
+    });
+    const conversationMessage = buildConversationMessageViewModel({ role: "assistant", text: "" });
+    const activeTurnSpinner = buildActiveTurnSpinnerViewModel({});
+    const toolActivityRail = buildToolActivityRailViewModel({ events: [] });
+    const fileChangePreview = buildFileChangePreviewViewModel({ path: "p", changeType: "modified" });
+    const sessionStatusRail = buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" });
+    const shortcutHintRail = buildShortcutHintRailViewModel({ hints: [] });
+    const slashMenu = buildSlashMenuViewModel({ query: "", options: [], selectedIndex: 0 });
 
     expect(status.kind).toBe("status");
     expect(table.kind).toBe("table");
@@ -391,6 +651,15 @@ describe("ViewModel shape invariants", () => {
     expect(startup.kind).toBe("startup");
     expect(result.kind).toBe("commandResult");
     expect(plain.kind).toBe("plainFallback");
+    expect(startupDashboard.kind).toBe("startupDashboard");
+    expect(startupRuntime.kind).toBe("startupRuntime");
+    expect(conversationMessage.kind).toBe("conversationMessage");
+    expect(activeTurnSpinner.kind).toBe("activeTurnSpinner");
+    expect(toolActivityRail.kind).toBe("toolActivityRail");
+    expect(fileChangePreview.kind).toBe("fileChangePreview");
+    expect(sessionStatusRail.kind).toBe("sessionStatusRail");
+    expect(shortcutHintRail.kind).toBe("shortcutHintRail");
+    expect(slashMenu.kind).toBe("slashMenu");
   });
 
   it("builder outputs contain no functions (pure data only)", () => {
@@ -428,6 +697,29 @@ describe("ViewModel shape invariants", () => {
           readiness: "ready",
         }),
         buildPlainFallbackViewModel({ lines: ["line"] }),
+        buildStartupDashboardViewModel({
+          agentName: "A",
+          taglines: [],
+          version: "v0",
+          model: { provider: "p", id: "i" },
+          workspaceTrust: "unknown",
+          workspaceVerification: "unknown",
+          securityMode: "open",
+          providerReadiness: "unknown",
+          availableCommands: [],
+        }),
+        buildStartupRuntimeViewModel({
+          workspaceTrust: "unknown",
+          workspaceVerification: "unknown",
+          providerReadiness: "unknown",
+        }),
+        buildConversationMessageViewModel({ role: "assistant", text: "hello" }),
+        buildActiveTurnSpinnerViewModel({}),
+        buildToolActivityRailViewModel({ events: [toolActivityRailEvent("t", "done")] }),
+        buildFileChangePreviewViewModel({ path: "p", changeType: "added" }),
+        buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "running" }),
+        buildShortcutHintRailViewModel({ hints: [shortcutHint("k", "d")] }),
+        buildSlashMenuViewModel({ query: "/", options: [slashMenuOption("i", "L")], selectedIndex: 0 }),
       ],
     });
 

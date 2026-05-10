@@ -12,27 +12,42 @@ import {
   buildStatusViewModel,
   buildTableViewModel,
   buildWarningErrorViewModel,
+  buildStartupDashboardViewModel,
+  buildStartupRuntimeViewModel,
+  buildConversationMessageViewModel,
+  buildActiveTurnSpinnerViewModel,
+  buildToolActivityRailViewModel,
+  buildFileChangePreviewViewModel,
+  buildSessionStatusRailViewModel,
+  buildShortcutHintRailViewModel,
+  buildSlashMenuViewModel,
   kv,
   listItem,
   timelineEvent,
   progressStep,
   pickerOption,
   approvalAction,
+  toolActivityRailEvent,
+  shortcutHint,
+  slashMenuOption,
 } from "../view-models/builders.js";
 import {
   renderPlain,
   renderPlainFallback,
   renderWarningError,
-  renderStatus,
-  renderTable,
   renderKeyValueBlock,
   renderList,
+  renderTable,
   renderApprovalSecurity,
   renderActivityTimeline,
   renderProgressRail,
   renderPicker,
   renderStartup,
+  renderStatus,
   renderCommandResult,
+  renderAssistantResponse,
+  renderStartupDashboard,
+  renderConversationMessage,
 } from "./plain-renderer.js";
 
 function assertNoAnsi(text: string): void {
@@ -483,7 +498,110 @@ describe("PlainRenderer — renderStartup", () => {
   });
 });
 
-// ──────────────────────────────────────────────────
+// ──────────────────────────────────────
+// PlainRenderer — renderStartupDashboard
+// ──────────────────────────────────────
+
+describe("PlainRenderer — renderStartupDashboard", () => {
+  it("renders full dashboard with all fields", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      version: "v0.0.5",
+      sessionId: "sess-9f7a2c1b",
+      model: { provider: "openrouter", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = renderStartupDashboard(vm);
+    expect(out).toContain("EstaCoda");
+    expect(out).toContain("Kemet Research");
+    expect(out).toContain("version: v0.0.5");
+    expect(out).toContain("session: sess-9f7a2c1b");
+    expect(out).toContain("model: deepseek-reasoner - ready");
+    expect(out).toContain("workspace trust: trusted");
+    expect(out).toContain("workspace verification: verified");
+    expect(out).toContain("workspace: /workspace");
+    expect(out).toContain("security: high");
+    expect(out).toContain("skills: autonomous");
+    expect(out).toContain("version status: unknown");
+    expect(out).toContain("Interactive commands:");
+    expect(out).toContain("  /tools   Browse runtime tools");
+    expect(out).toContain("  /status  Show session status");
+    assertNoAnsi(out);
+    // Tagline contains Arabic text; ASCII-safety does not apply to user content
+  });
+
+  it("renders minimal dashboard without optional fields", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.1",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = renderStartupDashboard(vm);
+    expect(out).toBe(
+      "EstaCoda\n\nversion: v0.0.1\nmodel: i - unknown\nworkspace trust: unknown\nworkspace verification: unknown\nsecurity: open\n\nInteractive commands:\n  /tools   Browse runtime tools\n  /skills  Browse skills\n  /model   Show or switch model\n  /status  Show session status"
+    );
+  });
+
+  it("renders missing-config with fallback label", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.1",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "missing-config",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = renderStartupDashboard(vm);
+    expect(out).toContain("model: model not configured - missing config");
+  });
+
+  it("renders dashboard with warnings", () => {
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "missing-config",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [
+        buildWarningErrorViewModel({ severity: "warn", title: "Config", message: "Missing" }),
+      ],
+    });
+    const out = renderStartupDashboard(vm);
+    expect(out).toContain("[WARN] Config: Missing");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+});
+
+// ──────────────────────────────────────
+// PlainRenderer — renderCommandResult
+// ──────────────────────────────────────
+
 describe("PlainRenderer — renderCommandResult", () => {
   it("renders ok result with blocks", () => {
     const vm = buildCommandResultViewModel({
@@ -566,8 +684,20 @@ describe("PlainRenderer — renderPlain dispatcher", () => {
         model: { provider: "p", id: "i" },
         readiness: "ready",
       }),
+      buildStartupDashboardViewModel({
+        agentName: "A",
+        taglines: [],
+        version: "v0.0.1",
+        model: { provider: "p", id: "i" },
+        workspaceTrust: "unknown",
+        workspaceVerification: "unknown",
+        securityMode: "open",
+        providerReadiness: "unknown",
+        availableCommands: [],
+      }),
       buildCommandResultViewModel({ ok: true, title: "T", blocks: [] }),
       buildPlainFallbackViewModel({ lines: ["line"] }),
+      buildConversationMessageViewModel({ role: "assistant", text: "Hello" }),
     ];
 
     for (const vm of vms) {
@@ -719,5 +849,98 @@ describe("PlainRenderer — edge cases", () => {
       steps: [],
     });
     expect(renderProgressRail(vm)).toBe("Steps\nNo steps.");
+  });
+});
+
+// ──────────────────────────────────────────────────
+describe("PlainRenderer — renderConversationMessage", () => {
+  it("renders assistant message with label and text", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Here is the result.\nLine two.",
+      label: "EstaCoda",
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda:");
+    expect(out).toContain("Here is the result.");
+    expect(out).toContain("Line two.");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders assistant message with matched skills", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Done.",
+      matchedSkills: ["file-search", "git-status"],
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda:");
+    expect(out).toContain("skills: file-search, git-status");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders assistant message with progress", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Done.",
+      progress: ["planning", "coding", "review"],
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda:");
+    expect(out).toContain("progress: planning -> coding -> review");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders assistant message with skills and progress", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Done.",
+      matchedSkills: ["search"],
+      progress: ["start", "finish"],
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda:");
+    expect(out).toContain("skills: search");
+    expect(out).toContain("progress: start -> finish");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("falls back to EstaCoda label when label contains non-ASCII", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Hello.",
+      label: "\u0230 \u0627\u0633\u062a\u0627\u0643\u0648\u062f\u0627",
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda:");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("uses custom label when ASCII-safe", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Hello.",
+      label: "CustomBot",
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toContain("CustomBot:");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("passes through user message text unchanged", () => {
+    const vm = buildConversationMessageViewModel({
+      role: "user",
+      text: "Hello, assistant!\nSecond line.",
+    });
+    const out = renderConversationMessage(vm);
+    expect(out).toBe("Hello, assistant!\nSecond line.");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
   });
 });

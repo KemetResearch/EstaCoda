@@ -2,16 +2,21 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
+import { measureTextWidth, padVisibleAlign } from "./layout.js";
+import type { UiLocale } from "../../ui/cli-ui-copy.js";
+import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import type {
   ActivityTimelineViewModel,
   ApprovalSecurityViewModel,
   CommandResultViewModel,
+  ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
   PlainFallbackViewModel,
   PickerViewModel,
   ProgressContextRailViewModel,
   StartupViewModel,
+  StartupDashboardViewModel,
   StatusViewModel,
   TableViewModel,
   TimelineEvent,
@@ -24,7 +29,7 @@ import type {
 // Generic dispatcher
 // ─────────────────────────────────────────────────────────────
 
-export function renderPlain(viewModel: ViewModel): string {
+export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
   switch (viewModel.kind) {
     case "status":
       return renderStatus(viewModel);
@@ -46,12 +51,25 @@ export function renderPlain(viewModel: ViewModel): string {
       return renderPicker(viewModel);
     case "startup":
       return renderStartup(viewModel);
+    case "startupDashboard":
+      return renderStartupDashboard(viewModel);
     case "commandResult":
       return renderCommandResult(viewModel);
     case "plainFallback":
       return renderPlainFallback(viewModel);
     case "assistantResponse":
       return renderAssistantResponse(viewModel);
+    case "conversationMessage":
+      return renderConversationMessage(viewModel, locale);
+    case "startupDashboard":
+    case "startupRuntime":
+    case "activeTurnSpinner":
+    case "toolActivityRail":
+    case "fileChangePreview":
+    case "sessionStatusRail":
+    case "shortcutHintRail":
+    case "slashMenu":
+      return `[unsupported view model: ${viewModel.kind}]`;
     default: {
       const _exhaustive: never = viewModel;
       return String(_exhaustive);
@@ -141,7 +159,7 @@ export function renderTable(vm: TableViewModel): string {
 
   // Header row
   const headerCells = vm.columns.map((col, i) =>
-    padAlign(col.header, widths[i], col.alignment ?? "left")
+    padVisibleAlign(col.header, widths[i], col.alignment ?? "left")
   );
   lines.push(headerCells.join("  "));
 
@@ -156,7 +174,7 @@ export function renderTable(vm: TableViewModel): string {
     const cells = vm.columns.map((col, i) => {
       const raw = row[col.key];
       const text = raw === undefined ? "" : String(raw);
-      return padAlign(text, widths[i], col.alignment ?? "left");
+      return padVisibleAlign(text, widths[i], col.alignment ?? "left");
     });
     lines.push(cells.join("  "));
   }
@@ -169,27 +187,14 @@ function computeColumnWidths(
   rows: readonly Record<string, unknown>[]
 ): number[] {
   return columns.map((col) => {
-    let width = col.header.length;
+    let width = measureTextWidth(col.header);
     for (const row of rows) {
       const raw = row[col.key];
       const text = raw === undefined ? "" : String(raw);
-      width = Math.max(width, text.length);
+      width = Math.max(width, measureTextWidth(text));
     }
     return width;
   });
-}
-
-function padAlign(text: string, width: number, alignment: string): string {
-  if (alignment === "right") {
-    return text.padStart(width);
-  }
-  if (alignment === "center") {
-    const totalPad = Math.max(0, width - text.length);
-    const left = Math.floor(totalPad / 2);
-    const right = totalPad - left;
-    return " ".repeat(left) + text + " ".repeat(right);
-  }
-  return text.padEnd(width);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -450,7 +455,87 @@ export function renderCommandResult(vm: CommandResultViewModel): string {
 }
 
 // ──────────────────────────────────────
-// Assistant Response
+// Startup Dashboard
+// ──────────────────────────────────────
+
+export function renderStartupDashboard(vm: StartupDashboardViewModel): string {
+  const lines: string[] = [vm.agentName];
+
+  for (const tagline of vm.taglines) {
+    if (tagline.length > 0) {
+      lines.push(tagline);
+    }
+  }
+
+  lines.push("");
+
+  if (vm.version !== undefined) {
+    lines.push(`version: ${vm.version}`);
+  }
+  if (vm.sessionId !== undefined) {
+    lines.push(`session: ${vm.sessionId}`);
+  }
+
+  // Model route readiness line
+  const readiness = vm.providerReadiness;
+  let modelLabel: string;
+  let readinessText: string;
+
+  switch (readiness) {
+    case "ready":
+      modelLabel = vm.model.id;
+      readinessText = "ready";
+      break;
+    case "degraded":
+      modelLabel = vm.model.id;
+      readinessText = "degraded";
+      break;
+    case "missing-config":
+      modelLabel = "model not configured";
+      readinessText = "missing config";
+      break;
+    case "unknown":
+    default:
+      modelLabel = vm.model.id;
+      readinessText = "unknown";
+      break;
+  }
+
+  lines.push(`model: ${modelLabel} - ${readinessText}`);
+
+  lines.push(`workspace trust: ${vm.workspaceTrust}`);
+  lines.push(`workspace verification: ${vm.workspaceVerification}`);
+
+  if (vm.workspaceDirectory !== undefined) {
+    lines.push(`workspace: ${vm.workspaceDirectory}`);
+  }
+  if (vm.securityMode !== undefined) {
+    lines.push(`security: ${vm.securityMode}`);
+  }
+  if (vm.skillAutonomy !== undefined) {
+    lines.push(`skills: ${vm.skillAutonomy}`);
+  }
+  if (vm.versionStatus !== undefined) {
+    lines.push(`version status: ${vm.versionStatus}`);
+  }
+
+  lines.push("");
+  lines.push("Interactive commands:");
+  lines.push("  /tools   Browse runtime tools");
+  lines.push("  /skills  Browse skills");
+  lines.push("  /model   Show or switch model");
+  lines.push("  /status  Show session status");
+
+  for (const warning of vm.warnings) {
+    lines.push("");
+    lines.push(renderWarningError(warning));
+  }
+
+  return lines.join("\n");
+}
+
+// ──────────────────────────────────────
+// Command Result
 // ──────────────────────────────────────
 
 export function renderAssistantResponse(vm: AssistantResponseViewModel): string {
@@ -470,4 +555,35 @@ export function renderAssistantResponse(vm: AssistantResponseViewModel): string 
   }
 
   return lines.join("\n");
+}
+
+// ──────────────────────────────────────
+// Conversation Message
+// ──────────────────────────────────────
+
+export function renderConversationMessage(vm: ConversationMessageViewModel, locale?: UiLocale): string {
+  if (vm.role === "assistant") {
+    const copy = chromeCopy(locale ?? "en");
+    const plainLabel = vm.label !== undefined && /^[\x00-\x7F]+$/.test(vm.label)
+      ? vm.label
+      : copy.assistantCardTitle;
+    const lines: string[] = [
+      `${plainLabel}:`,
+      ...vm.text.split("\n"),
+    ];
+
+    if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
+      lines.push("");
+      lines.push(`skills: ${vm.matchedSkills.join(", ")}`);
+    }
+
+    if (vm.progress !== undefined && vm.progress.length > 0) {
+      lines.push(`progress: ${vm.progress.join(" -> ")}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  // User messages: plain text until user prompt rail is implemented
+  return vm.text;
 }

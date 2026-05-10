@@ -5,6 +5,7 @@ import type {
   UiTokenContract,
   TokenOverlay,
   ResolvedTokens,
+  ThemeAwareSkin,
 } from "../contracts/ui-tokens.js";
 import { lightTheme } from "./base-light.js";
 import { darkTheme } from "./base-dark.js";
@@ -49,7 +50,9 @@ export function resolveTokens(
 
   let merged: UiTokenContract = { ...base };
 
-  merged = applyOverlay(merged, kemetBlueSkin);
+  const skinDef = getSkin(skin);
+  merged = applyOverlay(merged, skinDef.shared);
+  merged = applyOverlay(merged, skinDef[theme]);
 
   if (mode === "plain") {
     merged = applyOverlay(merged, plainOverlay);
@@ -61,6 +64,15 @@ export function resolveTokens(
     skin,
     contract: merged,
   };
+}
+
+function getSkin(skin: SkinName): ThemeAwareSkin {
+  switch (skin) {
+    case "kemetBlue":
+      return kemetBlueSkin;
+    default:
+      return kemetBlueSkin;
+  }
 }
 
 function applyOverlay(

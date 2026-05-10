@@ -14,12 +14,24 @@ import {
   buildStatusViewModel,
   buildTableViewModel,
   buildWarningErrorViewModel,
+  buildStartupDashboardViewModel,
+  buildStartupRuntimeViewModel,
+  buildConversationMessageViewModel,
+  buildActiveTurnSpinnerViewModel,
+  buildToolActivityRailViewModel,
+  buildFileChangePreviewViewModel,
+  buildSessionStatusRailViewModel,
+  buildShortcutHintRailViewModel,
+  buildSlashMenuViewModel,
   kv,
   listItem,
   timelineEvent,
   progressStep,
   pickerOption,
   approvalAction,
+  toolActivityRailEvent,
+  shortcutHint,
+  slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
 
@@ -120,8 +132,20 @@ describe("StandardRenderer — dispatch", () => {
         model: { provider: "p", id: "i" },
         readiness: "ready",
       }),
+      buildStartupDashboardViewModel({
+        agentName: "A",
+        taglines: [],
+        version: "v0.0.1",
+        model: { provider: "p", id: "i" },
+        workspaceTrust: "unknown",
+        workspaceVerification: "unknown",
+        securityMode: "open",
+        providerReadiness: "unknown",
+        availableCommands: [],
+      }),
       buildCommandResultViewModel({ ok: true, title: "T", blocks: [] }),
       buildPlainFallbackViewModel({ lines: ["line"] }),
+      buildConversationMessageViewModel({ role: "assistant", text: "Hello" }),
     ];
 
     for (const vm of vms) {
@@ -522,6 +546,149 @@ describe("StandardRenderer — visual primitives", () => {
   });
 });
 
+describe("StandardRenderer — startup dashboard", () => {
+  it("renders dashboard with hero, version, model readiness, info and commands", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      version: "v0.0.5",
+      sessionId: "sess-9f7a2c1b",
+      model: { provider: "openrouter", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = r.renderStartupDashboard(vm);
+    expect(out).toContain("EstaCoda");
+    expect(out).toContain("Kemet Research");
+    expect(out).toContain("v0.0.5");
+    expect(out).toContain("sess-9f7a2c1b");
+    expect(out).toContain("deepseek-reasoner");
+    expect(out).toContain("ready");
+    expect(out).toContain("Workspace Trust");
+    expect(out).toContain("trusted");
+    expect(out).toContain("Workspace Verification");
+    expect(out).toContain("verified");
+    expect(out).toContain("Workspace Directory");
+    expect(out).toContain("/workspace");
+    expect(out).toContain("/tools");
+    expect(out).toContain("Browse runtime tools");
+    expect(out).toContain("/status");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders degraded readiness with correct symbol", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      model: { provider: "p", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      securityMode: "high",
+      providerReadiness: "degraded",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = r.renderStartupDashboard(vm);
+    expect(out).toContain("degraded");
+    expect(out).toContain("deepseek-reasoner");
+  });
+
+  it("renders missing-config readiness with fallback label", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "missing-config",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = r.renderStartupDashboard(vm);
+    expect(out).toContain("model not configured");
+    expect(out).toContain("missing config");
+  });
+
+  it("renders dashboard with warnings", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      securityMode: "open",
+      providerReadiness: "missing-config",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [
+        buildWarningErrorViewModel({ severity: "warn", title: "Config", message: "Missing" }),
+      ],
+    });
+    const out = r.renderStartupDashboard(vm);
+    expect(out).toContain("Missing");
+  });
+
+  it("renders dashboard without ANSI in no-color mode", () => {
+    const r = renderer("dark", noColorCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research"],
+      version: "v0.0.5",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = r.renderStartupDashboard(vm);
+    assertNoAnsi(out);
+  });
+
+  it("renders dashboard with ASCII fallback in no-Unicode mode", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research"],
+      version: "v0.0.5",
+      sessionId: "sess-abc",
+      model: { provider: "p", id: "i" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace",
+      securityMode: "high",
+      skillAutonomy: "autonomous",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = r.renderStartupDashboard(vm);
+    // Should use ASCII dash for separator, not Unicode box-drawing
+    expect(out).not.toContain("─");
+    expect(out).toContain("-");
+  });
+});
+
 describe("StandardRenderer — empty and edge states", () => {
   it("renders empty table", () => {
     const r = renderer("dark", fullCaps());
@@ -605,5 +772,112 @@ describe("StandardRenderer — deterministic output", () => {
     const a = r.render(vm);
     const b = r.render(vm);
     expect(a).toBe(b);
+  });
+});
+
+describe("StandardRenderer — conversation message", () => {
+  it("renders assistant message with open horizontal frame and brand title", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Hello, world!",
+    });
+    const out = r.renderConversationMessage(vm);
+    // Should contain the Unicode eye symbol and brand name
+    expect(out).toContain("𓂀");
+    expect(out).toContain("EstaCoda");
+    // Should have open horizontal frame corners
+    expect(out).toContain("╭");
+    expect(out).toContain("╮");
+    expect(out).toContain("╰");
+    expect(out).toContain("╯");
+    // Should not have vertical side borders
+    expect(out).not.toContain("│");
+    // Content should be present, indented by two spaces
+    expect(out).toContain("  Hello, world!");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders assistant message with no-color capabilities", () => {
+    const r = renderer("dark", noColorCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "No color here.",
+    });
+    const out = r.renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda");
+    expect(out).toContain("No color here.");
+    assertNoAnsi(out);
+  });
+
+  it("renders assistant message with no-Unicode capabilities", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "ASCII only.",
+    });
+    const out = r.renderConversationMessage(vm);
+    // Should use ASCII fallback for brand symbol
+    expect(out).toContain("* EstaCoda");
+    // Should use ASCII corners
+    expect(out).toContain("+");
+    expect(out).not.toContain("\u256D");
+    expect(out).not.toContain("\u256E");
+    expect(out).not.toContain("\u2570");
+    expect(out).not.toContain("\u256F");
+    expect(out).toContain("ASCII only.");
+  });
+
+  it("renders assistant message within narrow terminal width", () => {
+    const r = renderer("dark", narrowCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Short text.",
+    });
+    const out = r.renderConversationMessage(vm);
+    expect(out).toContain("EstaCoda");
+    expect(out).toContain("Short text.");
+    // Frame should respect narrow terminal width (visible characters only)
+    const { measureVisibleWidth } = require("./layout.js");
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it("renders assistant message with plain capabilities", () => {
+    const tokens = resolveTokens("plain", "light", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: plainCaps() });
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Plain mode.",
+    });
+    const out = r.renderConversationMessage(vm);
+    expect(out).toContain("* EstaCoda");
+    expect(out).toContain("Plain mode.");
+    assertNoAnsi(out);
+  });
+
+  it("renders assistant message with skills and progress", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "assistant",
+      text: "Done.",
+      matchedSkills: ["search", "git"],
+      progress: ["plan", "execute"],
+    });
+    const out = r.renderConversationMessage(vm);
+    expect(out).toContain("Done.");
+    expect(out).toContain("skills: search, git");
+    expect(out).toContain("progress: plan -> execute");
+  });
+
+  it("passes through user message text unchanged", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildConversationMessageViewModel({
+      role: "user",
+      text: "Hello, assistant!",
+    });
+    const out = r.renderConversationMessage(vm);
+    expect(out).toBe("Hello, assistant!");
   });
 });

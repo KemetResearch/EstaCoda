@@ -1,6 +1,12 @@
 // Terminal layout helpers.
-// Handles Unicode width measurement, wrapping, and truncation.
-// No ANSI logic here — width is measured on visible characters only.
+// Handles Unicode width measurement, wrapping, truncation, frames, and rails.
+// ANSI-aware variants strip escape codes before measuring visible width.
+
+const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_REGEX, "");
+}
 
 export function measureTextWidth(text: string): number {
   let width = 0;
@@ -16,6 +22,10 @@ export function measureTextWidth(text: string): number {
     }
   }
   return width;
+}
+
+export function measureVisibleWidth(text: string): number {
+  return measureTextWidth(stripAnsi(text));
 }
 
 export function wrapText(text: string, maxWidth: number): string[] {
@@ -84,6 +94,177 @@ export function truncateText(
   }
 
   return result;
+}
+
+export function truncateVisible(
+  text: string,
+  maxWidth: number,
+  ellipsis: string = "..."
+): string {
+  if (maxWidth <= 0) return "";
+  const ellipsisWidth = measureTextWidth(ellipsis);
+  if (maxWidth <= ellipsisWidth) return ellipsis.slice(0, maxWidth);
+  if (measureVisibleWidth(text) <= maxWidth) return text;
+
+  let width = 0;
+  let result = "";
+  let state: "normal" | "afterEsc" | "inCsi" = "normal";
+
+  for (const ch of text) {
+    if (state === "afterEsc") {
+      if (ch === "[") {
+        state = "inCsi";
+      } else {
+        state = "normal";
+      }
+      result += ch;
+      continue;
+    }
+
+    if (state === "inCsi") {
+      result += ch;
+      const code = ch.charCodeAt(0);
+      if (code >= 0x40 && code <= 0x7E) {
+        state = "normal";
+      }
+      continue;
+    }
+
+    if (ch === "\x1b") {
+      state = "afterEsc";
+      result += ch;
+      continue;
+    }
+
+    const cp = ch.codePointAt(0) ?? 0;
+    let charWidth = 1;
+    if (isFullWidthChar(cp) || isEmoji(cp)) charWidth = 2;
+    if (isCombiningChar(cp)) charWidth = 0;
+
+    if (width + charWidth + ellipsisWidth > maxWidth) {
+      return result + ellipsis;
+    }
+
+    width += charWidth;
+    result += ch;
+  }
+
+  return result;
+}
+
+export function padVisibleEnd(
+  text: string,
+  width: number,
+  fill: string = " "
+): string {
+  const visibleWidth = measureVisibleWidth(text);
+  const padCount = Math.max(0, width - visibleWidth);
+  return text + fill.repeat(padCount);
+}
+
+export function padVisibleStart(
+  text: string,
+  width: number,
+  fill: string = " "
+): string {
+  const visibleWidth = measureVisibleWidth(text);
+  const padCount = Math.max(0, width - visibleWidth);
+  return fill.repeat(padCount) + text;
+}
+
+export function padVisibleAlign(
+  text: string,
+  width: number,
+  alignment: "left" | "right" | "center" = "left",
+  fill: string = " "
+): string {
+  const visibleWidth = measureVisibleWidth(text);
+  if (visibleWidth >= width) return text;
+
+  if (alignment === "right") {
+    return padVisibleStart(text, width, fill);
+  }
+  if (alignment === "center") {
+    const totalPad = width - visibleWidth;
+    const left = Math.floor(totalPad / 2);
+    const right = totalPad - left;
+    return fill.repeat(left) + text + fill.repeat(right);
+  }
+  return padVisibleEnd(text, width, fill);
+}
+
+export function indentLines(
+  lines: readonly string[],
+  indent: number | string = 2
+): string[] {
+  const prefix = typeof indent === "number" ? " ".repeat(indent) : indent;
+  return lines.map((line) => (line.length > 0 ? prefix + line : line));
+}
+
+export interface FrameOptions {
+  width?: number;
+  useUnicode?: boolean;
+  title?: string;
+}
+
+export function openHorizontalFrame(
+  lines: readonly string[],
+  options: FrameOptions = {}
+): string {
+  const useUnicode = options.useUnicode ?? true;
+  const horiz = useUnicode ? "─" : "-";
+  const topLeft = useUnicode ? "╭" : "+";
+  const topRight = useUnicode ? "╮" : "+";
+  const bottomLeft = useUnicode ? "╰" : "+";
+  const bottomRight = useUnicode ? "╯" : "+";
+
+  const contentWidth = Math.max(0, ...lines.map((l) => measureVisibleWidth(l)));
+  const titleWidth = options.title ? measureVisibleWidth(options.title) : 0;
+  const minWidth = Math.max(contentWidth + 4, titleWidth + 4);
+  const width = Math.max(minWidth, options.width ?? 0);
+
+  let top = topLeft + horiz.repeat(width - 2) + topRight;
+  if (options.title && titleWidth > 0) {
+    const avail = width - 2 - titleWidth;
+    const left = Math.floor(avail / 2);
+    const right = avail - left;
+    top = topLeft + horiz.repeat(left) + options.title + horiz.repeat(right) + topRight;
+  }
+
+  const bottom = bottomLeft + horiz.repeat(width - 2) + bottomRight;
+  const indented = indentLines(lines, 2);
+
+  return [top, ...indented, bottom].join("\n");
+}
+
+export function solidPromptRail(
+  width: number,
+  options: { cap?: string; fill?: string; useUnicode?: boolean } = {}
+): string {
+  const useUnicode = options.useUnicode ?? true;
+  const cap = options.cap ?? (useUnicode ? "+" : "+");
+  const fill = options.fill ?? (useUnicode ? "─" : "-");
+  if (width <= 0) return "";
+  if (width === 1) return cap;
+  const innerWidth = Math.max(0, width - 2);
+  return cap + fill.repeat(innerWidth) + cap;
+}
+
+export interface BeadOptions {
+  filledChar?: string;
+  emptyChar?: string;
+}
+
+export function renderBeads(
+  filled: number,
+  total: number,
+  options: BeadOptions = {}
+): string {
+  const filledChar = options.filledChar ?? "◉";
+  const emptyChar = options.emptyChar ?? "·";
+  if (total <= 0) return "";
+  const clampedFilled = Math.max(0, Math.min(filled, total));
+  return filledChar.repeat(clampedFilled) + emptyChar.repeat(total - clampedFilled);
 }
 
 function isCombiningChar(cp: number): boolean {

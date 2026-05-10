@@ -92,13 +92,26 @@ export interface UiTokenContract {
 
 // A partial set of overrides that a skin or mode can apply.
 export type TokenOverlay = Partial<
-  Omit<UiTokenContract, "glyph" | "toolIcon" | "branding" | "behavior">
+  Omit<UiTokenContract, "palette" | "severity" | "surface" | "text" | "interactive" | "glyph" | "toolIcon" | "branding" | "behavior">
 > & {
+  palette?: Partial<TokenColors>;
+  severity?: Partial<TokenSeverity>;
+  surface?: Partial<TokenSurface>;
+  text?: Partial<TokenText>;
+  interactive?: Partial<TokenInteractive>;
   glyph?: Partial<TokenGlyph>;
   toolIcon?: Readonly<Record<string, string>>;
   branding?: Partial<TokenBranding>;
   behavior?: Partial<TokenBehavior>;
 };
+
+// Theme-aware skin with shared, dark, and light token sets.
+// Shared applies first, then the theme-specific set overrides.
+export interface ThemeAwareSkin {
+  readonly shared: TokenOverlay;
+  readonly dark: TokenOverlay;
+  readonly light: TokenOverlay;
+}
 
 export interface ResolvedTokens {
   readonly mode: UiMode;

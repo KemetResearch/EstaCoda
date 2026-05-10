@@ -7,12 +7,14 @@ import type {
   ActivityTimelineViewModel,
   ApprovalSecurityViewModel,
   CommandResultViewModel,
+  ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
   PlainFallbackViewModel,
   PickerViewModel,
   ProgressContextRailViewModel,
   StartupViewModel,
+  StartupDashboardViewModel,
   StatusViewModel,
   TableViewModel,
   TimelineEvent,
@@ -22,11 +24,14 @@ import type {
   AssistantResponseViewModel,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
-import { measureTextWidth } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleAlign, openHorizontalFrame } from "./layout.js";
+import type { UiLocale } from "../../ui/cli-ui-copy.js";
+import { chromeCopy } from "../../ui/cli-ui-copy.js";
 
 export interface StandardRendererOptions {
   readonly tokens: ResolvedTokens;
   readonly capabilities: TerminalCapabilities;
+  readonly locale?: UiLocale;
 }
 
 export class StandardRenderer {
@@ -34,6 +39,8 @@ export class StandardRenderer {
   readonly #capabilities: TerminalCapabilities;
   readonly #useColor: boolean;
   readonly #useUnicode: boolean;
+  readonly #locale: UiLocale;
+  readonly #copy: ReturnType<typeof chromeCopy>;
 
   constructor(options: StandardRendererOptions) {
     this.#tokens = options.tokens;
@@ -42,6 +49,8 @@ export class StandardRenderer {
       this.#capabilities.supportsColor &&
       this.#tokens.contract.behavior.allowAnsiColor;
     this.#useUnicode = this.#capabilities.supportsUnicode;
+    this.#locale = options.locale ?? "en";
+    this.#copy = chromeCopy(this.#locale);
   }
 
   // ──────────────────────────────────────
@@ -83,12 +92,25 @@ export class StandardRenderer {
         return this.renderPicker(vm);
       case "startup":
         return this.renderStartup(vm);
+      case "startupDashboard":
+        return this.renderStartupDashboard(vm);
       case "commandResult":
         return this.renderCommandResult(vm);
       case "plainFallback":
         return this.renderPlainFallback(vm);
       case "assistantResponse":
         return this.renderAssistantResponse(vm);
+      case "conversationMessage":
+        return this.renderConversationMessage(vm);
+      case "startupDashboard":
+      case "startupRuntime":
+      case "activeTurnSpinner":
+      case "toolActivityRail":
+      case "fileChangePreview":
+      case "sessionStatusRail":
+      case "shortcutHintRail":
+      case "slashMenu":
+        return `[unsupported view model: ${vm.kind}]`;
       default: {
         const _exhaustive: never = vm;
         return String(_exhaustive);
@@ -190,9 +212,14 @@ export class StandardRenderer {
 
   /** Framed focus panel for approvals/security prompts. */
   #framedPanel(title: string, contentLines: readonly string[]): string {
+    const titleWidth = measureVisibleWidth(this.#bold(title));
+    const maxContentWidth = Math.max(
+      0,
+      ...contentLines.map((l) => measureVisibleWidth(l))
+    );
     const width = Math.min(
       this.#capabilities.terminalWidth,
-      Math.max(title.length + 4, ...contentLines.map((l) => measureTextWidth(l))) + 4
+      Math.max(titleWidth + 4, maxContentWidth + 4)
     );
     const horiz = this.#useUnicode ? "─" : "-";
     const topLeft = this.#useUnicode ? "┌" : "+";
@@ -205,10 +232,10 @@ export class StandardRenderer {
     const bottom = `${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`;
 
     const lines = [top];
-    lines.push(`${vert} ${this.#bold(title).padEnd(width - 4)} ${vert}`);
+    lines.push(`${vert} ${padVisibleEnd(this.#bold(title), width - 4)} ${vert}`);
     lines.push(`${vert}${horiz.repeat(width - 2)}${vert}`);
     for (const line of contentLines) {
-      lines.push(`${vert} ${line.padEnd(width - 4)} ${vert}`);
+      lines.push(`${vert} ${padVisibleEnd(line, width - 4)} ${vert}`);
     }
     lines.push(bottom);
     return lines.join("\n");
@@ -304,14 +331,14 @@ export class StandardRenderer {
 
     // Header row with brand color
     const headerCells = vm.columns.map((col, i) =>
-      this.#brand(padAlign(col.header, widths[i], col.alignment ?? "left"))
+      this.#brand(padVisibleAlign(col.header, widths[i], col.alignment ?? "left"))
     );
     lines.push(headerCells.join("  "));
 
     // Separator
     const horiz = this.#useUnicode ? "─" : "-";
     const sepCells = vm.columns.map((col, i) =>
-      horiz.repeat(Math.max(col.header.length, widths[i]))
+      horiz.repeat(widths[i])
     );
     lines.push(this.#dim(sepCells.join("  ")));
 
@@ -320,7 +347,7 @@ export class StandardRenderer {
       const cells = vm.columns.map((col, i) => {
         const raw = row[col.key];
         const text = raw === undefined ? "" : String(raw);
-        return padAlign(text, widths[i], col.alignment ?? "left");
+        return padVisibleAlign(text, widths[i], col.alignment ?? "left");
       });
       lines.push(cells.join("  "));
     }
@@ -593,6 +620,129 @@ export class StandardRenderer {
   }
 
   // ──────────────────────────────────────
+  // Startup Dashboard
+  // ──────────────────────────────────────
+
+  renderStartupDashboard(vm: StartupDashboardViewModel): string {
+    const lines: string[] = [];
+
+    // Hero
+    lines.push(this.#heroPanel(vm.agentName, vm.taglines));
+    lines.push("");
+
+    // Version / session separator line
+    const versionText = vm.version ?? "unknown";
+    const sessionText = vm.sessionId ?? "";
+    const horiz = this.#useUnicode ? "─" : "-";
+    const eye = this.#useUnicode ? "𓂀" : "*";
+    const sepLabel = sessionText
+      ? `${versionText}  ${eye}  ${sessionText}`
+      : versionText;
+    const sepWidth = Math.min(
+      this.#capabilities.terminalWidth,
+      Math.max(measureTextWidth(sepLabel) + 4, 40)
+    );
+    const sideLen = Math.max(0, Math.floor((sepWidth - measureTextWidth(sepLabel)) / 2) - 1);
+    const sepLine = `${horiz.repeat(sideLen)} ${sepLabel} ${horiz.repeat(sideLen)}`;
+    lines.push(this.#dim(sepLine));
+    lines.push("");
+
+    // Model route readiness line
+    const readiness = vm.providerReadiness;
+    let modelDot: string;
+    let modelLabel: string;
+    let readinessColor: string;
+
+    switch (readiness) {
+      case "ready":
+        modelDot = this.#severity("●", "ok");
+        modelLabel = vm.model.id;
+        readinessColor = this.#severity("ready", "ok");
+        break;
+      case "degraded":
+        modelDot = this.#caution("◐");
+        modelLabel = vm.model.id;
+        readinessColor = this.#caution("degraded");
+        break;
+      case "missing-config":
+        modelDot = this.#dim("○");
+        modelLabel = "model not configured";
+        readinessColor = this.#severity("missing config", "error");
+        break;
+      case "unknown":
+      default:
+        modelDot = this.#dim("○");
+        modelLabel = vm.model.id;
+        readinessColor = this.#dim("unknown");
+        break;
+    }
+
+    const modelLine = `${modelDot} ${this.#bold(modelLabel)}  ·  ${readinessColor}`;
+    lines.push(this.#rail(modelLine));
+    lines.push("");
+
+    // Two-column layout: info (left) and commands (right)
+    const infoRows: string[] = [];
+    infoRows.push(`Workspace Trust        :  ${vm.workspaceTrust}`);
+    infoRows.push(`Workspace Verification :  ${vm.workspaceVerification}`);
+    if (vm.workspaceDirectory !== undefined) {
+      infoRows.push(`Workspace Directory    :  ${vm.workspaceDirectory}`);
+    }
+    if (vm.securityMode !== undefined) {
+      infoRows.push(`User Security Mode     :  ${vm.securityMode}`);
+    }
+    if (vm.skillAutonomy !== undefined) {
+      infoRows.push(`User Skill Autonomy    :  ${vm.skillAutonomy}`);
+    }
+    if (vm.versionStatus !== undefined) {
+      infoRows.push(`Version Status         :  ${vm.versionStatus}`);
+    }
+
+    const cmdRows: string[] = [];
+    cmdRows.push(this.#bold("Interactive Commands:"));
+    cmdRows.push("");
+    const interactiveCommands = [
+      { name: "/tools", description: "Browse runtime tools" },
+      { name: "/skills", description: "Browse skills" },
+      { name: "/model", description: "Show or switch model" },
+      { name: "/status", description: "Show session status" },
+    ];
+    for (const cmd of interactiveCommands) {
+      const name = this.#action(cmd.name);
+      const desc = this.#dim(cmd.description);
+      cmdRows.push(`${name}   ${desc}`);
+    }
+
+    // Combine side by side if width allows
+    const maxInfoWidth = infoRows.length > 0 ? Math.max(...infoRows.map((r) => measureTextWidth(r))) : 0;
+    const maxCmdWidth = cmdRows.length > 0 ? Math.max(...cmdRows.map((r) => measureTextWidth(r))) : 0;
+    const gap = 6;
+    const totalWidth = maxInfoWidth + gap + maxCmdWidth;
+
+    if (totalWidth <= this.#capabilities.terminalWidth && maxInfoWidth > 0 && maxCmdWidth > 0) {
+      const maxRows = Math.max(infoRows.length, cmdRows.length);
+      for (let i = 0; i < maxRows; i++) {
+        const left = infoRows[i] ?? "";
+        const right = cmdRows[i] ?? "";
+        const paddedLeft = padVisibleEnd(left, maxInfoWidth);
+        lines.push(`${paddedLeft}${" ".repeat(gap)}${right}`);
+      }
+    } else {
+      for (const row of infoRows) lines.push(row);
+      if (infoRows.length > 0 && cmdRows.length > 0) lines.push("");
+      for (const row of cmdRows) lines.push(row);
+    }
+
+    // Warnings
+    for (const warning of vm.warnings) {
+      lines.push("");
+      lines.push(this.renderWarningError(warning));
+    }
+
+    return lines.join("\n");
+  }
+
+  // ──────────────────────────────────────
   // Command Result
   // ──────────────────────────────────────
 
@@ -650,6 +800,41 @@ export class StandardRenderer {
 
     return lines.join("\n");
   }
+
+  // ──────────────────────────────────────
+  // Conversation Message
+  // ──────────────────────────────────────
+
+  renderConversationMessage(vm: ConversationMessageViewModel): string {
+    if (vm.role === "assistant") {
+      const title = this.#useUnicode
+        ? this.#copy.assistantCardTitleUnicode
+        : this.#copy.assistantCardTitleAscii;
+      const brandTitle = this.#brand(this.#bold(title));
+      const textLines = vm.text.split("\n");
+
+      const frame = openHorizontalFrame(textLines, {
+        useUnicode: this.#useUnicode,
+        title: brandTitle,
+        width: this.#capabilities.terminalWidth,
+      });
+
+      let result = frame;
+
+      if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
+        result += "\n" + this.#dim(`skills: ${vm.matchedSkills.join(", ")}`);
+      }
+
+      if (vm.progress !== undefined && vm.progress.length > 0) {
+        result += "\n" + this.#dim(`progress: ${vm.progress.join(" -> ")}`);
+      }
+
+      return result;
+    }
+
+    // User messages: plain text until user prompt rail is implemented
+    return vm.text;
+  }
 }
 
 // ──────────────────────────────────────
@@ -683,27 +868,14 @@ function computeColumnWidths(
   rows: readonly Record<string, unknown>[]
 ): number[] {
   return columns.map((col) => {
-    let width = col.header.length;
+    let width = measureTextWidth(col.header);
     for (const row of rows) {
       const raw = row[col.key];
       const text = raw === undefined ? "" : String(raw);
-      width = Math.max(width, text.length);
+      width = Math.max(width, measureTextWidth(text));
     }
     return width;
   });
-}
-
-function padAlign(text: string, width: number, alignment: string): string {
-  if (alignment === "right") {
-    return text.padStart(width);
-  }
-  if (alignment === "center") {
-    const totalPad = Math.max(0, width - text.length);
-    const left = Math.floor(totalPad / 2);
-    const right = totalPad - left;
-    return " ".repeat(left) + text + " ".repeat(right);
-  }
-  return text.padEnd(width);
 }
 
 function formatDuration(ms: number): string {

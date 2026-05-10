@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rm, rename } from "node:fs/promises";
+import { mkdir, writeFile, rm, rename, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import {
@@ -22,6 +22,44 @@ export type UpdateApplyResult =
   | { kind: "success"; message: string }
   | { kind: "error"; message: string };
 
+type UpdateCacheEntry = {
+  checkedAt: string;
+  versionStatus: "up-to-date" | "update-available";
+};
+
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function cachePath(homeDir: string): string {
+  return join(homeDir, ".estacoda", "update-cache.json");
+}
+
+export async function readCachedUpdateStatus(homeDir: string): Promise<"up-to-date" | "update-available" | "unknown"> {
+  try {
+    const raw = await readFile(cachePath(homeDir), "utf8");
+    const parsed = JSON.parse(raw) as UpdateCacheEntry;
+    const checkedAt = new Date(parsed.checkedAt).getTime();
+    const now = Date.now();
+    if (Number.isNaN(checkedAt) || now - checkedAt > CACHE_TTL_MS) {
+      return "unknown";
+    }
+    if (parsed.versionStatus === "up-to-date" || parsed.versionStatus === "update-available") {
+      return parsed.versionStatus;
+    }
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function writeUpdateCache(homeDir: string, status: "up-to-date" | "update-available"): Promise<void> {
+  const entry: UpdateCacheEntry = {
+    checkedAt: new Date().toISOString(),
+    versionStatus: status,
+  };
+  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  await writeFile(cachePath(homeDir), JSON.stringify(entry, null, 2) + "\n", "utf8");
+}
+
 export async function checkForUpdate(fetchFn?: typeof fetch): Promise<UpdateCheckResult> {
   const resolved = await resolveLatestVersion(fetchFn);
 
@@ -32,9 +70,17 @@ export async function checkForUpdate(fetchFn?: typeof fetch): Promise<UpdateChec
   const { info } = resolved;
 
   if (compareVersions(info.current, info.latest) >= 0) {
+    const homeDir = process.env.HOME ?? "";
+    if (homeDir.length > 0) {
+      await writeUpdateCache(homeDir, "up-to-date").catch(() => {});
+    }
     return { kind: "up-to-date", current: info.current };
   }
 
+  const homeDir = process.env.HOME ?? "";
+  if (homeDir.length > 0) {
+    await writeUpdateCache(homeDir, "update-available").catch(() => {});
+  }
   return { kind: "available", info };
 }
 

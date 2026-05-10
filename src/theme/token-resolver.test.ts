@@ -48,34 +48,32 @@ describe("resolveTokens", () => {
 });
 
 describe("theme invariants", () => {
-  it("light brand is #0057D9", () => {
+  it("light base palette is neutral", () => {
     const t = getBaseTheme("light");
-    expect(t.palette.brand).toBe("#0057D9");
+    expect(t.palette.brand).toBe("#666666");
+    expect(t.palette.action).toBe("#666666");
+    expect(t.palette.caution).toBe("#666666");
   });
 
-  it("dark brand is #5AACFF", () => {
+  it("dark base palette is neutral", () => {
     const t = getBaseTheme("dark");
-    expect(t.palette.brand).toBe("#5AACFF");
+    expect(t.palette.brand).toBe("#B0B0B0");
+    expect(t.palette.action).toBe("#B0B0B0");
+    expect(t.palette.caution).toBe("#B0B0B0");
   });
 
-  it("light action accent is turquoise #008C95", () => {
+  it("light severity colors are semantic", () => {
     const t = getBaseTheme("light");
-    expect(t.palette.action).toBe("#008C95");
+    expect(t.severity.ok).toBe("#2E7D32");
+    expect(t.severity.error).toBe("#C62828");
+    expect(t.severity.warn).toBe("#EF6C00");
   });
 
-  it("dark action accent is turquoise #40E0D0", () => {
+  it("dark severity colors are semantic", () => {
     const t = getBaseTheme("dark");
-    expect(t.palette.action).toBe("#40E0D0");
-  });
-
-  it("light caution accent is amber #B45309", () => {
-    const t = getBaseTheme("light");
-    expect(t.palette.caution).toBe("#B45309");
-  });
-
-  it("dark caution accent is amber #FFB454", () => {
-    const t = getBaseTheme("dark");
-    expect(t.palette.caution).toBe("#FFB454");
+    expect(t.severity.ok).toBe("#4CAF50");
+    expect(t.severity.error).toBe("#EF5350");
+    expect(t.severity.warn).toBe("#FFA726");
   });
 
   it("severity colors are semantic, not brand", () => {
@@ -153,12 +151,12 @@ describe("plain mode invariants", () => {
 });
 
 describe("kemetBlue skin overlay", () => {
-  it("preserves base theme brand color in light", () => {
+  it("overrides neutral base brand color in light", () => {
     const r = resolveTokens("standard", "light", "kemetBlue");
     expect(r.contract.palette.brand).toBe("#0057D9");
   });
 
-  it("preserves base theme brand color in dark", () => {
+  it("overrides neutral base brand color in dark", () => {
     const r = resolveTokens("standard", "dark", "kemetBlue");
     expect(r.contract.palette.brand).toBe("#5AACFF");
   });
@@ -186,6 +184,22 @@ describe("kemetBlue skin overlay", () => {
     expect(r.contract.branding.taglineSecondary).toBe(
       "\u0627\u0644\u0633\u064a\u0627\u062f\u0629 \u0627\u0644\u062a\u0643\u0646\u0648\u0644\u0648\u062c\u064a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629"
     );
+  });
+
+  it("applies shared overlays across themes", () => {
+    const light = resolveTokens("standard", "light", "kemetBlue");
+    const dark = resolveTokens("standard", "dark", "kemetBlue");
+    expect(light.contract.glyph.prompt).toBe(dark.contract.glyph.prompt);
+    expect(light.contract.toolIcon.terminal).toBe(dark.contract.toolIcon.terminal);
+    expect(light.contract.branding.agentName).toBe(dark.contract.branding.agentName);
+  });
+
+  it("applies theme-specific palette overrides", () => {
+    const light = resolveTokens("standard", "light", "kemetBlue");
+    const dark = resolveTokens("standard", "dark", "kemetBlue");
+    expect(light.contract.palette.brand).toBe("#0057D9");
+    expect(dark.contract.palette.brand).toBe("#5AACFF");
+    expect(light.contract.palette.brand).not.toBe(dark.contract.palette.brand);
   });
 });
 

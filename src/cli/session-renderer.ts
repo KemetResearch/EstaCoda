@@ -2,7 +2,7 @@
 // Creates a ViewModel renderer for the CLI session loop.
 // Falls back to plain renderer when capabilities restrict color.
 
-import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { TerminalCapabilities, UiLocale } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { detectTerminalCapabilities } from "../ui/terminal-capabilities.js";
@@ -14,6 +14,7 @@ export interface SessionRenderer {
   render(viewModel: ViewModel): string;
   tokens: ResolvedTokens;
   capabilities: TerminalCapabilities;
+  locale: UiLocale;
 }
 
 export interface CreateSessionRendererOptions {
@@ -21,6 +22,7 @@ export interface CreateSessionRendererOptions {
   capabilities?: TerminalCapabilities;
   theme?: "light" | "dark";
   mode?: "standard" | "plain";
+  locale?: UiLocale;
 }
 
 export function createSessionRenderer(options: CreateSessionRendererOptions = {}): SessionRenderer {
@@ -37,11 +39,12 @@ export function createSessionRenderer(options: CreateSessionRendererOptions = {}
     !caps.supportsColor;
 
   const tokens = resolveTokens(shouldUsePlain ? "plain" : "standard", options.theme ?? "dark", "kemetBlue");
+  const locale = options.locale ?? "en";
 
   if (shouldUsePlain) {
-    return { render: renderPlain, tokens, capabilities: caps };
+    return { render: (vm) => renderPlain(vm, locale), tokens, capabilities: caps, locale };
   }
 
-  const renderer = new StandardRenderer({ tokens, capabilities: caps });
-  return { render: (vm) => renderer.render(vm), tokens, capabilities: caps };
+  const renderer = new StandardRenderer({ tokens, capabilities: caps, locale });
+  return { render: (vm) => renderer.render(vm), tokens, capabilities: caps, locale };
 }
