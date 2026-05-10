@@ -15,6 +15,8 @@ import type {
   ListViewModel,
   ProgressContextRailViewModel,
   TimelineEvent,
+  ToolActivityRailEvent,
+  ToolActivityRailViewModel,
   ViewModel,
   WarningErrorViewModel,
 } from "../contracts/view-model.js";
@@ -24,11 +26,14 @@ import {
   buildCommandResultViewModel,
   buildListViewModel,
   buildProgressContextRailViewModel,
+  buildToolActivityRailViewModel,
   buildWarningErrorViewModel,
   listItem,
   timelineEvent,
   progressStep,
+  toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
+import { toolActivityLabelKey } from "../ui/tool-labels.js";
 
 // ─────────────────────────────────────────────────────────────
 // Tool glyph resolution (capability-gated, token-driven)
@@ -196,6 +201,52 @@ export class ToolActivityViewModelBuilder {
   ): ActivityTimelineViewModel {
     const timelineEvents = events.map((e) => this.buildTimelineEvent(e));
     return buildActivityTimelineViewModel({ events: timelineEvents });
+  }
+
+  buildToolActivityRailEvent(
+    event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" | "provider-tool-call" }>
+  ): ToolActivityRailEvent {
+    if (event.kind === "tool-start") {
+      this.#pushStart(event.tool);
+      return toolActivityRailEvent(event.tool, "running", {
+        label: "preparing",
+        target: event.tool,
+      });
+    }
+
+    if (event.kind === "provider-tool-call") {
+      const tool = event.name ?? "provider-tool";
+      return toolActivityRailEvent(tool, "running", {
+        label: toolActivityLabelKey(tool),
+        target: event.argumentsText,
+      });
+    }
+
+    const elapsed = this.#popElapsed(event.tool);
+    const decision = event.decision !== undefined && event.decision !== "allow"
+      ? (event.decision as "ask" | "block")
+      : undefined;
+
+    if (decision !== undefined) {
+      return toolActivityRailEvent(event.tool, "gated", {
+        elapsedMs: elapsed ?? undefined,
+        label: "gated",
+        riskClass: event.riskClass,
+      });
+    }
+
+    const status = event.ok === false ? "failed" : "done";
+    return toolActivityRailEvent(event.tool, status, {
+      elapsedMs: elapsed ?? undefined,
+      label: status === "failed" ? "failed" : toolActivityLabelKey(event.tool),
+    });
+  }
+
+  buildToolActivityRail(
+    events: readonly Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" | "provider-tool-call" }>[]
+  ): ToolActivityRailViewModel {
+    const railEvents = events.map((e) => this.buildToolActivityRailEvent(e));
+    return buildToolActivityRailViewModel({ events: railEvents });
   }
 
   #pushStart(tool: string): void {
