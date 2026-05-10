@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { ToolsetName } from "../contracts/tool.js";
 
@@ -8,6 +9,8 @@ export type RuntimeFingerprint = {
   modelProvider: string;
   modelId: string;
   modelContextWindowTokens: number;
+  primaryModelRouteHash?: string;
+  modelFallbackRoutesHash?: string;
   profileId: string;
 
   // ── Security (config-bound) ──
@@ -83,6 +86,12 @@ export function computeRuntimeFingerprint(
     modelProvider: config.model.provider,
     modelId: config.model.id,
     modelContextWindowTokens: config.model.contextWindowTokens,
+    primaryModelRouteHash: config.primaryModelRoute
+      ? stableJsonHash(fingerprintRoute(config.primaryModelRoute))
+      : undefined,
+    modelFallbackRoutesHash: config.modelFallbackRoutes
+      ? stableJsonHash(config.modelFallbackRoutes.map(fingerprintRoute))
+      : undefined,
     profileId: options.profileId,
     securityMode: config.security.approvalMode,
     securityAssessorEnabled: config.security.assessor.enabled,
@@ -121,6 +130,16 @@ export function computeRuntimeFingerprint(
     currentPlatform: options.currentPlatform,
     userConfigPath: options.userConfigPath,
     projectConfigPath: options.projectConfigPath,
+  };
+}
+
+function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {
+  return {
+    provider: route.provider,
+    id: route.id,
+    baseUrl: route.baseUrl,
+    apiKeyEnv: route.apiKeyEnv,
+    contextWindowTokens: route.contextWindowTokens,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   runStuckScanGuarded,
   runRuntimeCacheStateHeartbeat,
   buildRuntimeCacheState,
+  buildGatewayCronRuntimeOptions,
   type SupervisorInternalState,
 } from "./supervisor.js";
 import { readGatewayPid } from "./pid-file.js";
@@ -87,6 +88,56 @@ function fakeSleep() {
   };
 }
 
+function fakeLoadedRuntimeConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    model: {
+      provider: "custom",
+      id: "main",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+    },
+    primaryModelRoute: {
+      provider: "custom",
+      id: "main",
+      baseUrl: "https://custom.example/v1",
+      apiKeyEnv: "CUSTOM_API_KEY",
+    },
+    modelFallbackRoutes: [
+      {
+        provider: "custom",
+        id: "backup",
+        baseUrl: "https://backup.example/v1",
+        apiKeyEnv: "BACKUP_API_KEY",
+      },
+    ],
+    providerRegistry: {},
+    credentialPools: {},
+    auxiliaryModels: {},
+    mcp: { servers: {} },
+    skills: { externalDirs: [], autonomy: "suggest", config: {} },
+    ui: { language: "en", flavor: "standard", activityLabels: "en" },
+    profile: { mode: "focused", responseLanguage: "en" },
+    browser: { backend: "unconfigured", autoLaunch: false },
+    imageGen: { provider: "fal", model: "test", useGateway: false },
+    tts: { provider: "edge", speed: 1 },
+    stt: { provider: "local" },
+    security: {
+      approvalMode: "adaptive",
+      assessor: { enabled: false, timeoutMs: 30000 },
+    },
+    channels: {
+      telegram: { ready: false },
+      discord: { ready: false },
+      email: { ready: false },
+      whatsapp: { ready: false },
+    },
+    web: { enableNetwork: true, maxContentChars: 5000 },
+    ...overrides,
+  } as any;
+}
+
 function fakeExit() {
   let codes: number[] = [];
   return {
@@ -133,6 +184,29 @@ describe("runGatewaySupervisor", () => {
 
     const pid = await readGatewayPid(tmpDir);
     expect(pid).toBeUndefined();
+  });
+
+  it("cron runtime options preserve primary and fallback model routes", () => {
+    const latestConfig = fakeLoadedRuntimeConfig();
+    const sessionDb = {} as any;
+
+    const options = buildGatewayCronRuntimeOptions({
+      latestConfig,
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      projectConfigPath: join(tmpDir, ".estacoda", "project-config.json"),
+      sessionDb,
+      sessionId: "cron-test",
+    });
+
+    expect(options.primaryModelRoute).toEqual(latestConfig.primaryModelRoute);
+    expect(options.modelFallbackRoutes).toEqual(latestConfig.modelFallbackRoutes);
+    expect(options.model).toEqual(latestConfig.model);
+    expect(options.providerRegistry).toBe(latestConfig.providerRegistry);
+    expect(options.credentialPools).toBe(latestConfig.credentialPools);
+    expect(options.disableCronTools).toBe(true);
+    expect(options.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
   });
 
   it("startup with telegram configured", async () => {

@@ -65,11 +65,60 @@ describe("cli model", () => {
       expect(result.output).toContain("estacoda model status");
       expect(result.output).toContain("estacoda model diagnose");
       expect(result.output).toContain("estacoda model set");
+      expect(result.output).toContain("deprecated; disabled");
       expect(result.output).toContain("estacoda model fallback status");
       expect(result.output).toContain("estacoda model fallback add");
       expect(result.output).toContain("estacoda model fallback remove");
       expect(result.output).toContain("estacoda model fallback reorder");
       expect(result.output).toContain("estacoda model fallback clear");
+    });
+  });
+
+  describe("model set", () => {
+    it("is deprecated and does not write config", async () => {
+      const originalConfig = {
+        providers: {
+          custom: {
+            kind: "openai-compatible",
+            baseUrl: "https://custom.example/v1",
+            apiKeyEnv: "CUSTOM_API_KEY",
+            models: ["main", "backup"],
+            enableNetwork: true
+          }
+        },
+        credentialPools: {
+          custom: {
+            strategy: "fill_first",
+            entries: [
+              {
+                id: "custom-CUSTOM_API_KEY",
+                source: { kind: "env", name: "CUSTOM_API_KEY" },
+                priority: 1
+              }
+            ]
+          }
+        },
+        model: {
+          provider: "custom",
+          id: "main",
+          fallbacks: [
+            { provider: "custom", id: "backup", apiKeyEnv: "CUSTOM_API_KEY" }
+          ]
+        }
+      };
+      await writeUserConfig(tmpDir, originalConfig);
+
+      const result = await runCliCommand({
+        argv: ["model", "set", "custom/backup"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("deprecated and disabled");
+      expect(result.output).not.toContain("Switched to");
+      expect(await readUserConfig(tmpDir)).toEqual(originalConfig);
     });
   });
 

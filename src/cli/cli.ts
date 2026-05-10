@@ -783,76 +783,15 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     return modelFallback(options, args.slice(1), config);
   }
 
-  if (args[0] === "set" && args[1] !== undefined) {
-    const providerModel = args[1];
-    const slashIndex = providerModel.indexOf("/");
-    if (slashIndex === -1) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: [
-          `Error: expected <provider>/<model>, got "${providerModel}"`,
-          "",
-          "Usage:",
-          "  estacoda model set <provider>/<model>"
-        ].join("\n")
-      };
-    }
-    const provider = providerModel.slice(0, slashIndex);
-    const modelId = providerModel.slice(slashIndex + 1);
-
-    const providerConfig = config.config.providers?.[provider];
-    if (providerConfig === undefined) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: [
-          `Error: provider "${provider}" is not configured.`,
-          "",
-          "Configured providers:",
-          ...Object.keys(config.config.providers ?? {}).map((p) => `  ${p}`),
-          "",
-          "Configure a provider first:",
-          `  estacoda setup --provider ${provider} --model ${modelId}`
-        ].join("\n")
-      };
-    }
-
-    if (!providerConfig.models?.includes(modelId)) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: [
-          `Error: model "${modelId}" is not listed for provider "${provider}".`,
-          "",
-          `Available models for ${provider}:\n${(providerConfig.models ?? []).map((m) => `  ${m}`).join("\n")}`,
-          "",
-          "Add the model to the provider config, then try again."
-        ].join("\n")
-      };
-    }
-
-    const result = await setupProviderConfig({
-      ...options,
-      input: {
-        provider,
-        model: modelId,
-        models: providerConfig.models,
-        primary: true
-      }
-    });
-
-    const updated = await loadRuntimeConfig(options);
-    const updatedDiagnostic = await diagnoseProviderConfig(updated);
-
+  if (args[0] === "set") {
     return {
       handled: true,
-      exitCode: 0,
+      exitCode: 1,
       output: [
-        `Switched to ${provider}/${modelId}.`,
-        `Config: ${result.path}`,
+        "`estacoda model set` is deprecated and disabled.",
         "",
-        renderProviderDiagnostic(updatedDiagnostic)
+        "This command previously rewrote provider setup while switching models.",
+        "Use `estacoda model setup local` or `estacoda model setup custom` to configure a model endpoint."
       ].join("\n")
     };
   }
@@ -889,7 +828,7 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("  estacoda model diagnose");
   diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]");
-  diagnosticLines.push("  estacoda model set <provider>/<model>");
+  diagnosticLines.push("  estacoda model set <provider>/<model> (deprecated; disabled)");
   diagnosticLines.push("  estacoda model auxiliary status");
   diagnosticLines.push("  estacoda model fallback status");
   diagnosticLines.push("  estacoda model fallback add <provider>/<model>");

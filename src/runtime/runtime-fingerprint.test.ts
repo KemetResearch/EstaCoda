@@ -167,6 +167,134 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("primary model route endpoint metadata changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig({
+      primaryModelRoute: {
+        provider: "custom",
+        id: "main",
+        profile: {
+          id: "main",
+          provider: "custom",
+          contextWindowTokens: 128_000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true,
+        },
+        baseUrl: "https://one.example/v1",
+        apiKeyEnv: "CUSTOM_API_KEY",
+      },
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        primaryModelRoute: {
+          provider: "custom",
+          id: "main",
+          profile: {
+            id: "main",
+            provider: "custom",
+            contextWindowTokens: 128_000,
+            supportsTools: true,
+            supportsVision: false,
+            supportsStructuredOutput: true,
+          },
+          baseUrl: "https://two.example/v1",
+          apiKeyEnv: "CUSTOM_API_KEY",
+        },
+      }),
+      opts
+    );
+    expect(fp1.primaryModelRouteHash).toBeDefined();
+    expect(fp2.primaryModelRouteHash).toBeDefined();
+    expect(fp1.primaryModelRouteHash).not.toBe(fp2.primaryModelRouteHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("fallback route ordering and credential env metadata changes fingerprint without secrets", () => {
+    const base = fakeLoadedRuntimeConfig({
+      config: {
+        providers: {
+          custom: {
+            headers: {
+              Authorization: "Bearer sk-test-secret",
+            },
+          },
+        },
+      },
+      modelFallbackRoutes: [
+        {
+          provider: "openai",
+          id: "gpt-5-mini",
+          profile: {
+            id: "gpt-5-mini",
+            provider: "openai",
+            contextWindowTokens: 128_000,
+            supportsTools: true,
+            supportsVision: false,
+            supportsStructuredOutput: true,
+          },
+          apiKeyEnv: "OPENAI_API_KEY",
+        },
+        {
+          provider: "custom",
+          id: "backup",
+          profile: {
+            id: "backup",
+            provider: "custom",
+            contextWindowTokens: 128_000,
+            supportsTools: true,
+            supportsVision: false,
+            supportsStructuredOutput: true,
+          },
+          baseUrl: "https://backup.example/v1",
+          apiKeyEnv: "BACKUP_API_KEY",
+        },
+      ],
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        modelFallbackRoutes: [
+          {
+            provider: "custom",
+            id: "backup",
+            profile: {
+              id: "backup",
+              provider: "custom",
+              contextWindowTokens: 128_000,
+              supportsTools: true,
+              supportsVision: false,
+              supportsStructuredOutput: true,
+            },
+            baseUrl: "https://backup.example/v1",
+            apiKeyEnv: "BACKUP_API_KEY",
+          },
+          {
+            provider: "openai",
+            id: "gpt-5-mini",
+            profile: {
+              id: "gpt-5-mini",
+              provider: "openai",
+              contextWindowTokens: 128_000,
+              supportsTools: true,
+              supportsVision: false,
+              supportsStructuredOutput: true,
+            },
+            apiKeyEnv: "OPENAI_API_KEY",
+          },
+        ],
+      }),
+      opts
+    );
+    expect(fp1.modelFallbackRoutesHash).toBeDefined();
+    expect(fp2.modelFallbackRoutesHash).toBeDefined();
+    expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
+    expect(JSON.stringify(fp1)).not.toContain("sk-test-secret");
+    expect(fp1).not.toEqual(fp2);
+  });
+
   it("security mode change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig();
     const opts = fakeOptions();

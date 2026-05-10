@@ -10,7 +10,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
-import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
+import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -83,6 +83,57 @@ export type GatewaySupervisorOptions = GatewayRunOptions & {
   factories?: SupervisorFactories;
   drainTimeoutMs?: number;
 };
+
+export function buildGatewayCronRuntimeOptions(input: {
+  latestConfig: LoadedRuntimeConfig;
+  workspaceRoot: string;
+  homeDir: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  sessionDb: SQLiteSessionDB;
+  sessionId: string;
+}): RuntimeOptions {
+  const { latestConfig } = input;
+  return {
+    theme: kemetBlueTheme,
+    model: latestConfig.model,
+    primaryModelRoute: latestConfig.primaryModelRoute,
+    modelFallbackRoutes: latestConfig.modelFallbackRoutes,
+    workspaceRoot: input.workspaceRoot,
+    homeDir: input.homeDir,
+    userConfigPath: input.userConfigPath,
+    projectConfigPath: input.projectConfigPath,
+    sessionId: input.sessionId,
+    profileId: "default",
+    sessionDb: input.sessionDb,
+    externalSkillRoots: latestConfig.skills.externalDirs,
+    skillAutonomy: latestConfig.skills.autonomy,
+    skillConfig: latestConfig.skills.config,
+    ui: latestConfig.ui,
+    agentProfile: latestConfig.profile,
+    providerRegistry: latestConfig.providerRegistry,
+    credentialPools: latestConfig.credentialPools,
+    auxiliaryModels: latestConfig.auxiliaryModels,
+    mcpServers: latestConfig.mcp.servers,
+    imageGen: latestConfig.imageGen,
+    tts: latestConfig.tts,
+    stt: latestConfig.stt,
+    securityMode: latestConfig.security.approvalMode,
+    securityAssessor: {
+      ...latestConfig.security.assessor,
+      providerExecutor: new ProviderExecutor({
+        registry: latestConfig.providerRegistry,
+        credentialPools: latestConfig.credentialPools,
+      }),
+    },
+    browser: latestConfig.browser,
+    telegramReady: latestConfig.channels.telegram.ready,
+    enableWebNetwork: latestConfig.web.enableNetwork,
+    webMaxContentChars: latestConfig.web.maxContentChars,
+    disableCronTools: true,
+    disabledToolsets: ["cron", "messaging", "clarify"],
+  };
+}
 
 type AcquiredIdentityLock = {
   kind: ChannelKind;
@@ -957,43 +1008,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           workspaceRoot: options.workspaceRoot,
           runtimeFactory: async (job) => {
             const latestConfig = await loadRuntimeConfig(options);
-            return createRuntime({
-              theme: kemetBlueTheme,
-              model: latestConfig.model,
+            return createRuntime(buildGatewayCronRuntimeOptions({
+              latestConfig,
               workspaceRoot: options.workspaceRoot,
               homeDir,
               userConfigPath: options.userConfigPath,
               projectConfigPath: options.projectConfigPath,
-              sessionId: `cron-${job.id}-${randomUUID()}`,
-              profileId: "default",
               sessionDb,
-              externalSkillRoots: latestConfig.skills.externalDirs,
-              skillAutonomy: latestConfig.skills.autonomy,
-              skillConfig: latestConfig.skills.config,
-              ui: latestConfig.ui,
-              agentProfile: latestConfig.profile,
-              providerRegistry: latestConfig.providerRegistry,
-              credentialPools: latestConfig.credentialPools,
-              auxiliaryModels: latestConfig.auxiliaryModels,
-              mcpServers: latestConfig.mcp.servers,
-              imageGen: latestConfig.imageGen,
-              tts: latestConfig.tts,
-              stt: latestConfig.stt,
-              securityMode: latestConfig.security.approvalMode,
-              securityAssessor: {
-                ...latestConfig.security.assessor,
-                providerExecutor: new ProviderExecutor({
-                  registry: latestConfig.providerRegistry,
-                  credentialPools: latestConfig.credentialPools,
-                }),
-              },
-              browser: latestConfig.browser,
-              telegramReady: latestConfig.channels.telegram.ready,
-              enableWebNetwork: latestConfig.web.enableNetwork,
-              webMaxContentChars: latestConfig.web.maxContentChars,
-              disableCronTools: true,
-              disabledToolsets: ["cron", "messaging", "clarify"],
-            });
+              sessionId: `cron-${job.id}-${randomUUID()}`,
+            }));
           },
         }),
       });
