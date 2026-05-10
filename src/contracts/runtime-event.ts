@@ -1,3 +1,5 @@
+import type { FileChangePreviewViewModel } from "./view-model.js";
+
 export type RuntimeEvent =
   | {
       kind: "agent-start";
@@ -27,6 +29,7 @@ export type RuntimeEvent =
       chars?: number;
       sentChars?: number;
       truncated?: boolean;
+      fileChangePreview?: FileChangePreviewViewModel;
     }
   | {
       kind: "provider-attempt";

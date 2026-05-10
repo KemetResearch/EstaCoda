@@ -53,6 +53,7 @@ import {
   renderShortcutHintRail,
   renderUserPromptRail,
   renderActiveTurnSpinner,
+  renderFileChangePreview,
 } from "./plain-renderer.js";
 
 function assertNoAnsi(text: string): void {
@@ -77,6 +78,28 @@ describe("PlainRenderer — renderPlainFallback", () => {
   it("renders empty lines as empty string", () => {
     const vm = buildPlainFallbackViewModel({ lines: [] });
     expect(renderPlainFallback(vm)).toBe("");
+  });
+});
+
+describe("PlainRenderer — renderFileChangePreview", () => {
+  it("renders bounded file change previews without expansion command", () => {
+    const vm = buildFileChangePreviewViewModel({
+      path: "src/app.ts",
+      changeType: "added",
+      summary: ["Added 12 line(s)."],
+      diff: Array.from({ length: 10 }, (_, index) => `+ line ${index + 1}`).join("\n"),
+      omittedLineCount: 2,
+    });
+
+    const out = renderFileChangePreview(vm);
+    expect(out).toContain("* created src/app.ts");
+    expect(out).toContain("Added 12 line(s).");
+    expect(out).toContain("+ line 8");
+    expect(out).not.toContain("+ line 9");
+    expect(out).toContain("omitted 4 diff line(s).");
+    expect(out).not.toContain("/diff latest");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
   });
 });
 

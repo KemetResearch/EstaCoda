@@ -23,6 +23,7 @@ import type {
   ViewModelSeverity,
   WarningErrorViewModel,
   AssistantResponseViewModel,
+  FileChangePreviewViewModel,
   SessionStatusRailViewModel,
   ShortcutHintRailViewModel,
   UserPromptRailViewModel,
@@ -119,9 +120,10 @@ export class StandardRenderer {
         return this.renderActiveTurnSpinner(vm);
       case "toolActivityRail":
         return this.renderToolActivityRail(vm);
+      case "fileChangePreview":
+        return this.renderFileChangePreview(vm);
       case "startupDashboard":
       case "startupRuntime":
-      case "fileChangePreview":
       case "slashMenu":
         return `[unsupported view model: ${vm.kind}]`;
       default: {
@@ -706,6 +708,59 @@ export class StandardRenderer {
   }
 
   // ──────────────────────────────────────
+  // File Change Preview
+  // ──────────────────────────────────────
+
+  renderFileChangePreview(vm: FileChangePreviewViewModel): string {
+    const marker = this.#useUnicode ? "◇" : "*";
+    const action = this.#fileChangeActionLabel(vm.changeType);
+    const path = this.#locale === "ar" ? isolateLtr(vm.path) : vm.path;
+    const lines: string[] = [
+      truncateVisible(this.#rail(`${marker} ${action} ${path}`), this.#capabilities.terminalWidth),
+    ];
+
+    for (const summary of vm.summary ?? []) {
+      lines.push(truncateVisible(this.#rail(`  + ${summary}`), this.#capabilities.terminalWidth));
+    }
+
+    const preview = boundedFileChangePreviewLines(vm, 8);
+    for (const line of preview.lines) {
+      lines.push(truncateVisible(this.#rail(`  ${this.#styleDiffLine(line)}`), this.#capabilities.terminalWidth));
+    }
+
+    if (preview.omittedLineCount > 0) {
+      lines.push(truncateVisible(this.#rail(`  ${this.#dim(this.#copy.omittedDiffLines(preview.omittedLineCount))}`), this.#capabilities.terminalWidth));
+    }
+
+    return lines.join("\n");
+  }
+
+  #fileChangeActionLabel(changeType: FileChangePreviewViewModel["changeType"]): string {
+    switch (changeType) {
+      case "added":
+        return this.#copy.created;
+      case "modified":
+        return this.#copy.edited;
+      case "deleted":
+        return this.#copy.deleted;
+    }
+  }
+
+  #styleDiffLine(line: string): string {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("+")) {
+      return this.#severity(line, "ok");
+    }
+    if (trimmed.startsWith("-")) {
+      return this.#severity(line, "error");
+    }
+    if (trimmed.startsWith("@@")) {
+      return this.#dim(line);
+    }
+    return line;
+  }
+
+  // ──────────────────────────────────────
   // Picker
   // ──────────────────────────────────────
 
@@ -1100,6 +1155,34 @@ function computeColumnWidths(
     }
     return width;
   });
+}
+
+function boundedFileChangePreviewLines(
+  vm: FileChangePreviewViewModel,
+  maxLines: number
+): { lines: string[]; omittedLineCount: number } {
+  const sourceLines = fileChangePreviewLines(vm);
+  const lines = sourceLines.slice(0, maxLines);
+  const rendererOmitted = Math.max(0, sourceLines.length - lines.length);
+  return {
+    lines,
+    omittedLineCount: (vm.omittedLineCount ?? 0) + rendererOmitted,
+  };
+}
+
+function fileChangePreviewLines(vm: FileChangePreviewViewModel): string[] {
+  if (vm.diff !== undefined && vm.diff.length > 0) {
+    return vm.diff.split("\n");
+  }
+  if (vm.hunks === undefined || vm.hunks.length === 0) {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const hunk of vm.hunks) {
+    lines.push(`@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`);
+    lines.push(...hunk.lines);
+  }
+  return lines;
 }
 
 function formatDuration(ms: number): string {

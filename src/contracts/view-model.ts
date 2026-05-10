@@ -318,8 +318,11 @@ export interface FileChangePreviewViewModel {
   readonly kind: "fileChangePreview";
   readonly path: string;
   readonly changeType: "added" | "modified" | "deleted";
+  readonly summary?: readonly string[];
   readonly diff?: string;
   readonly hunks?: readonly FileChangeHunk[];
+  readonly omittedLineCount?: number;
+  readonly expansionCommand?: string;
 }
 
 // ─────────────────────────────────────────────────────────────

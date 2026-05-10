@@ -9149,7 +9149,7 @@ assert(renderedSessionLoop.includes("assessor: not used"), "expected debug secur
 assert(renderedSessionLoop.includes("YOLO mode ON"), "expected session /yolo to enable open mode");
 assert(renderedSessionLoop.includes("YOLO mode OFF"), "expected session /yolo to disable open mode");
 assert(renderedSessionLoop.includes("Cron jobs") || renderedSessionLoop.includes("No cron jobs configured."), "expected session /cron output");
-assert(renderedSessionLoop.includes("thinking: Build a knowledge base from https://www.youtube.com/watch?v=sessionloop"), "expected session loop runtime event rendering");
+assert(renderedSessionLoop.includes("contemplating"), "expected session loop spinner event rendering");
 assert(renderedSessionLoop.includes("☥ skill: youtube-knowledge-base"), "expected session skill icon rendering");
 assert(
   renderedSessionLoop.includes("[>]") || renderedSessionLoop.includes("[x]"),

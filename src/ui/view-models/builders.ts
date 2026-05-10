@@ -467,8 +467,11 @@ export function buildToolActivityRailViewModel(
 export interface BuildFileChangePreviewInput {
   readonly path: string;
   readonly changeType: "added" | "modified" | "deleted";
+  readonly summary?: readonly string[];
   readonly diff?: string;
   readonly hunks?: readonly FileChangeHunk[];
+  readonly omittedLineCount?: number;
+  readonly expansionCommand?: string;
 }
 
 export function buildFileChangePreviewViewModel(
@@ -478,8 +481,11 @@ export function buildFileChangePreviewViewModel(
     kind: "fileChangePreview",
     path: input.path,
     changeType: input.changeType,
+    summary: input.summary,
     diff: input.diff,
     hunks: input.hunks,
+    omittedLineCount: input.omittedLineCount,
+    expansionCommand: input.expansionCommand,
   };
 }
 

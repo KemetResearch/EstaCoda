@@ -661,6 +661,31 @@ describe("Session-loop tool activity rail wiring", () => {
     expect(written).toContain("read");
   });
 
+  it("emits structured file change preview after write tool-result", () => {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    const event: RuntimeEvent = {
+      kind: "tool-result",
+      tool: "file.write",
+      ok: true,
+      fileChangePreview: {
+        kind: "fileChangePreview",
+        path: "src/app.ts",
+        changeType: "added",
+        summary: ["Added 2 line(s)."],
+        diff: "+ one\n+ two",
+      },
+    };
+    renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput);
+    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(written).toContain("created");
+    expect(written).toContain("src/app.ts");
+    expect(written).toContain("+ one");
+  });
+
   it("emits rail output for provider-tool-call", () => {
     const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
     const renderer = standardDarkRenderer();

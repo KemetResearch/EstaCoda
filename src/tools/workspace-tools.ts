@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/pro
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 
@@ -22,6 +23,7 @@ export type WorkspaceFsAdapter = {
 const DEFAULT_MAX_READ_BYTES = 48_000;
 const DEFAULT_MAX_SEARCH_RESULTS = 80;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+const FILE_CHANGE_PREVIEW_LINES = 8;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo"]);
 
 type ResolvedWorkspacePath =
@@ -107,6 +109,9 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return path;
         }
 
+        const relativePath = relative(canonicalRoot, path.path);
+        const existing = await readExistingWorkspaceText(path.path, fsAdapter);
+
         if (fsAdapter?.writeTextFile !== undefined) {
           await fsAdapter.writeTextFile({
             path: path.path,
@@ -119,10 +124,16 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
 
         return {
           ok: true,
-          content: `Wrote ${relative(canonicalRoot, path.path)} (${Buffer.byteLength(input.content)} bytes).`,
+          content: `Wrote ${relativePath} (${Buffer.byteLength(input.content)} bytes).`,
           metadata: {
-            path: relative(canonicalRoot, path.path),
-            bytes: Buffer.byteLength(input.content)
+            path: relativePath,
+            bytes: Buffer.byteLength(input.content),
+            fileChangePreview: buildFileWriteChangePreview({
+              path: relativePath,
+              before: existing,
+              after: input.content,
+              bytes: Buffer.byteLength(input.content)
+            })
           }
         };
       }
@@ -169,6 +180,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const next = existing.slice(0, index) + input.newText + existing.slice(index + input.oldText.length);
+        const relativePath = relative(canonicalRoot, path.path);
         if (fsAdapter?.writeTextFile !== undefined) {
           await fsAdapter.writeTextFile({
             path: path.path,
@@ -180,11 +192,18 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
 
         return {
           ok: true,
-          content: `Updated ${relative(canonicalRoot, path.path)}.`,
+          content: `Updated ${relativePath}.`,
           metadata: {
-            path: relative(canonicalRoot, path.path),
+            path: relativePath,
             oldBytes: Buffer.byteLength(existing),
-            newBytes: Buffer.byteLength(next)
+            newBytes: Buffer.byteLength(next),
+            fileChangePreview: buildFileReplaceChangePreview({
+              path: relativePath,
+              oldText: input.oldText,
+              newText: input.newText,
+              oldBytes: Buffer.byteLength(existing),
+              newBytes: Buffer.byteLength(next)
+            })
           }
         };
       }
@@ -457,6 +476,90 @@ async function searchFile(
       options.results.push(`${relative(root, path)}:${index + 1}: ${line}`);
     }
   }
+}
+
+async function readExistingWorkspaceText(
+  path: string,
+  fsAdapter: WorkspaceFsAdapter | undefined
+): Promise<string | undefined> {
+  if (fsAdapter !== undefined) {
+    try {
+      return await fsAdapter.readTextFile({ path });
+    } catch {
+      return undefined;
+    }
+  }
+
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function buildFileWriteChangePreview(input: {
+  path: string;
+  before: string | undefined;
+  after: string;
+  bytes: number;
+}): FileChangePreviewViewModel {
+  const afterLines = splitPreviewLines(input.after);
+  const previewLines = afterLines.slice(0, FILE_CHANGE_PREVIEW_LINES).map((line) => `+ ${line}`);
+  const previousLineCount = input.before === undefined ? 0 : splitPreviewLines(input.before).length;
+  const changeType = input.before === undefined ? "added" : "modified";
+  const omittedLineCount = Math.max(0, afterLines.length - previewLines.length);
+  const summary = input.before === undefined
+    ? [`Added ${afterLines.length} line(s).`, `Wrote ${input.bytes} byte(s).`]
+    : [`Replaced file content.`, `${previousLineCount} line(s) -> ${afterLines.length} line(s).`];
+
+  return {
+    kind: "fileChangePreview",
+    path: input.path,
+    changeType,
+    summary,
+    diff: previewLines.join("\n"),
+    omittedLineCount,
+  };
+}
+
+function buildFileReplaceChangePreview(input: {
+  path: string;
+  oldText: string;
+  newText: string;
+  oldBytes: number;
+  newBytes: number;
+}): FileChangePreviewViewModel {
+  const removed = splitPreviewLines(input.oldText).map((line) => `- ${line}`);
+  const added = splitPreviewLines(input.newText).map((line) => `+ ${line}`);
+  const diffLines = ["@@ exact replacement @@", ...removed, ...added];
+  const previewLines = diffLines.slice(0, FILE_CHANGE_PREVIEW_LINES);
+  const omittedLineCount = Math.max(0, diffLines.length - previewLines.length);
+
+  return {
+    kind: "fileChangePreview",
+    path: input.path,
+    changeType: "modified",
+    summary: [
+      `Replaced one exact segment.`,
+      `${input.oldBytes} byte(s) -> ${input.newBytes} byte(s).`
+    ],
+    diff: previewLines.join("\n"),
+    omittedLineCount,
+  };
+}
+
+function splitPreviewLines(content: string): string[] {
+  if (content.length === 0) {
+    return [""];
+  }
+  return content.replace(/\r\n/g, "\n").split("\n");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error;
 }
 
 async function runCommand(root: string, command: string, timeoutMs: number): Promise<ToolResult> {

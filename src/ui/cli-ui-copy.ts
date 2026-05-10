@@ -56,6 +56,12 @@ export interface CliUiChromeCopy {
   readonly failed: string;
   readonly gated: string;
 
+  // File change preview (Pass 12+)
+  readonly created: string;
+  readonly edited: string;
+  readonly deleted: string;
+  readonly omittedDiffLines: (count: number) => string;
+
   // Slash menu (Pass 13+)
   readonly commands: string;
   readonly typeToFilter: string;
@@ -105,6 +111,11 @@ const en: CliUiChromeCopy = {
   failed: "failed",
   gated: "gated",
 
+  created: "created",
+  edited: "edited",
+  deleted: "deleted",
+  omittedDiffLines: (count) => `omitted ${count} diff line(s).`,
+
   commands: "Commands",
   typeToFilter: "Type / then a command. Keep typing to filter.",
 };
@@ -153,6 +164,11 @@ const ar: CliUiChromeCopy = {
   plan: "تخطيط",
   failed: "فشل",
   gated: "محجوب",
+
+  created: "أنشأ",
+  edited: "عدّل",
+  deleted: "حذف",
+  omittedDiffLines: (count) => `تم إخفاء ${isolateLtr(String(count))} سطر/أسطر من الفرق.`,
 
   commands: "الأوامر",
   typeToFilter: "اكتب / ثم أمر. استمر في الكتابة للتصفية.",

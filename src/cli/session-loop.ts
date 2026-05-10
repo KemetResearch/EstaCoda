@@ -1,7 +1,6 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import type { SecurityAssessment } from "../contracts/security.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
 import { runCronCommand } from "../cron/cron-command.js";
@@ -14,7 +13,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildToolsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
-import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
+import { toolIcon } from "./tool-activity-renderer.js";
 import {
   ToolActivityViewModelBuilder,
   buildApprovalPromptViewModel,
@@ -30,10 +29,9 @@ import {
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
-import { chromeCopy } from "../ui/cli-ui-copy.js";
 import type { ToolActivityRailEvent } from "../contracts/view-model.js";
+import type { TerminalCapabilities } from "../contracts/ui.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -46,6 +44,7 @@ export type SessionLoopOptions = {
   workspaceRoot?: string;
   homeDir?: string;
   locale?: import("../contracts/ui.js").UiLocale;
+  capabilities?: TerminalCapabilities;
 };
 
 export class ToolActivityAnimator {
@@ -136,7 +135,7 @@ export class ToolActivityAnimator {
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
-  const renderer = createSessionRenderer({ output, locale: options.locale });
+  const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   let runtime = options.runtime;
   let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
@@ -261,24 +260,28 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const renderSpinner = (phase: string) => {
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => renderer.render(buildActiveTurnSpinnerViewModel({ phase: p })));
+            return;
           }
+          if (turnOutput.spinnerPhase === phase) {
+            return;
+          }
+          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase }));
+          output.write(`${spinnerText}\n`);
+          streamState.lastWriteEndedWithNewline = true;
+          turnOutput.spinnerPhase = phase;
+          turnOutput.hasOutput = true;
+          turnOutput.lastOutputWasSpinner = false;
         };
 
         const clearSpinner = () => {
           if (chrome.enabled) {
             chrome.clearInlineSpinner();
-          } else {
-            if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
-              output.write(`\x1b[1A\x1b[2K\r`);
-            }
           }
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;
         };
 
-        if (chrome.enabled) {
-          renderSpinner("thinking");
-        }
+        renderSpinner("thinking");
 
         const response = await runtime.handle({
             text: retryText,
@@ -286,7 +289,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             signal: activeTurn.signal,
             onEvent: (event) => {
               const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
-              if (newPhase !== undefined && chrome.enabled) {
+              if (newPhase !== undefined) {
                 renderSpinner(newPhase);
               }
             }
@@ -1250,14 +1253,8 @@ export function renderRuntimeEvent(
 
   switch (event.kind) {
     case "agent-start":
-      if (!chrome?.enabled) {
-        safeWrite(`thinking: ${event.input}\n`);
-      }
       return "thinking";
     case "intent":
-      if (!chrome?.enabled) {
-        safeWrite(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
-      }
       return "routing";
     case "skill":
       if (!chrome?.enabled) {
@@ -1284,14 +1281,12 @@ export function renderRuntimeEvent(
         const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
         safeWrite(`${renderer.render(railVm)}\n`);
       }
+      if (event.fileChangePreview !== undefined) {
+        safeWrite(`${renderer.render(event.fileChangePreview)}\n`);
+      }
       return "tool";
     }
     case "provider-attempt":
-      if (!chrome?.enabled) {
-        safeWrite(event.fallback
-          ? `provider: switching to ${event.provider}/${event.model}\n`
-          : `provider: using ${event.provider}/${event.model}\n`);
-      }
       return "provider";
     case "provider-token": {
       if (!chrome?.enabled) {
@@ -1316,15 +1311,6 @@ export function renderRuntimeEvent(
       }
       return "tool";
     case "provider-result":
-      if (!chrome?.enabled) {
-        if (event.ok) {
-          safeWrite(`\nprovider: ${event.provider}/${event.model} ready\n`);
-        } else {
-          safeWrite(event.willFallback
-            ? `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}; trying fallback\n`
-            : `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}\n`);
-        }
-      }
       if (!event.ok && !event.willFallback) {
         animator?.cancel();
       }
@@ -1352,29 +1338,6 @@ function truncateSingleLine(value: string, maxLength: number): string {
   }
 
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function humanProviderIssue(errorClass: string | undefined): string {
-  switch (errorClass) {
-    case "auth":
-      return "authentication needs attention";
-    case "rate-limit":
-      return "rate limited";
-    case "quota":
-      return "quota or billing limit";
-    case "network":
-      return "network issue";
-    case "server":
-      return "provider server issue";
-    case "model-unavailable":
-      return "model unavailable";
-    case "timeout":
-      return "timed out";
-    case undefined:
-      return "provider issue";
-    default:
-      return errorClass;
-  }
 }
 
 function buildPromptChromeState(

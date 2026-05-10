@@ -24,6 +24,7 @@ import type {
   TimelineEvent,
   WarningErrorViewModel,
   AssistantResponseViewModel,
+  FileChangePreviewViewModel,
   SessionStatusRailViewModel,
   ShortcutHintRailViewModel,
   UserPromptRailViewModel,
@@ -78,9 +79,10 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderActiveTurnSpinner(viewModel, locale);
     case "toolActivityRail":
       return renderToolActivityRail(viewModel, locale);
+    case "fileChangePreview":
+      return renderFileChangePreview(viewModel, locale);
     case "startupDashboard":
     case "startupRuntime":
-    case "fileChangePreview":
     case "slashMenu":
       return `[unsupported view model: ${viewModel.kind}]`;
     default: {
@@ -700,6 +702,69 @@ export function renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel, locale?:
     return `${eye} ${label}`;
   }
   return eye;
+}
+
+export function renderFileChangePreview(vm: FileChangePreviewViewModel, locale?: UiLocale): string {
+  const copy = chromeCopy(locale ?? "en");
+  const path = locale === "ar" ? isolateLtr(vm.path) : vm.path;
+  const lines: string[] = [`* ${fileChangeActionLabel(vm.changeType, copy)} ${path}`];
+
+  for (const summary of vm.summary ?? []) {
+    lines.push(`  + ${summary}`);
+  }
+
+  const preview = boundedFileChangePreviewLines(vm, 8);
+  for (const line of preview.lines) {
+    lines.push(`  ${line}`);
+  }
+
+  if (preview.omittedLineCount > 0) {
+    lines.push(`  ${copy.omittedDiffLines(preview.omittedLineCount)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function fileChangeActionLabel(
+  changeType: FileChangePreviewViewModel["changeType"],
+  copy: ReturnType<typeof chromeCopy>
+): string {
+  switch (changeType) {
+    case "added":
+      return copy.created;
+    case "modified":
+      return copy.edited;
+    case "deleted":
+      return copy.deleted;
+  }
+}
+
+function boundedFileChangePreviewLines(
+  vm: FileChangePreviewViewModel,
+  maxLines: number
+): { lines: string[]; omittedLineCount: number } {
+  const sourceLines = fileChangePreviewLines(vm);
+  const lines = sourceLines.slice(0, maxLines);
+  const rendererOmitted = Math.max(0, sourceLines.length - lines.length);
+  return {
+    lines,
+    omittedLineCount: (vm.omittedLineCount ?? 0) + rendererOmitted,
+  };
+}
+
+function fileChangePreviewLines(vm: FileChangePreviewViewModel): string[] {
+  if (vm.diff !== undefined && vm.diff.length > 0) {
+    return vm.diff.split("\n");
+  }
+  if (vm.hunks === undefined || vm.hunks.length === 0) {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const hunk of vm.hunks) {
+    lines.push(`@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`);
+    lines.push(...hunk.lines);
+  }
+  return lines;
 }
 
 function turnStateLabel(state: SessionStatusRailViewModel["turnState"], copy: ReturnType<typeof chromeCopy>): string {

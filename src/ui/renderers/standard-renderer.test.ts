@@ -148,12 +148,44 @@ describe("StandardRenderer — dispatch", () => {
       buildPlainFallbackViewModel({ lines: ["line"] }),
       buildConversationMessageViewModel({ role: "assistant", text: "Hello" }),
       buildUserPromptRailViewModel({ text: "Hello" }),
+      buildFileChangePreviewViewModel({ path: "src/app.ts", changeType: "modified", diff: "+ changed" }),
     ];
 
     for (const vm of vms) {
       const out = r.render(vm);
       expect(typeof out).toBe("string");
     }
+  });
+
+  it("renders bounded file change previews with omitted count", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildFileChangePreviewViewModel({
+      path: "src/app.ts",
+      changeType: "modified",
+      summary: ["Replaced one exact segment."],
+      diff: [
+        "@@ exact replacement @@",
+        "- old 1",
+        "- old 2",
+        "- old 3",
+        "- old 4",
+        "+ new 1",
+        "+ new 2",
+        "+ new 3",
+        "+ new 4",
+        "+ new 5",
+      ].join("\n"),
+      omittedLineCount: 4,
+    });
+
+    const out = r.renderFileChangePreview(vm);
+    expect(out).toContain("edited");
+    expect(out).toContain("src/app.ts");
+    expect(out).toContain("Replaced one exact segment.");
+    expect(out).toContain("old 1");
+    expect(out).not.toContain("new 5");
+    expect(out).toContain("omitted 6 diff line(s).");
+    expect(out).not.toContain("/diff latest");
   });
 });
 

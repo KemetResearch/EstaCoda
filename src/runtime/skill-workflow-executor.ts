@@ -5,7 +5,7 @@ import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
-import { toolResultStats } from "./tool-plan-runner.js";
+import { toolResultFileChangePreview, toolResultStats } from "./tool-plan-runner.js";
 import type { RunRecorder } from "./run-recorder.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
@@ -190,6 +190,7 @@ export class SkillWorkflowExecutor {
         decision: execution.decision,
         riskClass: execution.riskClass,
         ok: execution.result?.ok,
+        fileChangePreview: toolResultFileChangePreview(execution),
         ...toolResultStats(execution)
       });
 
@@ -255,6 +256,5 @@ function nextFallbackIndex(
 function extractFirstUrl(text: string): string | undefined {
   return /https?:\/\/[^\s<>"')]+/iu.exec(text)?.[0];
 }
-
 
 

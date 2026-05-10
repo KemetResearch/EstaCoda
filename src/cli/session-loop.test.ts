@@ -4,6 +4,22 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { TerminalCapabilities } from "../contracts/ui.js";
+
+function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
+  return {
+    isTTY: true,
+    supportsColor: true,
+    supportsTrueColor: true,
+    supportsUnicode: true,
+    supportsEmoji: true,
+    terminalWidth: 120,
+    isDumb: false,
+    isCI: false,
+    supportsAnimation: true,
+    ...overrides,
+  };
+}
 
 function createMockRuntime(): Runtime {
   const sessionDb = new InMemorySessionDB();
@@ -201,6 +217,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -241,6 +258,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -280,6 +298,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -298,7 +317,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(clearIndex).toBeLessThan(assistantIndex);
   });
 
-  it("preserves debug lines in plain/noninteractive mode", async () => {
+  it("uses deterministic spinner labels in plain/noninteractive mode", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -330,9 +349,14 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("thinking:");
-    expect(rendered).toContain("intent:");
-    expect(rendered).toContain("provider:");
+    expect(rendered).toContain("contemplating");
+    expect(rendered).toContain("plotting");
+    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("polishing");
+    expect(rendered).not.toContain("thinking:");
+    expect(rendered).not.toContain("intent:");
+    expect(rendered).not.toContain("provider:");
+    expect(rendered).not.toContain("\x1b[1A\x1b[2K\r");
   });
 
   it("uses Arabic spinner labels when locale is ar", async () => {
@@ -356,6 +380,7 @@ describe("runSessionLoop — active turn spinner", () => {
       runtime,
       output,
       locale: "ar",
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -395,6 +420,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -448,6 +474,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -490,6 +517,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -532,6 +560,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -570,6 +599,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -607,6 +637,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -650,6 +681,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -701,6 +733,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -742,6 +775,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     await runSessionLoop({
       runtime,
       output,
+      capabilities: interactiveCaps(),
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];
@@ -790,9 +824,8 @@ describe("runSessionLoop — animated spinner behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    // Plain mode shows debug lines, not spinner
-    expect(rendered).toContain("thinking:");
-    expect(rendered).not.toContain("contemplating");
+    expect(rendered).toContain("contemplating");
+    expect(rendered).not.toContain("thinking:");
     expect(rendered).not.toContain("\x1b[1A\x1b[2K\r");
   });
 });

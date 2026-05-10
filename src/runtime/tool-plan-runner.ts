@@ -1,6 +1,7 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
+import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -170,6 +171,7 @@ export class ToolPlanRunner {
       decision: execution.decision,
       riskClass: execution.riskClass,
       ok: execution.result?.ok,
+      fileChangePreview: toolResultFileChangePreview(execution),
       ...toolResultStats(execution)
     });
 
@@ -196,6 +198,26 @@ export function toolResultStats(execution: ToolExecutionRecord): {
     sentChars: packet.sentChars,
     truncated: packet.truncated
   };
+}
+
+export function toolResultFileChangePreview(
+  execution: ToolExecutionRecord
+): FileChangePreviewViewModel | undefined {
+  const candidate = execution.result?.metadata?.fileChangePreview;
+  if (!isFileChangePreview(candidate)) {
+    return undefined;
+  }
+  return candidate;
+}
+
+function isFileChangePreview(value: unknown): value is FileChangePreviewViewModel {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<FileChangePreviewViewModel>;
+  return candidate.kind === "fileChangePreview" &&
+    typeof candidate.path === "string" &&
+    (candidate.changeType === "added" || candidate.changeType === "modified" || candidate.changeType === "deleted");
 }
 
 export function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
