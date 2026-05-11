@@ -3,7 +3,6 @@ import type {
   ProviderEndpoint,
   ProviderRequest,
   ProviderResponse,
-  ProviderRoute,
   ProviderRoutePreferences,
   ProviderStreamEvent,
   ProviderId,
@@ -25,7 +24,6 @@ export type ProviderAttempt = {
 export type ProviderExecutionResult = {
   ok: boolean;
   response?: ProviderResponse;
-  route?: ProviderRoute;
   fallbackUsed: boolean;
   attempts: ProviderAttempt[];
   toolCalls: Array<{

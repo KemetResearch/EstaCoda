@@ -564,7 +564,6 @@ function mergeProviderExecutions(
   return {
     ok: continuation.ok,
     response: continuation.response,
-    route: continuation.route ?? initial.route,
     fallbackUsed: initial.fallbackUsed || continuation.fallbackUsed,
     attempts: [
       ...initial.attempts,

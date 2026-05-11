@@ -234,12 +234,6 @@ export type ProviderRoutePreferences = {
   providerBlocklist?: ProviderId[];
 };
 
-export type ProviderRoute = {
-  primary: ModelProfile;
-  fallbacks: ModelProfile[];
-  reason: string;
-};
-
 export type ProviderAdapter = {
   id: ProviderId;
   name: string;
