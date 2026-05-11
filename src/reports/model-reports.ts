@@ -69,6 +69,12 @@ export type ModelCatalogEntryReport = {
   credentialReady: boolean;
   endpointReady: boolean;
   warnings: string[];
+  live?: boolean;
+  endpointType?: "openai" | "anthropic" | "custom";
+  cost?: { inputPer1k?: number; outputPer1k?: number };
+  documentationUrl?: string;
+  logoUrl?: string;
+  diagnosticFields?: Record<string, unknown>;
 };
 
 export type ModelRouteDiagnostic = {

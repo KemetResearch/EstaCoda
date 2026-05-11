@@ -3,6 +3,7 @@ import type {
   ModelProfile,
   ProviderAdapter,
   ProviderCompletionOptions,
+  ProviderEndpoint,
   ProviderRequest,
   ProviderResponse,
   ProviderStreamEvent,
@@ -29,7 +30,7 @@ function createMockAdapter(options: {
     id: options.id as any,
     name: `${options.id} mock`,
     executable: true,
-    health() {
+    health(_endpointOverride?: ProviderEndpoint) {
       return { available: true };
     },
     listModels() {

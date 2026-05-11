@@ -44,11 +44,12 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
     id: options.id,
     name: options.name ?? `${options.id} OpenAI-compatible`,
     endpoint: options.endpoint,
-    health() {
-      if (options.endpoint.apiKey?.kind === "env" && process.env[options.endpoint.apiKey.name] === undefined) {
+    health(endpointOverride?: ProviderEndpoint) {
+      const effectiveEndpoint = endpointOverride ?? options.endpoint;
+      if (effectiveEndpoint.apiKey?.kind === "env" && process.env[effectiveEndpoint.apiKey.name] === undefined) {
         return {
           available: false,
-          reason: `Missing ${options.endpoint.apiKey.name}`
+          reason: `Missing ${effectiveEndpoint.apiKey.name}`
         };
       }
 
@@ -61,7 +62,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
     },
     async complete(request: ProviderRequest, completionOptions?: ProviderCompletionOptions): Promise<ProviderResponse> {
       const effectiveEndpoint = completionOptions?.endpoint ?? options.endpoint;
-      const health = await this.health();
+      const health = await this.health(completionOptions?.endpoint);
       const preparedRequest = buildOpenAICompatibleRequest(effectiveEndpoint, request, completionOptions?.credential?.value, options.id);
 
       if (!health.available && completionOptions?.credential?.value === undefined) {
@@ -97,7 +98,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
     },
     async *stream(request: ProviderRequest, completionOptions?: ProviderCompletionOptions): AsyncIterable<ProviderStreamEvent> {
       const effectiveEndpoint = completionOptions?.endpoint ?? options.endpoint;
-      const health = await this.health();
+      const health = await this.health(completionOptions?.endpoint);
       const preparedRequest = buildOpenAICompatibleRequest(effectiveEndpoint, {
         ...request,
         stream: true

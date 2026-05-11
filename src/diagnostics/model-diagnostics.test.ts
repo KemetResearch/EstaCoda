@@ -4,6 +4,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import type { ProviderId } from "../contracts/provider.js";
+import type { ProviderEndpoint } from "../contracts/provider.js";
 
 function makeMinimalConfig(overrides?: Partial<LoadedRuntimeConfig>): LoadedRuntimeConfig {
   const registry = new ProviderRegistry();
@@ -72,7 +73,7 @@ describe("produceModelStatusReport", () => {
       id: "openai" as ProviderId,
       name: "OpenAI",
       executable: true,
-      health() {
+      health(_endpointOverride?: ProviderEndpoint) {
         return { available: true };
       },
       listModels() {

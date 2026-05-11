@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ProviderId, ModelProfile } from "../contracts/provider.js";
+import type { ProviderId, ModelProfile, ProviderEndpoint } from "../contracts/provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { createCatalogProvider } from "./catalog-provider.js";
 import {
@@ -128,7 +128,7 @@ describe("routeKey", () => {
 
   it("omits baseUrl when undefined", () => {
     const key = routeKey("openai", "gpt-4o");
-    expect(key).toBe("openai:gpt-4o");
+    expect(key).toBe(JSON.stringify(["openai", "gpt-4o", ""]));
   });
 
   it("is treated as opaque", () => {
@@ -136,6 +136,17 @@ describe("routeKey", () => {
     // contract is: routeKey(a,b,c) === routeKey(a,b,c) always.
     expect(routeKey("openai", "gpt-4o", "https://a.com/v1"))
       .toBe(routeKey("openai", "gpt-4o", "https://a.com/v1"));
+  });
+
+  it("distinguishes http://localhost:8080 from http://localhost", () => {
+    const keyA = routeKey("provider", "id", "http://localhost:8080");
+    const keyB = routeKey("provider", "id", "http://localhost");
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("is not colon-delimited", () => {
+    const key = routeKey("openai", "gpt-4o", "https://example.com/v1");
+    expect(key.startsWith("openai:gpt-4o")).toBe(false);
   });
 });
 
@@ -278,7 +289,7 @@ describe("ModelSelectionCatalog executable vs catalogOnly", () => {
       id: "openai" as ProviderId,
       name: "OpenAI",
       executable: true,
-      health() {
+      health(_endpointOverride?: ProviderEndpoint) {
         return { available: true };
       },
       listModels() {
@@ -570,5 +581,81 @@ describe("ModelSelectionCatalog provider listing", () => {
 
     const local = providers.find((p) => p.id === "local");
     expect(local!.uxKind).toBe("local");
+  }));
+});
+
+describe("ModelSelectionCatalog report shape", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("includes endpointType, live, cost, documentationUrl, logoUrl, diagnosticFields where available", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.endpointType).toBe("openai");
+    expect(gpt4o!.diagnosticFields).toBeDefined();
+    expect(typeof gpt4o!.live).toBe("boolean");
+  }));
+
+  it("sets endpointType to custom for local providers", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local" as ProviderId,
+      name: "Local",
+      executable: true,
+      health(_endpointOverride?: ProviderEndpoint) {
+        return { available: true };
+      },
+      listModels() {
+        return [];
+      },
+      async complete() {
+        return { ok: true, content: "", model: "", provider: "local" };
+      }
+    });
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["llama3"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const llama3 = models.find((m) => m.id === "llama3" && m.provider === "local");
+    expect(llama3).toBeDefined();
+    expect(llama3!.endpointType).toBe("custom");
+  }));
+});
+
+describe("ModelSelectionCatalog cache invalidation", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("ignores old cache without formatVersion", withFixture(async (fixturePath, cachePath) => {
+    // Write an old-format cache (no formatVersion)
+    const oldSnapshot = {
+      providers: [{ id: "stale", name: "Stale Provider" }],
+      models: [],
+      fetchedAt: "2020-01-01T00:00:00.000Z",
+      source: "disk"
+    };
+    writeFileSync(cachePath, JSON.stringify(oldSnapshot), "utf8");
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const report = await catalog.refresh();
+
+    // Old cache should be invalidated, so cacheChanged should be true
+    // because the new snapshot differs from the old one.
+    expect(report.cacheChanged).toBe(true);
   }));
 });

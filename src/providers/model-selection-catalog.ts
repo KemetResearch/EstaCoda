@@ -15,7 +15,8 @@ import {
 import type {
   ModelInfo,
   ModelsDevRegistryOptions,
-  ModelsDevSnapshot
+  ModelsDevSnapshot,
+  ProviderInfo
 } from "../model-catalog/models-dev-registry.js";
 import {
   modelsDevSnapshotToProfiles,
@@ -32,7 +33,7 @@ import { join } from "node:path";
 
 /** Opaque route identity string. Never parse by splitting on punctuation. */
 export function routeKey(provider: ProviderId, id: string, baseUrl?: string): string {
-  return baseUrl ? `${provider}:${id}:${baseUrl}` : `${provider}:${id}`;
+  return JSON.stringify([provider, id, baseUrl ?? ""]);
 }
 
 export type SelectableModel = ModelCatalogEntryReport;
@@ -105,11 +106,16 @@ export async function createModelSelectionCatalog(
     snapshotInfoMap.set(routeKey(model.providerId as ProviderId, model.id), model);
   }
 
+  const snapshotProviderMap = new Map<string, ProviderInfo>();
+  for (const provider of snapshot.providers) {
+    snapshotProviderMap.set(provider.id, provider);
+  }
+
   return {
     listProviders: async (listOpts) => listProvidersImpl(options, snapshot, listOpts),
-    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, listOpts),
+    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts),
     searchModels: async (query, listOpts) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, listOpts);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts);
       const normalized = normalizeLookupKey(query);
       return all.filter((model) =>
         normalizeLookupKey(model.id).includes(normalized) ||
@@ -118,7 +124,7 @@ export async function createModelSelectionCatalog(
       );
     },
     resolveModel: async (provider, id, baseUrl) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap);
       const key = routeKey(provider, id, baseUrl);
       return all.find((model) => model.routeKey === key);
     },
@@ -229,6 +235,7 @@ async function listModelsImpl(
   snapshot: ModelsDevSnapshot,
   snapshotModelMap: Map<string, ModelProfile>,
   snapshotInfoMap: Map<string, ModelInfo>,
+  snapshotProviderMap: Map<string, ProviderInfo>,
   listOpts?: CatalogListOptions
 ): Promise<SelectableModel[]> {
   const config = options.config;
@@ -273,7 +280,8 @@ async function listModelsImpl(
       source: "models-dev",
       configured: config.providers?.[provider]?.models?.includes(id) ?? false,
       executable,
-      apiKeyEnv
+      apiKeyEnv,
+      providerInfo: snapshotProviderMap.get(provider)
     }));
   }
 
@@ -306,7 +314,8 @@ async function listModelsImpl(
       source: "fallback-known",
       configured: config.providers?.[provider]?.models?.includes(id) ?? false,
       executable,
-      apiKeyEnv
+      apiKeyEnv,
+      providerInfo: snapshotProviderMap.get(provider)
     }));
   }
 
@@ -350,7 +359,8 @@ async function listModelsImpl(
         source: "configured",
         configured: true,
         executable,
-        apiKeyEnv
+        apiKeyEnv,
+        providerInfo: snapshotProviderMap.get(provider)
       }));
     }
   }
@@ -409,7 +419,8 @@ async function listModelsImpl(
       source: "manual",
       configured: false,
       executable,
-      apiKeyEnv: route.apiKeyEnv
+      apiKeyEnv: route.apiKeyEnv,
+      providerInfo: snapshotProviderMap.get(route.provider)
     }));
   }
 
@@ -493,7 +504,10 @@ function buildSelectableModel(params: {
   configured: boolean;
   executable: boolean;
   apiKeyEnv?: string;
+  providerInfo?: ProviderInfo;
 }): SelectableModel {
+  const credentialReady = isCredentialReady(params.provider, params.apiKeyEnv);
+  const endpointReady = isEndpointReady(params.baseUrl);
   return {
     routeKey: params.key,
     provider: params.provider,
@@ -504,10 +518,43 @@ function buildSelectableModel(params: {
     executable: params.executable,
     catalogOnly: !params.executable,
     source: params.source,
-    credentialReady: isCredentialReady(params.provider, params.apiKeyEnv),
-    endpointReady: isEndpointReady(params.baseUrl),
-    warnings: []
+    credentialReady,
+    endpointReady,
+    warnings: [],
+    live: params.executable && credentialReady && endpointReady,
+    endpointType: inferEndpointType(params.provider, params.baseUrl),
+    cost: params.profile.cost?.inputPerMillionTokens !== undefined || params.profile.cost?.outputPerMillionTokens !== undefined
+      ? {
+          inputPer1k: params.profile.cost?.inputPerMillionTokens !== undefined ? params.profile.cost.inputPerMillionTokens / 1000 : undefined,
+          outputPer1k: params.profile.cost?.outputPerMillionTokens !== undefined ? params.profile.cost.outputPerMillionTokens / 1000 : undefined
+        }
+      : undefined,
+    documentationUrl: params.providerInfo?.documentationUrl,
+    logoUrl: params.providerInfo?.logoUrl,
+    diagnosticFields: {
+      baseUrl: params.baseUrl,
+      apiKeyEnv: params.apiKeyEnv
+    }
   };
+}
+
+function inferEndpointType(provider: ProviderId, baseUrl?: string): "openai" | "anthropic" | "custom" | undefined {
+  if (provider === "anthropic") return "anthropic";
+  if (baseUrl !== undefined) {
+    const defaults: Record<string, string> = {
+      openai: "https://api.openai.com/v1",
+      kimi: "https://api.moonshot.cn/v1",
+      deepseek: "https://api.deepseek.com/v1",
+      openrouter: "https://openrouter.ai/api/v1"
+    };
+    if (defaults[provider] === baseUrl) {
+      return provider === "anthropic" ? "anthropic" : "openai";
+    }
+    return "custom";
+  }
+  if (provider === "local") return "custom";
+  if (provider === "anthropic") return "anthropic";
+  return "openai";
 }
 
 function isExecutable(providerId: ProviderId, registry: ProviderRegistry): boolean {

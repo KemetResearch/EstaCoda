@@ -1,4 +1,4 @@
-import type { ModelProfile, ProviderAdapter, ProviderId, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
+import type { ModelProfile, ProviderAdapter, ProviderEndpoint, ProviderId, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
 
 export type CatalogProviderOptions = {
   id: ProviderId;
@@ -11,7 +11,7 @@ export function createCatalogProvider(options: CatalogProviderOptions): Provider
     id: options.id,
     name: options.name ?? `${options.id} catalog`,
     executable: false,
-    health() {
+    health(_endpointOverride?: ProviderEndpoint) {
       return {
         available: true
       };

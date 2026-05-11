@@ -21,7 +21,7 @@ import {
 
 function makeSelectableModel(overrides?: Partial<SelectableModel>): SelectableModel {
   return {
-    routeKey: "openai:gpt-4o",
+    routeKey: JSON.stringify(["openai", "gpt-4o", ""]),
     provider: "openai" as ProviderId,
     id: "gpt-4o",
     baseUrl: undefined,

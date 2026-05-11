@@ -95,6 +95,7 @@ export type CostEstimate = {
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const DEFAULT_REFRESH_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+const CATALOG_CACHE_FORMAT_VERSION = 2;
 
 let memoryCache: ModelsDevSnapshot | undefined;
 let memoryCacheLoadedAt = 0;
@@ -318,6 +319,9 @@ async function loadDiskSnapshot(options: ModelsDevRegistryOptions): Promise<Mode
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as unknown;
 
+    if (!isRecord(parsed)) return undefined;
+    if (parsed.formatVersion !== CATALOG_CACHE_FORMAT_VERSION) return undefined;
+
     return normalizeModelsDevApi(parsed, {
       fetchedAt: inferFetchedAt(parsed) ?? new Date(0).toISOString(),
       source: "disk"
@@ -372,7 +376,7 @@ async function saveDiskSnapshot(snapshot: ModelsDevSnapshot, options: ModelsDevR
   try {
     const path = getCachePath(options);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+    await writeFile(path, `${JSON.stringify({ ...snapshot, formatVersion: CATALOG_CACHE_FORMAT_VERSION }, null, 2)}\n`, "utf8");
   } catch {
     // Best-effort cache write only.
   }

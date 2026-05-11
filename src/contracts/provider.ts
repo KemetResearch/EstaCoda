@@ -245,7 +245,7 @@ export type ProviderAdapter = {
   name: string;
   endpoint?: ProviderEndpoint;
   executable?: boolean;
-  health(): Promise<ProviderHealth> | ProviderHealth;
+  health(endpointOverride?: ProviderEndpoint): Promise<ProviderHealth> | ProviderHealth;
   listModels(): Promise<ModelProfile[]> | ModelProfile[];
   complete(request: ProviderRequest, options?: ProviderCompletionOptions): Promise<ProviderResponse>;
   stream?(request: ProviderRequest, options?: ProviderCompletionOptions): AsyncIterable<ProviderStreamEvent>;

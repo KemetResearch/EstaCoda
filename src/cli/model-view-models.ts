@@ -6,6 +6,7 @@ import type {
   ResolvedAuxiliaryRoute
 } from "../contracts/provider.js";
 import type { CatalogProvider, SelectableModel } from "../providers/model-selection-catalog.js";
+import { routeKey } from "../providers/model-selection-catalog.js";
 import type {
   ModelCatalogReport,
   ModelRouteDiagnostic,
@@ -109,7 +110,7 @@ function modelRowStatusFromDiagnostic(diagnostic: ModelRouteDiagnostic): ModelRo
 function diagnosticToModelRow(diagnostic: ModelRouteDiagnostic): ModelRow {
   const route = diagnostic.route;
   return {
-    routeKey: `${route.provider}:${route.id}${route.baseUrl ? `:${route.baseUrl}` : ""}`,
+    routeKey: routeKey(route.provider, route.id, route.baseUrl),
     provider: route.provider,
     id: route.id,
     label: `${route.provider}/${route.id}`,
@@ -197,7 +198,7 @@ export function toAuxiliaryRouteSummaries(report: ModelCatalogReport): Auxiliary
 export function toSetupReviewSummary(review: ModelSetupReview): SetupReviewSummary {
   const route = review.route;
   const row: ModelRow = {
-    routeKey: `${route.provider}:${route.id}${route.baseUrl ? `:${route.baseUrl}` : ""}`,
+    routeKey: routeKey(route.provider, route.id, route.baseUrl),
     provider: route.provider,
     id: route.id,
     label: `${route.provider}/${route.id}`,

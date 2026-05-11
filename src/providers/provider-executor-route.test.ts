@@ -31,7 +31,7 @@ function createMockAdapter(options: {
     name: `${options.id} mock`,
     endpoint: options.endpoint,
     executable: true,
-    health() {
+    health(_endpointOverride?: ProviderEndpoint) {
       return { available: true };
     },
     listModels() {
