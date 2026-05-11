@@ -578,6 +578,27 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const telegramMissing = telegram.enabled === true && telegram.botTokenEnv !== undefined && process.env[telegram.botTokenEnv] === undefined
     ? [telegram.botTokenEnv]
     : [];
+  const discord = config.channels?.discord ?? {};
+  const discordMissing: string[] = [];
+  if (discord.enabled === true) {
+    if (discord.botTokenEnv === undefined) discordMissing.push("botTokenEnv");
+  }
+
+  const email = config.channels?.email ?? {};
+  const emailMissing: string[] = [];
+  if (email.enabled === true) {
+    if (email.imapHost === undefined) emailMissing.push("imapHost");
+    if (email.smtpHost === undefined) emailMissing.push("smtpHost");
+    if (email.username === undefined) emailMissing.push("username");
+    if (email.passwordEnv === undefined) emailMissing.push("passwordEnv");
+    if (email.ownAddress === undefined) emailMissing.push("ownAddress");
+  }
+
+  const whatsapp = config.channels?.whatsapp ?? {};
+  const whatsappMissing: string[] = [];
+  if (whatsapp.enabled === true) {
+    if (whatsapp.experimental !== true) whatsappMissing.push("experimental");
+  }
   const warnedInvalidBusyPolicies = new Set<string>();
   const normalizedFallbacks = normalizeModelFallbacks(config);
   if (normalizedFallbacks.warnings.length > 0) {
@@ -665,25 +686,25 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         queueDepth: normalizeQueueDepth(telegram.queueDepth)
       },
       discord: {
-        ...(config.channels?.discord ?? {}),
-        ready: false,
-        missing: [],
-        busyPolicy: normalizeChannelBusyPolicy(config.channels?.discord?.busyPolicy, "discord", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(config.channels?.discord?.queueDepth)
+        ...discord,
+        ready: discord.enabled === true && discordMissing.length === 0,
+        missing: discordMissing.length === 0 ? undefined : discordMissing,
+        busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(discord.queueDepth)
       },
       email: {
-        ...(config.channels?.email ?? {}),
-        ready: false,
-        missing: [],
-        busyPolicy: normalizeChannelBusyPolicy(config.channels?.email?.busyPolicy, "email", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(config.channels?.email?.queueDepth)
+        ...email,
+        ready: email.enabled === true && emailMissing.length === 0,
+        missing: emailMissing.length === 0 ? undefined : emailMissing,
+        busyPolicy: normalizeChannelBusyPolicy(email.busyPolicy, "email", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(email.queueDepth)
       },
       whatsapp: {
-        ...(config.channels?.whatsapp ?? {}),
-        ready: false,
-        missing: [],
-        busyPolicy: normalizeChannelBusyPolicy(config.channels?.whatsapp?.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(config.channels?.whatsapp?.queueDepth)
+        ...whatsapp,
+        ready: whatsapp.enabled === true && whatsappMissing.length === 0,
+        missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
+        busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
+        queueDepth: normalizeQueueDepth(whatsapp.queueDepth)
       }
     }
   };

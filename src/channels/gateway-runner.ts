@@ -1,5 +1,5 @@
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import type { ChannelAuthPolicy } from "../contracts/channel.js";
+import type { ChannelAuthPolicies } from "../contracts/channel.js";
 import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
 
 export type GatewayRunOptions = {
@@ -70,11 +70,9 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
     statusLabel: telegram.ready ? "ready" : telegram.enabled ? "configured, missing credentials" : "disabled",
     modelRoute: `${config.model.provider}/${config.model.id}`,
     contextWindowTokens: config.model.contextWindowTokens,
-    securityLabel: authPolicy.mode === "allow-all"
-      ? "allow-all"
-      : (telegram.allowedUserIds ?? []).length + (telegram.allowedChatIds ?? []).length > 0
-        ? "allowlist"
-        : "locked until allowlist or pairing is configured",
+    securityLabel: (telegram.allowedUserIds ?? []).length + (telegram.allowedChatIds ?? []).length > 0
+      ? "allowlist"
+      : "locked until allowlist or pairing is configured",
     allowedUserIds: telegram.allowedUserIds ?? [],
     allowedChatIds: telegram.allowedChatIds ?? [],
     groupSessionsPerUser: telegram.groupSessionsPerUser ?? true,
@@ -100,21 +98,23 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
   };
 }
 
-export function telegramAuthPolicy(allowedUserIds: string[], allowedChatIds: string[]): ChannelAuthPolicy {
+export function telegramAuthPolicy(allowedUserIds: string[], allowedChatIds: string[]): ChannelAuthPolicies {
   if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
     return {
-      mode: "allowlist",
-      allowedUserIds: [],
-      allowedChatIds: [],
-      deniedMessage: "This EstaCoda Telegram bot is locked. Add your Telegram user ID or chat ID to the allowlist before chatting with it."
+      telegram: {
+        allowedUserIds: [],
+        allowedChatIds: [],
+        deniedMessage: "This EstaCoda Telegram bot is locked. Add your Telegram user ID or chat ID to the allowlist before chatting with it."
+      }
     };
   }
 
   return {
-    mode: "allowlist",
-    allowedUserIds,
-    allowedChatIds,
-    deniedMessage: "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
+    telegram: {
+      allowedUserIds,
+      allowedChatIds,
+      deniedMessage: "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
+    }
   };
 }
 

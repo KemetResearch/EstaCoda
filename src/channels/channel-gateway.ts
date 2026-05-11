@@ -1,6 +1,6 @@
 import type {
   ChannelAdapter,
-  ChannelAuthPolicy,
+  ChannelAuthPolicies,
   ChannelGatewayResult,
   ChannelMessage,
   ChannelSessionKey
@@ -57,7 +57,7 @@ export type ChannelGatewayOptions = {
   adapters: ChannelAdapter[];
   runtimeForSession: ChannelRuntimeFactory;
   sessionStore?: ChannelSessionStore;
-  authPolicy?: ChannelAuthPolicy;
+  authPolicy?: ChannelAuthPolicies;
   trustedWorkspace?: boolean | ((message: ChannelMessage) => boolean | Promise<boolean>);
   onStopRequested?: (message: ChannelMessage) => void | Promise<void>;
   pair?: (message: ChannelMessage) => Promise<string | undefined>;
@@ -181,7 +181,7 @@ export class ChannelGateway {
   readonly #adapters = new Map<string, ChannelAdapter>();
   readonly #runtimeForSession: ChannelRuntimeFactory;
   readonly #sessionStore: ChannelSessionStore;
-  readonly #authPolicy: ChannelAuthPolicy;
+  readonly #authPolicy: ChannelAuthPolicies;
   readonly #trustedWorkspace: ChannelGatewayOptions["trustedWorkspace"];
   readonly #onStopRequested: ChannelGatewayOptions["onStopRequested"];
   readonly #pair: ChannelGatewayOptions["pair"];
@@ -221,7 +221,7 @@ export class ChannelGateway {
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
-    this.#authPolicy = options.authPolicy ?? { mode: "allowlist", allowedUserIds: [], allowedChatIds: [] };
+    this.#authPolicy = options.authPolicy ?? {};
     this.#trustedWorkspace = options.trustedWorkspace;
     this.#onStopRequested = options.onStopRequested;
     this.#pair = options.pair;
@@ -1792,27 +1792,85 @@ function tokenizeCommandArgs(text: string): string[] {
   return [...matches].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
 }
 
-export function authorizeChannelMessage(message: ChannelMessage, policy: ChannelAuthPolicy): {
+export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {
   allowed: boolean;
   message: string;
 } {
-  if (policy.mode === "allow-all") {
-    return { allowed: true, message: "" };
+  const kind = message.channel;
+  const policy = policies[kind as keyof ChannelAuthPolicies];
+
+  if (policy === undefined) {
+    return {
+      allowed: false,
+      message: `This EstaCoda ${kind} gateway is locked. No authorization policy is configured for this channel.`
+    };
   }
 
-  const allowedUserIds = new Set(policy.allowedUserIds ?? []);
-  const allowedChatIds = new Set(policy.allowedChatIds ?? []);
-  const allowed =
-    allowedUserIds.has(message.sender.id) ||
-    allowedUserIds.has(message.sessionKey.userId ?? "") ||
-    allowedChatIds.has(message.sessionKey.chatId);
+  if (kind === "telegram") {
+    const telegramPolicy = policy as import("../contracts/channel.js").TelegramAuthPolicy;
+    const allowedUserIds = new Set(telegramPolicy.allowedUserIds ?? []);
+    const allowedChatIds = new Set(telegramPolicy.allowedChatIds ?? []);
+    const allowed =
+      allowedUserIds.has(message.sender.id) ||
+      allowedUserIds.has(message.sessionKey.userId ?? "") ||
+      allowedChatIds.has(message.sessionKey.chatId);
+    return {
+      allowed,
+      message: allowed
+        ? ""
+        : telegramPolicy.deniedMessage ??
+          "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
+    };
+  }
+
+  if (kind === "discord") {
+    const discordPolicy = policy as import("../contracts/channel.js").DiscordAuthPolicy;
+    const allowedUserIds = new Set(discordPolicy.allowedUserIds ?? []);
+    const allowedGuildIds = new Set(discordPolicy.allowedGuildIds ?? []);
+    const allowed =
+      allowedUserIds.has(message.sender.id) ||
+      allowedUserIds.has(message.sessionKey.userId ?? "") ||
+      allowedGuildIds.has((message.metadata?.guildId as string) ?? "");
+    return {
+      allowed,
+      message: allowed
+        ? ""
+        : discordPolicy.deniedMessage ??
+          "This EstaCoda Discord gateway is locked. Ask the owner to add your Discord user ID or guild ID."
+    };
+  }
+
+  if (kind === "email") {
+    const emailPolicy = policy as import("../contracts/channel.js").EmailAuthPolicy;
+    const allowedSenders = new Set((emailPolicy.allowedSenders ?? []).map((s) => s.toLowerCase()));
+    const senderId = message.sender.id.toLowerCase();
+    const allowed = allowedSenders.has(senderId);
+    return {
+      allowed,
+      message: allowed
+        ? ""
+        : emailPolicy.deniedMessage ??
+          "This EstaCoda email gateway is locked. Ask the owner to add your sender address to the allowlist."
+    };
+  }
+
+  if (kind === "whatsapp") {
+    const whatsappPolicy = policy as import("../contracts/channel.js").WhatsAppAuthPolicy;
+    const allowedNumbers = new Set(whatsappPolicy.allowedNumbers ?? []);
+    const normalizedSender = message.sender.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "");
+    const allowed = allowedNumbers.has(normalizedSender) || allowedNumbers.has(message.sender.id);
+    return {
+      allowed,
+      message: allowed
+        ? ""
+        : whatsappPolicy.deniedMessage ??
+          "This EstaCoda WhatsApp gateway is locked. Ask the owner to add your phone number to the allowlist."
+    };
+  }
 
   return {
-    allowed,
-    message: allowed
-      ? ""
-      : policy.deniedMessage ??
-        "This EstaCoda gateway is not paired with this account yet. Pair this chat from a trusted local session first."
+    allowed: false,
+    message: `This EstaCoda ${kind} gateway is locked. Authorization is not implemented for this channel kind.`
   };
 }
 

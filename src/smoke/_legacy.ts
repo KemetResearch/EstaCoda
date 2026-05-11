@@ -11477,9 +11477,10 @@ const channelGateway = new ChannelGateway({
   sessionStore: channelSessionStore,
   approvalStore: channelApprovalStore,
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"],
-    allowedChatIds: ["chat-2"]
+    telegram: {
+      allowedUserIds: ["user-1"],
+      allowedChatIds: ["chat-2"]
+    }
   },
   trustedWorkspace: true,
   runtimeForSession: async ({ sessionId }) => {
@@ -11670,8 +11671,9 @@ const cancelGateway = new ChannelGateway({
     idFactory: sequenceId()
   }),
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: async ({ sessionId }) => fakeRuntime({
     sessionId,
@@ -11729,8 +11731,9 @@ const stopGateway = new ChannelGateway({
     idFactory: sequenceId()
   }),
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   onStopRequested: () => {
     gatewayStopRequested = true;
@@ -11896,8 +11899,9 @@ const approvalGateway = new ChannelGateway({
   adapters: [approvalMockChannel],
   approvalStore,
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: async ({ sessionId, securityPolicy }) => fakeRuntime({
     sessionId,
@@ -12041,8 +12045,9 @@ const restartGateway = new ChannelGateway({
   adapters: [restartMockChannel],
   approvalStore,
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: createApprovalRuntimeFor("approval restart smoke")
 });
@@ -12065,8 +12070,9 @@ const restartedGateway = new ChannelGateway({
   adapters: [new MockChannelAdapter({ kind: "telegram" })],
   approvalStore,
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: createApprovalRuntimeFor("approval restarted gateway smoke")
 });
@@ -12121,8 +12127,9 @@ const createPersistentSessionGateway = () => new ChannelGateway({
   adapters: [new MockChannelAdapter({ kind: "telegram" })],
   sessionStore: new PersistentChannelSessionStore({ path: persistedSessionStorePath }),
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: async ({ sessionId }) => fakeRuntime({
     sessionId,
@@ -12285,8 +12292,9 @@ const sessionApprovalGateway = new ChannelGateway({
   adapters: [sessionApprovalMockChannel],
   approvalStore: sessionApprovalStore,
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["user-1"]
+    telegram: {
+      allowedUserIds: ["user-1"]
+    }
   },
   runtimeForSession: async ({ sessionId, securityPolicy }) => fakeRuntime({
     sessionId,
@@ -13035,9 +13043,10 @@ const telegramAttachmentGateway = new ChannelGateway({
     idFactory: sequenceId()
   }),
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["1254738091"],
-    allowedChatIds: ["1254738091"]
+    telegram: {
+      allowedUserIds: ["1254738091"],
+      allowedChatIds: ["1254738091"]
+    }
   },
   trustedWorkspace: true,
   runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({
@@ -13337,9 +13346,10 @@ const telegramAttachmentFailureGateway = new ChannelGateway({
     idFactory: sequenceId()
   }),
   authPolicy: {
-    mode: "allowlist",
-    allowedUserIds: ["1254738091"],
-    allowedChatIds: ["1254738091"]
+    telegram: {
+      allowedUserIds: ["1254738091"],
+      allowedChatIds: ["1254738091"]
+    }
   },
   trustedWorkspace: true,
   runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({

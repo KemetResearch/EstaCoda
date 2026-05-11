@@ -108,6 +108,107 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
   });
 });
 
+describe("loadRuntimeConfig channel readiness", () => {
+  it("discord ready = enabled && botTokenEnv present", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.discord.ready).toBe(true);
+    expect(loaded.channels.discord.missing).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("discord not ready when enabled but botTokenEnv missing", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { discord: { enabled: true } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.discord.ready).toBe(false);
+    expect(loaded.channels.discord.missing).toContain("botTokenEnv");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("email ready = enabled && required config present", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        email: {
+          enabled: true,
+          imapHost: "imap.example.com",
+          smtpHost: "smtp.example.com",
+          username: "user",
+          passwordEnv: "EMAIL_PASS",
+          ownAddress: "bot@example.com"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.email.ready).toBe(true);
+    expect(loaded.channels.email.missing).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("email not ready when enabled but required config missing", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { email: { enabled: true } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.email.ready).toBe(false);
+    expect(loaded.channels.email.missing).toEqual(["imapHost", "smtpHost", "username", "passwordEnv", "ownAddress"]);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp ready = enabled && experimental true", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.whatsapp.ready).toBe(true);
+    expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp not ready when enabled but experimental false", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: false } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("experimental");
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
   it("resolves explicit fallback routes with provider defaults and overrides", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));

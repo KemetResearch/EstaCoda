@@ -135,7 +135,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         surfacePointerStore: pointerStore
       });
 
@@ -153,7 +153,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         surfacePointerStore: pointerStore
       });
 
@@ -177,7 +177,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         surfacePointerStore: pointerStore
       });
 
@@ -194,7 +194,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       const result = await gateway.receive(makeMessage("/sethome"));
@@ -209,7 +209,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         diagnostics: async () => "Diagnostics: ok"
       });
 
@@ -223,7 +223,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       const result = await gateway.receive(makeMessage("/diagnostics"));
@@ -246,7 +246,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         surfacePointerStore: pointerStore
       });
 
@@ -261,7 +261,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       const result = await gateway.receive(makeMessage("/status"));
@@ -282,7 +282,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       await gateway.receive(makeMessage("hello"));
@@ -304,7 +304,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       await gateway.receive(makeMessage("/unknown"));
@@ -322,7 +322,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       await gateway.receive(makeMessage("hello world"));
@@ -344,7 +344,7 @@ describe("ChannelGateway commands", () => {
     it("allows messages from allowed user ids", () => {
       const result = authorizeChannelMessage(
         makeMessage("hi"),
-        { mode: "allowlist", allowedUserIds: ["user-1"], allowedChatIds: [] }
+        { telegram: { allowedUserIds: ["user-1"] } }
       );
       expect(result.allowed).toBe(true);
     });
@@ -352,7 +352,7 @@ describe("ChannelGateway commands", () => {
     it("denies messages from unknown users", () => {
       const result = authorizeChannelMessage(
         makeMessage("hi"),
-        { mode: "allowlist", allowedUserIds: ["user-2"], allowedChatIds: [] }
+        { telegram: { allowedUserIds: ["user-2"] } }
       );
       expect(result.allowed).toBe(false);
     });
@@ -485,7 +485,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -512,7 +512,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         isDraining: () => true,
       });
@@ -554,7 +554,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -593,7 +593,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -637,7 +637,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -685,7 +685,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       const first = gateway.receive(makeMessage("hello"));
@@ -733,7 +733,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -756,7 +756,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         onStopRequested: () => { stopCalled = true; }
       });
@@ -777,7 +777,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
@@ -797,7 +797,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createThrowingRuntime(new Error("boom")),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -827,7 +827,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
@@ -860,7 +860,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
@@ -882,7 +882,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -903,7 +903,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -923,7 +923,7 @@ describe("ChannelGateway commands", () => {
           throw new Error("factory fail");
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -942,7 +942,7 @@ describe("ChannelGateway commands", () => {
           throw new Error("factory fail");
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       const result = await gateway.receive(makeMessage("hello"));
@@ -963,7 +963,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
@@ -984,7 +984,7 @@ describe("ChannelGateway commands", () => {
           throw new Error("factory fail");
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -1003,7 +1003,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore,
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -1032,7 +1032,7 @@ describe("ChannelGateway commands", () => {
           } as unknown as Runtime["sessionDb"]
         }),
         sessionStore,
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -1061,7 +1061,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore,
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -1085,7 +1085,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -1112,7 +1112,7 @@ describe("ChannelGateway commands", () => {
           } as unknown as Runtime["sessionDb"]
         }),
         sessionStore,
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
         runtimeFingerprint: fingerprint
       });
@@ -1134,7 +1134,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       await gateway.receive(makeMessage("hello"));
@@ -1148,7 +1148,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" }
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
       });
 
       await gateway.receive(makeMessage("hello"));
@@ -1168,7 +1168,7 @@ describe("ChannelGateway commands", () => {
           return createMinimalRuntime();
         },
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache
         // no runtimeFingerprint
       });
@@ -1204,7 +1204,7 @@ describe("ChannelGateway commands", () => {
           } as Awaited<ReturnType<Runtime["handle"]>>)
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -1231,7 +1231,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         handoffStore: handoffStore as unknown as import("./handoff-store.js").HandoffStore,
         surfacePointerStore: pointerStore
       });
@@ -1270,7 +1270,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry
       });
 
@@ -1320,7 +1320,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1365,7 +1365,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 1 })
       });
@@ -1415,7 +1415,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
       });
@@ -1463,7 +1463,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
       });
@@ -1509,7 +1509,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 })
       });
 
@@ -1547,7 +1547,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1598,7 +1598,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 }),
         isDraining: () => draining
@@ -1649,7 +1649,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1702,7 +1702,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1754,7 +1754,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1803,7 +1803,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1856,7 +1856,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1902,7 +1902,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -1950,7 +1950,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -2002,7 +2002,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 }),
         isDraining: () => draining
@@ -2054,7 +2054,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
@@ -2103,7 +2103,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 })
       });
@@ -2147,7 +2147,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
       });
 
@@ -2174,7 +2174,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         hookRegistry: registry,
       });
 
@@ -2197,7 +2197,7 @@ describe("ChannelGateway commands", () => {
           handle: async () => { throw new Error("runtime boom"); }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         hookRegistry: registry,
       });
 
@@ -2240,7 +2240,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 }),
         hookRegistry: registry,
       });
@@ -2286,7 +2286,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         hookRegistry: registry,
       });
 
@@ -2332,7 +2332,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 }),
         hookRegistry: registry,
       });
@@ -2376,7 +2376,7 @@ describe("ChannelGateway commands", () => {
           }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 3 }),
         hookRegistry: registry,
       });
@@ -2402,12 +2402,162 @@ describe("ChannelGateway commands", () => {
           dispose: async () => { disposed = true; }
         }),
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { mode: "allow-all" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         hookRegistry: registry,
       });
 
       await gateway.receive(makeMessage("hello"));
       expect(disposed).toBe(true);
+    });
+  });
+
+  describe("Workstream 6: per-channel auth and workspace trust", () => {
+    it("rejects Discord message when no Discord allowlist is configured", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      });
+
+      const result = await gateway.receive(makeMessage("hello", { channel: "discord", sender: { id: "discord-user", displayName: "D" } }));
+      expect(result.replyText).toContain("locked");
+    });
+
+    it("rejects Email sender when not in allowlist", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { email: { allowedSenders: ["owner@example.com"] } },
+      });
+
+      const result = await gateway.receive(makeMessage("hello", {
+        channel: "email",
+        sender: { id: "intruder@example.com", displayName: "Intruder" }
+      }));
+      expect(result.replyText).toContain("locked");
+    });
+
+    it("rejects WhatsApp number when not in allowlist", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"] } },
+      });
+
+      const result = await gateway.receive(makeMessage("hello", {
+        channel: "whatsapp",
+        sender: { id: "9998887777", displayName: "Stranger" }
+      }));
+      expect(result.replyText).toContain("locked");
+    });
+
+    it("allowed Discord user does not authorize Email sender", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          discord: { allowedUserIds: ["discord-user"] },
+        },
+      });
+
+      const result = await gateway.receive(makeMessage("hello", {
+        channel: "email",
+        sender: { id: "discord-user", displayName: "Same ID" }
+      }));
+      expect(result.replyText).toContain("locked");
+    });
+
+    it("allowed Email sender does not authorize Telegram/Discord/WhatsApp", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          email: { allowedSenders: ["owner@example.com"] },
+        },
+      });
+
+      const telegramResult = await gateway.receive(makeMessage("hello", {
+        channel: "telegram",
+        sender: { id: "owner@example.com", displayName: "Owner" }
+      }));
+      expect(telegramResult.replyText).toContain("locked");
+
+      const discordResult = await gateway.receive(makeMessage("hello", {
+        channel: "discord",
+        sender: { id: "owner@example.com", displayName: "Owner" }
+      }));
+      expect(discordResult.replyText).toContain("locked");
+
+      const whatsappResult = await gateway.receive(makeMessage("hello", {
+        channel: "whatsapp",
+        sender: { id: "owner@example.com", displayName: "Owner" }
+      }));
+      expect(whatsappResult.replyText).toContain("locked");
+    });
+
+    it("empty authPolicy means all remote channels are locked", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {},
+      });
+
+      const telegramResult = await gateway.receive(makeMessage("hello"));
+      expect(telegramResult.replyText).toContain("locked");
+    });
+
+    it("passes trustedWorkspace=false into runtime when workspace is untrusted", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let receivedTrusted: boolean | undefined;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ trustedWorkspace }: { trustedWorkspace?: boolean }) => {
+            receivedTrusted = trustedWorkspace;
+            return createMinimalRuntime().handle({} as any);
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        trustedWorkspace: false,
+      });
+
+      await gateway.receive(makeMessage("hello"));
+      expect(receivedTrusted).toBe(false);
+    });
+
+    it("passes trustedWorkspace=true into runtime when workspace is trusted", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let receivedTrusted: boolean | undefined;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ trustedWorkspace }: { trustedWorkspace?: boolean }) => {
+            receivedTrusted = trustedWorkspace;
+            return createMinimalRuntime().handle({} as any);
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        trustedWorkspace: true,
+      });
+
+      await gateway.receive(makeMessage("hello"));
+      expect(receivedTrusted).toBe(true);
     });
   });
 });

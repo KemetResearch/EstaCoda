@@ -5,7 +5,7 @@ import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, consumeTelegramPairing
 import { resolveStateHome } from "../config/state-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
-import type { ChannelAdapter, ChannelAuthPolicy, ChannelKind } from "../contracts/channel.js";
+import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -632,22 +632,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           const telegram = config.channels.telegram;
           const botTokenEnv = telegram.botTokenEnv;
           const botToken = botTokenEnv === undefined ? undefined : process.env[botTokenEnv];
-          const telegramAuthPolicy = (allowedUserIds: string[], allowedChatIds: string[]): ChannelAuthPolicy => {
-            if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
-              return {
-                mode: "allowlist",
-                allowedUserIds: [],
-                allowedChatIds: [],
-                deniedMessage: "This EstaCoda Telegram bot is locked. Add your Telegram user ID or chat ID to the allowlist before chatting with it."
-              };
-            }
-            return {
-              mode: "allowlist",
-              allowedUserIds,
-              allowedChatIds,
-              deniedMessage: "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
-            };
-          };
           adapter = options.factories?.createTelegramAdapter
             ? options.factories.createTelegramAdapter({
                 botToken: botToken!,
@@ -795,28 +779,50 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
     }
 
-    // 11. Build ChannelGateway with wrappers
+    // 11. Load workspace trust and build per-channel auth policies
     const telegram = config.channels.telegram;
-    const authPolicy = telegram.enabled === true
-      ? (() => {
-          const allowedUserIds = telegram.allowedUserIds ?? [];
-          const allowedChatIds = telegram.allowedChatIds ?? [];
-          if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
-            return {
-              mode: "allowlist" as const,
-              allowedUserIds: [],
-              allowedChatIds: [],
-              deniedMessage: "This EstaCoda Telegram bot is locked. Add your Telegram user ID or chat ID to the allowlist before chatting with it."
-            };
-          }
-          return {
-            mode: "allowlist" as const,
-            allowedUserIds,
-            allowedChatIds,
-            deniedMessage: "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
-          };
-        })()
-      : { mode: "allow-all" as const };
+    const discord = config.channels.discord;
+    const email = config.channels.email;
+    const whatsapp = config.channels.whatsapp;
+
+    const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
+    const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
+
+    const authPolicies: ChannelAuthPolicies = {};
+    if (telegram.enabled === true) {
+      authPolicies.telegram = {
+        allowedUserIds: telegram.allowedUserIds ?? [],
+        allowedChatIds: telegram.allowedChatIds ?? [],
+        deniedMessage: (telegram.allowedUserIds ?? []).length + (telegram.allowedChatIds ?? []).length > 0
+          ? "This EstaCoda Telegram bot is not paired with this account. Ask the owner to add your Telegram user ID or chat ID."
+          : "This EstaCoda Telegram bot is locked. Add your Telegram user ID or chat ID to the allowlist before chatting with it."
+      };
+    }
+    if (discord.enabled === true) {
+      authPolicies.discord = {
+        allowedUserIds: discord.allowedUsers ?? [],
+        allowedGuildIds: discord.allowedGuilds ?? [],
+        deniedMessage: (discord.allowedUsers ?? []).length + (discord.allowedGuilds ?? []).length > 0
+          ? "This EstaCoda Discord gateway is not paired with this account. Ask the owner to add your Discord user ID or guild ID."
+          : "This EstaCoda Discord gateway is locked. Add your Discord user ID or guild ID to the allowlist before chatting with it."
+      };
+    }
+    if (email.enabled === true) {
+      authPolicies.email = {
+        allowedSenders: email.allowedSenders ?? [],
+        deniedMessage: (email.allowedSenders ?? []).length > 0
+          ? "This EstaCoda email gateway is not paired with this account. Ask the owner to add your sender address."
+          : "This EstaCoda email gateway is locked. Add your sender address to the allowlist before emailing it."
+      };
+    }
+    if (whatsapp.enabled === true) {
+      authPolicies.whatsapp = {
+        allowedNumbers: whatsapp.allowedUsers ?? [],
+        deniedMessage: (whatsapp.allowedUsers ?? []).length > 0
+          ? "This EstaCoda WhatsApp gateway is not paired with this account. Ask the owner to add your phone number."
+          : "This EstaCoda WhatsApp gateway is locked. Add your phone number to the allowlist before messaging it."
+      };
+    }
 
     const sessionPolicy = {
       groupSessionsPerUser: telegram.groupSessionsPerUser ?? true,
@@ -832,8 +838,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           deliveryRouter: router,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
-          authPolicy,
-          trustedWorkspace: true,
+          authPolicy: authPolicies,
+          trustedWorkspace: workspaceTrusted,
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
@@ -889,8 +895,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           deliveryRouter: router,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
-          authPolicy,
-          trustedWorkspace: true,
+          authPolicy: authPolicies,
+          trustedWorkspace: workspaceTrusted,
           sessionPolicy,
           handoffStore,
           surfacePointerStore,

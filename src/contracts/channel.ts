@@ -165,16 +165,34 @@ export type ChannelAdapter = {
   pollOnce?(): Promise<number>;
 };
 
-export type ChannelAuthPolicy =
-  | {
-      mode: "allow-all";
-    }
-  | {
-      mode: "allowlist";
-      allowedUserIds?: string[];
-      allowedChatIds?: string[];
-      deniedMessage?: string;
-    };
+export type TelegramAuthPolicy = {
+  allowedUserIds?: string[];
+  allowedChatIds?: string[];
+  deniedMessage?: string;
+};
+
+export type DiscordAuthPolicy = {
+  allowedUserIds?: string[];
+  allowedGuildIds?: string[];
+  deniedMessage?: string;
+};
+
+export type EmailAuthPolicy = {
+  allowedSenders?: string[];
+  deniedMessage?: string;
+};
+
+export type WhatsAppAuthPolicy = {
+  allowedNumbers?: string[];
+  deniedMessage?: string;
+};
+
+export type ChannelAuthPolicies = {
+  telegram?: TelegramAuthPolicy;
+  discord?: DiscordAuthPolicy;
+  email?: EmailAuthPolicy;
+  whatsapp?: WhatsAppAuthPolicy;
+};
 
 export type ChannelGatewayResult = {
   sessionId: string;

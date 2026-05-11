@@ -115,4 +115,68 @@ describe("buildAdapterCapability", () => {
     expect(cap.supportsThreads).toBe(true);
     expect(cap.supportsAttachments).toBe(false);
   });
+
+  it("discord ready only when enabled and botTokenEnv is set", () => {
+    const capReady = buildAdapterCapability({
+      kind: "discord",
+      config: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" },
+      missing: [],
+    });
+    expect(capReady.enabled).toBe(true);
+    expect(capReady.configured).toBe(true);
+
+    const capMissing = buildAdapterCapability({
+      kind: "discord",
+      config: { enabled: true },
+      missing: ["botTokenEnv"],
+    });
+    expect(capMissing.enabled).toBe(true);
+    expect(capMissing.configured).toBe(false);
+    expect(capMissing.missingConfig).toEqual(["botTokenEnv"]);
+
+    const capDisabled = buildAdapterCapability({
+      kind: "discord",
+      config: { enabled: false, botTokenEnv: "DISCORD_BOT_TOKEN" },
+    });
+    expect(capDisabled.enabled).toBe(false);
+    expect(capDisabled.configured).toBe(false);
+  });
+
+  it("email ready only when enabled and required config is present", () => {
+    const capReady = buildAdapterCapability({
+      kind: "email",
+      config: { enabled: true, imapHost: "imap.example.com", smtpHost: "smtp.example.com", username: "user", passwordEnv: "PASS", ownAddress: "bot@example.com" },
+      missing: [],
+    });
+    expect(capReady.enabled).toBe(true);
+    expect(capReady.configured).toBe(true);
+
+    const capMissing = buildAdapterCapability({
+      kind: "email",
+      config: { enabled: true },
+      missing: ["imapHost", "smtpHost"],
+    });
+    expect(capMissing.enabled).toBe(true);
+    expect(capMissing.configured).toBe(false);
+    expect(capMissing.missingConfig).toEqual(["imapHost", "smtpHost"]);
+  });
+
+  it("whatsapp ready only when enabled and experimental is true", () => {
+    const capReady = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, experimental: true },
+      missing: [],
+    });
+    expect(capReady.enabled).toBe(true);
+    expect(capReady.configured).toBe(true);
+
+    const capMissing = buildAdapterCapability({
+      kind: "whatsapp",
+      config: { enabled: true, experimental: false },
+      missing: ["experimental"],
+    });
+    expect(capMissing.enabled).toBe(true);
+    expect(capMissing.configured).toBe(false);
+    expect(capMissing.missingConfig).toEqual(["experimental"]);
+  });
 });
