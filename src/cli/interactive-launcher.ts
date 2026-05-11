@@ -1,5 +1,5 @@
 import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
-import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { loadUserRuntimeConfig } from "../config/runtime-config.js";
 import { runInteractiveOnboarding, canRunInteractive, createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import type { UiLocale } from "../contracts/ui.js";
@@ -83,10 +83,9 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
 }
 
 async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
-  const config = await loadRuntimeConfig({
+  const config = await loadUserRuntimeConfig({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
-    projectConfigTrust: options.projectConfigTrust
+    homeDir: options.homeDir
   });
   return config.ui.language === "ar" ? "ar" : "en";
 }

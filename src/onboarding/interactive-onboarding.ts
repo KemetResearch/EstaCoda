@@ -246,7 +246,7 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         path: `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/trust.json`
       }).grant(workspaceRoot, { label: "setup wizard" });
     }
-    const loaded = await loadRuntimeConfig({ ...options, workspaceRoot });
+    const loaded = await loadRuntimeConfig({ ...options, workspaceRoot, projectConfigTrust: trustWorkspace ? "trusted" : "untrusted" });
     const diagnostic = await diagnoseProviderConfig(loaded);
     const verification = await runSetupVerification({ ...options, workspaceRoot });
     const security = formatSecurityMode(securityMode, locale);
