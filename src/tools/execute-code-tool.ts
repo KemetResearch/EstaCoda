@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import { buildSafeChildEnv } from "../security/process-env.js";
 import type { ToolExecutor } from "./tool-executor.js";
 
 export type ExecuteCodeToolOptions = {
@@ -123,17 +124,21 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
   const tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
   const scriptPath = join(tempDir, "script.py");
   const script = renderPythonHarness(options.code);
+  const sandboxHome = join(tempDir, "sandbox-home");
+  await mkdir(sandboxHome, { recursive: true });
 
   await writeFile(scriptPath, script, "utf8");
 
   return new Promise<ToolResult>((resolve) => {
     const child = spawn("python3", [scriptPath], {
       cwd: options.workspaceRoot,
-      env: {
-        ...process.env,
-        ESTACODA_INPUT_JSON: JSON.stringify(options.input),
-        ESTACODA_ALLOWED_TOOLS_JSON: JSON.stringify([...options.allowedTools].sort())
-      },
+      env: buildSafeChildEnv({
+        homeDir: sandboxHome,
+        extra: {
+          ESTACODA_INPUT_JSON: JSON.stringify(options.input),
+          ESTACODA_ALLOWED_TOOLS_JSON: JSON.stringify([...options.allowedTools].sort())
+        }
+      }),
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";

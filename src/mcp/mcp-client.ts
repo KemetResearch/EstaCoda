@@ -2,6 +2,7 @@ import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { buildSafeChildEnv } from "../security/process-env.js";
 
 export type MCPServerTransport = "stdio" | "http";
 
@@ -404,36 +405,9 @@ export class MCPClient {
 }
 
 function buildStdioEnv(customEnv: Record<string, string> | undefined): Record<string, string> {
-  const allowed = [
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-    "SHELL",
-    "TERM",
-    "LANG",
-    "LC_ALL",
-    "SYSTEMROOT",
-    "WINDIR",
-    "ComSpec",
-    "PATHEXT"
-  ];
-  const base = Object.fromEntries(
-    allowed.flatMap((key) => {
-      const value = process.env[key];
-      return typeof value === "string" ? [[key, value]] : [];
-    })
-  );
-
-  return customEnv === undefined
-    ? base
-    : {
-        ...base,
-        ...customEnv
-      };
+  return buildSafeChildEnv({
+    extra: customEnv
+  });
 }
 
 const defaultFetch: MCPFetchLike = async (input, init) => {
