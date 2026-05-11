@@ -144,7 +144,7 @@ describe("model setup local", () => {
     });
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("Provider status: ready");
+    expect(result.output).toContain("Status: ready");
     expect(result.output).not.toContain("Missing API key");
     expect(result.output).not.toContain("No credential pool");
   });

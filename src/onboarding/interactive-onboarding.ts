@@ -20,6 +20,7 @@ import {
   type UiLanguage
 } from "../config/runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
+import { createModelSelectionCatalog, type ModelSelectionCatalog } from "../providers/model-selection-catalog.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -99,6 +100,12 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
 }): Promise<InteractiveOnboardingResult> {
   const status = await getOnboardingStatus(options);
   const loadedConfig = await loadRuntimeConfig(options);
+  const catalog = await createModelSelectionCatalog({
+    config: loadedConfig.config,
+    providerRegistry: loadedConfig.providerRegistry,
+    homeDir: options.homeDir,
+    allowNetwork: false
+  });
   let locale: Locale = loadedConfig.ui.language === "ar" ? "ar" : "en";
   let copy = onboardingCopy(locale);
   const theme = options.theme ?? kemetBlueTheme;
@@ -151,7 +158,7 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     });
     const trustRaw = await prompt(copy.workspace.trustPrompt);
     const trustWorkspace = parseYesNo(trustRaw, true);
-    const provider = await selectProvider(prompt, copy);
+    const provider = await selectProvider(prompt, copy, catalog);
     const selected = await selectModel(prompt, provider, copy);
     const defaultApiKeyEnv = selected.provider === "local" ? undefined : defaultEnvKey(selected.provider);
     const normalizedEnvName = defaultApiKeyEnv;
@@ -499,9 +506,10 @@ async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage, copy: 
 
 async function selectProvider(
   prompt: Prompt,
-  copy: OnboardingCopy
+  copy: OnboardingCopy,
+  catalog: ModelSelectionCatalog
 ): Promise<ProviderChoice> {
-  const choices = providerChoices(copy);
+  const choices = await providerChoices(catalog, copy);
   const defaultIndex = 0;
   if (prompt.select !== undefined) {
     return await prompt.select(withSelectChrome(copy, {
@@ -977,7 +985,7 @@ function renderWelcome(input: {
 
 function renderProviderPicker(
   copy: OnboardingCopy,
-  choices: ProviderChoice[] = providerChoices(copy),
+  choices: ProviderChoice[],
   title = copy.providers.title,
   body = copy.providers.body
 ): string {

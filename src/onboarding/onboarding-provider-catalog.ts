@@ -1,5 +1,6 @@
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { ProviderId } from "../contracts/provider.js";
+import type { ModelSelectionCatalog } from "../providers/model-selection-catalog.js";
 import type { OnboardingCopy } from "./onboarding-copy.js";
 
 export type ModelChoice = {
@@ -33,51 +34,36 @@ export function formatProviderModel(provider: string, model: string): string {
   return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
 }
 
-export function providerChoices(copy: OnboardingCopy): ProviderChoice[] {
-  const catalog = copy.providers.catalog;
-  return [
-    {
-      provider: "openai",
-      label: catalog.openai.label,
-      description: catalog.openai.description,
-      models: [
-        { provider: "openai", model: "gpt-4.1-mini", label: catalog.openai.models["gpt-4.1-mini"]!.label, description: catalog.openai.models["gpt-4.1-mini"]!.description }
-      ]
-    },
-    {
-      provider: "kimi",
-      label: catalog.kimi.label,
-      description: catalog.kimi.description,
-      models: [
-        { provider: "kimi", model: "kimi-k2.5", label: catalog.kimi.models["kimi-k2.5"]!.label, description: catalog.kimi.models["kimi-k2.5"]!.description },
-        { provider: "kimi", model: "kimi-k2-turbo-preview", label: catalog.kimi.models["kimi-k2-turbo-preview"]!.label, description: catalog.kimi.models["kimi-k2-turbo-preview"]!.description }
-      ]
-    },
-    {
-      provider: "deepseek",
-      label: catalog.deepseek.label,
-      description: catalog.deepseek.description,
-      models: [
-        { provider: "deepseek", model: "deepseek-chat", label: catalog.deepseek.models["deepseek-chat"]!.label, description: catalog.deepseek.models["deepseek-chat"]!.description }
-      ]
-    },
-    {
-      provider: "openrouter",
-      label: catalog.openrouter.label,
-      description: catalog.openrouter.description,
-      models: [
-        { provider: "openrouter", model: "qwen/qwen3.6-plus", label: catalog.openrouter.models["qwen/qwen3.6-plus"]!.label, description: catalog.openrouter.models["qwen/qwen3.6-plus"]!.description }
-      ]
-    },
-    {
-      provider: "local",
-      label: catalog.local.label,
-      description: catalog.local.description,
-      models: [
-        { provider: "local", model: "ollama/auto", label: catalog.local.models["ollama/auto"]!.label, description: catalog.local.models["ollama/auto"]!.description }
-      ]
-    }
-  ];
+export async function providerChoices(
+  catalog: ModelSelectionCatalog,
+  copy: OnboardingCopy
+): Promise<ProviderChoice[]> {
+  const providers = (await catalog.listProviders()).filter((p) => p.id !== "unconfigured");
+  const copyCatalog = copy.providers.catalog;
+
+  const result: ProviderChoice[] = [];
+  for (const provider of providers) {
+    const models = (await catalog.listModels({ provider: provider.id, includeBeta: true }))
+      .filter((m) => m.id !== "unconfigured");
+    const providerCopy = copyCatalog[provider.id];
+
+    result.push({
+      provider: provider.id,
+      label: providerCopy?.label ?? provider.name,
+      description: providerCopy?.description ?? "",
+      models: models.map((model) => {
+        const modelCopy = providerCopy?.models?.[model.id];
+        return {
+          provider: provider.id,
+          model: model.id,
+          label: modelCopy?.label ?? model.id,
+          description: modelCopy?.description
+        };
+      })
+    });
+  }
+
+  return result;
 }
 
 export function interfaceLanguageChoices(copy: OnboardingCopy): InterfaceChoice[] {

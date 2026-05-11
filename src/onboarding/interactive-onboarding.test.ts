@@ -79,7 +79,7 @@ describe("interactive onboarding prompt-card integration", () => {
 
   it("switches subsequent onboarding selections and cards to Arabic with isolated technical tokens", async () => {
     const workspaceRoot = join(tempDir, "workspace");
-    const prompt = makePrompt({ language: "ar", provider: "local" });
+    const prompt = makePrompt({ language: "ar", provider: "local", model: "ollama/auto" });
 
     const result = await runInteractiveOnboarding({
       workspaceRoot,
