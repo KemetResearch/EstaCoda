@@ -84,6 +84,13 @@ import { packCommand } from "./pack-commands.js";
 import { skillsCommand } from "./skill-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import {
+  renderModelList,
+  renderModelSearchResults,
+  renderProviderList,
+  renderRefreshReport
+} from "./model-renderers.js";
+import { toModelRow, toProviderRow } from "./model-view-models.js";
+import {
   formatSecurityMode,
   formatSkillAutonomy,
   renderSecurityModeOption,
@@ -116,11 +123,8 @@ import { isBackupReady } from "../lifecycle/state-preservation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import {
   createModelSelectionCatalog,
-  type SelectableModel,
-  type CatalogProvider,
   type CatalogListOptions
 } from "../providers/model-selection-catalog.js";
-import type { ModelRefreshReport } from "../reports/model-reports.js";
 import { produceModelStatusReport } from "../diagnostics/model-diagnostics.js";
 import {
   runModelSetupLocal,
@@ -628,50 +632,40 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
 
   if (args[0] === "list") {
     const flags = parseCatalogListFlags(args.slice(1));
-    if (flags.live) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: "Live catalog probing is not yet implemented. Use `estacoda model refresh` to update the catalog."
-      };
-    }
     const catalog = await createModelSelectionCatalog({
       config: config.config,
       providerRegistry: config.providerRegistry,
       homeDir: options.homeDir,
-      modelsDevOptions: options.modelsDevOptions
+      modelsDevOptions: options.modelsDevOptions,
+      allowNetwork: flags.live
     });
     const { live: _liveList, ...listOpts } = flags;
     const models = await catalog.listModels(listOpts);
+    const rows = models.map(toModelRow);
     return {
       handled: true,
       exitCode: 0,
-      output: renderModelList(models)
+      output: renderModelList(rows, { verbose: true })
     };
   }
 
   if (args[0] === "search" && args[1] !== undefined) {
     const query = args[1];
     const flags = parseCatalogListFlags(args.slice(2));
-    if (flags.live) {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: "Live catalog probing is not yet implemented. Use `estacoda model refresh` to update the catalog."
-      };
-    }
     const catalog = await createModelSelectionCatalog({
       config: config.config,
       providerRegistry: config.providerRegistry,
       homeDir: options.homeDir,
-      modelsDevOptions: options.modelsDevOptions
+      modelsDevOptions: options.modelsDevOptions,
+      allowNetwork: flags.live
     });
     const { live: _liveSearch, ...searchOpts } = flags;
     const models = await catalog.searchModels(query, searchOpts);
+    const rows = models.map(toModelRow);
     return {
       handled: true,
       exitCode: 0,
-      output: renderModelSearchResults(query, models)
+      output: renderModelSearchResults(query, rows)
     };
   }
 
@@ -683,10 +677,11 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       modelsDevOptions: options.modelsDevOptions
     });
     const providers = await catalog.listProviders();
+    const rows = providers.map(toProviderRow);
     return {
       handled: true,
       exitCode: 0,
-      output: renderProviderList(providers)
+      output: renderProviderList(rows)
     };
   }
 
@@ -724,37 +719,56 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
   }
 
   if (args[0] === "diagnose") {
-    const diagnostic = await diagnoseProviderConfig(config);
-    const auxiliaryRoutes = await resolveAllAuxiliaryRoutes(config.auxiliaryModels, {
-      mainRoute: config.primaryModelRoute,
-      providerRegistry: config.providerRegistry
-    });
     const report = await produceModelStatusReport(config);
-    const readinessLines: string[] = [];
-    readinessLines.push(`Primary: ${report.primary.route.provider}/${report.primary.route.id} (${report.primary.executable ? "executable" : "catalog-only"})`);
-    for (let i = 0; i < report.fallbacks.length; i++) {
-      const fb = report.fallbacks[i];
-      readinessLines.push(`Fallback ${i + 1}: ${fb.route.provider}/${fb.route.id} (${fb.executable ? "executable" : "catalog-only"})`);
+    const lines: string[] = ["EstaCoda model diagnose", ""];
+
+    const primary = report.primary;
+    lines.push(`Primary: ${primary.route.provider}/${primary.route.id}`);
+    const primaryStatus = !primary.executable ? "blocked" : primary.credentialReady && primary.endpointReady ? "ready" : "warning";
+    lines.push(`  Status: ${primaryStatus}`);
+    if (primary.errors.length > 0) {
+      for (const error of primary.errors) lines.push(`  Error: ${error}`);
     }
-    for (const [task, aux] of Object.entries(report.auxiliary)) {
-      readinessLines.push(`Auxiliary ${task}: ${aux.route.provider}/${aux.route.id} (${aux.executable ? "executable" : "catalog-only"})`);
+    if (primary.warnings.length > 0) {
+      for (const warning of primary.warnings) lines.push(`  Warning: ${warning}`);
+    }
+
+    if (report.fallbacks.length > 0) {
+      lines.push("");
+      lines.push("Fallback routes:");
+      for (let i = 0; i < report.fallbacks.length; i++) {
+        const fb = report.fallbacks[i];
+        lines.push(`  ${i + 1}. ${fb.route.provider}/${fb.route.id} (${fb.executable ? "executable" : "catalog-only"})`);
+        if (fb.warnings.length > 0) {
+          for (const warning of fb.warnings) lines.push(`    Warning: ${warning}`);
+        }
+      }
+    } else {
+      lines.push("");
+      lines.push("Fallback chain: none configured");
+    }
+
+    if (Object.keys(report.auxiliary).length > 0) {
+      lines.push("");
+      lines.push("Auxiliary models:");
+      for (const [task, aux] of Object.entries(report.auxiliary)) {
+        lines.push(`  ${task}: ${aux.route.provider}/${aux.route.id} (${aux.executable ? "executable" : "catalog-only"})`);
+        if (aux.warnings.length > 0) {
+          for (const warning of aux.warnings) lines.push(`    Warning: ${warning}`);
+        }
+      }
+    }
+
+    if (report.warnings.length > 0) {
+      lines.push("");
+      lines.push("Warnings:");
+      for (const warning of report.warnings) lines.push(`  - ${warning}`);
     }
 
     return {
       handled: true,
-      exitCode: diagnostic.status === "ready" ? 0 : 1,
-      output: [
-        "EstaCoda model diagnose",
-        "",
-        "Route execution readiness:",
-        ...readinessLines,
-        "",
-        renderProviderDiagnostic(diagnostic),
-        "",
-        renderFallbackDiagnostic(config),
-        "",
-        renderAuxiliaryDiagnostic(auxiliaryRoutes)
-      ].join("\n")
+      exitCode: report.overallReady ? 0 : 1,
+      output: lines.join("\n")
     };
   }
 
@@ -872,67 +886,6 @@ function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     lines.push("Fallbacks: none");
   }
 
-  return lines.join("\n");
-}
-
-function renderFallbackDiagnostic(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
-  if (config.modelFallbackRoutes.length === 0) {
-    return "Fallback chain: none configured";
-  }
-
-  const lines: string[] = ["Fallback chain:"];
-  for (let i = 0; i < config.modelFallbackRoutes.length; i++) {
-    const fb = config.modelFallbackRoutes[i];
-    const warnings: string[] = [];
-    if (fb.baseUrl !== undefined) {
-      lines.push(`  Endpoint: ${fb.baseUrl}`);
-    }
-    if (fb.apiKeyEnv !== undefined) {
-      if (process.env[fb.apiKeyEnv] === undefined) {
-        warnings.push(`missing env var ${fb.apiKeyEnv}`);
-      }
-    }
-    const capabilityLine = [
-      `Tools: ${fb.profile.supportsTools ? "yes" : "no"}`,
-      `Vision: ${fb.profile.supportsVision ? "yes" : "no"}`,
-      `Structured: ${fb.profile.supportsStructuredOutput ? "yes" : "no"}`
-    ].join(", ");
-    lines.push(`${i + 1}. ${fb.provider}/${fb.id}`);
-    lines.push(`   Context window: ${formatCount(fb.profile.contextWindowTokens)} tokens`);
-    lines.push(`   ${capabilityLine}`);
-    if (warnings.length > 0) {
-      lines.push(`   Warnings: ${warnings.join(", ")}`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-function renderAuxiliaryDiagnostic(routes: ResolvedAuxiliaryRoute[]): string {
-  const lines: string[] = ["Auxiliary models:"];
-  for (const route of routes) {
-    const status = route.route === undefined ? "unavailable" : `${route.route.provider}/${route.route.id}`;
-    lines.push(`  ${route.task}: ${status} (${route.source})`);
-    if (route.route !== undefined) {
-      const caps = [
-        `Tools: ${route.route.profile.supportsTools ? "yes" : "no"}`,
-        `Vision: ${route.route.profile.supportsVision ? "yes" : "no"}`,
-        `Structured: ${route.route.profile.supportsStructuredOutput ? "yes" : "no"}`
-      ].join(", ");
-      lines.push(`    ${caps}`);
-      if (route.route.baseUrl !== undefined) {
-        lines.push(`    Endpoint: ${route.route.baseUrl}`);
-      }
-      if (route.route.apiKeyEnv !== undefined) {
-        const cred = process.env[route.route.apiKeyEnv] === undefined ? `missing ${route.route.apiKeyEnv}` : "ready";
-        lines.push(`    Credential: ${cred}`);
-      }
-      lines.push(`    Fallback to main: ${route.fallbackToMain ? "yes" : "no"}`);
-    }
-    if (route.diagnostics.length > 0) {
-      lines.push(`    Diagnostics: ${route.diagnostics.join("; ")}`);
-    }
-  }
   return lines.join("\n");
 }
 
@@ -3234,65 +3187,4 @@ function parseCatalogListFlags(rawArgs: string[]): { live?: boolean } & CatalogL
     i++;
   }
   return flags;
-}
-
-function renderModelList(models: SelectableModel[]): string {
-  if (models.length === 0) return "No models found.";
-  const lines = ["Model catalog:"];
-  for (const m of models) {
-    const tags: string[] = [];
-    if (m.profile.status === "beta") tags.push("beta");
-    if (m.profile.status === "deprecated") tags.push("deprecated");
-    if (m.executable) tags.push("executable");
-    else tags.push("catalog-only");
-    if (m.profile.supportsTools) tags.push("tools");
-    if (m.profile.supportsVision) tags.push("vision");
-    if (m.profile.supportsStructuredOutput) tags.push("structured");
-    if (m.profile.supportsReasoning) tags.push("reasoning");
-    const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
-    lines.push(`  ${m.provider}/${m.id}${tagStr}`);
-  }
-  return lines.join("\n");
-}
-
-function renderModelSearchResults(query: string, models: SelectableModel[]): string {
-  if (models.length === 0) return `No models matched "${query}".`;
-  const lines = [`Search results for "${query}":`];
-  for (const m of models) {
-    const tags: string[] = [];
-    if (m.profile.status === "beta") tags.push("beta");
-    if (m.profile.status === "deprecated") tags.push("deprecated");
-    if (m.executable) tags.push("executable");
-    else tags.push("catalog-only");
-    if (m.profile.supportsTools) tags.push("tools");
-    if (m.profile.supportsVision) tags.push("vision");
-    if (m.profile.supportsStructuredOutput) tags.push("structured");
-    if (m.profile.supportsReasoning) tags.push("reasoning");
-    const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
-    lines.push(`  ${m.provider}/${m.id}${tagStr}`);
-  }
-  return lines.join("\n");
-}
-
-function renderProviderList(providers: CatalogProvider[]): string {
-  if (providers.length === 0) return "No providers found.";
-  const lines = ["Providers:"];
-  for (const p of providers) {
-    const status = p.executable ? "executable" : "catalog-only";
-    lines.push(`  ${p.id} - ${p.name} (${status})`);
-  }
-  return lines.join("\n");
-}
-
-function renderRefreshReport(report: ModelRefreshReport): string {
-  const lines = [
-    "Catalog refresh complete",
-    `Source: ${report.sourceDomain}`,
-    `Cache: ${report.cachePath}`,
-    `Timestamp: ${report.snapshotTimestamp}`,
-    `Models: ${report.modelsCount}`,
-    `Providers: ${report.providersCount}`,
-    `Changed: ${report.cacheChanged ? "yes" : "no"}`
-  ];
-  return lines.join("\n");
 }

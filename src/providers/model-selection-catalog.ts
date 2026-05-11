@@ -71,6 +71,7 @@ export type CreateModelSelectionCatalogOptions = {
   providerRegistry: ProviderRegistry;
   homeDir?: string;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  allowNetwork?: boolean;
 };
 
 export type ModelSelectionCatalog = {
@@ -86,8 +87,8 @@ export async function createModelSelectionCatalog(
 ): Promise<ModelSelectionCatalog> {
   const snapshot = await resolveModelsDevSnapshot({
     homeDir: options.homeDir,
-    allowNetwork: false,
-    ...options.modelsDevOptions
+    ...options.modelsDevOptions,
+    allowNetwork: options.allowNetwork ?? options.modelsDevOptions?.allowNetwork ?? false,
   });
 
   const snapshotProfiles = modelsDevSnapshotToProfiles(snapshot, {

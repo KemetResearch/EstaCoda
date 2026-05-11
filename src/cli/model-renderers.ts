@@ -6,6 +6,7 @@ import type {
   ProviderRow,
   SetupReviewSummary
 } from "./model-view-models.js";
+import type { ModelRefreshReport } from "../reports/model-reports.js";
 
 export function renderModelList(rows: ModelRow[], options?: { verbose?: boolean }): string {
   if (rows.length === 0) {
@@ -90,5 +91,35 @@ export function renderSetupReview(summary: SetupReviewSummary): string {
       lines.push(`  - ${warning}`);
     }
   }
+  return lines.join("\n");
+}
+
+export function renderModelSearchResults(query: string, rows: ModelRow[]): string {
+  if (rows.length === 0) {
+    return `No models matched "${query}".`;
+  }
+  const lines: string[] = [`Search results for "${query}":`];
+  for (const row of rows) {
+    const badges = row.capabilityBadges
+      .filter((b) => b.enabled)
+      .map((b) => b.kind)
+      .join(", ");
+    const badgeStr = badges ? ` [${badges}]` : "";
+    const readiness = row.status === "ready" ? "" : ` (${row.status})`;
+    lines.push(`  ${row.label}${badgeStr}${readiness}`);
+  }
+  return lines.join("\n");
+}
+
+export function renderRefreshReport(report: ModelRefreshReport): string {
+  const lines = [
+    "Catalog refresh complete",
+    `Source: ${report.sourceDomain}`,
+    `Cache: ${report.cachePath}`,
+    `Timestamp: ${report.snapshotTimestamp}`,
+    `Models: ${report.modelsCount}`,
+    `Providers: ${report.providersCount}`,
+    `Changed: ${report.cacheChanged ? "yes" : "no"}`
+  ];
   return lines.join("\n");
 }

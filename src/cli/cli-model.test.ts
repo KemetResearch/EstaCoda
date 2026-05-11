@@ -182,7 +182,7 @@ describe("cli model", () => {
 
       expect(result.handled).toBe(true);
       expect(result.output).toContain("EstaCoda model diagnose");
-      expect(result.output).toContain("Selected route:");
+      expect(result.output).toContain("Primary:");
       expect(result.output).toContain("Fallback chain:");
     });
 
@@ -213,7 +213,7 @@ describe("cli model", () => {
       // auxiliaryProviders should not appear in output at all
       expect(result.output).not.toContain("auxiliaryProviders");
       // Model should still resolve correctly
-      expect(result.output).toContain("Selected route: local/qwen2.5:3b");
+      expect(result.output).toContain("Primary: local/qwen2.5:3b");
       // Fallback chain should be empty, not populated from auxiliaryProviders
       expect(result.output).toContain("Fallback chain: none configured");
     });
@@ -985,7 +985,7 @@ describe("cli model", () => {
       expect(withFlag.output).toContain("dall-e-3");
     });
 
-    it("fails clearly when --live is passed", async () => {
+    it("probes live catalog when --live is passed", async () => {
       const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
       await writeUserConfig(tmpDir, {
         providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
@@ -998,8 +998,9 @@ describe("cli model", () => {
         modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
       });
       expect(listResult.handled).toBe(true);
-      expect(listResult.exitCode).toBe(1);
-      expect(listResult.output).toContain("Live catalog probing is not yet implemented");
+      expect(listResult.exitCode).toBe(0);
+      expect(listResult.output).toContain("Model catalog:");
+      expect(listResult.output).toContain("openai/gpt-4o");
 
       const searchResult = await runCliCommand({
         argv: ["model", "search", "gpt", "--live"],
@@ -1008,8 +1009,9 @@ describe("cli model", () => {
         modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
       });
       expect(searchResult.handled).toBe(true);
-      expect(searchResult.exitCode).toBe(1);
-      expect(searchResult.output).toContain("Live catalog probing is not yet implemented");
+      expect(searchResult.exitCode).toBe(0);
+      expect(searchResult.output).toContain("Search results for \"gpt\"");
+      expect(searchResult.output).toContain("openai/gpt-4o");
     });
 
     it("does not make network calls by default for list, search, providers, and diagnose", async () => {
@@ -1078,6 +1080,78 @@ describe("cli model", () => {
           expect(line).not.toContain("executable");
         }
       }
+    });
+
+    it("does not load project-defined providers when workspace is untrusted", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+      // Write a project config with a custom provider to a separate path
+      const projectConfigPath = join(tmpDir, "project-config.json");
+      await writeFile(projectConfigPath, JSON.stringify({
+        providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example/v1", models: ["custom-model"] } }
+      }), "utf8");
+
+      const listResult = await runCliCommand({
+        argv: ["model", "list", "--live"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        projectConfigPath,
+        projectConfigTrust: "untrusted",
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(listResult.handled).toBe(true);
+      expect(listResult.exitCode).toBe(0);
+      expect(listResult.output).not.toContain("custom-model");
+      expect(listResult.output).not.toContain("custom.example");
+
+      const searchResult = await runCliCommand({
+        argv: ["model", "search", "custom", "--live"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        projectConfigPath,
+        projectConfigTrust: "untrusted",
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
+      });
+      expect(searchResult.handled).toBe(true);
+      expect(searchResult.exitCode).toBe(0);
+      expect(searchResult.output).not.toContain("custom-model");
+    });
+  });
+
+  describe("model diagnose structured output", () => {
+    it("produces structured report output only without old text path", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b"],
+            enableNetwork: true
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "diagnose"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.output).toContain("EstaCoda model diagnose");
+      expect(result.output).toContain("Primary:");
+      // Old text-based diagnoseProviderConfig output should not appear
+      expect(result.output).not.toContain("Selected route:");
+      expect(result.output).not.toContain("Context window:");
+      expect(result.output).not.toContain("Provider health:");
+      expect(result.output).not.toContain("Credential pool:");
     });
   });
 });
