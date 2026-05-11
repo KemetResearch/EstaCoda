@@ -21,19 +21,19 @@ export type CommandSafetyAssessment = {
 
 export function assessCommandSafety(command: string): CommandSafetyAssessment {
   const normalized = normalizeCommandForSafety(command);
-  const hardBlock = detectHardBlock(normalized);
+  const hardBlock = detectHardBlock(command);
 
   if (hardBlock !== undefined) {
     return {
       normalized,
-      riskClass: inferRiskClass(normalized),
+      riskClass: inferRiskClass(command),
       hardBlock
     };
   }
 
   return {
     normalized,
-    riskClass: inferRiskClass(normalized)
+    riskClass: inferRiskClass(command)
   };
 }
 
@@ -113,8 +113,113 @@ function detectHardBlock(command: string): { code: HardCommandBlockCode; reason:
   return undefined;
 }
 
+/* ------------------------------------------------------------------ */
+/* Token-aware rm parsing                                              */
+/* ------------------------------------------------------------------ */
+
+const BROAD_SYSTEM_SEGMENTS = new Set([
+  "usr", "etc", "var", "home", "Users", "root", "opt", "bin", "sbin", "lib", "lib64"
+]);
+
+const WRAPPER_COMMANDS = new Set(["sudo", "command", "env"]);
+
+function tokenizeCommand(command: string): string[] {
+  return command.trim().split(/\s+/u);
+}
+
+function parseRmTokens(tokens: string[]): {
+  hasRecursive: boolean;
+  hasForce: boolean;
+  targets: string[];
+} | undefined {
+  let index = 0;
+
+  while (index < tokens.length && WRAPPER_COMMANDS.has(tokens[index]!)) {
+    index++;
+  }
+
+  if (index >= tokens.length || tokens[index] !== "rm") {
+    return undefined;
+  }
+
+  index++;
+
+  let hasRecursive = false;
+  let hasForce = false;
+  let afterTerminator = false;
+  const targets: string[] = [];
+
+  for (; index < tokens.length; index++) {
+    const token = tokens[index]!;
+
+    if (token === "--") {
+      afterTerminator = true;
+      continue;
+    }
+
+    if (afterTerminator) {
+      targets.push(token);
+      continue;
+    }
+
+    if (token.startsWith("--")) {
+      if (token === "--recursive") {
+        hasRecursive = true;
+      } else if (token === "--force") {
+        hasForce = true;
+      }
+      continue;
+    }
+
+    if (token.startsWith("-") && token.length > 1) {
+      for (const ch of token.slice(1)) {
+        if (ch === "r" || ch === "R") {
+          hasRecursive = true;
+        } else if (ch === "f") {
+          hasForce = true;
+        }
+      }
+      continue;
+    }
+
+    targets.push(token);
+  }
+
+  return { hasRecursive, hasForce, targets };
+}
+
+function isBroadDeleteTarget(target: string): boolean {
+  if (target === "/" || target === "~" || target === "." || target === "..") {
+    return true;
+  }
+
+  if (target.startsWith("~/")) {
+    return true;
+  }
+
+  if (target.startsWith("/")) {
+    const segments = target.split("/");
+    const first = segments[1];
+    if (first !== undefined && BROAD_SYSTEM_SEGMENTS.has(first)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* ------------------------------------------------------------------ */
+/* Classification helpers                                              */
+/* ------------------------------------------------------------------ */
+
 function looksDestructive(command: string): boolean {
-  return /\brm\s+-rf\b|\bsudo\b|\bchmod\s+-R\b|\bchown\s+-R\b|\bmkfs\.|\bdd\b.+\bof=|>\/dev\/sd[a-z]/iu.test(command);
+  const tokens = tokenizeCommand(command);
+  const rm = parseRmTokens(tokens);
+  if (rm !== undefined && rm.hasRecursive && rm.hasForce) {
+    return true;
+  }
+
+  return /\bsudo\b|\bchmod\s+-R\b|\bchown\s+-R\b|\bmkfs\.|\bdd\b.+\bof=|>\/dev\/sd[a-z]/iu.test(command);
 }
 
 function looksCredentialSeeking(command: string): boolean {
@@ -123,7 +228,15 @@ function looksCredentialSeeking(command: string): boolean {
 }
 
 function matchesBroadDelete(command: string): boolean {
-  return /\brm\s+-rf(?:\s+--)?\s+(?:\/(?:\s|$)|~(?:\/|\s|$)|\.(?:\s|$)|\.\.(?:\s|$)|\/(?:usr|etc|var|home|Users|root|opt|bin|sbin|lib|lib64)(?:\/|\s|$))/iu.test(command);
+  const tokens = tokenizeCommand(command);
+  const rm = parseRmTokens(tokens);
+  if (rm === undefined) {
+    return false;
+  }
+  if (!rm.hasRecursive || !rm.hasForce) {
+    return false;
+  }
+  return rm.targets.some(isBroadDeleteTarget);
 }
 
 function matchesDiskDestructive(command: string): boolean {
@@ -141,7 +254,7 @@ function matchesSystemPower(command: string): boolean {
 
 function matchesForkBombOrKillall(command: string): boolean {
   const compact = command.replace(/\s+/gu, "");
-  return compact.includes(":(){:|:&};:") ||
+  return compact.includes(":(){:|:&};") ||
     /\bkill\s+-1\b/iu.test(command) ||
     /\bpkill\s+-9\s+-u\b/iu.test(command) ||
     /\bkillall\s+-u\b/iu.test(command);
