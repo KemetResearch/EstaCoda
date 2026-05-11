@@ -76,6 +76,36 @@ describe("command-safety", () => {
     });
   });
 
+  describe("regression tests for shell composition and absolute paths", () => {
+    it("hard-blocks cd /tmp && rm -rf /etc", () => {
+      expect(assessCommandSafety("cd /tmp && rm -rf /etc").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks echo ok; rm -rf /etc", () => {
+      expect(assessCommandSafety("echo ok; rm -rf /etc").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks true || rm -rf /etc", () => {
+      expect(assessCommandSafety("true || rm -rf /etc").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks /bin/rm -rf /etc", () => {
+      expect(assessCommandSafety("/bin/rm -rf /etc").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks /usr/bin/rm -rf /var", () => {
+      expect(assessCommandSafety("/usr/bin/rm -rf /var").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks sudo -n rm -rf /etc", () => {
+      expect(assessCommandSafety("sudo -n rm -rf /etc").hardBlock).toBeDefined();
+    });
+
+    it("hard-blocks sudo --non-interactive rm -rf /etc", () => {
+      expect(assessCommandSafety("sudo --non-interactive rm -rf /etc").hardBlock).toBeDefined();
+    });
+  });
+
   describe("preserved high-risk detection", () => {
     it("hard-blocks git push --force origin main", () => {
       const assessment = assessCommandSafety("git push --force origin main");

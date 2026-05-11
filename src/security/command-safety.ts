@@ -115,6 +115,13 @@ function detectHardBlock(command: string): { code: HardCommandBlockCode; reason:
 
 /* ------------------------------------------------------------------ */
 /* Token-aware rm parsing                                              */
+/*                                                                    */
+/* Supported safety boundary:                                         */
+/* - Simple command segmentation for common shell separators          */
+/*   (&&, ||, ;, |).                                                  */
+/* - Basename detection for rm (e.g. /bin/rm, /usr/bin/rm).           */
+/* - Known wrapper option skipping (sudo -n, sudo --non-interactive). */
+/* - No alias/function expansion.                                     */
 /* ------------------------------------------------------------------ */
 
 const BROAD_SYSTEM_SEGMENTS = new Set([
@@ -123,8 +130,17 @@ const BROAD_SYSTEM_SEGMENTS = new Set([
 
 const WRAPPER_COMMANDS = new Set(["sudo", "command", "env"]);
 
+function getBasename(token: string): string {
+  const idx = token.lastIndexOf("/");
+  return idx >= 0 ? token.slice(idx + 1) : token;
+}
+
 function tokenizeCommand(command: string): string[] {
   return command.trim().split(/\s+/u);
+}
+
+function splitShellSegments(command: string): string[] {
+  return command.split(/\s*(?:\|\||&&|;|\|)\s*/u).filter(s => s.length > 0);
 }
 
 function parseRmTokens(tokens: string[]): {
@@ -134,11 +150,20 @@ function parseRmTokens(tokens: string[]): {
 } | undefined {
   let index = 0;
 
-  while (index < tokens.length && WRAPPER_COMMANDS.has(tokens[index]!)) {
-    index++;
+  while (index < tokens.length) {
+    const token = tokens[index]!;
+    if (WRAPPER_COMMANDS.has(token)) {
+      index++;
+      // Skip wrapper options (tokens starting with '-')
+      while (index < tokens.length && tokens[index]!.startsWith("-")) {
+        index++;
+      }
+      continue;
+    }
+    break;
   }
 
-  if (index >= tokens.length || tokens[index] !== "rm") {
+  if (index >= tokens.length || getBasename(tokens[index]!) !== "rm") {
     return undefined;
   }
 
@@ -213,10 +238,13 @@ function isBroadDeleteTarget(target: string): boolean {
 /* ------------------------------------------------------------------ */
 
 function looksDestructive(command: string): boolean {
-  const tokens = tokenizeCommand(command);
-  const rm = parseRmTokens(tokens);
-  if (rm !== undefined && rm.hasRecursive && rm.hasForce) {
-    return true;
+  const segments = splitShellSegments(command);
+  for (const segment of segments) {
+    const tokens = tokenizeCommand(segment);
+    const rm = parseRmTokens(tokens);
+    if (rm !== undefined && rm.hasRecursive && rm.hasForce) {
+      return true;
+    }
   }
 
   return /\bsudo\b|\bchmod\s+-R\b|\bchown\s+-R\b|\bmkfs\.|\bdd\b.+\bof=|>\/dev\/sd[a-z]/iu.test(command);
@@ -228,15 +256,21 @@ function looksCredentialSeeking(command: string): boolean {
 }
 
 function matchesBroadDelete(command: string): boolean {
-  const tokens = tokenizeCommand(command);
-  const rm = parseRmTokens(tokens);
-  if (rm === undefined) {
-    return false;
+  const segments = splitShellSegments(command);
+  for (const segment of segments) {
+    const tokens = tokenizeCommand(segment);
+    const rm = parseRmTokens(tokens);
+    if (rm === undefined) {
+      continue;
+    }
+    if (!rm.hasRecursive || !rm.hasForce) {
+      continue;
+    }
+    if (rm.targets.some(isBroadDeleteTarget)) {
+      return true;
+    }
   }
-  if (!rm.hasRecursive || !rm.hasForce) {
-    return false;
-  }
-  return rm.targets.some(isBroadDeleteTarget);
+  return false;
 }
 
 function matchesDiskDestructive(command: string): boolean {
