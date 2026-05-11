@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { loadRuntimeConfig, loadUserRuntimeConfig, loadTrustedRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
 import { readFile } from "node:fs/promises";
 
 describe("normalizeAuxiliaryModels", () => {
@@ -206,5 +206,122 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     expect(loaded.modelFallbackRoutes.length).toBe(1);
     expect(loaded.modelFallbackRoutes[0].provider).toBe("deepseek");
+  });
+});
+
+describe("loadUserRuntimeConfig trust isolation", () => {
+  it("excludes project-defined MCP servers when untrusted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: { test: { command: "echo", args: ["hello"] } }
+    }));
+
+    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
+    expect(loaded.mcp.servers).toEqual({});
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("excludes project-defined custom providers when untrusted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example.com/v1" } }
+    }));
+
+    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
+    expect(loaded.providerRegistry.get("custom")).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("does not throw when project config is invalid JSON", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, "this is not json");
+
+    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
+    expect(loaded.model.provider).toBe("unconfigured");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("excludes project MCP servers so runtime cannot spawn them", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const markerPath = join(workspace, "marker.txt");
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: {
+        marker: {
+          command: "sh",
+          args: ["-c", `touch "${markerPath}"`]
+        }
+      }
+    }));
+
+    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
+    expect(Object.keys(loaded.mcp.servers)).toEqual([]);
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
+describe("loadTrustedRuntimeConfig trust inclusion", () => {
+  it("includes project-defined MCP servers when trusted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: { test: { command: "echo", args: ["hello"] } }
+    }));
+
+    const loaded = await loadTrustedRuntimeConfig({ workspaceRoot: workspace });
+    expect(loaded.mcp.servers).toHaveProperty("test");
+    expect(loaded.mcp.servers.test.command).toBe("echo");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("includes project-defined custom providers when trusted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example.com/v1" } }
+    }));
+
+    const loaded = await loadTrustedRuntimeConfig({ workspaceRoot: workspace });
+    const resolved = loaded.providerRegistry.get("custom");
+    expect(resolved).toBeDefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
+describe("production loadRuntimeConfig callsite safety", () => {
+  it("has no production loadRuntimeConfig calls that omit projectConfigTrust and are not wrappers", async () => {
+    const { execSync } = await import("node:child_process");
+    const srcRoot = new URL("..", import.meta.url).pathname;
+    const output = execSync(
+      `rg "loadRuntimeConfig\\(" src --type ts -n | grep -v "\\.test\\." | grep -v "_legacy" | grep -v "src/config/runtime-config.ts:" || true`,
+      { cwd: srcRoot, encoding: "utf8" }
+    );
+    const lines = output.trim().split("\n").filter((line) => line.length > 0);
+
+    const unsafe = lines.filter((line) => {
+      // Allow wrapper definitions in runtime-config.ts
+      if (line.includes("src/config/runtime-config.ts:")) return false;
+      // Allow calls that pass 'options' (types carry projectConfigTrust)
+      if (line.includes("loadRuntimeConfig(options)")) return false;
+      // Allow calls that explicitly pass projectConfigTrust
+      if (line.includes("projectConfigTrust")) return false;
+      return true;
+    });
+
+    expect(unsafe).toEqual([]);
   });
 });

@@ -8,6 +8,7 @@ export type LaunchOptions = {
   workspaceRoot: string;
   homeDir?: string;
   prompt?: Prompt;
+  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export type LaunchResult = {
@@ -31,7 +32,8 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
 
   const onboarding = await getOnboardingStatus({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir
+    homeDir: options.homeDir,
+    projectConfigTrust: options.projectConfigTrust
   });
   const currentLocale = await loadLaunchLocale(options);
 
@@ -56,7 +58,8 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
       homeDir: options.homeDir,
       prompt: options.prompt,
       theme: kemetBlueTheme,
-      continueToSession: true
+      continueToSession: true,
+      projectConfigTrust: options.projectConfigTrust
     });
     const workspaceRoot = result.workspaceRoot ?? options.workspaceRoot;
 
@@ -82,7 +85,8 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
 async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
   const config = await loadRuntimeConfig({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir
+    homeDir: options.homeDir,
+    projectConfigTrust: options.projectConfigTrust
   });
   return config.ui.language === "ar" ? "ar" : "en";
 }

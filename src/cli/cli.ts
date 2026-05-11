@@ -149,6 +149,7 @@ export type CliOptions = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {

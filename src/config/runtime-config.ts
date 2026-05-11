@@ -34,6 +34,7 @@ import {
   defaultImageModel,
   resolveImageModel
 } from "../contracts/image-generation.js";
+import { resolveStateHome } from "./state-home.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
@@ -534,19 +535,25 @@ export type ProfileSetupInput = {
   scope?: "user" | "project";
 };
 
-export async function loadRuntimeConfig(options: {
+export type LoadRuntimeConfigOptions = {
   workspaceRoot: string;
   homeDir?: string;
   userConfigPath?: string;
   projectConfigPath?: string;
   providerFetch?: ProviderFetchLike;
   modelsDevOptions?: ModelsDevRegistryOptions;
-}): Promise<LoadedRuntimeConfig> {
+  projectConfigTrust?: "trusted" | "untrusted";
+};
+
+export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
   await loadDotEnvSecrets({ homeDir: options.homeDir });
-  const sources = [
-    options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
-    options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const sources: string[] = [
+    options.userConfigPath ?? stateHome.configPath
   ];
+  if (options.projectConfigTrust !== "untrusted") {
+    sources.push(options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"));
+  }
   const loaded = await Promise.all(sources.map((path) => readConfig(path)));
   const config = mergeConfig(...loaded.map((entry) => entry.config));
   const catalogProfiles = await resolveModelProfilesFromCatalog({
@@ -680,6 +687,14 @@ export async function loadRuntimeConfig(options: {
       }
     }
   };
+}
+
+export async function loadUserRuntimeConfig(options: Omit<LoadRuntimeConfigOptions, "projectConfigTrust">): Promise<LoadedRuntimeConfig> {
+  return loadRuntimeConfig({ ...options, projectConfigTrust: "untrusted" });
+}
+
+export async function loadTrustedRuntimeConfig(options: Omit<LoadRuntimeConfigOptions, "projectConfigTrust">): Promise<LoadedRuntimeConfig> {
+  return loadRuntimeConfig({ ...options, projectConfigTrust: "trusted" });
 }
 
 export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {

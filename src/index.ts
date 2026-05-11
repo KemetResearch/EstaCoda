@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
+import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
+import { resolveStateHome } from "./config/state-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
@@ -9,6 +10,7 @@ import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
+import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { launchInteractiveSession } from "./cli/interactive-launcher.js";
 import { getPackageVersion } from "./cli/version-command.js";
@@ -28,13 +30,22 @@ let workspaceRoot = process.cwd();
 const cliSessionStore = new PersistentCliSessionStore();
 const cliApprovalController = new WorkspaceApprovalController();
 let launchLocale: UiLocale | undefined;
-let config: LoadedRuntimeConfig = await loadRuntimeConfig({
-  workspaceRoot
-});
+
+const stateHome = resolveStateHome();
+const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
+let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
+
+if (!workspaceTrusted) {
+  console.warn("[trust] Workspace is not trusted. Project config is ignored until this workspace is trusted.");
+}
+
+let config: LoadedRuntimeConfig = workspaceTrusted
+  ? await loadTrustedRuntimeConfig({ workspaceRoot })
+  : await loadUserRuntimeConfig({ workspaceRoot });
 
 // Bare launch: use interactive launcher for onboarding/session routing
 if (argv.length === 0 && canRunInteractive()) {
-  const launchResult = await launchInteractiveSession({ workspaceRoot });
+  const launchResult = await launchInteractiveSession({ workspaceRoot, projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted" });
 
   if (!launchResult.launched) {
     if (launchResult.output.length > 0) {
@@ -49,7 +60,10 @@ if (argv.length === 0 && canRunInteractive()) {
   launchLocale = launchResult.locale;
 
   if (launchResult.onboardingTriggered) {
-    config = await loadRuntimeConfig({ workspaceRoot });
+    workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
+    config = workspaceTrusted
+      ? await loadTrustedRuntimeConfig({ workspaceRoot })
+      : await loadUserRuntimeConfig({ workspaceRoot });
   }
 }
 
@@ -57,9 +71,10 @@ async function buildRuntime(input: {
   sessionId?: string;
   sessionDb?: SessionDB;
 } = {}) {
-  const latestConfig = await loadRuntimeConfig({
-    workspaceRoot
-  });
+  const nowTrusted = await trustStore.isTrusted(workspaceRoot);
+  const latestConfig = nowTrusted
+    ? await loadTrustedRuntimeConfig({ workspaceRoot })
+    : await loadUserRuntimeConfig({ workspaceRoot });
 
   return createRuntime({
     theme: kemetBlueTheme,
@@ -94,7 +109,8 @@ async function buildRuntime(input: {
 if (argv[0] === "acp") {
   const acpCommand = await runCliCommand({
     argv,
-    workspaceRoot
+    workspaceRoot,
+    projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
   });
 
   if (acpCommand.handled) {
@@ -114,7 +130,8 @@ const command = await runCliCommand({
   argv,
   workspaceRoot,
   tools: runtime.tools(),
-  runtime
+  runtime,
+  projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
 });
 
 if (command.handled) {

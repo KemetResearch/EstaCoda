@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
-import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { loadUserRuntimeConfig, loadTrustedRuntimeConfig } from "../config/runtime-config.js";
+import { resolveStateHome } from "../config/state-home.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -749,12 +751,22 @@ export class AcpServer {
       });
     }
 
-    const config = await loadRuntimeConfig({
-      workspaceRoot: options.workspaceRoot,
-      homeDir: this.#homeDir,
-      userConfigPath: this.#userConfigPath,
-      projectConfigPath: this.#projectConfigPath
-    });
+    const stateHome = resolveStateHome({ homeDir: this.#homeDir });
+    const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
+    const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
+    const config = workspaceTrusted
+      ? await loadTrustedRuntimeConfig({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: this.#homeDir,
+          userConfigPath: this.#userConfigPath,
+          projectConfigPath: this.#projectConfigPath
+        })
+      : await loadUserRuntimeConfig({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: this.#homeDir,
+          userConfigPath: this.#userConfigPath,
+          projectConfigPath: this.#projectConfigPath
+        });
 
     const runtimeOptions: RuntimeOptions = {
       theme: kemetBlueTheme,

@@ -57,6 +57,7 @@ export type GatewayCommandOptions = {
   workspaceRoot: string;
   userConfigPath?: string;
   projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export type GatewayRenderer = (viewModel: ViewModel) => string;

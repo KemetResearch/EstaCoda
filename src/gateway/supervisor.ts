@@ -1,7 +1,9 @@
 import { mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
+import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
+import { resolveStateHome } from "../config/state-home.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicy, ChannelKind } from "../contracts/channel.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -316,11 +318,22 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
 export async function runGatewaySupervisor(options: GatewaySupervisorOptions): Promise<GatewayRunResult> {
   const startedAt = new Date().toISOString();
-  const config = await loadRuntimeConfig(options);
-  const version = await getPackageVersion();
   const homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
   const stateRoot = join(homeDir, ".estacoda");
   const trustStorePath = join(homeDir, ".estacoda", "trust.json");
+
+  const projectConfigTrust = options.projectConfigTrust ?? await (async () => {
+    const stateHome = resolveStateHome({ homeDir: options.homeDir });
+    const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
+    return (await trustStore.isTrusted(options.workspaceRoot)) ? "trusted" : "untrusted";
+  })();
+
+  const loadConfig = () => projectConfigTrust === "trusted"
+    ? loadTrustedRuntimeConfig(options)
+    : loadUserRuntimeConfig(options);
+
+  const config = await loadConfig();
+  const version = await getPackageVersion();
 
   const runtimeFingerprint = computeRuntimeFingerprint(config, {
     profileId: "default",
@@ -825,7 +838,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           handoffStore,
           surfacePointerStore,
           preprocessMessage: async (message) => {
-            const latestConfig = await loadRuntimeConfig(options);
+            const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, { stt: latestConfig.stt });
           },
           pair: async (message) => {
@@ -882,7 +895,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           handoffStore,
           surfacePointerStore,
           preprocessMessage: async (message) => {
-            const latestConfig = await loadRuntimeConfig(options);
+            const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, { stt: latestConfig.stt });
           },
           pair: async (message) => {
@@ -1007,7 +1020,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
           runtimeFactory: async (job) => {
-            const latestConfig = await loadRuntimeConfig(options);
+            const latestConfig = await loadConfig();
             return createRuntime(buildGatewayCronRuntimeOptions({
               latestConfig,
               workspaceRoot: options.workspaceRoot,

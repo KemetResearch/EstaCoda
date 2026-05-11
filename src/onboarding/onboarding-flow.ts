@@ -43,6 +43,7 @@ export type OnboardingOptions = {
   homeDir?: string;
   userConfigPath?: string;
   projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function getOnboardingStatus(options: OnboardingOptions): Promise<OnboardingStatus> {

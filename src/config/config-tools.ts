@@ -23,6 +23,7 @@ export type ConfigToolsOptions = {
   homeDir?: string;
   userConfigPath?: string;
   projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {

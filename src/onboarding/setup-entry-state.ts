@@ -67,6 +67,7 @@ export type CollectSetupEntryStateOptions = {
   readonly modelsDevOptions?: ModelsDevRegistryOptions;
   readonly runtime?: Runtime;
   readonly trustStorePath?: string;
+  readonly projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function collectSetupEntryState(

@@ -7,6 +7,7 @@ export type GatewayRunOptions = {
   homeDir?: string;
   userConfigPath?: string;
   projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
   telegramFetch?: import("./telegram-adapter.js").TelegramFetch;
   once?: boolean;
 };
