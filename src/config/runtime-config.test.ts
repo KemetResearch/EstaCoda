@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { loadRuntimeConfig, loadUserRuntimeConfig, loadTrustedRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
-import { readFile } from "node:fs/promises";
 
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
@@ -467,13 +466,8 @@ describe("loadRuntimeConfig fail-closed behavior", () => {
 
 describe("production loadRuntimeConfig callsite safety", () => {
   it("has no production loadRuntimeConfig calls that omit projectConfigTrust and are not wrappers", async () => {
-    const { execSync } = await import("node:child_process");
     const repoRoot = new URL("../..", import.meta.url).pathname;
-    const output = execSync(
-      `rg --files src scripts --type ts -g '!*.test.ts' -g '!*_legacy*' -g '!src/config/runtime-config.ts'`,
-      { cwd: repoRoot, encoding: "utf8" }
-    );
-    const files = output.trim().split("\n").filter((line) => line.length > 0);
+    const files = await findProductionTypeScriptFiles(repoRoot);
     const unsafe: string[] = [];
 
     for (const file of files) {
@@ -491,6 +485,47 @@ describe("production loadRuntimeConfig callsite safety", () => {
     expect(unsafe).toEqual([]);
   });
 });
+
+async function findProductionTypeScriptFiles(repoRoot: string): Promise<string[]> {
+  const files: string[] = [];
+
+  for (const root of ["src", "scripts"]) {
+    await collectTypeScriptFiles(join(repoRoot, root), repoRoot, files);
+  }
+
+  return files.sort();
+}
+
+async function collectTypeScriptFiles(directory: string, repoRoot: string, files: string[]): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await collectTypeScriptFiles(fullPath, repoRoot, files);
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const relativePath = relative(repoRoot, fullPath).split(sep).join("/");
+    if (!relativePath.endsWith(".ts")) {
+      continue;
+    }
+    if (relativePath.endsWith(".test.ts")) {
+      continue;
+    }
+    if (relativePath.includes("_legacy")) {
+      continue;
+    }
+    if (relativePath === "src/config/runtime-config.ts") {
+      continue;
+    }
+
+    files.push(relativePath);
+  }
+}
 
 function collectLoadRuntimeConfigCalls(source: string): Array<{ start: number; call: string }> {
   const calls: Array<{ start: number; call: string }> = [];
