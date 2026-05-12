@@ -73,4 +73,4 @@ bun run dev -- browser test
 
 - Cloud backends are not implemented.
 - Persistent dialog supervisor is missing.
-- Browser setup branch in onboarding is `smoke-tested` but not live-proven end-to-end.
+- Browser can be selected as an optional reviewed setup capability, but setup records configuration intent and does not auto-launch the browser runtime.

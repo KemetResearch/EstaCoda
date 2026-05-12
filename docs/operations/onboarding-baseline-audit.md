@@ -1,8 +1,8 @@
 # Onboarding Baseline Audit
 
-This is the O0 audit for replacing the current onboarding proof of concept with the setup-entry architecture. It documents current behavior so the replacement can be built beside the old entrypoints without letting the old implementation shape dictate the new design.
+This is the historical audit log for replacing the onboarding proof of concept with the reviewed setup-entry architecture. Sections labeled O0 through O8 describe migration-time behavior at the time those phases were written. The final state on this branch is recorded in the Phase 5 through Phase 9 sections.
 
-## Current Setup States
+## O0 Historical Setup States
 
 - `new or unconfigured`: `getOnboardingStatus()` reports onboarding needed when the effective model provider or id is `unconfigured`.
 - `configured-ready`: `getOnboardingStatus()` reports no onboarding needed when a configured model exists and provider diagnostics are not blocked.
@@ -30,7 +30,7 @@ These paths must keep working through the setup-entry router coverage for first-
 - `diagnoseProviderConfig()` provides the provider readiness signal and warning text.
 - `WorkspaceTrustStore` provides the trust read/write behavior the new architecture should reuse.
 - `setupProviderConfig()`, `setupSecurityConfig()`, `setupSkillConfig()`, and optional capability setup helpers provide low-level config writes.
-- `onboarding-copy.ts` has useful English and Arabic copy, but the new flow should use it through a structured step/copy boundary.
+- `setup-copy.ts` and `setup-verification-copy.ts` provide English and Arabic setup-owned copy after the Phase 7 migration.
 - `cli-ui-copy.ts` and `bidi.ts` provide the small chrome copy boundary and LTR isolation helpers needed by later Arabic onboarding work.
 
 ## Legacy POC Surfaces
@@ -44,10 +44,10 @@ Replace rather than extend:
 - `completeOnboarding()` as a provider-only wrapper.
 - `onboarding.status` and `onboarding.complete` runtime tools.
 
-Moved or preserved until replacements exist:
+Completed during the migration:
 
-- `Prompt` and `createReadlinePrompt()` are shared CLI utilities today and must move to a neutral CLI module before deleting `interactive-onboarding.ts`.
-- `getOnboardingStatus()` remains only on legacy onboarding/tool surfaces. Live CLI setup, bare launch, and doctor decisions now use `collectSetupEntryState()` and `collectSetupRoute()`.
+- `Prompt` and `createReadlinePrompt()` now live in neutral CLI modules.
+- Live CLI setup, bare launch, and doctor decisions use `collectSetupEntryState()` and `collectSetupRoute()`.
 
 ## Removed In O0
 
@@ -56,10 +56,10 @@ Moved or preserved until replacements exist:
 
 The removed backup path did not write `model.fallbacks`, so it was misleading and would conflict with the intended fallback architecture. Future backup setup should use `setupModelFallbackConfig()`.
 
-## Docs Drift
+## O0 Docs Drift
 
 - `docs/subsystems/cli.md` described an optional backup model in first-run onboarding; that is no longer true after O0 cleanup.
-- Public docs still describe current POC first-run behavior, not the future setup-entry architecture. Do not document the new architecture as user-facing behavior until `estacoda setup` is cut over.
+- Public docs described current POC first-run behavior during O0. Phase 9 updates active docs to the reviewed setup architecture.
 
 ## Security Notes
 
@@ -274,8 +274,39 @@ Live CLI setup and bare-launch setup handling are now cut over to the new setup-
 - `estacoda doctor` uses `collectSetupEntryState()` before normal config loading so broken config is diagnostic instead of an uncaught setup failure.
 - Direct advanced setup flags such as `estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY` remain supported.
 
-Legacy onboarding files and runtime onboarding tools still exist for later removal review. They are not the live CLI setup path after Phase 5.
+Phase 5 left legacy onboarding files and runtime onboarding tools in place for later removal review. They were not the live CLI setup path after Phase 5.
 
-## Next Step
+## Phase 6 Status
 
-After review, the next checkpoint is Phase 6 runtime onboarding tool removal. Do not remove legacy runtime tools or legacy files until that review is explicitly approved.
+Runtime onboarding tools were removed from live registration. The runtime no longer exposes `onboarding.status` or the mutating `onboarding.complete` tool, and no runtime path calls `completeOnboarding()`. Setup mutation remains behind the reviewed CLI setup/apply architecture.
+
+## Phase 7 Status
+
+Verification copy moved off `onboarding-copy.ts` and into setup-owned copy boundaries. `verification.ts` imports `setup-verification-copy.ts`, which resolves labels and actions through `setup-copy.ts`. Verification collection and rendering remain separate, and Arabic technical-token isolation is preserved for paths, commands, env vars, and provider/model identifiers used in onboarding-owned setup surfaces.
+
+## Phase 8 Status
+
+The legacy onboarding POC files were deleted:
+
+- `src/onboarding/interactive-onboarding.ts`
+- `src/onboarding/interactive-onboarding.test.ts`
+- `src/onboarding/onboarding-flow.ts`
+- `src/onboarding/onboarding-provider-catalog.ts`
+- `src/onboarding/onboarding-tools.ts`
+- `src/onboarding/onboarding-copy.ts`
+
+`verification.ts` now owns its setup verification options type, so setup verification no longer depends on the deleted provider-only flow.
+
+## Phase 9 Status
+
+Active docs now describe the completed cutover:
+
+- `estacoda setup` is the canonical setup entrypoint.
+- bare `estacoda` uses setup-route decisions when setup is incomplete.
+- direct `estacoda setup --provider ... --model ... --api-key-env ...` flags are advanced/direct setup.
+- interactive setup uses reviewed setup, review-before-apply, reviewed apply execution, structured verification, and launch handoff behavior.
+- runtime mutating onboarding tools are removed.
+- fallback models use the model fallback path and `model.fallbacks`, not `backupForMain`.
+- Arabic onboarding copy and technical-token isolation are supported within onboarding-owned setup surfaces.
+
+This does not claim full runtime CLI localization or runtime setup mutation tools.

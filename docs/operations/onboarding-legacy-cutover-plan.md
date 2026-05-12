@@ -1,10 +1,12 @@
 # Onboarding Legacy Cutover Plan
 
+Status: historical migration plan. The cutover through Phase 9 is complete on the integration branch. References to deleted legacy files, old live paths, and future-phase work below are retained as migration history, not current architecture.
+
 This plan describes how to move EstaCoda onboarding off the legacy proof-of-concept implementation and onto the structured setup architecture.
 
 The goal is not only to delete files. The goal is to make `estacoda setup`, bare interactive launch, setup diagnostics, review, apply, verification, and launch handoff all use the new setup-entry architecture safely.
 
-## Current Classification
+## Historical Starting Classification
 
 ### Legacy Or POC-Bound
 

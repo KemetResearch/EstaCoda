@@ -329,7 +329,38 @@ const output = adapter.render(/* any ViewModel */);
 
 ---
 
-## 10. Regression Gate
+## 10. Reviewed Setup QA
+
+Use an isolated home so no real credentials or trust state are touched:
+
+```bash
+rm -rf /tmp/estacoda-setup-qa-home
+mkdir -p /tmp/estacoda-setup-qa-home
+HOME=/tmp/estacoda-setup-qa-home bun run dev -- setup
+```
+
+**Verify:**
+- Setup starts from `estacoda setup`, not from a runtime tool.
+- Language selection appears early.
+- Workspace trust is explicit.
+- Provider/model setup is separate from optional capabilities.
+- Optional capabilities can be skipped independently.
+- A review appears before any apply/write step.
+- Raw secret values are not shown in review, logs, or final output.
+- Verification runs after approved apply and reports structured readiness.
+- Launch handoff happens only after verified-ready or explicitly accepted degraded setup.
+
+Arabic setup spot check:
+
+```bash
+HOME=/tmp/estacoda-setup-qa-home-ar bun run dev -- setup
+```
+
+Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks onboarding-owned setup surfaces only; full runtime CLI localization is not complete.
+
+---
+
+## 11. Regression Gate
 
 Before any commit that touches rendering code, run:
 

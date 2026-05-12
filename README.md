@@ -12,7 +12,9 @@ bun install
 bun run dev
 ```
 
-On first launch, EstaCoda runs an interactive setup flow:
+`estacoda setup` is the canonical setup entrypoint. A bare `estacoda` launch checks setup state and may point you to setup when configuration is incomplete; the setup product flow itself lives under `estacoda setup`.
+
+Interactive setup uses a reviewed setup flow:
 
 - choose interface language and expression style
 - trust the active workspace
@@ -21,7 +23,14 @@ On first launch, EstaCoda runs an interactive setup flow:
 - choose security mode: `strict`, `adaptive`, or `open`
 - choose workflow-learning mode: `none`, `suggest`, `proactive`, or `autonomous`
 - optionally configure Telegram, voice, vision/image generation, and browser support
-- verify readiness, then start the first agent session
+- review the proposed setup before anything is applied
+- apply approved setup writes, run structured verification, then choose launch handoff behavior
+
+Advanced users can still use direct provider/model setup flags:
+
+```bash
+estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+```
 
 ## Core Capabilities
 
@@ -42,7 +51,7 @@ On first launch, EstaCoda runs an interactive setup flow:
 - **Cron jobs (v0.9 hardened)** — persistent store, prompt scanning, script-backed jobs, tick locking, per-job duplicate prevention, execution history in SQLite, failure classification, delivery routing, recursion guard.
 - Voice/TTS/STT configuration foundation and audio artifacts.
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.
-- English and Arabic first-run onboarding, with localized setup labels and supported status copy.
+- English and Arabic first-run onboarding, with localized setup labels, supported status copy, and LTR isolation for technical tokens in onboarding-owned surfaces.
 - **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
 - **Operator surface (v0.9):** CLI commands for gateway status/diagnose/stop/restart, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
@@ -92,7 +101,7 @@ For a clean first-run onboarding check:
 ```bash
 rm -rf /tmp/estacoda-e2e-home
 mkdir -p /tmp/estacoda-e2e-home
-HOME=/tmp/estacoda-e2e-home bun run dev
+HOME=/tmp/estacoda-e2e-home bun run dev -- setup
 ```
 
 ## State
@@ -127,8 +136,10 @@ Project overlays live under `<workspace>/.estacoda/`.
 EstaCoda starts with a guided first-run setup when no usable configuration is found:
 
 ```bash
-bun run dev
+bun run dev -- setup
 ```
+
+A bare `bun run dev` launch uses setup-route decisions when setup is incomplete, but setup changes are handled by the setup command.
 
 The setup flow walks through:
 
@@ -139,10 +150,14 @@ The setup flow walks through:
 5. Security mode (`strict`, `adaptive`, or `open`).
 6. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
 7. Optional capabilities: Telegram, voice, vision, image generation, browser automation.
-8. Readiness check before the first agent session.
+8. Review of proposed setup changes before apply.
+9. Read-only readiness verification after approved apply.
+10. Launch handoff when verification is ready, or an explicit degraded state is accepted.
 
-Credentials are stored locally with restrictive permissions. Advanced users can point EstaCoda at existing environment variables instead of pasting keys during setup.
+Credentials are stored locally with restrictive permissions. Advanced/direct setup can point EstaCoda at existing environment variables instead of pasting keys during setup.
 
 Workspace trust is path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy.
 
 `open` mode is not "security off"; the hard safety floor remains active.
+
+Runtime mutating onboarding tools are not exposed. Fallback models are configured through the model fallback path and `model.fallbacks`, not through the removed legacy backup-provider POC field.

@@ -45,8 +45,15 @@ export PATH="$HOME/.estacoda/bin:$PATH"
 
 ```bash
 estacoda init       # Bootstrap state directories
+estacoda setup      # Reviewed setup flow for provider, trust, security, workflow, and optional capabilities
 estacoda verify     # Check readiness
 estacoda            # Start interactive session
+```
+
+Advanced/direct provider setup can reference an existing environment variable:
+
+```bash
+estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
 ```
 
 ## Update

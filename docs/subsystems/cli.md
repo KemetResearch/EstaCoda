@@ -28,7 +28,7 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 
 ```bash
 bun run dev                    # Interactive CLI
-bun run dev -- setup           # Run setup wizard
+bun run dev -- setup           # Canonical reviewed setup entrypoint
 bun run dev -- verify          # Verify configuration
 bun run dev -- settings        # Show current settings
 bun run dev -- doctor --live   # Live provider check
@@ -92,11 +92,13 @@ In-session commands:
 
 CLI startup restores the active workspace session from `cli-session-store.ts`. Fresh launches are no longer forced back to the default `scaffold` session.
 
-## First-Run Onboarding
+## Setup And Onboarding
 
 **Evidence:** `live-proven` (English and Arabic)
 
-Setup sequence:
+`estacoda setup` is the canonical setup entrypoint. Bare `estacoda` launch uses setup-route decisions when setup is incomplete and points users to setup instead of running the product flow inline.
+
+Interactive setup uses the reviewed setup architecture:
 
 1. Interface language and expression style
 2. Workspace trust prompt
@@ -105,8 +107,18 @@ Setup sequence:
 5. Security mode selection
 6. Workflow-learning mode selection
 7. Optional capabilities (Telegram, voice, vision, browser)
-8. Setup verification
-9. Immediate session start
+8. Review manifest before apply
+9. Reviewed apply operations perform config, credential-reference, and trust writes
+10. Structured read-only verification after apply
+11. Launch handoff for verified-ready setup, or explicit accepted degraded state
+
+Direct provider/model flags remain as an advanced setup path:
+
+```bash
+estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+```
+
+Runtime mutating onboarding tools are removed. The runtime no longer exposes `onboarding.status` or `onboarding.complete`; setup mutation stays behind reviewed CLI setup/apply.
 
 Backup/fallback routes are managed through `estacoda model fallback ...`; first-run onboarding no longer offers the legacy backup-provider prompt.
 

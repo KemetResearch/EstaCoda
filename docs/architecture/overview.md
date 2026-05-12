@@ -11,7 +11,7 @@ EstaCoda is a TypeScript-first agent runtime built on Bun. It executes provider-
 
 | File | Role | Evidence |
 |------|------|----------|
-| `src/index.ts` | Boot flow. Loads config, runs first-run onboarding if needed, dispatches to CLI command, interactive session, or one-shot prompt. Also restores the active CLI workspace session from persisted store before interactive launch. | `implemented but not live-proven` |
+| `src/index.ts` | Boot flow. Dispatches CLI commands, uses setup-route launch gating for incomplete setup, then starts interactive session or one-shot prompt. Also restores the active CLI workspace session from persisted store before interactive launch. | `smoke-tested` |
 | `src/cli/cli.ts` | CLI command surface. Parses arguments and dispatches to subcommands. | `smoke-tested` |
 | `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/reset`. | `smoke-tested` |
 | `src/cli/cli-session-store.ts` | Persisted active CLI session pointer keyed by workspace root. | `smoke-tested` |
