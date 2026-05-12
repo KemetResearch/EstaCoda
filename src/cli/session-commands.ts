@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { SessionRecord } from "../contracts/session.js";
+import { resolveStateHome } from "../config/state-home.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
@@ -31,13 +33,12 @@ export async function runSessionsCommand(
 ): Promise<{ ok: boolean; output: string }> {
   const [subcommand, ...rest] = input.args;
   const homeDir = input.homeDir;
-  const dbPath = join(homeDir, ".estacoda", "sessions.sqlite");
+  const stateHome = resolveStateHome({ homeDir });
 
   if (subcommand === "list" || subcommand === undefined) {
-    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
-    const db = new SQLiteSessionDB({ path: dbPath });
+    const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     try {
       const sessions = await db.listSessions("default");
       const pointers = await pointerStore.listPointers();
@@ -64,10 +65,9 @@ export async function runSessionsCommand(
       });
       return { ok: false, output: renderer(viewModel) };
     }
-    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
-    const db = new SQLiteSessionDB({ path: dbPath });
+    const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     try {
       const session = await db.getSession(sessionId);
       if (session === undefined) {
@@ -101,7 +101,7 @@ export async function runSessionsCommand(
       return { ok: false, output: renderer(viewModel) };
     }
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     const pointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === runtime.sessionId);
     const viewModel = buildSessionCurrentViewModel({
       sessionId: runtime.sessionId,
@@ -130,7 +130,7 @@ export async function runSessionsCommand(
       return { ok: false, output: renderer(viewModel) };
     }
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     await pointerStore.setPointer(surface as typeof VALID_SURFACES[number], surfaceId, {
       sessionId,
       attachedAt: new Date().toISOString(),
@@ -155,7 +155,7 @@ export async function runSessionsCommand(
       return { ok: false, output: renderer(viewModel) };
     }
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
-    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     await pointerStore.removePointer(surface as typeof VALID_SURFACES[number], surfaceId);
     const viewModel = buildSessionDetachViewModel({ surface, surfaceId });
     return { ok: true, output: renderer(viewModel) };

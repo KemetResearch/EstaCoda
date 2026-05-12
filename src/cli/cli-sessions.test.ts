@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
@@ -80,6 +80,22 @@ describe("CLI session commands", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("sess-1");
       expect(result.output).toContain("Test Session");
+    });
+
+    it("prepares the session DB file permissions before listing sessions", async () => {
+      await chmod(dbPath, 0o644);
+
+      const result = await runCliCommand({
+        argv: ["sessions", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.exitCode).toBe(0);
+      if (process.platform !== "win32") {
+        const stats = await stat(dbPath);
+        expect(stats.mode & 0o777).toBe(0o600);
+      }
     });
 
     it("shows surface pointers attached to sessions", async () => {

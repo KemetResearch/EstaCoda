@@ -254,6 +254,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
   const imageCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "image-cache");
   let activeTrustedWorkspace = false;
+  let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
   if (existingSession === undefined) {
@@ -913,7 +914,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return trustStore.revoke(workspaceRoot, { profileId });
     },
     async dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
+      const closeSessionDb = (sessionDb as { close?: () => void | Promise<void> }).close;
+      if (typeof closeSessionDb === "function") {
+        await closeSessionDb.call(sessionDb);
+      }
     },
     describe() {
       return [

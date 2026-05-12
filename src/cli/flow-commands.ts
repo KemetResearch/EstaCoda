@@ -1,7 +1,7 @@
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveStateHome } from "../config/state-home.js";
 import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
 import { FlowLockService } from "../taskflow/flow-lock-service.js";
 import { TaskFlowEngine } from "../taskflow/taskflow-engine.js";
@@ -12,7 +12,8 @@ import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/fl
 export async function flowCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
 
-  const db = await openFlowDb(options);
+  const openedDb = await openFlowDb(options);
+  const db = openedDb.db;
 
   try {
     switch (subcommand) {
@@ -63,18 +64,18 @@ export async function flowCommand(options: CliOptions, args: string[]): Promise<
         };
     }
   } finally {
-    await db.close?.();
+    await openedDb.close();
   }
 }
 
-async function openFlowDb(options: CliOptions): Promise<SQLiteSessionDB> {
+async function openFlowDb(options: CliOptions): Promise<{ db: SQLiteSessionDB; close: () => void }> {
   if (options.runtime?.sessionDb instanceof SQLiteSessionDB) {
-    return options.runtime.sessionDb;
+    return { db: options.runtime.sessionDb, close: () => undefined };
   }
 
-  const homeDir = options.homeDir ?? process.env.HOME ?? homedir();
-  const path = join(homeDir, ".estacoda", "sessions.sqlite");
-  return new SQLiteSessionDB({ path });
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+  return { db, close: () => db.close() };
 }
 
 function createFlowServices(db: SQLiteSessionDB) {
