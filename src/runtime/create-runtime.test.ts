@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createRuntime } from "./create-runtime.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { ModelProfile, ProviderAdapter } from "../contracts/provider.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
@@ -130,5 +131,83 @@ describe("createRuntime MCP trust gating", () => {
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");
+  });
+});
+
+describe("createRuntime getStartupReadiness trust threading", () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+
+  beforeEach(() => {
+    process.env.OPENAI_API_KEY = "test-key";
+  });
+
+  afterEach(() => {
+    if (originalKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalKey;
+    }
+  });
+
+  it("loads project config in verification when projectConfigTrust is trusted", async () => {
+    const options = await minimalRuntimeOptions({ projectConfigTrust: "trusted" });
+    await mkdir(join(options.workspaceRoot, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(options.workspaceRoot, ".estacoda", "config.json"),
+      JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.openai.com/v1",
+            apiKeyEnv: "OPENAI_API_KEY",
+            models: ["gpt-4o"],
+            enableNetwork: true,
+          },
+        },
+      })
+    );
+    const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
+    const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
+    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
+    try {
+      const readiness = await runtime.getStartupReadiness();
+      expect(readiness.providerReadiness).toBe("ready");
+      expect(readiness.workspaceVerification).toBe("verified");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("skips project config in verification when projectConfigTrust is untrusted", async () => {
+    const options = await minimalRuntimeOptions({ projectConfigTrust: "untrusted" });
+    await mkdir(join(options.workspaceRoot, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(options.workspaceRoot, ".estacoda", "config.json"),
+      JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.openai.com/v1",
+            apiKeyEnv: "OPENAI_API_KEY",
+            models: ["gpt-4o"],
+            enableNetwork: true,
+          },
+        },
+      })
+    );
+    const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
+    const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
+    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
+    try {
+      const readiness = await runtime.getStartupReadiness();
+      expect(readiness.providerReadiness).toBe("missing-config");
+      expect(readiness.workspaceVerification).toBe("unverified");
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

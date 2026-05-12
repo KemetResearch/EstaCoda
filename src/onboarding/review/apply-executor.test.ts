@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildFirstRunDraftBundle } from "../setup-drafts.js";
@@ -269,5 +269,51 @@ describe("reviewed setup apply executor", () => {
     expect(endState.kind).toBe("saved-not-launched");
     if (endState.kind !== "saved-not-launched") throw new Error("expected saved-not-launched");
     expect(endState.verification?.providerDiagnostic.status).toBe("ready");
+  });
+
+  describe("verifyReviewedSetup projectConfigTrust threading", () => {
+    it("includes project config when projectConfigTrust is trusted", async () => {
+      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, ".estacoda", "config.json"),
+        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
+      );
+      const executor = createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        projectConfigTrust: "trusted",
+      });
+      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
+      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(true);
+    });
+
+    it("skips project config when projectConfigTrust is untrusted", async () => {
+      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, ".estacoda", "config.json"),
+        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
+      );
+      const executor = createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        projectConfigTrust: "untrusted",
+      });
+      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
+      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
+    });
+
+    it("remains fail-closed when projectConfigTrust is omitted", async () => {
+      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, ".estacoda", "config.json"),
+        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
+      );
+      const executor = createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      });
+      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
+      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
+    });
   });
 });

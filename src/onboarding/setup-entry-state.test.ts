@@ -208,4 +208,26 @@ describe("collectSetupEntryState", () => {
     expect(state.configPaths.project).toBe(join(workspaceRoot, ".estacoda", "config.json"));
     expect(configContent).toContain("hermes-local");
   });
+
+  it("includes project config in verification when projectConfigTrust is trusted", async () => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    await writeUserConfig(homeDir, localReadyConfig());
+    await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
+    await writeFile(join(workspaceRoot, ".estacoda", "config.json"), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
+    await trustWorkspace(homeDir, workspaceRoot);
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot, projectConfigTrust: "trusted" });
+    expect(state.setupVerification.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(true);
+  });
+
+  it("excludes project config in verification when projectConfigTrust is untrusted", async () => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    await writeUserConfig(homeDir, localReadyConfig());
+    await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
+    await writeFile(join(workspaceRoot, ".estacoda", "config.json"), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
+    await trustWorkspace(homeDir, workspaceRoot);
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot, projectConfigTrust: "untrusted" });
+    expect(state.setupVerification.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
+  });
 });

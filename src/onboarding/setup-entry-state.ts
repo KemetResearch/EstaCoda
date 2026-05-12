@@ -104,6 +104,7 @@ export async function collectSetupEntryState(
     projectConfigPath: options.projectConfigPath,
     runtime: options.runtime,
     trustStorePath: options.trustStorePath,
+    projectConfigTrust: options.projectConfigTrust,
   });
   const startup = collectStartupReadinessSnapshot({
     workspaceRoot: options.workspaceRoot,

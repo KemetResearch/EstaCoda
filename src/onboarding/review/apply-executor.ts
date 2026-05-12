@@ -40,6 +40,7 @@ export type ReviewedSetupApplyExecutorOptions = {
   readonly homeDir?: string;
   readonly userConfigPath?: string;
   readonly projectConfigPath?: string;
+  readonly projectConfigTrust?: "trusted" | "untrusted";
   readonly trustStorePath?: string;
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
@@ -147,6 +148,7 @@ async function verifyReviewedSetup(
     homeDir: options.homeDir,
     userConfigPath: options.userConfigPath,
     projectConfigPath: options.projectConfigPath,
+    projectConfigTrust: options.projectConfigTrust,
     trustStorePath: options.trustStorePath,
   });
 }

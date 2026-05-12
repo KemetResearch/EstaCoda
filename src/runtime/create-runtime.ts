@@ -981,6 +981,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         projectConfigPath: options.projectConfigPath,
         trustStorePath: options.trustStorePath,
         runtime: this as Runtime,
+        projectConfigTrust: options.projectConfigTrust,
       });
       const versionStatus = options.homeDir !== undefined
         ? await readCachedUpdateStatus(options.homeDir)
