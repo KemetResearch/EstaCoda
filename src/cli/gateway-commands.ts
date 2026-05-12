@@ -1,11 +1,12 @@
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
-import { Database } from "bun:sqlite";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveStateHome } from "../config/state-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
@@ -72,16 +73,18 @@ export async function runGatewayStatus(
 ): Promise<{ ok: boolean; output: string }> {
   const config = await loadRuntimeConfig(options);
   const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateRoot = join(homeDir, ".estacoda");
+  const stateHome = resolveStateHome({ homeDir });
+  const stateRoot = stateHome.stateRoot;
 
   const cronStore = new CronStore({ homeDir });
   const cronJobs = await cronStore.list();
 
   let executionStore: CronExecutionStore | undefined;
+  let executionDb: { close(): void } | undefined;
   try {
-    const dbPath = join(stateRoot, "sessions.sqlite");
-    const db = new Database(dbPath);
-    executionStore = new CronExecutionStore(db);
+    const db = openDefaultSQLiteDatabase({ path: stateHome.sessionsSqlitePath });
+    executionDb = db;
+    executionStore = new CronExecutionStore({ db });
   } catch { /* ignore */ }
 
   let recentCronFailures: Awaited<ReturnType<CronExecutionStore["recentFailures"]>> = [];
@@ -90,6 +93,7 @@ export async function runGatewayStatus(
       recentCronFailures = await executionStore.recentFailures(5);
     } catch { /* table may not exist */ }
   }
+  try { executionDb?.close(); } catch { /* ignore */ }
 
   const deliveryRouter = new DeliveryRouter({ homeDir });
   const recentDeliveryErrors = await deliveryRouter.getRecentErrors(5);

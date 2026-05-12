@@ -94,6 +94,7 @@ export type RuntimeOptions = {
   profileId?: string;
   sessionId?: string;
   sessionDb?: SessionDB;
+  closeSessionDbOnDispose?: boolean;
   workspaceRoot?: string;
   localSkillsRoot?: string;
   externalSkillRoots?: string[];
@@ -223,6 +224,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const profileId = options.profileId ?? "default";
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
+  const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
@@ -254,6 +256,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
   const imageCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "image-cache");
   let activeTrustedWorkspace = false;
+  let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
   if (existingSession === undefined) {
@@ -727,8 +730,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const sqliteDb = (sessionDb as unknown as { db: import("bun:sqlite").Database }).db;
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sqliteDb });
+      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db });
       const lockService = new FlowLockService({ store: taskflowStore });
       const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
       const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
@@ -914,7 +916,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return trustStore.revoke(workspaceRoot, { profileId });
     },
     async dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
+      const closeSessionDb = closeSessionDbOnDispose
+        ? (sessionDb as { close?: () => void | Promise<void> }).close
+        : undefined;
+      if (closeSessionDbOnDispose && typeof closeSessionDb === "function") {
+        await closeSessionDb.call(sessionDb);
+      }
     },
     describe() {
       return [

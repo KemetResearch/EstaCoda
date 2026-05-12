@@ -8,6 +8,8 @@ import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillProposalService, slugifySkillName } from "../skills/skill-proposal-service.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveStateHome } from "../config/state-home.js";
 import { runConstraintGates } from "../evolution/constraint-gate-runner.js";
 import { canTransition } from "../evolution/candidate-lifecycle.js";
 import { populateTraces } from "../evolution/export-format.js";
@@ -17,9 +19,10 @@ function resolveHome(options: CliOptions): string {
   return options.homeDir ?? process.env.HOME ?? homedir();
 }
 
-async function openStores(options: CliOptions) {
+async function openStores(options: CliOptions, storeOptions: { includeSessionDb?: boolean } = {}) {
   const home = resolveHome(options);
-  const localSkillsRoot = join(home, ".estacoda", "skills");
+  const stateHome = resolveStateHome({ homeDir: home });
+  const localSkillsRoot = stateHome.skillsPath;
   const registry = new SkillRegistry();
   const loaded = await loadSkillsFromDirectory(localSkillsRoot, {
     sourceKind: "local",
@@ -41,12 +44,13 @@ async function openStores(options: CliOptions) {
     skillEvolutionStore,
     changeManifestStore
   });
-  const sessionDbPath = join(home, ".estacoda", "sessions.sqlite");
   let sessionDb: SQLiteSessionDB | undefined;
-  try {
-    sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
-  } catch {
-    sessionDb = undefined;
+  if (storeOptions.includeSessionDb === true) {
+    try {
+      sessionDb = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+    } catch {
+      sessionDb = undefined;
+    }
   }
   return { registry, skillEvolutionStore, changeManifestStore, proposalService, sessionDb, localSkillsRoot };
 }
@@ -427,96 +431,100 @@ async function evolutionExport(options: CliOptions, args: string[]): Promise<Cli
     };
   }
 
-  const { skillEvolutionStore, changeManifestStore, sessionDb } = await openStores(options);
+  const { skillEvolutionStore, changeManifestStore, sessionDb } = await openStores(options, { includeSessionDb: true });
 
-  const proposals = await skillEvolutionStore.listProposals({});
-  const observations = await skillEvolutionStore.listObservations({});
-  const evalRuns = await skillEvolutionStore.listEvalRuns();
-  const manifests = await changeManifestStore.list({});
+  try {
+    const proposals = await skillEvolutionStore.listProposals({});
+    const observations = await skillEvolutionStore.listObservations({});
+    const evalRuns = await skillEvolutionStore.listEvalRuns();
+    const manifests = await changeManifestStore.list({});
 
-  const filteredProposals = skillName !== undefined
-    ? proposals.filter((p) => p.skillName === skillName)
-    : proposals;
-  const filteredObservations = skillName !== undefined
-    ? observations.filter((o) => o.skillName === skillName)
-    : observations;
-  const filteredManifests = skillName !== undefined
-    ? manifests.filter((m) => m.filesChanged.some((f) => f.includes(skillName)))
-    : manifests;
+    const filteredProposals = skillName !== undefined
+      ? proposals.filter((p) => p.skillName === skillName)
+      : proposals;
+    const filteredObservations = skillName !== undefined
+      ? observations.filter((o) => o.skillName === skillName)
+      : observations;
+    const filteredManifests = skillName !== undefined
+      ? manifests.filter((m) => m.filesChanged.some((f) => f.includes(skillName)))
+      : manifests;
 
-  const sinceTime = since?.getTime() ?? 0;
+    const sinceTime = since?.getTime() ?? 0;
 
-  const traces = await populateTraces(filteredManifests, sessionDb);
+    const traces = await populateTraces(filteredManifests, sessionDb);
 
-  const dataset: OptimizationDataset = {
-    version: "v0.7",
-    generatedAt: new Date().toISOString(),
-    meta: {
-      skillCount: new Set([
-        ...filteredProposals.map((p) => p.skillName),
-        ...filteredObservations.map((o) => o.skillName)
-      ]).size,
-      proposalCount: filteredProposals.length,
-      manifestCount: filteredManifests.length,
-      observationCount: filteredObservations.length,
-      evalRunCount: evalRuns.length
-    },
-    traces,
-    skillEvalRuns: evalRuns.map((r: import("../skills/skill-evolution.js").SkillEvalRunRecord) => ({
-      skillName: r.skillName,
-      evalId: r.evalId,
-      score: r.score,
-      passed: r.passed,
-      details: r.details ?? {}
-    })),
-    observations: filteredObservations
-      .filter((o) => new Date(o.timestamp).getTime() >= sinceTime)
-      .map((o) => ({
-        id: o.id,
-        skillName: o.skillName,
-        type: o.type,
-        lesson: o.lesson,
-        outcome: o.outcome,
-        toolsAttempted: o.toolsAttempted ?? []
+    const dataset: OptimizationDataset = {
+      version: "v0.7",
+      generatedAt: new Date().toISOString(),
+      meta: {
+        skillCount: new Set([
+          ...filteredProposals.map((p) => p.skillName),
+          ...filteredObservations.map((o) => o.skillName)
+        ]).size,
+        proposalCount: filteredProposals.length,
+        manifestCount: filteredManifests.length,
+        observationCount: filteredObservations.length,
+        evalRunCount: evalRuns.length
+      },
+      traces,
+      skillEvalRuns: evalRuns.map((r: import("../skills/skill-evolution.js").SkillEvalRunRecord) => ({
+        skillName: r.skillName,
+        evalId: r.evalId,
+        score: r.score,
+        passed: r.passed,
+        details: r.details ?? {}
       })),
-    proposals: filteredProposals
-      .filter((p) => new Date(p.createdAt).getTime() >= sinceTime)
-      .map((p) => ({
-        id: p.id,
-        skillName: p.skillName,
-        status: p.status
-      })),
-    manifests: filteredManifests
-      .filter((m) => new Date(m.createdAt).getTime() >= sinceTime)
-      .map((m) => ({
-        id: m.id,
-        target: m.target,
-        status: m.status,
-        hypothesis: m.hypothesis,
-        predictedImpact: m.predictedImpact,
-        riskLevel: m.riskLevel,
-        filesChanged: m.filesChanged,
-        evidenceTraces: m.evidence.traces,
-        constraintGates: m.constraintGates,
-        rollbackPlan: m.rollbackPlan,
-        createdAt: m.createdAt
-      }))
-  };
+      observations: filteredObservations
+        .filter((o) => new Date(o.timestamp).getTime() >= sinceTime)
+        .map((o) => ({
+          id: o.id,
+          skillName: o.skillName,
+          type: o.type,
+          lesson: o.lesson,
+          outcome: o.outcome,
+          toolsAttempted: o.toolsAttempted ?? []
+        })),
+      proposals: filteredProposals
+        .filter((p) => new Date(p.createdAt).getTime() >= sinceTime)
+        .map((p) => ({
+          id: p.id,
+          skillName: p.skillName,
+          status: p.status
+        })),
+      manifests: filteredManifests
+        .filter((m) => new Date(m.createdAt).getTime() >= sinceTime)
+        .map((m) => ({
+          id: m.id,
+          target: m.target,
+          status: m.status,
+          hypothesis: m.hypothesis,
+          predictedImpact: m.predictedImpact,
+          riskLevel: m.riskLevel,
+          filesChanged: m.filesChanged,
+          evidenceTraces: m.evidence.traces,
+          constraintGates: m.constraintGates,
+          rollbackPlan: m.rollbackPlan,
+          createdAt: m.createdAt
+        }))
+    };
 
-  await writeFile(datasetPath, JSON.stringify(dataset, null, 2), "utf8");
+    await writeFile(datasetPath, JSON.stringify(dataset, null, 2), "utf8");
 
-  return {
-    handled: true,
-    exitCode: 0,
-    output: [
-      `Exported optimization dataset to ${datasetPath}`,
-      `  Proposals: ${dataset.meta.proposalCount}`,
-      `  Manifests: ${dataset.meta.manifestCount}`,
-      `  Observations: ${dataset.meta.observationCount}`,
-      `  Eval runs: ${dataset.meta.evalRunCount}`,
-      `  Traces: ${dataset.traces.length}`
-    ].join("\n")
-  };
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Exported optimization dataset to ${datasetPath}`,
+        `  Proposals: ${dataset.meta.proposalCount}`,
+        `  Manifests: ${dataset.meta.manifestCount}`,
+        `  Observations: ${dataset.meta.observationCount}`,
+        `  Eval runs: ${dataset.meta.evalRunCount}`,
+        `  Traces: ${dataset.traces.length}`
+      ].join("\n")
+    };
+  } finally {
+    sessionDb?.close();
+  }
 }
 
 function valueAfter(args: string[], flag: string): string | undefined {

@@ -1,6 +1,210 @@
-// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Cron surfaces — help renders in plain: cron-help-plain 1`] = `
+exports[`Cron surfaces — action > renders in narrow width > cron-action-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mPaused cron job[0m
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — action > renders in no Unicode > cron-action-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mPaused cron job[0m
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — action > renders in no color > cron-action-no color 1`] = `
+"[OK] Paused cron job
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — action > renders in plain > cron-action-plain 1`] = `
+"[OK] Paused cron job
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — action > renders in standard dark > cron-action-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mPaused cron job[0m
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — action > renders in standard light > cron-action-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mPaused cron job[0m
+
+Paused cron job cron-test-1: Test job"
+`;
+
+exports[`Cron surfaces — created > renders in narrow width > cron-created-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCreated cron job[0m
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — created > renders in no Unicode > cron-created-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCreated cron job[0m
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — created > renders in no color > cron-created-no color 1`] = `
+"[OK] Created cron job
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — created > renders in plain > cron-created-plain 1`] = `
+"[OK] Created cron job
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — created > renders in standard dark > cron-created-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCreated cron job[0m
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — created > renders in standard light > cron-created-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mCreated cron job[0m
+
+ID: cron-test-1
+Name: Test job
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Delivery: local"
+`;
+
+exports[`Cron surfaces — execution history > renders in narrow width > cron-history-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history > renders in no Unicode > cron-history-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+- exec-1 [success] 2024-01-01T00:00:00Z (5s)
+- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history > renders in no color > cron-history-no color 1`] = `
+"[OK] Execution history for cron-test-1
+
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history > renders in plain > cron-history-plain 1`] = `
+"[OK] Execution history for cron-test-1
+
+- exec-1 [success] 2024-01-01T00:00:00Z (5s)
+- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history > renders in standard dark > cron-history-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history > renders in standard light > cron-history-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mExecution history for cron-test-1[0m
+
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: error —"
+`;
+
+exports[`Cron surfaces — execution history empty > renders in narrow width > cron-history-empty-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — execution history empty > renders in no Unicode > cron-history-empty-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — execution history empty > renders in no color > cron-history-empty-no color 1`] = `
+"[OK] Execution history for cron-test-1
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — execution history empty > renders in plain > cron-history-empty-plain 1`] = `
+"[OK] Execution history for cron-test-1
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — execution history empty > renders in standard dark > cron-history-empty-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mExecution history for cron-test-1[0m
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — execution history empty > renders in standard light > cron-history-empty-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mExecution history for cron-test-1[0m
+
+No execution history for job cron-test-1."
+`;
+
+exports[`Cron surfaces — help > renders in narrow width > cron-help-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda cron[0m
+
+• cron add     Add a cron job
+• cron list    List cron jobs
+• cron show    Show job detail"
+`;
+
+exports[`Cron surfaces — help > renders in no Unicode > cron-help-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda cron[0m
+
+- cron add     Add a cron job
+- cron list    List cron jobs
+- cron show    Show job detail"
+`;
+
+exports[`Cron surfaces — help > renders in no color > cron-help-no color 1`] = `
+"[OK] EstaCoda cron
+
+• cron add     Add a cron job
+• cron list    List cron jobs
+• cron show    Show job detail"
+`;
+
+exports[`Cron surfaces — help > renders in plain > cron-help-plain 1`] = `
 "[OK] EstaCoda cron
 
 - cron add     Add a cron job
@@ -8,179 +212,83 @@ exports[`Cron surfaces — help renders in plain: cron-help-plain 1`] = `
 - cron show    Show job detail"
 `;
 
-exports[`Cron surfaces — help renders in standard dark: cron-help-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda cron\x1B[0m
+exports[`Cron surfaces — help > renders in standard dark > cron-help-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda cron[0m
 
 • cron add     Add a cron job
 • cron list    List cron jobs
 • cron show    Show job detail"
 `;
 
-exports[`Cron surfaces — help renders in standard light: cron-help-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mEstaCoda cron\x1B[0m
+exports[`Cron surfaces — help > renders in standard light > cron-help-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mEstaCoda cron[0m
 
 • cron add     Add a cron job
 • cron list    List cron jobs
 • cron show    Show job detail"
 `;
 
-exports[`Cron surfaces — help renders in no color: cron-help-no color 1`] = `
-"[OK] EstaCoda cron
+exports[`Cron surfaces — job detail > renders in narrow width > cron-job-detail-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron job detail[0m
 
-• cron add     Add a cron job
-• cron list    List cron jobs
-• cron show    Show job detail"
+[1mCron job: cron-test-1[0m
+Name: Test job
+Status: active
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Last run: never
+Runs: 3
+Delivery: local
+Skills: test-skill
+
+[1mRecent executions (2 shown)[0m
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: timeout — Job exceeded 30s
+  delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — help renders in no Unicode: cron-help-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda cron\x1B[0m
+exports[`Cron surfaces — job detail > renders in no Unicode > cron-job-detail-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron job detail[0m
 
-- cron add     Add a cron job
-- cron list    List cron jobs
-- cron show    Show job detail"
+[1mCron job: cron-test-1[0m
+Name: Test job
+Status: active
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Last run: never
+Runs: 3
+Delivery: local
+Skills: test-skill
+
+[1mRecent executions (2 shown)[0m
+- exec-1 [success] 2024-01-01T00:00:00Z (5s)
+- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: timeout — Job exceeded 30s
+  delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — help renders in narrow width: cron-help-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda cron\x1B[0m
+exports[`Cron surfaces — job detail > renders in no color > cron-job-detail-no color 1`] = `
+"[OK] Cron job detail
 
-• cron add     Add a cron job
-• cron list    List cron jobs
-• cron show    Show job detail"
+Cron job: cron-test-1
+Name: Test job
+Status: active
+Schedule: 1h
+Next run: 2024-01-01T01:00:00Z
+Last run: never
+Runs: 3
+Delivery: local
+Skills: test-skill
+
+Recent executions (2 shown)
+• exec-1 [success] 2024-01-01T00:00:00Z (5s)
+• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
+  failure: timeout — Job exceeded 30s
+  delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — list empty renders in plain: cron-list-empty-plain 1`] = `
-"[OK] Cron jobs
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list empty renders in standard dark: cron-list-empty-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list empty renders in standard light: cron-list-empty-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list empty renders in no color: cron-list-empty-no color 1`] = `
-"[OK] Cron jobs
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list empty renders in no Unicode: cron-list-empty-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list empty renders in narrow width: cron-list-empty-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-No cron jobs configured."
-`;
-
-exports[`Cron surfaces — list with jobs renders in plain: cron-list-jobs-plain 1`] = `
-"[OK] Cron jobs
-
-cron-test-1 [active] Test job
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-cron-test-2 [paused] Another job
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — list with jobs renders in standard dark: cron-list-jobs-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-\x1B[1mcron-test-1 [active] Test job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-\x1B[1mcron-test-2 [paused] Another job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — list with jobs renders in standard light: cron-list-jobs-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-\x1B[1mcron-test-1 [active] Test job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-\x1B[1mcron-test-2 [paused] Another job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — list with jobs renders in no color: cron-list-jobs-no color 1`] = `
-"[OK] Cron jobs
-
-cron-test-1 [active] Test job
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-cron-test-2 [paused] Another job
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — list with jobs renders in no Unicode: cron-list-jobs-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-\x1B[1mcron-test-1 [active] Test job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-\x1B[1mcron-test-2 [paused] Another job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — list with jobs renders in narrow width: cron-list-jobs-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron jobs\x1B[0m
-
-\x1B[1mcron-test-1 [active] Test job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-runs: 3
-skills: test-skill
-
-\x1B[1mcron-test-2 [paused] Another job\x1B[0m
-schedule: 1h
-next: 2024-01-01T01:00:00Z
-script: script.js
-runs: 3"
-`;
-
-exports[`Cron surfaces — job detail renders in plain: cron-job-detail-plain 1`] = `
+exports[`Cron surfaces — job detail > renders in plain > cron-job-detail-plain 1`] = `
 "[OK] Cron job detail
 
 Cron job: cron-test-1
@@ -200,10 +308,10 @@ Recent executions (2 shown)
   delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — job detail renders in standard dark: cron-job-detail-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron job detail\x1B[0m
+exports[`Cron surfaces — job detail > renders in standard dark > cron-job-detail-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron job detail[0m
 
-\x1B[1mCron job: cron-test-1\x1B[0m
+[1mCron job: cron-test-1[0m
 Name: Test job
 Status: active
 Schedule: 1h
@@ -213,17 +321,17 @@ Runs: 3
 Delivery: local
 Skills: test-skill
 
-\x1B[1mRecent executions (2 shown)\x1B[0m
+[1mRecent executions (2 shown)[0m
 • exec-1 [success] 2024-01-01T00:00:00Z (5s)
 • exec-2 [failed] 2024-01-01T00:00:00Z (5s)
   failure: timeout — Job exceeded 30s
   delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — job detail renders in standard light: cron-job-detail-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCron job detail\x1B[0m
+exports[`Cron surfaces — job detail > renders in standard light > cron-job-detail-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mCron job detail[0m
 
-\x1B[1mCron job: cron-test-1\x1B[0m
+[1mCron job: cron-test-1[0m
 Name: Test job
 Status: active
 Schedule: 1h
@@ -233,357 +341,249 @@ Runs: 3
 Delivery: local
 Skills: test-skill
 
-\x1B[1mRecent executions (2 shown)\x1B[0m
+[1mRecent executions (2 shown)[0m
 • exec-1 [success] 2024-01-01T00:00:00Z (5s)
 • exec-2 [failed] 2024-01-01T00:00:00Z (5s)
   failure: timeout — Job exceeded 30s
   delivery: telegram:fail"
 `;
 
-exports[`Cron surfaces — job detail renders in no color: cron-job-detail-no color 1`] = `
-"[OK] Cron job detail
+exports[`Cron surfaces — list empty > renders in narrow width > cron-list-empty-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-Cron job: cron-test-1
-Name: Test job
-Status: active
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Last run: never
-Runs: 3
-Delivery: local
-Skills: test-skill
-
-Recent executions (2 shown)
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: timeout — Job exceeded 30s
-  delivery: telegram:fail"
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — job detail renders in no Unicode: cron-job-detail-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron job detail\x1B[0m
+exports[`Cron surfaces — list empty > renders in no Unicode > cron-list-empty-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-\x1B[1mCron job: cron-test-1\x1B[0m
-Name: Test job
-Status: active
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Last run: never
-Runs: 3
-Delivery: local
-Skills: test-skill
-
-\x1B[1mRecent executions (2 shown)\x1B[0m
-- exec-1 [success] 2024-01-01T00:00:00Z (5s)
-- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: timeout — Job exceeded 30s
-  delivery: telegram:fail"
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — job detail renders in narrow width: cron-job-detail-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCron job detail\x1B[0m
+exports[`Cron surfaces — list empty > renders in no color > cron-list-empty-no color 1`] = `
+"[OK] Cron jobs
 
-\x1B[1mCron job: cron-test-1\x1B[0m
-Name: Test job
-Status: active
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Last run: never
-Runs: 3
-Delivery: local
-Skills: test-skill
-
-\x1B[1mRecent executions (2 shown)\x1B[0m
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: timeout — Job exceeded 30s
-  delivery: telegram:fail"
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — execution history renders in plain: cron-history-plain 1`] = `
-"[OK] Execution history for cron-test-1
+exports[`Cron surfaces — list empty > renders in plain > cron-list-empty-plain 1`] = `
+"[OK] Cron jobs
 
-- exec-1 [success] 2024-01-01T00:00:00Z (5s)
-- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — execution history renders in standard dark: cron-history-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list empty > renders in standard dark > cron-list-empty-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — execution history renders in standard light: cron-history-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list empty > renders in standard light > cron-list-empty-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mCron jobs[0m
 
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+No cron jobs configured."
 `;
 
-exports[`Cron surfaces — execution history renders in no color: cron-history-no color 1`] = `
-"[OK] Execution history for cron-test-1
+exports[`Cron surfaces — list with jobs > renders in narrow width > cron-list-jobs-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+[1mcron-test-1 [active] Test job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+[1mcron-test-2 [paused] Another job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history renders in no Unicode: cron-history-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list with jobs > renders in no Unicode > cron-list-jobs-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-- exec-1 [success] 2024-01-01T00:00:00Z (5s)
-- exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+[1mcron-test-1 [active] Test job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+[1mcron-test-2 [paused] Another job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history renders in narrow width: cron-history-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list with jobs > renders in no color > cron-list-jobs-no color 1`] = `
+"[OK] Cron jobs
 
-• exec-1 [success] 2024-01-01T00:00:00Z (5s)
-• exec-2 [failed] 2024-01-01T00:00:00Z (5s)
-  failure: error — "
+cron-test-1 [active] Test job
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+cron-test-2 [paused] Another job
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history empty renders in plain: cron-history-empty-plain 1`] = `
-"[OK] Execution history for cron-test-1
+exports[`Cron surfaces — list with jobs > renders in plain > cron-list-jobs-plain 1`] = `
+"[OK] Cron jobs
 
-No execution history for job cron-test-1."
+cron-test-1 [active] Test job
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+cron-test-2 [paused] Another job
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history empty renders in standard dark: cron-history-empty-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list with jobs > renders in standard dark > cron-list-jobs-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mCron jobs[0m
 
-No execution history for job cron-test-1."
+[1mcron-test-1 [active] Test job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+[1mcron-test-2 [paused] Another job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history empty renders in standard light: cron-history-empty-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — list with jobs > renders in standard light > cron-list-jobs-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mCron jobs[0m
 
-No execution history for job cron-test-1."
+[1mcron-test-1 [active] Test job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+runs: 3
+skills: test-skill
+
+[1mcron-test-2 [paused] Another job[0m
+schedule: 1h
+next: 2024-01-01T01:00:00Z
+script: script.js
+runs: 3"
 `;
 
-exports[`Cron surfaces — execution history empty renders in no color: cron-history-empty-no color 1`] = `
-"[OK] Execution history for cron-test-1
+exports[`Cron surfaces — not found > renders in narrow width > cron-not-found-narrow width 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mCron job not found[0m
 
-No execution history for job cron-test-1."
+[38;2;239;83;80m[ERROR][0m [1mNot found[0m: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — execution history empty renders in no Unicode: cron-history-empty-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
+exports[`Cron surfaces — not found > renders in no Unicode > cron-not-found-no Unicode 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mCron job not found[0m
 
-No execution history for job cron-test-1."
+[38;2;239;83;80m[ERROR][0m [1mNot found[0m: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — execution history empty renders in narrow width: cron-history-empty-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mExecution history for cron-test-1\x1B[0m
-
-No execution history for job cron-test-1."
-`;
-
-exports[`Cron surfaces — action renders in plain: cron-action-plain 1`] = `
-"[OK] Paused cron job
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — action renders in standard dark: cron-action-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mPaused cron job\x1B[0m
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — action renders in standard light: cron-action-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mPaused cron job\x1B[0m
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — action renders in no color: cron-action-no color 1`] = `
-"[OK] Paused cron job
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — action renders in no Unicode: cron-action-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mPaused cron job\x1B[0m
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — action renders in narrow width: cron-action-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mPaused cron job\x1B[0m
-
-Paused cron job cron-test-1: Test job"
-`;
-
-exports[`Cron surfaces — created renders in plain: cron-created-plain 1`] = `
-"[OK] Created cron job
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — created renders in standard dark: cron-created-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCreated cron job\x1B[0m
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — created renders in standard light: cron-created-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mCreated cron job\x1B[0m
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — created renders in no color: cron-created-no color 1`] = `
-"[OK] Created cron job
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — created renders in no Unicode: cron-created-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCreated cron job\x1B[0m
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — created renders in narrow width: cron-created-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mCreated cron job\x1B[0m
-
-ID: cron-test-1
-Name: Test job
-Schedule: 1h
-Next run: 2024-01-01T01:00:00Z
-Delivery: local"
-`;
-
-exports[`Cron surfaces — not found renders in plain: cron-not-found-plain 1`] = `
+exports[`Cron surfaces — not found > renders in no color > cron-not-found-no color 1`] = `
 "[FAIL] Cron job not found
 
 [ERROR] Not found: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — not found renders in standard dark: cron-not-found-standard dark 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mCron job not found\x1B[0m
-
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Cron job not found: missing-id"
-`;
-
-exports[`Cron surfaces — not found renders in standard light: cron-not-found-standard light 1`] = `
-"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mCron job not found\x1B[0m
-
-\x1B[38;2;198;40;40m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Cron job not found: missing-id"
-`;
-
-exports[`Cron surfaces — not found renders in no color: cron-not-found-no color 1`] = `
+exports[`Cron surfaces — not found > renders in plain > cron-not-found-plain 1`] = `
 "[FAIL] Cron job not found
 
 [ERROR] Not found: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — not found renders in no Unicode: cron-not-found-no Unicode 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mCron job not found\x1B[0m
+exports[`Cron surfaces — not found > renders in standard dark > cron-not-found-standard dark 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mCron job not found[0m
 
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Cron job not found: missing-id"
+[38;2;239;83;80m[ERROR][0m [1mNot found[0m: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — not found renders in narrow width: cron-not-found-narrow width 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mCron job not found\x1B[0m
+exports[`Cron surfaces — not found > renders in standard light > cron-not-found-standard light 1`] = `
+"[38;2;198;40;40m[FAIL][0m [1mCron job not found[0m
 
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mNot found\x1B[0m: Cron job not found: missing-id"
+[38;2;198;40;40m[ERROR][0m [1mNot found[0m: Cron job not found: missing-id"
 `;
 
-exports[`Cron surfaces — usage error renders in plain: cron-usage-error-plain 1`] = `
-"[FAIL] Usage error
+exports[`Cron surfaces — unknown command > renders in narrow width > cron-unknown-narrow width 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUnknown command[0m
 
-[WARN] Usage: Usage: cron show <job-id>"
+[38;2;239;83;80m[ERROR][0m [1mUnknown[0m: Unknown cron command: fly"
 `;
 
-exports[`Cron surfaces — usage error renders in standard dark: cron-usage-error-standard dark 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
+exports[`Cron surfaces — unknown command > renders in no Unicode > cron-unknown-no Unicode 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUnknown command[0m
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: cron show <job-id>"
+[38;2;239;83;80m[ERROR][0m [1mUnknown[0m: Unknown cron command: fly"
 `;
 
-exports[`Cron surfaces — usage error renders in standard light: cron-usage-error-standard light 1`] = `
-"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
-
-\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: cron show <job-id>"
-`;
-
-exports[`Cron surfaces — usage error renders in no color: cron-usage-error-no color 1`] = `
-"[FAIL] Usage error
-
-[WARN] Usage: Usage: cron show <job-id>"
-`;
-
-exports[`Cron surfaces — usage error renders in no Unicode: cron-usage-error-no Unicode 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
-
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: cron show <job-id>"
-`;
-
-exports[`Cron surfaces — usage error renders in narrow width: cron-usage-error-narrow width 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUsage error\x1B[0m
-
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mUsage\x1B[0m: Usage: cron show <job-id>"
-`;
-
-exports[`Cron surfaces — unknown command renders in plain: cron-unknown-plain 1`] = `
+exports[`Cron surfaces — unknown command > renders in no color > cron-unknown-no color 1`] = `
 "[FAIL] Unknown command
 
 [ERROR] Unknown: Unknown cron command: fly"
 `;
 
-exports[`Cron surfaces — unknown command renders in standard dark: cron-unknown-standard dark 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUnknown command\x1B[0m
-
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mUnknown\x1B[0m: Unknown cron command: fly"
-`;
-
-exports[`Cron surfaces — unknown command renders in standard light: cron-unknown-standard light 1`] = `
-"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mUnknown command\x1B[0m
-
-\x1B[38;2;198;40;40m[ERROR]\x1B[0m \x1B[1mUnknown\x1B[0m: Unknown cron command: fly"
-`;
-
-exports[`Cron surfaces — unknown command renders in no color: cron-unknown-no color 1`] = `
+exports[`Cron surfaces — unknown command > renders in plain > cron-unknown-plain 1`] = `
 "[FAIL] Unknown command
 
 [ERROR] Unknown: Unknown cron command: fly"
 `;
 
-exports[`Cron surfaces — unknown command renders in no Unicode: cron-unknown-no Unicode 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUnknown command\x1B[0m
+exports[`Cron surfaces — unknown command > renders in standard dark > cron-unknown-standard dark 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUnknown command[0m
 
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mUnknown\x1B[0m: Unknown cron command: fly"
+[38;2;239;83;80m[ERROR][0m [1mUnknown[0m: Unknown cron command: fly"
 `;
 
-exports[`Cron surfaces — unknown command renders in narrow width: cron-unknown-narrow width 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mUnknown command\x1B[0m
+exports[`Cron surfaces — unknown command > renders in standard light > cron-unknown-standard light 1`] = `
+"[38;2;198;40;40m[FAIL][0m [1mUnknown command[0m
 
-\x1B[38;2;239;83;80m[ERROR]\x1B[0m \x1B[1mUnknown\x1B[0m: Unknown cron command: fly"
+[38;2;198;40;40m[ERROR][0m [1mUnknown[0m: Unknown cron command: fly"
+`;
+
+exports[`Cron surfaces — usage error > renders in narrow width > cron-usage-error-narrow width 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUsage error[0m
+
+[38;2;255;167;38m[WARN][0m [1mUsage[0m: Usage: cron show <job-id>"
+`;
+
+exports[`Cron surfaces — usage error > renders in no Unicode > cron-usage-error-no Unicode 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUsage error[0m
+
+[38;2;255;167;38m[WARN][0m [1mUsage[0m: Usage: cron show <job-id>"
+`;
+
+exports[`Cron surfaces — usage error > renders in no color > cron-usage-error-no color 1`] = `
+"[FAIL] Usage error
+
+[WARN] Usage: Usage: cron show <job-id>"
+`;
+
+exports[`Cron surfaces — usage error > renders in plain > cron-usage-error-plain 1`] = `
+"[FAIL] Usage error
+
+[WARN] Usage: Usage: cron show <job-id>"
+`;
+
+exports[`Cron surfaces — usage error > renders in standard dark > cron-usage-error-standard dark 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mUsage error[0m
+
+[38;2;255;167;38m[WARN][0m [1mUsage[0m: Usage: cron show <job-id>"
+`;
+
+exports[`Cron surfaces — usage error > renders in standard light > cron-usage-error-standard light 1`] = `
+"[38;2;198;40;40m[FAIL][0m [1mUsage error[0m
+
+[38;2;239;108;0m[WARN][0m [1mUsage[0m: Usage: cron show <job-id>"
 `;

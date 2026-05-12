@@ -94,6 +94,10 @@ function snapshotContexts() {
   ];
 }
 
+function snapshotOutput(output: string): string {
+  return output.split("\n").map((line) => line.trimEnd()).join("\n");
+}
+
 // ──────────────────────────────────────
 // Fake data factories
 // ──────────────────────────────────────
@@ -118,7 +122,7 @@ describe("Session surfaces — help", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`sessions-help-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`sessions-help-${ctx.name}`);
     });
   }
 });
@@ -133,7 +137,7 @@ describe("Session surfaces — list", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`sessions-list-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`sessions-list-${ctx.name}`);
     });
   }
 });
@@ -149,7 +153,7 @@ describe("Session surfaces — show", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-show-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-show-${ctx.name}`);
     });
   }
 });
@@ -163,7 +167,7 @@ describe("Session surfaces — show no pointers", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-show-no-pointers-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-show-no-pointers-${ctx.name}`);
     });
   }
 });
@@ -178,7 +182,7 @@ describe("Session surfaces — current", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-current-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-current-${ctx.name}`);
     });
   }
 });
@@ -191,7 +195,7 @@ describe("Session surfaces — current no pointers", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-current-no-pointers-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-current-no-pointers-${ctx.name}`);
     });
   }
 });
@@ -201,7 +205,7 @@ describe("Session surfaces — attach", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-attach-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-attach-${ctx.name}`);
     });
   }
 });
@@ -211,7 +215,7 @@ describe("Session surfaces — detach", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-detach-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-detach-${ctx.name}`);
     });
   }
 });
@@ -221,7 +225,7 @@ describe("Session surfaces — not found", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-not-found-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-not-found-${ctx.name}`);
     });
   }
 });
@@ -231,7 +235,7 @@ describe("Session surfaces — no active session", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-no-active-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-no-active-${ctx.name}`);
     });
   }
 });
@@ -241,7 +245,7 @@ describe("Session surfaces — invalid surface", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-invalid-surface-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-invalid-surface-${ctx.name}`);
     });
   }
 });
@@ -251,7 +255,7 @@ describe("Session surfaces — usage error", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`session-usage-error-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`session-usage-error-${ctx.name}`);
     });
   }
 });
@@ -265,7 +269,7 @@ describe("Handoff surfaces — help", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`handoff-help-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`handoff-help-${ctx.name}`);
     });
   }
 });
@@ -280,7 +284,7 @@ describe("Handoff surfaces — telegram", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`handoff-telegram-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`handoff-telegram-${ctx.name}`);
     });
   }
 });
@@ -309,7 +313,7 @@ describe("Handoff surfaces — list", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`handoff-list-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`handoff-list-${ctx.name}`);
     });
   }
 });
@@ -319,7 +323,7 @@ describe("Handoff surfaces — list empty", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`handoff-list-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`handoff-list-empty-${ctx.name}`);
     });
   }
 });
@@ -331,7 +335,7 @@ describe("Handoff surfaces — no active session", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`handoff-no-session-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`handoff-no-session-${ctx.name}`);
     });
   }
 });

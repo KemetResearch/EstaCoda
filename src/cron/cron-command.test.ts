@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Database } from "bun:sqlite";
 import { runCronCommand } from "./cron-command.js";
 import { CronStore } from "./cron-store.js";
 import { CronExecutionStore } from "./cron-execution-store.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cron-cmd-test-"));
@@ -15,7 +15,7 @@ async function setupExecutionStore(homeDir: string): Promise<CronExecutionStore>
   const dbDir = join(homeDir, ".estacoda");
   await mkdir(dbDir, { recursive: true });
   const dbPath = join(dbDir, "sessions.sqlite");
-  const db = new Database(dbPath, { create: true });
+  const db = openDefaultSQLiteDatabase({ path: dbPath });
   db.exec(`
     create table if not exists cron_executions (
       id text primary key,
@@ -33,7 +33,7 @@ async function setupExecutionStore(homeDir: string): Promise<CronExecutionStore>
       created_at text not null
     )
   `);
-  return new CronExecutionStore(db);
+  return new CronExecutionStore({ db });
 }
 
 describe("runCronCommand", () => {
@@ -179,8 +179,8 @@ describe("runCronCommand", () => {
     const freshDbDir = join(tmpDir, ".estacoda-fresh");
     await mkdir(freshDbDir, { recursive: true });
     const freshDbPath = join(freshDbDir, "sessions.sqlite");
-    const freshDb = new Database(freshDbPath, { create: true });
-    const freshExecutionStore = new CronExecutionStore(freshDb);
+    const freshDb = openDefaultSQLiteDatabase({ path: freshDbPath });
+    const freshExecutionStore = new CronExecutionStore({ db: freshDb });
     const job = await store.create({ schedule: "1h", prompt: "test" });
     const resultShow = await runCronCommand({ args: ["show", job.id], store, executionStore: freshExecutionStore });
     expect(resultShow.ok).toBe(true);

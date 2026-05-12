@@ -1243,7 +1243,6 @@ describe("StandardRenderer — conversation message", () => {
     expect(out).toContain("EstaCoda");
     expect(out).toContain("Short text.");
     // Frame should respect narrow terminal width (visible characters only)
-    const { measureVisibleWidth } = require("./layout.js");
     for (const line of out.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(40);
     }

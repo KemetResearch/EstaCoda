@@ -820,6 +820,7 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("cron tick is skipped while draining", async () => {
+    const exited = fakeExit();
     const tick = fakeTickCron();
     const gateway = fakeChannelGateway();
 
@@ -831,6 +832,7 @@ describe("runGatewaySupervisor", () => {
         tickCron: tick.tickCron,
         createChannelGateway: () => gateway as any,
         createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
       },
     });
 
@@ -841,6 +843,7 @@ describe("runGatewaySupervisor", () => {
 
     // Only one tick should have run before drain stopped the loop
     expect(tick.calls()).toBe(1);
+    expect(exited.codes()).toContain(0);
   });
 
   it("isDraining callback is passed to ChannelGateway", async () => {

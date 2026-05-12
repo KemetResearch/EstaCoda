@@ -1,14 +1,15 @@
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveStateHome } from "../config/state-home.js";
 import type { Trajectory, TrajectoryEvent } from "../contracts/trajectory.js";
 import { redactObject, redactJson } from "../utils/redaction.js";
 
 export async function trace(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
 
-  const db = await openTraceDb(options);
+  const openedDb = await openTraceDb(options);
+  const db = openedDb.db;
 
   try {
     switch (subcommand) {
@@ -37,19 +38,19 @@ export async function trace(options: CliOptions, args: string[]): Promise<CliCom
         };
     }
   } finally {
-    await db.close?.();
+    await openedDb.close();
   }
 }
 
-async function openTraceDb(options: CliOptions): Promise<SQLiteSessionDB> {
+async function openTraceDb(options: CliOptions): Promise<{ db: SQLiteSessionDB; close: () => void }> {
   // Prefer runtime's sessionDb if it's a SQLiteSessionDB
   if (options.runtime?.sessionDb instanceof SQLiteSessionDB) {
-    return options.runtime.sessionDb;
+    return { db: options.runtime.sessionDb, close: () => undefined };
   }
 
-  const homeDir = options.homeDir ?? process.env.HOME ?? homedir();
-  const path = join(homeDir, ".estacoda", "sessions.sqlite");
-  return new SQLiteSessionDB({ path });
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+  return { db, close: () => db.close() };
 }
 
 function traceHelp(): string {

@@ -17,7 +17,8 @@ import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 
-const argv = process.argv.slice(2);
+const rawArgv = process.argv.slice(2);
+const argv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
 
 // Handle --version / -v immediately, before any async init
 if (argv.includes("--version") || argv.includes("-v")) {
@@ -51,6 +52,21 @@ if (argv[0] === "setup") {
       console.log(setupCommand.output);
     }
     process.exit(setupCommand.exitCode);
+  }
+}
+
+if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+  const helpCommand = await runCliCommand({
+    argv,
+    workspaceRoot,
+    projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+  });
+
+  if (helpCommand.handled) {
+    if (helpCommand.output.length > 0) {
+      console.log(helpCommand.output);
+    }
+    process.exit(helpCommand.exitCode);
   }
 }
 
@@ -139,6 +155,10 @@ async function buildRuntime(input: {
   });
 }
 
+async function openLocalSessionDb(): Promise<SessionDB> {
+  return createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+}
+
 if (argv[0] === "acp") {
   const acpCommand = await runCliCommand({
     argv,
@@ -154,7 +174,7 @@ if (argv[0] === "acp") {
   }
 }
 
-const sessionDb = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+const sessionDb = await openLocalSessionDb();
 
 const runtime = await buildRuntime({
   sessionId: await cliSessionStore.getSessionId(workspaceRoot),
@@ -184,7 +204,7 @@ if (argv.length === 0 && canRunInteractive()) {
     refreshRuntime: async (options) => {
       const nextRuntime = await buildRuntime({
         sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),
-        sessionDb: runtime.sessionDb
+        sessionDb: await openLocalSessionDb()
       });
       await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
       return nextRuntime;
@@ -192,7 +212,7 @@ if (argv.length === 0 && canRunInteractive()) {
     switchRuntime: async (sessionId) => {
       const nextRuntime = await buildRuntime({
         sessionId,
-        sessionDb: runtime.sessionDb
+        sessionDb: await openLocalSessionDb()
       });
       await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
       return nextRuntime;

@@ -14,7 +14,6 @@ import type { IntentRoute } from "../../contracts/intent.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
 import type { AgentLoop } from "../../runtime/agent-loop.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../../runtime/agent-loop.js";
 import { kemetBlueTheme } from "../../theme/kemet-blue.js";
@@ -328,8 +327,7 @@ export const track5IntegrationCase: EvalCase = {
 
       try {
         // Seed a running flow directly in the DB
-        const rawDb = (sqliteDb as unknown as { db: Database }).db;
-        const tfStore = new SQLiteTaskFlowStore({ db: rawDb });
+        const tfStore = new SQLiteTaskFlowStore({ db: sqliteDb.db });
         const tfLock = new FlowLockService({ store: tfStore });
         const tfEngine = new TaskFlowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
 

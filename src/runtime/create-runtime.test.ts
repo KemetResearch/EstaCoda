@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createRuntime } from "./create-runtime.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { ModelProfile, ProviderAdapter } from "../contracts/provider.js";
@@ -209,5 +210,31 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+});
+
+describe("createRuntime SQLite session lifecycle", () => {
+  it("closes an injected SQLite session DB when disposed", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({
+      path: join(options.workspaceRoot, ".estacoda", "sessions.sqlite")
+    });
+    const runtime = await createRuntime({ ...options, sessionDb });
+
+    await runtime.dispose();
+    await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
+    await expect(runtime.dispose()).resolves.toBeUndefined();
+  });
+
+  it("leaves shared SQLite session DB open when disposal ownership is disabled", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({
+      path: join(options.workspaceRoot, ".estacoda", "sessions.sqlite")
+    });
+    const runtime = await createRuntime({ ...options, sessionDb, closeSessionDbOnDispose: false });
+
+    await runtime.dispose();
+    await expect(sessionDb.listSessions()).resolves.toEqual(expect.any(Array));
+    sessionDb.close();
   });
 });

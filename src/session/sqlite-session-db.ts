@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import type {
   AppendMessageInput,
   CreateSessionInput,
@@ -13,6 +12,8 @@ import type { ChannelKind } from "../contracts/channel.js";
 import type { Trajectory, CompressedTrajectory } from "../contracts/trajectory.js";
 import type { FailureRecord } from "../contracts/failure.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 type SessionRow = {
   id: string;
@@ -73,20 +74,20 @@ type FailureRow = {
 };
 
 export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
-  readonly #db: Database;
+  readonly #db: SQLiteDatabase;
   readonly #now: () => Date;
   readonly #id: () => string;
   readonly #path: string;
 
-  constructor(options: { path: string; now?: () => Date; id?: () => string }) {
+  constructor(options: { path: string; db?: SQLiteDatabase; now?: () => Date; id?: () => string }) {
     this.#path = options.path;
-    this.#db = new Database(options.path, { create: true, readwrite: true });
+    this.#db = options.db ?? openDefaultSQLiteDatabase({ path: options.path });
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
     this.#migrate();
   }
 
-  get db(): Database {
+  get db(): SQLiteDatabase {
     return this.#db;
   }
 
@@ -826,4 +827,3 @@ function rowToFailure(row: FailureRow): FailureRecord {
     context: row.context_json === null ? undefined : (JSON.parse(row.context_json) as Record<string, unknown>)
   };
 }
-

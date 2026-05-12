@@ -1,0 +1,5 @@
+allowBuilds:
+  '@whiskeysockets/baileys': false
+  better-sqlite3: true
+  protobufjs: false
+  sharp: false

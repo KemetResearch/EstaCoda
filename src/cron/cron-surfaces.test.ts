@@ -88,6 +88,10 @@ function snapshotContexts() {
   ];
 }
 
+function snapshotOutput(output: string): string {
+  return output.split("\n").map((line) => line.trimEnd()).join("\n");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Fake data factories
 // ─────────────────────────────────────────────────────────────
@@ -148,7 +152,7 @@ describe("Cron surfaces — help", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-help-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-help-${ctx.name}`);
     });
   }
 });
@@ -158,7 +162,7 @@ describe("Cron surfaces — list empty", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-list-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-list-empty-${ctx.name}`);
     });
   }
 });
@@ -173,7 +177,7 @@ describe("Cron surfaces — list with jobs", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-list-jobs-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-list-jobs-${ctx.name}`);
     });
   }
 });
@@ -195,7 +199,7 @@ describe("Cron surfaces — job detail", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-job-detail-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-job-detail-${ctx.name}`);
     });
   }
 });
@@ -211,7 +215,7 @@ describe("Cron surfaces — execution history", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-history-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-history-${ctx.name}`);
     });
   }
 });
@@ -221,7 +225,7 @@ describe("Cron surfaces — execution history empty", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-history-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-history-empty-${ctx.name}`);
     });
   }
 });
@@ -231,7 +235,7 @@ describe("Cron surfaces — action", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-action-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-action-${ctx.name}`);
     });
   }
 });
@@ -241,7 +245,7 @@ describe("Cron surfaces — created", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-created-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-created-${ctx.name}`);
     });
   }
 });
@@ -251,7 +255,7 @@ describe("Cron surfaces — not found", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-not-found-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-not-found-${ctx.name}`);
     });
   }
 });
@@ -261,7 +265,7 @@ describe("Cron surfaces — usage error", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-usage-error-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-usage-error-${ctx.name}`);
     });
   }
 });
@@ -271,7 +275,7 @@ describe("Cron surfaces — unknown command", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`cron-unknown-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`cron-unknown-${ctx.name}`);
     });
   }
 });

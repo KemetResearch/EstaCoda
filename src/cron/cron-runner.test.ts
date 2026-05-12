@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +9,8 @@ import { createFileCronJobLock } from "./cron-lock.js";
 import { tickCron, type CronRunner } from "./cron-runner.js";
 import type { CronJob } from "./cron-store.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 function mockOk(job: CronJob): ReturnType<CronRunner["runJob"]> {
   return Promise.resolve({
@@ -40,14 +41,14 @@ function mockFail(
 describe("tickCron with execution store and job lock", () => {
   let tmpDir: string;
   let store: CronStore;
-  let db: Database;
+  let db: SQLiteDatabase;
   let executionStore: CronExecutionStore;
   let lockDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "estacoda-cron-runner-test-"));
     store = new CronStore({ homeDir: tmpDir });
-    db = new Database(join(tmpDir, "test.db"));
+    db = openDefaultSQLiteDatabase({ path: join(tmpDir, "test.db") });
     db.exec(`
       create table if not exists cron_executions (
         id text primary key,
@@ -67,7 +68,7 @@ describe("tickCron with execution store and job lock", () => {
       create index if not exists idx_cron_executions_job on cron_executions(job_id, started_at desc);
       create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
     `);
-    executionStore = new CronExecutionStore(db);
+    executionStore = new CronExecutionStore({ db });
     lockDir = join(tmpDir, "locks");
   });
 
