@@ -8,7 +8,7 @@ import {
   runSetupVerification,
   type SetupVerificationReport,
 } from "./verification.js";
-import { onboardingCopyEn } from "./onboarding-copy.js";
+import { setupVerificationCopyEn } from "./setup-verification-copy.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 
 function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: string[] = []): ProviderDiagnostic {
@@ -41,7 +41,7 @@ function makeReport(overrides: Partial<SetupVerificationReport> = {}): SetupVeri
 describe("renderSetupVerificationReport", () => {
   it("renders ready state when no warnings", () => {
     const report = makeReport();
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(copy.verification.title);
     expect(output).toContain(copy.verification.statusReady);
@@ -50,7 +50,7 @@ describe("renderSetupVerificationReport", () => {
   });
 
   it("renders warnings when present", () => {
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const report = makeReport({
       stateWritable: false,
       warnings: [copy.verification.stateNotWritableWarning],
@@ -69,56 +69,56 @@ describe("renderSetupVerificationReport", () => {
       warnings: ["Provider setup is incomplete."],
       issueCodes: ["provider-incomplete"],
     });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(copy.verification.actions.providerIncomplete);
   });
 
   it("renders blocked state directory", () => {
     const report = makeReport({ stateWritable: false });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(`${copy.verification.stateDirectory}: ${copy.verification.blocked}`);
   });
 
   it("renders env file mode when present", () => {
     const report = makeReport({ envFilePresent: true, envFileMode: "644" });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(copy.verification.presentMode("644"));
   });
 
   it("renders not present when env file missing", () => {
     const report = makeReport({ envFilePresent: false });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(`${copy.verification.secretStore}: ${copy.verification.notPresent}`);
   });
 
   it("renders trusted workspace status", () => {
     const report = makeReport({ workspaceTrusted: true });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(`${copy.verification.workspaceTrust}: ${copy.setupCheck.trusted}`);
   });
 
   it("renders not trusted workspace status", () => {
     const report = makeReport({ workspaceTrusted: false });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(`${copy.verification.workspaceTrust}: ${copy.setupCheck.notTrusted}`);
   });
 
   it("renders config sources", () => {
     const report = makeReport({ configSources: ["config.json", ".env"] });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain("config.json, .env");
   });
 
   it("falls back to default next action for unknown issues", () => {
     const report = makeReport({ warnings: ["Something weird"], issueCodes: ["unknown-code"] });
-    const copy = onboardingCopyEn;
+    const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(copy.verification.fallbackNextAction);
   });

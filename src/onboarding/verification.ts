@@ -7,7 +7,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { OnboardingOptions } from "./onboarding-flow.js";
-import { onboardingCopy, type OnboardingCopy } from "./onboarding-copy.js";
+import { setupVerificationCopy, type SetupVerificationCopy } from "./setup-verification-copy.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
@@ -36,6 +36,12 @@ export type SetupVerificationIssue = {
   readonly message: string;
 };
 
+export type SetupVerificationToolStatus =
+  | "skipped"
+  | "ready"
+  | "blocked"
+  | "skipped-no-package-json";
+
 export type SetupVerificationReport = {
   readonly stateWritable: boolean;
   readonly envFilePresent: boolean;
@@ -47,7 +53,7 @@ export type SetupVerificationReport = {
   readonly skillAutonomyLabel: string;
   readonly skillAutonomyValue: string;
   readonly providerDiagnostic: ProviderDiagnostic;
-  readonly toolStatus: string;
+  readonly toolStatus: SetupVerificationToolStatus;
   readonly configSources: readonly string[];
   readonly warnings: readonly string[];
   readonly issueCodes: readonly SetupVerificationIssueCode[];
@@ -75,16 +81,17 @@ export async function collectSetupVerificationReport(
   let envFilePresent = false;
   let envMode: string | undefined;
   let envFileSecure = true;
-  let toolStatus = "skipped";
+  let toolStatus: SetupVerificationToolStatus = "skipped";
   const warnings: string[] = [];
   const issueCodes: SetupVerificationIssueCode[] = [];
+  const copy = setupVerificationCopy(locale);
 
   try {
     await mkdir(stateRoot, { recursive: true });
     await writeFile(verifyFile, "ok\n", "utf8");
     stateWritable = true;
   } catch {
-    warnings.push(onboardingCopy(locale).verification.stateNotWritableWarning);
+    warnings.push(copy.verification.stateNotWritableWarning);
     issueCodes.push("state-not-writable");
   }
 
@@ -94,7 +101,7 @@ export async function collectSetupVerificationReport(
     envMode = (envStat.mode & 0o777).toString(8).padStart(3, "0");
     envFileSecure = (envStat.mode & 0o777) === 0o600;
     if (!envFileSecure) {
-      warnings.push(onboardingCopy(locale).verification.secretModeWarning);
+      warnings.push(copy.verification.secretModeWarning);
       issueCodes.push("secret-permissions");
     }
   } catch {
@@ -109,7 +116,7 @@ export async function collectSetupVerificationReport(
   }
 
   if (!workspaceTrusted) {
-    warnings.push(onboardingCopy(locale).verification.notTrustedWarning);
+    warnings.push(copy.verification.notTrustedWarning);
     issueCodes.push("workspace-not-trusted");
   }
 
@@ -123,11 +130,11 @@ export async function collectSetupVerificationReport(
       });
       toolStatus = response?.result?.ok === true ? "ready" : "blocked";
       if (response?.result?.ok !== true) {
-        warnings.push(onboardingCopy(locale).verification.readOnlyToolWarning);
+        warnings.push(copy.verification.readOnlyToolWarning);
         issueCodes.push("read-only-tool-blocked");
       }
     } catch {
-      toolStatus = onboardingCopy(locale).verification.skippedNoPackageJson;
+      toolStatus = "skipped-no-package-json";
     }
   }
 
@@ -159,7 +166,7 @@ async function isWorkspaceTrusted(store: WorkspaceTrustStore, workspaceRoot: str
 
 export function renderSetupVerificationReport(
   report: SetupVerificationReport,
-  copy: OnboardingCopy
+  copy: SetupVerificationCopy
 ): string {
   const lines: string[] = [
     copy.verification.title,
@@ -170,7 +177,7 @@ export function renderSetupVerificationReport(
     `${copy.verification.workspaceTrust}: ${report.workspaceTrusted ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
     `${copy.verification.securityMode}: ${report.securityModeLabel} (${report.securityModeValue})`,
     `${copy.verification.workflowLearning}: ${report.skillAutonomyLabel} (${report.skillAutonomyValue})`,
-    `${copy.verification.readOnlyToolCheck}: ${report.toolStatus}`,
+    `${copy.verification.readOnlyToolCheck}: ${renderToolStatus(report.toolStatus, copy)}`,
     `${copy.verification.configSources}: ${report.configSources.join(", ") || "none"}`,
     "",
     renderProviderDiagnostic(report.providerDiagnostic),
@@ -197,7 +204,7 @@ export async function runSetupVerification(options: OnboardingOptions & {
   const report = await collectSetupVerificationReport(options);
   const config = await loadRuntimeConfig(options);
   const locale = config.ui.language === "ar" ? "ar" : "en";
-  const copy = onboardingCopy(locale);
+  const copy = setupVerificationCopy(locale);
   const output = renderSetupVerificationReport(report, copy);
 
   return {
@@ -206,7 +213,20 @@ export async function runSetupVerification(options: OnboardingOptions & {
   };
 }
 
-function renderVerificationNextSteps(issueCodes: readonly SetupVerificationIssueCode[], copy: OnboardingCopy): string {
+function renderToolStatus(status: SetupVerificationToolStatus, copy: SetupVerificationCopy): string {
+  switch (status) {
+    case "ready":
+      return copy.verification.ready;
+    case "blocked":
+      return copy.verification.blocked;
+    case "skipped-no-package-json":
+      return copy.verification.skippedNoPackageJson;
+    case "skipped":
+      return copy.verification.skipped;
+  }
+}
+
+function renderVerificationNextSteps(issueCodes: readonly SetupVerificationIssueCode[], copy: SetupVerificationCopy): string {
   const steps = new Set<string>();
   for (const code of issueCodes) {
     switch (code) {

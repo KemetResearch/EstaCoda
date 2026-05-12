@@ -9,6 +9,7 @@ import {
   setupCopy,
   type SetupCopyKey,
 } from "./setup-copy.js";
+import { setupVerificationCopy } from "./setup-verification-copy.js";
 
 const FIRST_RUN_KEYS = [
   "onboarding.welcome",
@@ -151,6 +152,45 @@ const APPLY_HANDOFF_KEYS = [
   "setupApply.repairRequired",
 ] as const;
 
+const SETUP_VERIFICATION_KEYS = [
+  "setupVerification.title",
+  "setupVerification.body",
+  "setupVerification.stateDirectory",
+  "setupVerification.secretStore",
+  "setupVerification.workspaceTrust",
+  "setupVerification.securityMode",
+  "setupVerification.workflowLearning",
+  "setupVerification.readOnlyToolCheck",
+  "setupVerification.configSources",
+  "setupVerification.status.writable",
+  "setupVerification.status.blocked",
+  "setupVerification.status.notPresent",
+  "setupVerification.status.presentMode",
+  "setupVerification.status.skipped",
+  "setupVerification.status.ready",
+  "setupVerification.status.trusted",
+  "setupVerification.status.notTrusted",
+  "setupVerification.warning.workspaceNotTrusted",
+  "setupVerification.warning.stateNotWritable",
+  "setupVerification.warning.secretMode",
+  "setupVerification.warning.readOnlyTool",
+  "setupVerification.warning.skippedNoPackageJson",
+  "setupVerification.warningsTitle",
+  "setupVerification.nextActionsTitle",
+  "setupVerification.statusReady",
+  "setupVerification.nextReady",
+  "setupVerification.fallbackNextAction",
+  "setupVerification.actions.providerIncomplete",
+  "setupVerification.actions.missingApiKey.generic",
+  "setupVerification.actions.missingApiKey.env",
+  "setupVerification.actions.noCredentialPool",
+  "setupVerification.actions.networkDisabled",
+  "setupVerification.actions.workspaceNotTrusted",
+  "setupVerification.actions.secretPermissions",
+  "setupVerification.actions.stateNotWritable",
+  "setupVerification.actions.readOnlyTool",
+] as const;
+
 const VALIDATION_KEYS = [
   "setupValidation.provider.invalid",
   "setupValidation.model.invalid",
@@ -221,7 +261,18 @@ describe("setup copy", () => {
   });
 
   it("contains save, verify, and launch handoff copy keys", () => {
+    assertKeys(SETUP_VERIFICATION_KEYS);
     assertKeys(APPLY_HANDOFF_KEYS);
+  });
+
+  it("keeps setup verification Arabic technical tokens isolated", () => {
+    const copy = setupVerificationCopy("ar");
+
+    expect(copy.verification.skippedNoPackageJson).toContain(isolateLtr("package.json"));
+    expect(copy.verification.nextReady).toContain(isolateLtr("estacoda telegram setup"));
+    expect(copy.verification.nextReady).toContain(isolateLtr("estacoda browser setup"));
+    expect(copy.verification.actions.secretPermissions).toContain(isolateLtr("chmod 600 ~/.estacoda/.env"));
+    expect(copy.verification.actions.missingApiKey("OPENAI_API_KEY")).toContain(isolateLtr("OPENAI_API_KEY"));
   });
 
   it("contains validation, error, and warning copy keys", () => {

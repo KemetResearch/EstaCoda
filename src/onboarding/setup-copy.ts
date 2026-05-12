@@ -36,8 +36,21 @@ export type SetupCopyResolutionOptions = {
 };
 
 const TECHNICAL_TOKENS = [
+  "estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>",
+  "estacoda telegram setup",
+  "estacoda browser setup",
+  "estacoda setup --advanced",
+  "chmod 600 ~/.estacoda/.env",
+  "/workspace.trust.grant",
+  "estacoda verify",
+  "estacoda setup",
   "EstaCoda",
   "Telegram",
+  "package.json",
+  "~/.estacoda/.env",
+  "~/.estacoda",
+  "estacoda",
+  "0600",
   "API",
 ] as const;
 
@@ -121,6 +134,42 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.save.validation.confirmed", "Confirm save/apply planning.", "أكّد تخطيط الحفظ والتطبيق.", [], "config-write"),
   copy("onboarding.verification", "Run read-only verification after saving. It checks setup without unnecessary device changes.", "يشغّل تحققًا للقراءة فقط بعد الحفظ. يفحص الإعداد دون تدخّل غير ضروري في الجهاز.", [], "setup-verification"),
   copy("onboarding.verification.validation.selected", "Choose whether to verify setup.", "اختر هل تريد التحقق من الإعداد.", [], "setup-verification"),
+  copy("setupVerification.title", "EstaCoda verify", "فحص EstaCoda", [], "setup-verification"),
+  copy("setupVerification.body", "Checks your local setup, provider route, credential store, workspace trust, and basic tool readiness.", "يتحقق من الإعداد المحلي، ومسار المزوّد، ومخزن المفاتيح، وثقة مجلد العمل، وجاهزية الأدوات الأساسية.", [], "setup-verification"),
+  copy("setupVerification.stateDirectory", "State directory", "مجلد الحالة", [], "setup-verification"),
+  copy("setupVerification.secretStore", "Secret store", "مخزن المفاتيح", [], "setup-verification"),
+  copy("setupVerification.workspaceTrust", "Workspace trust", "ثقة مجلد العمل", [], "workspace-trust"),
+  copy("setupVerification.securityMode", "Security mode", "وضع الأمان", [], "security-policy"),
+  copy("setupVerification.workflowLearning", "Workflow learning", "تعلّم سير العمل", [], "workflow-learning"),
+  copy("setupVerification.readOnlyToolCheck", "Read-only tool check", "فحص أداة القراءة فقط", [], "setup-verification"),
+  copy("setupVerification.configSources", "Config sources", "مصادر الإعداد", [], "config-summary"),
+  copy("setupVerification.status.writable", "writable", "قابل للكتابة", [], "setup-verification"),
+  copy("setupVerification.status.blocked", "blocked", "محظور", [], "setup-verification"),
+  copy("setupVerification.status.notPresent", "not present", "غير موجود", [], "setup-verification"),
+  copy("setupVerification.status.presentMode", "present ({mode})", "موجود ({mode})", ["{mode}"], "setup-verification"),
+  copy("setupVerification.status.skipped", "skipped", "تم التخطي", [], "setup-verification"),
+  copy("setupVerification.status.ready", "ready", "جاهز", [], "setup-verification"),
+  copy("setupVerification.status.trusted", "trusted", "موثوق", [], "workspace-trust"),
+  copy("setupVerification.status.notTrusted", "not trusted", "غير موثوق", [], "workspace-trust"),
+  copy("setupVerification.warning.workspaceNotTrusted", "Workspace is not trusted yet; local write/terminal actions will ask first.", "مجلد العمل غير موثوق بعد؛ إجراءات الكتابة والطرفية المحلية ستطلب الموافقة أولاً.", [], "workspace-trust"),
+  copy("setupVerification.warning.stateNotWritable", "State directory is not writable.", "مجلد الحالة غير قابل للكتابة.", [], "config-repair"),
+  copy("setupVerification.warning.secretMode", "Secret store permissions should be 0600.", "يجب أن تكون صلاحيات مخزن المفاتيح 0600.", [], "credential-reference"),
+  copy("setupVerification.warning.readOnlyTool", "Read-only file tool check did not complete.", "لم يكتمل فحص أداة قراءة الملفات.", [], "setup-verification"),
+  copy("setupVerification.warning.skippedNoPackageJson", "skipped (no package.json)", "تم التخطي (لا يوجد package.json)", [], "setup-verification"),
+  copy("setupVerification.warningsTitle", "Warnings:", "تحذيرات:", [], "setup-verification"),
+  copy("setupVerification.nextActionsTitle", "Next actions:", "الخطوات التالية:", [], "setup-verification"),
+  copy("setupVerification.statusReady", "Status: ready", "الحالة: جاهز", [], "setup-verification"),
+  copy("setupVerification.nextReady", "Next: run estacoda, or configure optional channels with estacoda telegram setup / estacoda browser setup.", "التالي: شغّل estacoda، أو اضبط القنوات الاختيارية عبر estacoda telegram setup / estacoda browser setup.", [], "agent-launch"),
+  copy("setupVerification.fallbackNextAction", "Fix the warnings above, then rerun estacoda verify.", "أصلح التحذيرات أعلاه، ثم أعد تشغيل estacoda verify.", [], "setup-verification"),
+  copy("setupVerification.actions.providerIncomplete", "Run estacoda setup to choose a provider/model.", "شغّل estacoda setup لاختيار مزوّد ونموذج.", [], "provider-selection"),
+  copy("setupVerification.actions.missingApiKey.generic", "Export the missing provider API key, or rerun estacoda setup to store it locally.", "صدّر مفتاح API الناقص، أو أعد تشغيل estacoda setup لحفظه محلياً.", [], "credential-reference"),
+  copy("setupVerification.actions.missingApiKey.env", "Export {envVar}, or rerun estacoda setup and choose local secret storage.", "صدّر {envVar}، أو أعد تشغيل estacoda setup واختر تخزين المفتاح محلياً.", ["{envVar}"], "credential-reference"),
+  copy("setupVerification.actions.noCredentialPool", "Run estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>.", "شغّل estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>.", [], "credential-reference"),
+  copy("setupVerification.actions.networkDisabled", "Enable network inference for the selected hosted provider with estacoda setup --advanced.", "فعّل الاستدلال عبر الشبكة للمزوّد المستضاف المختار باستخدام estacoda setup --advanced.", [], "provider-selection"),
+  copy("setupVerification.actions.workspaceNotTrusted", "Run /workspace.trust.grant in an interactive session, or rerun estacoda setup and trust this workspace.", "شغّل /workspace.trust.grant داخل جلسة تفاعلية، أو أعد تشغيل estacoda setup ومنح الثقة لهذا المجلد.", [], "workspace-trust"),
+  copy("setupVerification.actions.secretPermissions", "Run chmod 600 ~/.estacoda/.env to restrict local secret-store permissions.", "شغّل chmod 600 ~/.estacoda/.env لتقييد صلاحيات مخزن المفاتيح المحلي.", [], "credential-reference"),
+  copy("setupVerification.actions.stateNotWritable", "Check write permissions for ~/.estacoda.", "تحقق من صلاحيات الكتابة في ~/.estacoda.", [], "config-repair"),
+  copy("setupVerification.actions.readOnlyTool", "Start an interactive session after fixing provider/trust warnings, then retry estacoda verify.", "ابدأ جلسة تفاعلية بعد إصلاح تحذيرات المزوّد/الثقة، ثم أعد تشغيل estacoda verify.", [], "setup-verification"),
   copy("onboarding.launch", "Launch only after verified-ready, or after explicitly accepting limited mode.", "ابدأ التشغيل فقط بعد جاهزية مؤكدة، أو بعد قبول الوضع المحدود صراحةً.", [], "agent-launch"),
   copy("onboarding.launch.preferenceTitle", "Launch preference", "تفضيل التشغيل", [], "agent-launch"),
   copy("onboarding.launch.skipAction.label", "Do not launch", "لا تبدأ التشغيل", [], "agent-launch"),
@@ -314,10 +363,8 @@ function copy(
 
 function isolateArabicCopy(value: string): string {
   let isolated = value.replace(/\{[A-Za-z][A-Za-z0-9]*\}/gu, (placeholder) => isolateLtr(placeholder));
-  for (const token of TECHNICAL_TOKENS) {
-    isolated = isolated.replace(new RegExp(escapeRegExp(token), "gu"), isolateLtr(token));
-  }
-  return isolated;
+  const tokenPattern = new RegExp(TECHNICAL_TOKENS.map(escapeRegExp).join("|"), "gu");
+  return isolated.replace(tokenPattern, (token) => isolateLtr(token));
 }
 
 function escapeRegExp(value: string): string {
