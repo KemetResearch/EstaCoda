@@ -17,6 +17,7 @@
     "smoke:dist": "node dist/smoke.js",
     "smoke:bun": "bun src/smoke.ts",
     "audit:esm": "node scripts/audit-esm.mjs dist",
+    "audit:runtime-imports": "node scripts/audit-runtime-imports.mjs",
     "test": "vitest run",
     "test:node": "vitest run --config vitest.node.config.ts",
     "test:bun": "bun ./node_modules/vitest/vitest.mjs run",
@@ -28,6 +29,7 @@
     "provider:hardening:bun": "bun scripts/provider-hardening.ts"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "tsx": "^4.20.6",
     "typescript": "^5.8.0",
@@ -36,6 +38,7 @@
   "dependencies": {
     "@hapi/boom": "^9.1.4",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "better-sqlite3": "^12.10.0",
     "discord.js": "^14.26.4"
   }
 }
