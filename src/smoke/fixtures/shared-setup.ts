@@ -12,7 +12,6 @@ import { loadSkillsFromDirectory } from "../../skills/skill-loader.js";
 import { builtinTools } from "../../tools/builtin-tools.js";
 import { createConfigTools } from "../../config/config-tools.js";
 import { createMemoryTool } from "../../memory/memory-tool.js";
-import { createOnboardingTools } from "../../onboarding/onboarding-tools.js";
 import { createProcessTools } from "../../process/process-tools.js";
 import { createPythonTools } from "../../tools/python-tools.js";
 import { createWebTools } from "../../tools/web-tools.js";
@@ -149,12 +148,6 @@ export async function registerStandardTools(tools: ToolRegistry, options: {
     })) {
       tools.register(tool);
     }
-    for (const tool of createOnboardingTools({
-      workspaceRoot: options.configWorkspace,
-      homeDir: options.configHome
-    })) {
-      tools.register(tool);
-    }
   }
 
   if (options.skills && options.personalSkillRoot && options.skillEvolutionStore) {
@@ -260,12 +253,6 @@ export async function createSmokeContext(): Promise<SmokeContext> {
     tools.register(tool);
   }
   for (const tool of createConfigTools({
-    workspaceRoot: configToolsWorkspace,
-    homeDir: configToolsHome
-  })) {
-    tools.register(tool);
-  }
-  for (const tool of createOnboardingTools({
     workspaceRoot: configToolsWorkspace,
     homeDir: configToolsHome
   })) {

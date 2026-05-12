@@ -21,7 +21,6 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
-import { createOnboardingTools } from "../onboarding/onboarding-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
@@ -425,15 +424,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolRegistry.register(tool);
   }
   for (const tool of createConfigTools({
-    workspaceRoot,
-    homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
-    projectConfigTrust: options.projectConfigTrust
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createOnboardingTools({
     workspaceRoot,
     homeDir: options.homeDir,
     userConfigPath: options.userConfigPath,

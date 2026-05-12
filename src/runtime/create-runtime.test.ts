@@ -90,6 +90,18 @@ async function minimalRuntimeOptions(overrides: {
 }
 
 describe("createRuntime MCP trust gating", () => {
+  it("does not expose legacy onboarding runtime tools", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime(options);
+    try {
+      const names = runtime.tools().map((tool) => tool.name);
+
+      expect(names.filter((name) => name.startsWith("onboarding."))).toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("does not start/register MCP when projectConfigTrust is omitted", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } }
