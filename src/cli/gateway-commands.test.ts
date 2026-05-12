@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { Database } from "bun:sqlite";
 import {
   runGatewayStatus,
   runGatewayDiagnose,
@@ -29,6 +28,7 @@ import { writeRuntimeCacheState, runtimeCacheStatePath } from "../gateway/runtim
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
   return {
@@ -143,7 +143,7 @@ describe("gateway commands", () => {
 
     it("shows recent cron failures", async () => {
       const dbPath = join(stateRoot, "sessions.sqlite");
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.exec(`
         create table if not exists cron_executions (
           id text primary key,
@@ -161,7 +161,7 @@ describe("gateway commands", () => {
           created_at text not null
         )
       `);
-      const executionStore = new CronExecutionStore(db);
+      const executionStore = new CronExecutionStore({ db });
       const record = await executionStore.create({ jobId: "job-1" });
       await executionStore.complete(record.id, {
         status: "failed",

@@ -11,19 +11,7 @@ const driverRules = new Map([
 ]);
 
 const legacyBunSQLiteFiles = new Set([
-  "src/cli/cli-sessions.test.ts",
-  "src/cli/cli.ts",
-  "src/cli/flow-commands.ts",
-  "src/cli/gateway-commands.test.ts",
-  "src/cli/gateway-commands.ts",
-  "src/cron/cron-command.test.ts",
-  "src/cron/cron-execution-store.test.ts",
-  "src/cron/cron-execution-store.ts",
-  "src/cron/cron-runner.test.ts",
-  "src/eval/fixtures/track5-integration.ts",
-  "src/runtime/create-runtime.ts",
-  "src/session/sqlite-session-db.ts",
-  "src/taskflow/sqlite-taskflow-store.ts"
+  // Transitional allowlist. Keep empty when storage/runtime classes do not import bun:sqlite.
 ]);
 
 async function collectSourceFiles(directory) {

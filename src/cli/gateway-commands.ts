@@ -1,11 +1,11 @@
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
-import { Database } from "bun:sqlite";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
@@ -80,8 +80,8 @@ export async function runGatewayStatus(
   let executionStore: CronExecutionStore | undefined;
   try {
     const dbPath = join(stateRoot, "sessions.sqlite");
-    const db = new Database(dbPath);
-    executionStore = new CronExecutionStore(db);
+    const db = openDefaultSQLiteDatabase({ path: dbPath });
+    executionStore = new CronExecutionStore({ db });
   } catch { /* ignore */ }
 
   let recentCronFailures: Awaited<ReturnType<CronExecutionStore["recentFailures"]>> = [];

@@ -58,10 +58,10 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
-import { Database } from "bun:sqlite";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive,
@@ -1954,8 +1954,8 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
 function tryCreateExecutionStore(options: CliOptions): CronExecutionStore | undefined {
   try {
     const dbPath = join(options.homeDir ?? ".estacoda", "sessions.sqlite");
-    const db = new Database(dbPath);
-    return new CronExecutionStore(db);
+    const db = openDefaultSQLiteDatabase({ path: dbPath });
+    return new CronExecutionStore({ db });
   } catch {
     return undefined;
   }

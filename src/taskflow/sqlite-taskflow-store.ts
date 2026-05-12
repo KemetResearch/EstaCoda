@@ -1,6 +1,5 @@
 // SQLite-backed TaskFlowStore implementation
 
-import { Database } from "bun:sqlite";
 import type {
   Flow,
   FlowId,
@@ -22,15 +21,16 @@ import type {
 import type { TaskFlowStore } from "./taskflow-store.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
 
 export type SQLiteTaskFlowStoreOptions = {
-  db: Database;
+  db: SQLiteDatabase;
   now?: () => Date;
   id?: () => string;
 };
 
 export class SQLiteTaskFlowStore implements TaskFlowStore {
-  readonly #db: Database;
+  readonly #db: SQLiteDatabase;
   readonly #now: () => Date;
   readonly #id: () => string;
 

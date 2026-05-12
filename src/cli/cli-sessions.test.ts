@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Database } from "bun:sqlite";
 import { runCliCommand } from "./cli.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -20,7 +20,7 @@ describe("CLI session commands", () => {
     stateRoot = join(tmpDir, ".estacoda");
     await mkdir(stateRoot, { recursive: true });
     dbPath = join(stateRoot, "sessions.sqlite");
-    const db = new Database(dbPath, { create: true });
+    const db = openDefaultSQLiteDatabase({ path: dbPath });
     db.exec(`
       create table if not exists sessions (
         id text primary key,
@@ -67,7 +67,7 @@ describe("CLI session commands", () => {
 
   describe("sessions list", () => {
     it("lists sessions", async () => {
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
@@ -83,7 +83,7 @@ describe("CLI session commands", () => {
     });
 
     it("shows surface pointers attached to sessions", async () => {
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
@@ -103,7 +103,7 @@ describe("CLI session commands", () => {
 
   describe("sessions show", () => {
     it("shows session details", async () => {
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
@@ -133,7 +133,7 @@ describe("CLI session commands", () => {
     });
 
     it("shows surface pointers for session", async () => {
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
@@ -246,7 +246,7 @@ describe("CLI session commands", () => {
 
   describe("read-only status commands do not mutate sessions", () => {
     it("sessions list does not create or modify sessions", async () => {
-      const db = new Database(dbPath, { create: true });
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
       db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
         .run("sess-1", "default", "Test", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
@@ -257,7 +257,7 @@ describe("CLI session commands", () => {
         homeDir: tmpDir
       });
 
-      const db2 = new Database(dbPath, { create: true });
+      const db2 = openDefaultSQLiteDatabase({ path: dbPath });
       const rows = db2.query("select * from sessions where id = ?").all("sess-1") as any[];
       db2.close();
       expect(rows.length).toBe(1);

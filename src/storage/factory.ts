@@ -1,10 +1,14 @@
 import type { OpenSQLiteDatabaseOptions, SQLiteDatabase } from "./sqlite.js";
+import { openBetterSQLiteDatabase } from "./better-sqlite3.js";
+
+export function openDefaultSQLiteDatabase(options: OpenSQLiteDatabaseOptions): SQLiteDatabase {
+  return openBetterSQLiteDatabase({ ...options, driver: "better-sqlite3" });
+}
 
 export async function openSQLiteDatabase(options: OpenSQLiteDatabaseOptions): Promise<SQLiteDatabase> {
   const driver = options.driver ?? "better-sqlite3";
 
   if (driver === "better-sqlite3") {
-    const { openBetterSQLiteDatabase } = await import("./better-sqlite3.js");
     return openBetterSQLiteDatabase(options);
   }
 

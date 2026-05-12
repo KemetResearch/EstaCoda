@@ -727,8 +727,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const sqliteDb = (sessionDb as unknown as { db: import("bun:sqlite").Database }).db;
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sqliteDb });
+      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db });
       const lockService = new FlowLockService({ store: taskflowStore });
       const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
       const processRegistry = new FlowProcessRegistry({ store: taskflowStore });

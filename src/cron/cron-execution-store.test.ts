@@ -1,18 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CronExecutionStore } from "./cron-execution-store.js";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 describe("CronExecutionStore", () => {
   let tmpDir: string;
-  let db: Database;
+  let db: SQLiteDatabase;
   let store: CronExecutionStore;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "estacoda-cron-test-"));
-    db = new Database(join(tmpDir, "test.db"));
+    db = openDefaultSQLiteDatabase({ path: join(tmpDir, "test.db") });
     db.exec(`
       create table if not exists cron_executions (
         id text primary key,
@@ -32,7 +33,7 @@ describe("CronExecutionStore", () => {
       create index if not exists idx_cron_executions_job on cron_executions(job_id, started_at desc);
       create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
     `);
-    store = new CronExecutionStore(db);
+    store = new CronExecutionStore({ db });
   });
 
   afterEach(() => {

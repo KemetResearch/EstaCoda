@@ -78,8 +78,7 @@ async function openFlowDb(options: CliOptions): Promise<SQLiteSessionDB> {
 }
 
 function createFlowServices(db: SQLiteSessionDB) {
-  const sqliteDb = (db as unknown as { db: import("bun:sqlite").Database }).db;
-  const store = new SQLiteTaskFlowStore({ db: sqliteDb });
+  const store = new SQLiteTaskFlowStore({ db: db.db });
   const lockService = new FlowLockService({ store });
   const engine = new TaskFlowEngine({ store, lockService, ownerId: "cli" });
   const processRegistry = new FlowProcessRegistry({ store });

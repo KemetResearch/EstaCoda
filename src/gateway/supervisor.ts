@@ -609,7 +609,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     state.runtimeFingerprint = runtimeFingerprint;
 
     const cronStore = new CronStore({ homeDir });
-    const cronExecutionStore = new CronExecutionStore(sessionDb.db);
+    const cronExecutionStore = new CronExecutionStore({ db: sessionDb.db });
     const cronJobLock = createFileCronJobLock({
       lockDir: join(stateRoot, "cron", "locks"),
       staleTimeoutMs: 600_000,

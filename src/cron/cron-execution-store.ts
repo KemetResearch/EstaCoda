@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Database } from "bun:sqlite";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
 
 export type CronExecutionStatus = "success" | "failed" | "cancelled" | "skipped" | "running";
 
@@ -24,7 +24,7 @@ export type CronExecutionRecord = {
 };
 
 export type CronExecutionStoreOptions = {
-  db: Database;
+  db: SQLiteDatabase;
   now?: () => Date;
   id?: () => string;
 };
@@ -46,15 +46,14 @@ type ExecutionRow = {
 };
 
 export class CronExecutionStore {
-  readonly #db: Database;
+  readonly #db: SQLiteDatabase;
   readonly #now: () => Date;
   readonly #id: () => string;
 
-  constructor(options: CronExecutionStoreOptions | Database) {
-    const opts = options instanceof Database ? { db: options } : options;
-    this.#db = opts.db;
-    this.#now = opts.now ?? (() => new Date());
-    this.#id = opts.id ?? (() => randomUUID());
+  constructor(options: CronExecutionStoreOptions) {
+    this.#db = options.db;
+    this.#now = options.now ?? (() => new Date());
+    this.#id = options.id ?? (() => randomUUID());
     this.#ensureSchema();
   }
 
