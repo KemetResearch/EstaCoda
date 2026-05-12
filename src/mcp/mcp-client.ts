@@ -87,6 +87,7 @@ export class MCPClient {
   #nextId = 1;
   #started = false;
   #stderr = "";
+  #stdioClosedError: Error | undefined;
   readonly #pending = new Map<number, {
     resolve: (value: unknown) => void;
     reject: (error: unknown) => void;
@@ -188,6 +189,7 @@ export class MCPClient {
     const child = this.#child;
     this.#child = undefined;
     this.#started = false;
+    this.#markStdioClosed(new Error(`MCP server ${this.#name} stopped`));
     if (child === undefined || child.killed) {
       return;
     }
@@ -204,6 +206,7 @@ export class MCPClient {
 
   async #startStdio(): Promise<void> {
     const resolved = await resolveStdioCommand(this.#command!, this.#args);
+    this.#stdioClosedError = undefined;
     this.#child = spawn(resolved.command, resolved.args, {
       cwd: this.#cwd,
       env: buildStdioEnv(this.#env),
@@ -218,12 +221,17 @@ export class MCPClient {
     this.#child.stderr.on("data", (chunk: string) => {
       this.#stderr += chunk;
     });
+    this.#child.on("error", (error) => {
+      this.#markStdioClosed(new Error(`MCP server ${this.#name} process error: ${error.message}`));
+    });
     this.#child.on("exit", (code, signal) => {
-      const error = new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`);
-      for (const pending of this.#pending.values()) {
-        pending.reject(error);
-      }
-      this.#pending.clear();
+      this.#markStdioClosed(new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`));
+    });
+    this.#child.on("close", (code, signal) => {
+      this.#markStdioClosed(new Error(`MCP server ${this.#name} closed (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`));
+    });
+    this.#child.stdin.on("error", (error) => {
+      this.#markStdioClosed(this.#stdioWriteError(error));
     });
   }
 
@@ -237,16 +245,12 @@ export class MCPClient {
       return;
     }
 
-    const child = this.#child;
-    if (child === undefined) {
-      throw new Error(`MCP server ${this.#name} is not running`);
-    }
     const payload = JSON.stringify({
       jsonrpc: "2.0",
       method,
       params
     });
-    child.stdin.write(`${payload}\n`, "utf8");
+    await this.#writeStdioLine(`${payload}\n`);
   }
 
   async #request(method: string, params?: unknown, timeoutMs = this.#timeoutMs): Promise<unknown> {
@@ -261,11 +265,6 @@ export class MCPClient {
     if (this.#transport === "http") {
       const response = await this.#sendHttp(payload, timeoutMs);
       return this.#unwrapResponse(response, method);
-    }
-
-    const child = this.#child;
-    if (child === undefined) {
-      throw new Error(`MCP server ${this.#name} is not running`);
     }
 
     const response = await new Promise<unknown>((resolve, reject) => {
@@ -283,10 +282,86 @@ export class MCPClient {
           reject(error);
         }
       });
-      child.stdin.write(`${JSON.stringify(payload)}\n`, "utf8");
+      void this.#writeStdioLine(`${JSON.stringify(payload)}\n`).catch((error) => {
+        if (this.#pending.delete(id)) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
     });
 
     return response;
+  }
+
+  async #writeStdioLine(line: string): Promise<void> {
+    const child = this.#child;
+    if (child === undefined) {
+      throw this.#stdioClosedError ?? new Error(`MCP server ${this.#name} is not running`);
+    }
+    if (this.#stdioClosedError !== undefined) {
+      throw this.#stdioClosedError;
+    }
+    if (
+      child.exitCode !== null
+      || child.signalCode !== null
+      || child.stdin.destroyed
+      || child.stdin.writableEnded
+      || child.stdin.closed
+      || !child.stdin.writable
+    ) {
+      const error = this.#stdioConnectionClosedError();
+      this.#markStdioClosed(error);
+      throw error;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error | null) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        child.stdin.off("error", finish);
+        if (error === undefined || error === null) {
+          resolve();
+          return;
+        }
+        const writeError = this.#stdioWriteError(error);
+        this.#markStdioClosed(writeError);
+        reject(writeError);
+      };
+
+      child.stdin.once("error", finish);
+      try {
+        child.stdin.write(line, "utf8", finish);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  #stdioConnectionClosedError(): Error {
+    return new Error(`MCP server ${this.#name} connection is closed`);
+  }
+
+  #stdioWriteError(error: Error): Error {
+    const errorWithCode = error as Error & { code?: unknown };
+    const code = typeof errorWithCode.code === "string"
+      ? ` ${errorWithCode.code}`
+      : "";
+    return new Error(`MCP server ${this.#name} stdin write failed${code}: ${error.message}`);
+  }
+
+  #markStdioClosed(error: Error): void {
+    if (this.#stdioClosedError === undefined) {
+      this.#stdioClosedError = error;
+    }
+    this.#started = false;
+    const closeError = this.#stdioClosedError;
+    for (const pending of this.#pending.values()) {
+      pending.reject(closeError);
+    }
+    this.#pending.clear();
   }
 
   async #sendHttp(payload: Record<string, unknown>, timeoutMs = this.#timeoutMs): Promise<unknown> {
