@@ -130,15 +130,13 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
   await writeFile(scriptPath, script, "utf8");
 
   return new Promise<ToolResult>((resolve) => {
+    const childEnv = buildSafeChildEnv({ homeDir: sandboxHome });
+    childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
+    childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
+
     const child = spawn("python3", [scriptPath], {
       cwd: options.workspaceRoot,
-      env: buildSafeChildEnv({
-        homeDir: sandboxHome,
-        extra: {
-          ESTACODA_INPUT_JSON: JSON.stringify(options.input),
-          ESTACODA_ALLOWED_TOOLS_JSON: JSON.stringify([...options.allowedTools].sort())
-        }
-      }),
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
