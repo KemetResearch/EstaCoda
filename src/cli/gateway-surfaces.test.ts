@@ -102,6 +102,10 @@ function snapshotContexts() {
   ];
 }
 
+function snapshotOutput(output: string): string {
+  return output.split("\n").map((line) => line.trimEnd()).join("\n");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Fake data factories
 // ─────────────────────────────────────────────────────────────
@@ -276,7 +280,7 @@ describe("Gateway surfaces — status", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildGatewayStatusViewModel(fakeGatewayStatusData());
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`gateway-status-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`gateway-status-${ctx.name}`);
     });
   }
 });
@@ -286,7 +290,7 @@ describe("Gateway surfaces — diagnose", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildGatewayDiagnoseViewModel(fakeGatewayDiagnoseData());
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`gateway-diagnose-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`gateway-diagnose-${ctx.name}`);
     });
   }
 });
@@ -299,7 +303,7 @@ describe("Gateway surfaces — channels list", () => {
         capabilities: fakeCapabilities(),
       });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`channels-list-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`channels-list-${ctx.name}`);
     });
   }
 });
@@ -309,7 +313,7 @@ describe("Gateway surfaces — channels status", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildChannelsStatusViewModel(fakeChannelsStatusData());
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`channels-status-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`channels-status-${ctx.name}`);
     });
   }
 });
@@ -319,7 +323,7 @@ describe("Gateway surfaces — channels status unknown", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildChannelsStatusViewModel({ channel: "unknown" });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`channels-status-unknown-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`channels-status-unknown-${ctx.name}`);
     });
   }
 });

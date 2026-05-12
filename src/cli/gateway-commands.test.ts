@@ -2,6 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+
+const fsPromisesMock = vi.hoisted(() => ({
+  rename: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  fsPromisesMock.rename.mockImplementation(actual.rename);
+  return {
+    ...actual,
+    rename: fsPromisesMock.rename,
+  };
+});
+
 import {
   runGatewayStatus,
   runGatewayDiagnose,
@@ -113,6 +127,7 @@ describe("gateway commands", () => {
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
     await mkdir(stateRoot, { recursive: true });
+    fsPromisesMock.rename.mockClear();
   });
 
   afterEach(async () => {
@@ -951,17 +966,12 @@ describe("gateway commands", () => {
       const original = JSON.stringify({ channels: { telegram: { enabled: false } } });
       await writeFile(configPath, original, "utf8");
 
-      const fsPromises = await import("node:fs/promises");
-      const renameSpy = vi.spyOn(fsPromises, "rename").mockImplementation(() => Promise.reject(new Error("rename failed")));
+      fsPromisesMock.rename.mockRejectedValueOnce(new Error("rename failed"));
 
-      try {
-        await expect(runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" })).rejects.toThrow("rename failed");
+      await expect(runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" })).rejects.toThrow("rename failed");
 
-        const after = await readFile(configPath, "utf8");
-        expect(after).toBe(original);
-      } finally {
-        renameSpy.mockRestore();
-      }
+      const after = await readFile(configPath, "utf8");
+      expect(after).toBe(original);
     });
   });
 

@@ -170,6 +170,10 @@ function snapshotContexts() {
   ];
 }
 
+function snapshotOutput(output: string): string {
+  return output.split("\n").map((line) => line.trimEnd()).join("\n");
+}
+
 // ──────────────────────────────────────
 // ViewModel fixtures
 // ──────────────────────────────────────
@@ -423,32 +427,32 @@ describe("Tool activity timeline", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders empty in ${ctx.name}`, () => {
       const output = ctx.renderer.render(emptyTimelineVm());
-      expect(output).toMatchSnapshot(`timeline-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-empty-${ctx.name}`);
     });
 
     it(`renders single running in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleRunningVm());
-      expect(output).toMatchSnapshot(`timeline-running-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-running-${ctx.name}`);
     });
 
     it(`renders single done in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleDoneVm());
-      expect(output).toMatchSnapshot(`timeline-done-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-done-${ctx.name}`);
     });
 
     it(`renders single failed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleFailedVm());
-      expect(output).toMatchSnapshot(`timeline-failed-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-failed-${ctx.name}`);
     });
 
     it(`renders single gated in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleGatedVm());
-      expect(output).toMatchSnapshot(`timeline-gated-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-gated-${ctx.name}`);
     });
 
     it(`renders multiple mixed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(multipleMixedVm());
-      expect(output).toMatchSnapshot(`timeline-mixed-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`timeline-mixed-${ctx.name}`);
     });
   }
 });
@@ -457,7 +461,7 @@ describe("Approval prompt", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(approvalPromptVm());
-      expect(output).toMatchSnapshot(`approval-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`approval-${ctx.name}`);
     });
   }
 
@@ -509,17 +513,17 @@ describe("Security audit", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders empty in ${ctx.name}`, () => {
       const output = ctx.renderer.render(securityAuditEmptyVm());
-      expect(output).toMatchSnapshot(`security-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`security-empty-${ctx.name}`);
     });
 
     it(`renders compact in ${ctx.name}`, () => {
       const output = ctx.renderer.render(securityAuditCompactVm());
-      expect(output).toMatchSnapshot(`security-compact-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`security-compact-${ctx.name}`);
     });
 
     it(`renders debug in ${ctx.name}`, () => {
       const output = ctx.renderer.render(securityAuditDebugVm());
-      expect(output).toMatchSnapshot(`security-debug-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`security-debug-${ctx.name}`);
     });
   }
 });
@@ -528,12 +532,12 @@ describe("Setup needed", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders image generation in ${ctx.name}`, () => {
       const output = ctx.renderer.render(setupNeededImageVm());
-      expect(output).toMatchSnapshot(`setup-image-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`setup-image-${ctx.name}`);
     });
 
     it(`renders other capability in ${ctx.name}`, () => {
       const output = ctx.renderer.render(setupNeededOtherVm());
-      expect(output).toMatchSnapshot(`setup-other-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`setup-other-${ctx.name}`);
     });
   }
 });
@@ -542,27 +546,27 @@ describe("Progress context rail", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders empty in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailEmptyVm());
-      expect(output).toMatchSnapshot(`rail-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`rail-empty-${ctx.name}`);
     });
 
     it(`renders active in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailActiveVm());
-      expect(output).toMatchSnapshot(`rail-active-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`rail-active-${ctx.name}`);
     });
 
     it(`renders failed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailFailedVm());
-      expect(output).toMatchSnapshot(`rail-failed-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`rail-failed-${ctx.name}`);
     });
 
     it(`renders timers in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailTimerVm());
-      expect(output).toMatchSnapshot(`rail-timer-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`rail-timer-${ctx.name}`);
     });
 
     it(`renders idle in ${ctx.name}`, () => {
       const output = ctx.renderer.render(progressRailIdleVm());
-      expect(output).toMatchSnapshot(`rail-idle-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`rail-idle-${ctx.name}`);
     });
   }
 });
@@ -575,37 +579,37 @@ describe("Tool activity rail", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders empty in ${ctx.name}`, () => {
       const output = ctx.renderer.render(emptyToolRailVm());
-      expect(output).toMatchSnapshot(`tool-rail-empty-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-empty-${ctx.name}`);
     });
 
     it(`renders single running in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleToolRunningVm());
-      expect(output).toMatchSnapshot(`tool-rail-running-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-running-${ctx.name}`);
     });
 
     it(`renders single done in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleToolDoneVm());
-      expect(output).toMatchSnapshot(`tool-rail-done-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-done-${ctx.name}`);
     });
 
     it(`renders single failed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleToolFailedVm());
-      expect(output).toMatchSnapshot(`tool-rail-failed-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-failed-${ctx.name}`);
     });
 
     it(`renders single gated in ${ctx.name}`, () => {
       const output = ctx.renderer.render(singleToolGatedVm());
-      expect(output).toMatchSnapshot(`tool-rail-gated-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-gated-${ctx.name}`);
     });
 
     it(`renders multiple mixed in ${ctx.name}`, () => {
       const output = ctx.renderer.render(multipleToolMixedVm());
-      expect(output).toMatchSnapshot(`tool-rail-mixed-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-mixed-${ctx.name}`);
     });
 
     it(`renders long path truncated in ${ctx.name}`, () => {
       const output = ctx.renderer.render(longPathToolRailVm());
-      expect(output).toMatchSnapshot(`tool-rail-long-path-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tool-rail-long-path-${ctx.name}`);
     });
   }
 
@@ -613,12 +617,12 @@ describe("Tool activity rail", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const renderer = new StandardRenderer({ tokens, capabilities: fullCaps(), locale: "ar" });
     const output = renderer.render(arabicToolRailVm());
-    expect(output).toMatchSnapshot("tool-rail-arabic-standard");
+    expect(snapshotOutput(output)).toMatchSnapshot("tool-rail-arabic-standard");
   });
 
   it("renders Arabic in plain mode with LTR-isolated tokens", () => {
     const output = renderPlain(arabicToolRailVm(), "ar");
-    expect(output).toMatchSnapshot("tool-rail-arabic-plain");
+    expect(snapshotOutput(output)).toMatchSnapshot("tool-rail-arabic-plain");
   });
 
   it("static running marker does not animate", () => {

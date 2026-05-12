@@ -1,357 +1,412 @@
-// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Gateway surfaces — status renders in plain: gateway-status-plain 1`] = `
-"[OK] EstaCoda gateway status
+exports[`Gateway surfaces — channels list > renders in narrow width > channels-list-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda channels[0m
 
-Supervisor
-PID: none
-State: stopped
+• telegram  : disabled
+• discord   : disabled
+• email     : disabled
+• whatsapp  : disabled
 
-Process
-Status: CLI view (no live gateway process in this shell)
+[1mCapabilities[0m
+[38;2;90;172;255mChannel [0m  [38;2;90;172;255mEnabled[0m  [38;2;90;172;255mConfigured[0m  [38;2;90;172;255mInbound  [0m  [38;2;90;172;255mOutbound[0m  [38;2;90;172;255mAttachments[0m  [38;2;90;172;255mThreads[0m  [38;2;90;172;255mExperimental[0m  [38;2;90;172;255mStatus                 [0m
+[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
 
-Channels
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
+exports[`Gateway surfaces — channels list > renders in no Unicode > channels-list-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda channels[0m
 
-Delivery
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
+- telegram  : disabled
+- discord   : disabled
+- email     : disabled
+- whatsapp  : disabled
+
+[1mCapabilities[0m
+[38;2;90;172;255mChannel [0m  [38;2;90;172;255mEnabled[0m  [38;2;90;172;255mConfigured[0m  [38;2;90;172;255mInbound  [0m  [38;2;90;172;255mOutbound[0m  [38;2;90;172;255mAttachments[0m  [38;2;90;172;255mThreads[0m  [38;2;90;172;255mExperimental[0m  [38;2;90;172;255mStatus                 [0m
+[2m--------  -------  ----------  ---------  --------  -----------  -------  ------------  -----------------------[0m
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
+
+exports[`Gateway surfaces — channels list > renders in no color > channels-list-no color 1`] = `
+"[OK] EstaCoda channels
+
+• telegram  : disabled
+• discord   : disabled
+• email     : disabled
+• whatsapp  : disabled
+
+Capabilities
+Channel   Enabled  Configured  Inbound    Outbound  Attachments  Threads  Experimental  Status
+────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
+
+exports[`Gateway surfaces — channels list > renders in plain > channels-list-plain 1`] = `
+"[OK] EstaCoda channels
+
+- telegram  : disabled
+- discord   : disabled
+- email     : disabled
+- whatsapp  : disabled
+
+Capabilities
+Channel   Enabled  Configured  Inbound    Outbound  Attachments  Threads  Experimental  Status
+--------  -------  ----------  ---------  --------  -----------  -------  ------------  -----------------------
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
+
+exports[`Gateway surfaces — channels list > renders in standard dark > channels-list-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda channels[0m
+
+• telegram  : disabled
+• discord   : disabled
+• email     : disabled
+• whatsapp  : disabled
+
+[1mCapabilities[0m
+[38;2;90;172;255mChannel [0m  [38;2;90;172;255mEnabled[0m  [38;2;90;172;255mConfigured[0m  [38;2;90;172;255mInbound  [0m  [38;2;90;172;255mOutbound[0m  [38;2;90;172;255mAttachments[0m  [38;2;90;172;255mThreads[0m  [38;2;90;172;255mExperimental[0m  [38;2;90;172;255mStatus                 [0m
+[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
+
+exports[`Gateway surfaces — channels list > renders in standard light > channels-list-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mEstaCoda channels[0m
+
+• telegram  : disabled
+• discord   : disabled
+• email     : disabled
+• whatsapp  : disabled
+
+[1mCapabilities[0m
+[38;2;0;87;217mChannel [0m  [38;2;0;87;217mEnabled[0m  [38;2;0;87;217mConfigured[0m  [38;2;0;87;217mInbound  [0m  [38;2;0;87;217mOutbound[0m  [38;2;0;87;217mAttachments[0m  [38;2;0;87;217mThreads[0m  [38;2;0;87;217mExperimental[0m  [38;2;0;87;217mStatus                 [0m
+[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
+telegram  no       no          polling    push      yes          yes      no            live_proven
+discord   no       no          websocket  push      no           no       no            present_not_live_proven
+email     no       no          polling    push      no           yes      no            present_not_live_proven
+whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
+`;
+
+exports[`Gateway surfaces — channels status > renders in narrow width > channels-status-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mTelegram channel status[0m
+
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
+
+[1mCapabilities[0m
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
+
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Gateway surfaces — channels status > renders in no Unicode > channels-status-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mTelegram channel status[0m
+
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
+
+[1mCapabilities[0m
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
+
+[1mSurface pointers[0m
+- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+`;
+
+exports[`Gateway surfaces — channels status > renders in no color > channels-status-no color 1`] = `
+"[OK] Telegram channel status
+
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
+
+Capabilities
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
 
 Surface pointers
-- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-Approvals
-Policy: adaptive
-Granted: 1
-
-Cron
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-Recent cron failures (last 5)
-- job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-Recent delivery errors (last 5)
-- 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-Missing config
-- telegram: BOT_TOKEN_ENV"
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
 `;
 
-exports[`Gateway surfaces — status renders in standard dark: gateway-status-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda gateway status\x1B[0m
+exports[`Gateway surfaces — channels status > renders in plain > channels-status-plain 1`] = `
+"[OK] Telegram channel status
 
-\x1B[1mSupervisor\x1B[0m
-PID: none
-State: stopped
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
-\x1B[1mProcess\x1B[0m
-Status: CLI view (no live gateway process in this shell)
-
-\x1B[1mChannels\x1B[0m
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
-
-\x1B[1mDelivery\x1B[0m
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
-
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-\x1B[1mApprovals\x1B[0m
-Policy: adaptive
-Granted: 1
-
-\x1B[1mCron\x1B[0m
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-\x1B[1mRecent cron failures (last 5)\x1B[0m
-• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-\x1B[1mRecent delivery errors (last 5)\x1B[0m
-• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-\x1B[1mMissing config\x1B[0m
-• telegram: BOT_TOKEN_ENV"
-`;
-
-exports[`Gateway surfaces — status renders in standard light: gateway-status-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mEstaCoda gateway status\x1B[0m
-
-\x1B[1mSupervisor\x1B[0m
-PID: none
-State: stopped
-
-\x1B[1mProcess\x1B[0m
-Status: CLI view (no live gateway process in this shell)
-
-\x1B[1mChannels\x1B[0m
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
-
-\x1B[1mDelivery\x1B[0m
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
-
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-\x1B[1mApprovals\x1B[0m
-Policy: adaptive
-Granted: 1
-
-\x1B[1mCron\x1B[0m
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-\x1B[1mRecent cron failures (last 5)\x1B[0m
-• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-\x1B[1mRecent delivery errors (last 5)\x1B[0m
-• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-\x1B[1mMissing config\x1B[0m
-• telegram: BOT_TOKEN_ENV"
-`;
-
-exports[`Gateway surfaces — status renders in no color: gateway-status-no color 1`] = `
-"[OK] EstaCoda gateway status
-
-Supervisor
-PID: none
-State: stopped
-
-Process
-Status: CLI view (no live gateway process in this shell)
-
-Channels
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
-
-Delivery
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
+Capabilities
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
 
 Surface pointers
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-Approvals
-Policy: adaptive
-Granted: 1
-
-Cron
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-Recent cron failures (last 5)
-• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-Recent delivery errors (last 5)
-• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-Missing config
-• telegram: BOT_TOKEN_ENV"
+- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
 `;
 
-exports[`Gateway surfaces — status renders in no Unicode: gateway-status-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda gateway status\x1B[0m
+exports[`Gateway surfaces — channels status > renders in standard dark > channels-status-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mTelegram channel status[0m
 
-\x1B[1mSupervisor\x1B[0m
-PID: none
-State: stopped
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
-\x1B[1mProcess\x1B[0m
-Status: CLI view (no live gateway process in this shell)
+[1mCapabilities[0m
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
 
-\x1B[1mChannels\x1B[0m
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
-
-\x1B[1mDelivery\x1B[0m
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
-
-\x1B[1mSurface pointers\x1B[0m
-- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-\x1B[1mApprovals\x1B[0m
-Policy: adaptive
-Granted: 1
-
-\x1B[1mCron\x1B[0m
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-\x1B[1mRecent cron failures (last 5)\x1B[0m
-- job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-\x1B[1mRecent delivery errors (last 5)\x1B[0m
-- 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-\x1B[1mMissing config\x1B[0m
-- telegram: BOT_TOKEN_ENV"
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
 `;
 
-exports[`Gateway surfaces — status renders in narrow width: gateway-status-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda gateway status\x1B[0m
+exports[`Gateway surfaces — channels status > renders in standard light > channels-status-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mTelegram channel status[0m
 
-\x1B[1mSupervisor\x1B[0m
-PID: none
-State: stopped
+Enabled: yes
+Ready: no
+Status: configured, missing credentials
+Token env: (unset)
+Token present: no
+Default chat: (unset)
+Security: locked until allowlist or pairing is configured
+Allowed users: none
+Allowed chats: none
+Group sessions per user: yes
+Thread sessions per user: no
+Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
-\x1B[1mProcess\x1B[0m
-Status: CLI view (no live gateway process in this shell)
+[1mCapabilities[0m
+Enabled: no
+Configured: no
+Missing config: none
+Inbound mode: polling
+Outbound mode: push
+Supports attachments: yes
+Supports threads: yes
+Supports approvals: yes
+Supports progress streaming: yes
+Experimental: no
+Implementation status: live_proven
 
-\x1B[1mChannels\x1B[0m
-Telegram: disabled
-Discord: disabled
-Email: disabled
-WhatsApp: disabled
-
-\x1B[1mDelivery\x1B[0m
-Enabled platforms: none
-Recent errors: 1 (last 5 records)
-
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
-
-\x1B[1mApprovals\x1B[0m
-Policy: adaptive
-Granted: 1
-
-\x1B[1mCron\x1B[0m
-Jobs: 1 total, 1 active
-Next due: test-job at 2024-01-01T00:00:00Z
-
-\x1B[1mRecent cron failures (last 5)\x1B[0m
-• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
-
-\x1B[1mRecent delivery errors (last 5)\x1B[0m
-• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
-
-\x1B[1mMissing config\x1B[0m
-• telegram: BOT_TOKEN_ENV"
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
 `;
 
-exports[`Gateway surfaces — diagnose renders in plain: gateway-diagnose-plain 1`] = `
-"[FAIL] EstaCoda gateway diagnose
+exports[`Gateway surfaces — channels status unknown > renders in narrow width > channels-status-unknown-narrow width 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
 
-Supervisor
+exports[`Gateway surfaces — channels status unknown > renders in no Unicode > channels-status-unknown-no Unicode 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
+
+exports[`Gateway surfaces — channels status unknown > renders in no color > channels-status-unknown-no color 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
+
+exports[`Gateway surfaces — channels status unknown > renders in plain > channels-status-unknown-plain 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
+
+exports[`Gateway surfaces — channels status unknown > renders in standard dark > channels-status-unknown-standard dark 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
+
+exports[`Gateway surfaces — channels status unknown > renders in standard light > channels-status-unknown-standard light 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
+
+exports[`Gateway surfaces — diagnose > renders in narrow width > gateway-diagnose-narrow width 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mEstaCoda gateway diagnose[0m
+
+[1mSupervisor[0m
 PID healthy: yes
 Lock healthy: yes
 
-Telegram
+[1mTelegram[0m
 Enabled: yes
 Ready: no
 Token present: no
-[WARN] Token env: (unset)
-[WARN] Security: no allowed users or chats configured
+[38;2;255;167;38m![0m Token env: (unset)
+[38;2;255;167;38m![0m Security: no allowed users or chats configured
 
-Discord
+[1mDiscord[0m
 Enabled: no
 
-Email
+[1mEmail[0m
 Enabled: no
 
-WhatsApp
+[1mWhatsApp[0m
 Enabled: no
 Experimental gate: closed
 
-Cron
+[1mCron[0m
 Jobs: 0
 Jobs file readable: yes
 Output dir writable: yes
 Lock dir writable: yes
 
-[WARN] Telegram: missing env (unset)
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: missing env (unset)
 
-[WARN] Telegram: no allowed users or chats configured"
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: no allowed users or chats configured"
 `;
 
-exports[`Gateway surfaces — diagnose renders in standard dark: gateway-diagnose-standard dark 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mEstaCoda gateway diagnose\x1B[0m
+exports[`Gateway surfaces — diagnose > renders in no Unicode > gateway-diagnose-no Unicode 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mEstaCoda gateway diagnose[0m
 
-\x1B[1mSupervisor\x1B[0m
+[1mSupervisor[0m
 PID healthy: yes
 Lock healthy: yes
 
-\x1B[1mTelegram\x1B[0m
+[1mTelegram[0m
 Enabled: yes
 Ready: no
 Token present: no
-\x1B[38;2;255;167;38m!\x1B[0m Token env: (unset)
-\x1B[38;2;255;167;38m!\x1B[0m Security: no allowed users or chats configured
+[38;2;255;167;38m![0m Token env: (unset)
+[38;2;255;167;38m![0m Security: no allowed users or chats configured
 
-\x1B[1mDiscord\x1B[0m
+[1mDiscord[0m
 Enabled: no
 
-\x1B[1mEmail\x1B[0m
+[1mEmail[0m
 Enabled: no
 
-\x1B[1mWhatsApp\x1B[0m
+[1mWhatsApp[0m
 Enabled: no
 Experimental gate: closed
 
-\x1B[1mCron\x1B[0m
+[1mCron[0m
 Jobs: 0
 Jobs file readable: yes
 Output dir writable: yes
 Lock dir writable: yes
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: missing env (unset)
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: missing env (unset)
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: no allowed users or chats configured"
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: no allowed users or chats configured"
 `;
 
-exports[`Gateway surfaces — diagnose renders in standard light: gateway-diagnose-standard light 1`] = `
-"\x1B[38;2;198;40;40m[FAIL]\x1B[0m \x1B[1mEstaCoda gateway diagnose\x1B[0m
-
-\x1B[1mSupervisor\x1B[0m
-PID healthy: yes
-Lock healthy: yes
-
-\x1B[1mTelegram\x1B[0m
-Enabled: yes
-Ready: no
-Token present: no
-\x1B[38;2;239;108;0m!\x1B[0m Token env: (unset)
-\x1B[38;2;239;108;0m!\x1B[0m Security: no allowed users or chats configured
-
-\x1B[1mDiscord\x1B[0m
-Enabled: no
-
-\x1B[1mEmail\x1B[0m
-Enabled: no
-
-\x1B[1mWhatsApp\x1B[0m
-Enabled: no
-Experimental gate: closed
-
-\x1B[1mCron\x1B[0m
-Jobs: 0
-Jobs file readable: yes
-Output dir writable: yes
-Lock dir writable: yes
-
-\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: missing env (unset)
-
-\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: no allowed users or chats configured"
-`;
-
-exports[`Gateway surfaces — diagnose renders in no color: gateway-diagnose-no color 1`] = `
+exports[`Gateway surfaces — diagnose > renders in no color > gateway-diagnose-no color 1`] = `
 "[FAIL] EstaCoda gateway diagnose
 
 Supervisor
@@ -386,408 +441,353 @@ Lock dir writable: yes
 [WARN] Telegram: no allowed users or chats configured"
 `;
 
-exports[`Gateway surfaces — diagnose renders in no Unicode: gateway-diagnose-no Unicode 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mEstaCoda gateway diagnose\x1B[0m
+exports[`Gateway surfaces — diagnose > renders in plain > gateway-diagnose-plain 1`] = `
+"[FAIL] EstaCoda gateway diagnose
 
-\x1B[1mSupervisor\x1B[0m
+Supervisor
 PID healthy: yes
 Lock healthy: yes
 
-\x1B[1mTelegram\x1B[0m
+Telegram
 Enabled: yes
 Ready: no
 Token present: no
-\x1B[38;2;255;167;38m!\x1B[0m Token env: (unset)
-\x1B[38;2;255;167;38m!\x1B[0m Security: no allowed users or chats configured
+[WARN] Token env: (unset)
+[WARN] Security: no allowed users or chats configured
 
-\x1B[1mDiscord\x1B[0m
+Discord
 Enabled: no
 
-\x1B[1mEmail\x1B[0m
+Email
 Enabled: no
 
-\x1B[1mWhatsApp\x1B[0m
+WhatsApp
 Enabled: no
 Experimental gate: closed
 
-\x1B[1mCron\x1B[0m
+Cron
 Jobs: 0
 Jobs file readable: yes
 Output dir writable: yes
 Lock dir writable: yes
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: missing env (unset)
+[WARN] Telegram: missing env (unset)
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: no allowed users or chats configured"
+[WARN] Telegram: no allowed users or chats configured"
 `;
 
-exports[`Gateway surfaces — diagnose renders in narrow width: gateway-diagnose-narrow width 1`] = `
-"\x1B[38;2;239;83;80m[FAIL]\x1B[0m \x1B[1mEstaCoda gateway diagnose\x1B[0m
+exports[`Gateway surfaces — diagnose > renders in standard dark > gateway-diagnose-standard dark 1`] = `
+"[38;2;239;83;80m[FAIL][0m [1mEstaCoda gateway diagnose[0m
 
-\x1B[1mSupervisor\x1B[0m
+[1mSupervisor[0m
 PID healthy: yes
 Lock healthy: yes
 
-\x1B[1mTelegram\x1B[0m
+[1mTelegram[0m
 Enabled: yes
 Ready: no
 Token present: no
-\x1B[38;2;255;167;38m!\x1B[0m Token env: (unset)
-\x1B[38;2;255;167;38m!\x1B[0m Security: no allowed users or chats configured
+[38;2;255;167;38m![0m Token env: (unset)
+[38;2;255;167;38m![0m Security: no allowed users or chats configured
 
-\x1B[1mDiscord\x1B[0m
+[1mDiscord[0m
 Enabled: no
 
-\x1B[1mEmail\x1B[0m
+[1mEmail[0m
 Enabled: no
 
-\x1B[1mWhatsApp\x1B[0m
+[1mWhatsApp[0m
 Enabled: no
 Experimental gate: closed
 
-\x1B[1mCron\x1B[0m
+[1mCron[0m
 Jobs: 0
 Jobs file readable: yes
 Output dir writable: yes
 Lock dir writable: yes
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: missing env (unset)
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: missing env (unset)
 
-\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mTelegram\x1B[0m: no allowed users or chats configured"
+[38;2;255;167;38m[WARN][0m [1mTelegram[0m: no allowed users or chats configured"
 `;
 
-exports[`Gateway surfaces — channels list renders in plain: channels-list-plain 1`] = `
-"[OK] EstaCoda channels
+exports[`Gateway surfaces — diagnose > renders in standard light > gateway-diagnose-standard light 1`] = `
+"[38;2;198;40;40m[FAIL][0m [1mEstaCoda gateway diagnose[0m
 
-- telegram  : disabled
-- discord   : disabled
-- email     : disabled
-- whatsapp  : disabled
+[1mSupervisor[0m
+PID healthy: yes
+Lock healthy: yes
 
-Capabilities
-Channel   Enabled  Configured  Inbound    Outbound  Attachments  Threads  Experimental  Status                 
---------  -------  ----------  ---------  --------  -----------  -------  ------------  -----------------------
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels list renders in standard dark: channels-list-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda channels\x1B[0m
-
-• telegram  : disabled
-• discord   : disabled
-• email     : disabled
-• whatsapp  : disabled
-
-\x1B[1mCapabilities\x1B[0m
-\x1B[38;2;90;172;255mChannel \x1B[0m  \x1B[38;2;90;172;255mEnabled\x1B[0m  \x1B[38;2;90;172;255mConfigured\x1B[0m  \x1B[38;2;90;172;255mInbound  \x1B[0m  \x1B[38;2;90;172;255mOutbound\x1B[0m  \x1B[38;2;90;172;255mAttachments\x1B[0m  \x1B[38;2;90;172;255mThreads\x1B[0m  \x1B[38;2;90;172;255mExperimental\x1B[0m  \x1B[38;2;90;172;255mStatus                 \x1B[0m
-\x1B[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────\x1B[0m
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels list renders in standard light: channels-list-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mEstaCoda channels\x1B[0m
-
-• telegram  : disabled
-• discord   : disabled
-• email     : disabled
-• whatsapp  : disabled
-
-\x1B[1mCapabilities\x1B[0m
-\x1B[38;2;0;87;217mChannel \x1B[0m  \x1B[38;2;0;87;217mEnabled\x1B[0m  \x1B[38;2;0;87;217mConfigured\x1B[0m  \x1B[38;2;0;87;217mInbound  \x1B[0m  \x1B[38;2;0;87;217mOutbound\x1B[0m  \x1B[38;2;0;87;217mAttachments\x1B[0m  \x1B[38;2;0;87;217mThreads\x1B[0m  \x1B[38;2;0;87;217mExperimental\x1B[0m  \x1B[38;2;0;87;217mStatus                 \x1B[0m
-\x1B[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────\x1B[0m
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels list renders in no color: channels-list-no color 1`] = `
-"[OK] EstaCoda channels
-
-• telegram  : disabled
-• discord   : disabled
-• email     : disabled
-• whatsapp  : disabled
-
-Capabilities
-Channel   Enabled  Configured  Inbound    Outbound  Attachments  Threads  Experimental  Status                 
-────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels list renders in no Unicode: channels-list-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda channels\x1B[0m
-
-- telegram  : disabled
-- discord   : disabled
-- email     : disabled
-- whatsapp  : disabled
-
-\x1B[1mCapabilities\x1B[0m
-\x1B[38;2;90;172;255mChannel \x1B[0m  \x1B[38;2;90;172;255mEnabled\x1B[0m  \x1B[38;2;90;172;255mConfigured\x1B[0m  \x1B[38;2;90;172;255mInbound  \x1B[0m  \x1B[38;2;90;172;255mOutbound\x1B[0m  \x1B[38;2;90;172;255mAttachments\x1B[0m  \x1B[38;2;90;172;255mThreads\x1B[0m  \x1B[38;2;90;172;255mExperimental\x1B[0m  \x1B[38;2;90;172;255mStatus                 \x1B[0m
-\x1B[2m--------  -------  ----------  ---------  --------  -----------  -------  ------------  -----------------------\x1B[0m
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels list renders in narrow width: channels-list-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mEstaCoda channels\x1B[0m
-
-• telegram  : disabled
-• discord   : disabled
-• email     : disabled
-• whatsapp  : disabled
-
-\x1B[1mCapabilities\x1B[0m
-\x1B[38;2;90;172;255mChannel \x1B[0m  \x1B[38;2;90;172;255mEnabled\x1B[0m  \x1B[38;2;90;172;255mConfigured\x1B[0m  \x1B[38;2;90;172;255mInbound  \x1B[0m  \x1B[38;2;90;172;255mOutbound\x1B[0m  \x1B[38;2;90;172;255mAttachments\x1B[0m  \x1B[38;2;90;172;255mThreads\x1B[0m  \x1B[38;2;90;172;255mExperimental\x1B[0m  \x1B[38;2;90;172;255mStatus                 \x1B[0m
-\x1B[2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────\x1B[0m
-telegram  no       no          polling    push      yes          yes      no            live_proven            
-discord   no       no          websocket  push      no           no       no            present_not_live_proven
-email     no       no          polling    push      no           yes      no            present_not_live_proven
-whatsapp  no       no          websocket  push      no           no       yes           present_not_live_proven"
-`;
-
-exports[`Gateway surfaces — channels status renders in plain: channels-status-plain 1`] = `
-"[OK] Telegram channel status
-
+[1mTelegram[0m
 Enabled: yes
 Ready: no
-Status: configured, missing credentials
-Token env: (unset)
 Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
+[38;2;239;108;0m![0m Token env: (unset)
+[38;2;239;108;0m![0m Security: no allowed users or chats configured
 
-Capabilities
+[1mDiscord[0m
 Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
+
+[1mEmail[0m
+Enabled: no
+
+[1mWhatsApp[0m
+Enabled: no
+Experimental gate: closed
+
+[1mCron[0m
+Jobs: 0
+Jobs file readable: yes
+Output dir writable: yes
+Lock dir writable: yes
+
+[38;2;239;108;0m[WARN][0m [1mTelegram[0m: missing env (unset)
+
+[38;2;239;108;0m[WARN][0m [1mTelegram[0m: no allowed users or chats configured"
+`;
+
+exports[`Gateway surfaces — status > renders in narrow width > gateway-status-narrow width 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda gateway status[0m
+
+[1mSupervisor[0m
+PID: none
+State: stopped
+
+[1mProcess[0m
+Status: CLI view (no live gateway process in this shell)
+
+[1mChannels[0m
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
+
+[1mDelivery[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
+
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+[1mApprovals[0m
+Policy: adaptive
+Granted: 1
+
+[1mCron[0m
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+[1mRecent cron failures (last 5)[0m
+• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+[1mRecent delivery errors (last 5)[0m
+• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+[1mMissing config[0m
+• telegram: BOT_TOKEN_ENV"
+`;
+
+exports[`Gateway surfaces — status > renders in no Unicode > gateway-status-no Unicode 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda gateway status[0m
+
+[1mSupervisor[0m
+PID: none
+State: stopped
+
+[1mProcess[0m
+Status: CLI view (no live gateway process in this shell)
+
+[1mChannels[0m
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
+
+[1mDelivery[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
+
+[1mSurface pointers[0m
+- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+[1mApprovals[0m
+Policy: adaptive
+Granted: 1
+
+[1mCron[0m
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+[1mRecent cron failures (last 5)[0m
+- job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+[1mRecent delivery errors (last 5)[0m
+- 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+[1mMissing config[0m
+- telegram: BOT_TOKEN_ENV"
+`;
+
+exports[`Gateway surfaces — status > renders in no color > gateway-status-no color 1`] = `
+"[OK] EstaCoda gateway status
+
+Supervisor
+PID: none
+State: stopped
+
+Process
+Status: CLI view (no live gateway process in this shell)
+
+Channels
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
+
+Delivery
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 Surface pointers
-- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+Approvals
+Policy: adaptive
+Granted: 1
+
+Cron
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+Recent cron failures (last 5)
+• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+Recent delivery errors (last 5)
+• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+Missing config
+• telegram: BOT_TOKEN_ENV"
 `;
 
-exports[`Gateway surfaces — channels status renders in standard dark: channels-status-standard dark 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mTelegram channel status\x1B[0m
+exports[`Gateway surfaces — status > renders in plain > gateway-status-plain 1`] = `
+"[OK] EstaCoda gateway status
 
-Enabled: yes
-Ready: no
-Status: configured, missing credentials
-Token env: (unset)
-Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
+Supervisor
+PID: none
+State: stopped
 
-\x1B[1mCapabilities\x1B[0m
-Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
+Process
+Status: CLI view (no live gateway process in this shell)
 
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
-`;
+Channels
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
 
-exports[`Gateway surfaces — channels status renders in standard light: channels-status-standard light 1`] = `
-"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mTelegram channel status\x1B[0m
-
-Enabled: yes
-Ready: no
-Status: configured, missing credentials
-Token env: (unset)
-Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
-
-\x1B[1mCapabilities\x1B[0m
-Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
-
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
-`;
-
-exports[`Gateway surfaces — channels status renders in no color: channels-status-no color 1`] = `
-"[OK] Telegram channel status
-
-Enabled: yes
-Ready: no
-Status: configured, missing credentials
-Token env: (unset)
-Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
-
-Capabilities
-Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
+Delivery
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
 
 Surface pointers
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+Approvals
+Policy: adaptive
+Granted: 1
+
+Cron
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+Recent cron failures (last 5)
+- job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+Recent delivery errors (last 5)
+- 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+Missing config
+- telegram: BOT_TOKEN_ENV"
 `;
 
-exports[`Gateway surfaces — channels status renders in no Unicode: channels-status-no Unicode 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mTelegram channel status\x1B[0m
+exports[`Gateway surfaces — status > renders in standard dark > gateway-status-standard dark 1`] = `
+"[38;2;76;175;80m[OK][0m [1mEstaCoda gateway status[0m
 
-Enabled: yes
-Ready: no
-Status: configured, missing credentials
-Token env: (unset)
-Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
+[1mSupervisor[0m
+PID: none
+State: stopped
 
-\x1B[1mCapabilities\x1B[0m
-Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
+[1mProcess[0m
+Status: CLI view (no live gateway process in this shell)
 
-\x1B[1mSurface pointers\x1B[0m
-- telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+[1mChannels[0m
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
+
+[1mDelivery[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
+
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+[1mApprovals[0m
+Policy: adaptive
+Granted: 1
+
+[1mCron[0m
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+[1mRecent cron failures (last 5)[0m
+• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+[1mRecent delivery errors (last 5)[0m
+• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+[1mMissing config[0m
+• telegram: BOT_TOKEN_ENV"
 `;
 
-exports[`Gateway surfaces — channels status renders in narrow width: channels-status-narrow width 1`] = `
-"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mTelegram channel status\x1B[0m
+exports[`Gateway surfaces — status > renders in standard light > gateway-status-standard light 1`] = `
+"[38;2;46;125;50m[OK][0m [1mEstaCoda gateway status[0m
 
-Enabled: yes
-Ready: no
-Status: configured, missing credentials
-Token env: (unset)
-Token present: no
-Default chat: (unset)
-Security: locked until allowlist or pairing is configured
-Allowed users: none
-Allowed chats: none
-Group sessions per user: yes
-Thread sessions per user: no
-Session reset policy: none
-Busy policy: reject
-Queue depth: 3
-Identity lock: unlocked
-Runtime state: unavailable (supervisor not running)
+[1mSupervisor[0m
+PID: none
+State: stopped
 
-\x1B[1mCapabilities\x1B[0m
-Enabled: no
-Configured: no
-Missing config: none
-Inbound mode: polling
-Outbound mode: push
-Supports attachments: yes
-Supports threads: yes
-Supports approvals: yes
-Supports progress streaming: yes
-Experimental: no
-Implementation status: live_proven
+[1mProcess[0m
+Status: CLI view (no live gateway process in this shell)
 
-\x1B[1mSurface pointers\x1B[0m
-• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z)"
+[1mChannels[0m
+Telegram: disabled
+Discord: disabled
+Email: disabled
+WhatsApp: disabled
+
+[1mDelivery[0m
+Enabled platforms: none
+Recent errors: 1 (last 5 records)
+
+[1mSurface pointers[0m
+• telegram:chat-1 → sess-1 (since 2024-01-01T00:00:00Z) home=local
+
+[1mApprovals[0m
+Policy: adaptive
+Granted: 1
+
+[1mCron[0m
+Jobs: 1 total, 1 active
+Next due: test-job at 2024-01-01T00:00:00Z
+
+[1mRecent cron failures (last 5)[0m
+• job-1 [failed] 2024-01-01T00:00:00Z — script exited 1
+
+[1mRecent delivery errors (last 5)[0m
+• 2024-01-01T00:00:00Z telegram:123: No delivery adapter available for telegram
+
+[1mMissing config[0m
+• telegram: BOT_TOKEN_ENV"
 `;
-
-exports[`Gateway surfaces — channels status unknown renders in plain: channels-status-unknown-plain 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
-
-exports[`Gateway surfaces — channels status unknown renders in standard dark: channels-status-unknown-standard dark 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
-
-exports[`Gateway surfaces — channels status unknown renders in standard light: channels-status-unknown-standard light 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
-
-exports[`Gateway surfaces — channels status unknown renders in no color: channels-status-unknown-no color 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
-
-exports[`Gateway surfaces — channels status unknown renders in no Unicode: channels-status-unknown-no Unicode 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;
-
-exports[`Gateway surfaces — channels status unknown renders in narrow width: channels-status-unknown-narrow width 1`] = `"Unknown channel: unknown. Supported: telegram, discord, email, whatsapp."`;

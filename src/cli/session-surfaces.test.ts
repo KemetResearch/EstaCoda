@@ -182,6 +182,10 @@ function snapshotContexts() {
   ];
 }
 
+function snapshotOutput(output: string): string {
+  return output.split("\n").map((line) => line.trimEnd()).join("\n");
+}
+
 // ──────────────────────────────────────
 // Test suites
 // ──────────────────────────────────────
@@ -190,7 +194,7 @@ describe("Session surfaces — /status", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(fakeStatusViewModel());
-      expect(output).toMatchSnapshot(`status-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`status-${ctx.name}`);
     });
   }
 });
@@ -199,7 +203,7 @@ describe("Session surfaces — /model", () => {
   for (const ctx of snapshotContexts()) {
     it(`renders in ${ctx.name}`, () => {
       const output = ctx.renderer.render(fakeModelInfoViewModel());
-      expect(output).toMatchSnapshot(`model-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`model-${ctx.name}`);
     });
   }
 });
@@ -209,7 +213,7 @@ describe("Session surfaces — /help", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildSessionHelpViewModel();
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`help-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`help-${ctx.name}`);
     });
   }
 });
@@ -219,7 +223,7 @@ describe("Session surfaces — /tools", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildToolsMenuViewModel(fakeRuntime, "");
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`tools-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`tools-${ctx.name}`);
     });
   }
 });
@@ -229,7 +233,7 @@ describe("Session surfaces — slash menu", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildSlashMenuViewModel(fakeRuntime, "");
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`slash-menu-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`slash-menu-${ctx.name}`);
     });
   }
 });
@@ -319,7 +323,7 @@ describe("Session surfaces — unknown-command fallback", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildSlashMenuViewModel(fakeRuntime, "nonexistent");
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`unknown-command-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`unknown-command-${ctx.name}`);
     });
   }
 });
@@ -407,7 +411,7 @@ describe("Session surfaces — startup", () => {
         readiness: "ready",
       });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`startup-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`startup-${ctx.name}`);
     });
   }
 });
@@ -436,7 +440,7 @@ describe("Session surfaces — startup dashboard", () => {
         warnings: [],
       });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`startup-dashboard-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`startup-dashboard-${ctx.name}`);
     });
   }
 });
@@ -457,7 +461,7 @@ describe("Session surfaces — picker", () => {
         ],
       });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`picker-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`picker-${ctx.name}`);
     });
   }
 });
@@ -474,7 +478,7 @@ describe("Session surfaces — input rail-frame", () => {
       const useUnicode = ctx.name !== "plain" && ctx.name !== "no Unicode";
       const width = ctx.name === "narrow width" ? 40 : 80;
       const rule = renderHorizontalRule(tokens, useColor, useUnicode, width);
-      expect(rule).toMatchSnapshot(`rail-frame-${ctx.name}`);
+      expect(snapshotOutput(rule)).toMatchSnapshot(`rail-frame-${ctx.name}`);
     });
 
     it(`renders prompt prefix in ${ctx.name}`, () => {
@@ -482,7 +486,7 @@ describe("Session surfaces — input rail-frame", () => {
       const useColor = ctx.name !== "plain" && ctx.name !== "no color";
       const prefix = tokens.contract.branding.promptPrefix ?? `${tokens.contract.glyph.prompt} `;
       const colored = colorPromptPrefix(prefix, tokens, useColor);
-      expect(colored).toMatchSnapshot(`prompt-prefix-${ctx.name}`);
+      expect(snapshotOutput(colored)).toMatchSnapshot(`prompt-prefix-${ctx.name}`);
     });
   }
 });
@@ -501,7 +505,7 @@ describe("Session surfaces — assistant response", () => {
         progress: ["intent routed", "security assessed", "tools executed"],
       });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`assistant-response-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`assistant-response-${ctx.name}`);
     });
   }
 });
@@ -512,7 +516,7 @@ describe("Session surfaces — user prompt rail", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildUserPromptRailViewModel({ text: "Tell me about quantum computing" });
       const output = ctx.renderer.render(vm);
-      expect(output).toMatchSnapshot(`user-prompt-rail-${ctx.name}`);
+      expect(snapshotOutput(output)).toMatchSnapshot(`user-prompt-rail-${ctx.name}`);
     });
   }
 

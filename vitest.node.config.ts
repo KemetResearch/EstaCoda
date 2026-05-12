@@ -5,16 +5,7 @@ export default defineConfig({
     globals: false,
     environment: "node",
     include: ["src/**/*.test.ts"],
-    exclude: [
-      "node_modules",
-      "dist",
-      // Tests that import bun:sqlite — only runnable under Bun
-      "src/cli/cli-sessions.test.ts",
-      "src/cli/gateway-commands.test.ts",
-      "src/cron/cron-command.test.ts",
-      "src/cron/cron-execution-store.test.ts",
-      "src/cron/cron-runner.test.ts",
-    ],
+    exclude: ["node_modules", "dist"],
     setupFiles: ["src/test/vitest-setup.ts"],
     reporters: ["verbose"],
   },
