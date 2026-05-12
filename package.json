@@ -3,22 +3,34 @@
   "version": "0.0.6",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit --incremental",
-    "dev": "$npm_execpath src/index.ts",
-    "smoke": "$npm_execpath src/smoke.ts",
-    "test": "bun ./node_modules/vitest/vitest.mjs run",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --import tsx src/index.ts",
+    "dev:bun": "bun src/index.ts",
+    "smoke": "node --import tsx src/smoke.ts",
+    "smoke:bun": "bun src/smoke.ts",
+    "test": "vitest run",
     "test:node": "vitest run --config vitest.node.config.ts",
-    "alpha:harness": "$npm_execpath scripts/internal-alpha.ts",
-    "eval:substrate": "$npm_execpath scripts/eval-substrate.ts",
-    "provider:hardening": "$npm_execpath scripts/provider-hardening.ts"
+    "test:bun": "bun ./node_modules/vitest/vitest.mjs run",
+    "alpha:harness": "node --import tsx scripts/internal-alpha.ts",
+    "alpha:harness:bun": "bun scripts/internal-alpha.ts",
+    "eval:substrate": "node --import tsx scripts/eval-substrate.ts",
+    "eval:substrate:bun": "bun scripts/eval-substrate.ts",
+    "provider:hardening": "node --import tsx scripts/provider-hardening.ts",
+    "provider:hardening:bun": "bun scripts/provider-hardening.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "tsx": "^4.20.6",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "@hapi/boom": "^9.1.4",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "discord.js": "^14.26.4"
   }

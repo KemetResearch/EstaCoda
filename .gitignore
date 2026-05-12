@@ -7,6 +7,8 @@ node_modules/
 dist/
 build/
 coverage/
+bun.lock
+bun.lockb
 
 acp-proof.txt
 agent-proof.md
