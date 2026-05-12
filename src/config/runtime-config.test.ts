@@ -470,21 +470,106 @@ describe("production loadRuntimeConfig callsite safety", () => {
     const { execSync } = await import("node:child_process");
     const repoRoot = new URL("../..", import.meta.url).pathname;
     const output = execSync(
-      `rg "loadRuntimeConfig\\(" src --type ts -n | grep -v "\\.test\\." | grep -v "_legacy" | grep -v "src/config/runtime-config.ts:"`,
+      `rg --files src scripts --type ts -g '!*.test.ts' -g '!*_legacy*' -g '!src/config/runtime-config.ts'`,
       { cwd: repoRoot, encoding: "utf8" }
     );
-    const lines = output.trim().split("\n").filter((line) => line.length > 0);
+    const files = output.trim().split("\n").filter((line) => line.length > 0);
+    const unsafe: string[] = [];
 
-    const unsafe = lines.filter((line) => {
-      // Allow wrapper definitions in runtime-config.ts
-      if (line.includes("src/config/runtime-config.ts:")) return false;
-      // Allow calls that pass 'options' (types carry projectConfigTrust)
-      if (line.includes("loadRuntimeConfig(options)")) return false;
-      // Allow calls that explicitly pass projectConfigTrust
-      if (line.includes("projectConfigTrust")) return false;
-      return true;
-    });
+    for (const file of files) {
+      const source = await readFile(join(repoRoot, file), "utf8");
+      for (const callsite of collectLoadRuntimeConfigCalls(source)) {
+        const call = callsite.call;
+        // Allow calls that pass 'options' (types carry projectConfigTrust)
+        if (/^loadRuntimeConfig\s*\(\s*options\s*\)$/.test(call)) continue;
+        // All other production callsites must explicitly pass projectConfigTrust.
+        if (call.includes("projectConfigTrust")) continue;
+        unsafe.push(`${file}:${lineNumberAt(source, callsite.start)}:${call.split("\n")[0].trim()}`);
+      }
+    }
 
     expect(unsafe).toEqual([]);
   });
 });
+
+function collectLoadRuntimeConfigCalls(source: string): Array<{ start: number; call: string }> {
+  const calls: Array<{ start: number; call: string }> = [];
+  const needle = "loadRuntimeConfig(";
+  let searchFrom = 0;
+  while (true) {
+    const start = source.indexOf(needle, searchFrom);
+    if (start === -1) break;
+    const end = findMatchingCallEnd(source, start + "loadRuntimeConfig".length);
+    if (end !== -1) {
+      calls.push({ start, call: source.slice(start, end + 1) });
+      searchFrom = end + 1;
+    } else {
+      searchFrom = start + needle.length;
+    }
+  }
+  return calls;
+}
+
+function findMatchingCallEnd(source: string, openParen: number): number {
+  let depth = 0;
+  let quote: "'" | "\"" | "`" | undefined;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = openParen; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (char === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === "\\") {
+        index += 1;
+        continue;
+      }
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (char === "'" || char === "\"" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return -1;
+}
+
+function lineNumberAt(source: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (source[index] === "\n") line += 1;
+  }
+  return line;
+}

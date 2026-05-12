@@ -122,7 +122,7 @@ async function runProvider(spec: ProviderSpec): Promise<ProviderResult> {
   });
   result.configured = true;
 
-  const config = await loadRuntimeConfig({ workspaceRoot });
+  const config = await loadRuntimeConfig({ workspaceRoot, projectConfigTrust: "trusted" });
   const providerDiagnostic = await diagnoseProviderConfig(config);
   const liveDiagnostic = await diagnoseProviderLive(config);
   result.doctorStatus = providerDiagnostic.status;
