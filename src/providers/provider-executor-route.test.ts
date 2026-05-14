@@ -85,10 +85,10 @@ describe("ProviderExecutor route-based execution", () => {
   });
 
   it("honors route-level baseUrl during execution", async () => {
-    const adapter = createMockAdapter({ id: "openai" });
+    const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
 
-    const route = createDefaultRoute({ baseUrl: "https://custom.example.com/v1" });
+    const route = createDefaultRoute({ provider: "test-provider", baseUrl: "https://custom.example.com/v1" });
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: route
     });
@@ -125,11 +125,11 @@ describe("ProviderExecutor route-based execution", () => {
   });
 
   it("same provider ID with different base URLs does not overwrite each other", async () => {
-    const adapter = createMockAdapter({ id: "openai" });
+    const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
 
-    const routeA = createDefaultRoute({ baseUrl: "https://a.example.com/v1" });
-    const routeB = createDefaultRoute({ baseUrl: "https://b.example.com/v1" });
+    const routeA = createDefaultRoute({ provider: "test-provider", baseUrl: "https://a.example.com/v1" });
+    const routeB = createDefaultRoute({ provider: "test-provider", baseUrl: "https://b.example.com/v1" });
 
     await executor.complete({ messages: [] }, {}, { primaryRoute: routeA });
     await executor.complete({ messages: [] }, {}, { primaryRoute: routeB });
@@ -219,19 +219,19 @@ describe("ProviderExecutor route-based execution", () => {
     }
   });
 
-  it("still works with existing hosted provider execution without primaryRoute", async () => {
+  it("still works with existing provider execution without primaryRoute", async () => {
     const adapter = createMockAdapter({
-      id: "openai",
+      id: "test-provider",
       completeResponse: {
         ok: true,
         content: "legacy-response",
-        model: "gpt-4o",
-        provider: "openai"
+        model: "legacy-model",
+        provider: "test-provider"
       },
       models: [
         {
-          id: "gpt-4o",
-          provider: "openai",
+          id: "legacy-model",
+          provider: "test-provider",
           contextWindowTokens: 128_000,
           supportsTools: true,
           supportsVision: true,
@@ -242,8 +242,8 @@ describe("ProviderExecutor route-based execution", () => {
     registry.register(adapter);
 
     const result = await executor.complete({
-      provider: "openai",
-      model: "gpt-4o",
+      provider: "test-provider",
+      model: "legacy-model",
       messages: []
     });
 
@@ -351,16 +351,16 @@ describe("ProviderExecutor route-based execution", () => {
 
   it("streams with route-level endpoint override", async () => {
     const adapter = createMockAdapter({
-      id: "openai",
+      id: "test-provider",
       streamEvents: [
-        { kind: "start", provider: "openai", model: "gpt-4o" },
-        { kind: "token", provider: "openai", model: "gpt-4o", text: "hello" },
-        { kind: "done", provider: "openai", model: "gpt-4o", response: { ok: true, content: "hello", model: "gpt-4o", provider: "openai" } }
+        { kind: "start", provider: "test-provider", model: "legacy-model" },
+        { kind: "token", provider: "test-provider", model: "legacy-model", text: "hello" },
+        { kind: "done", provider: "test-provider", model: "legacy-model", response: { ok: true, content: "hello", model: "legacy-model", provider: "test-provider" } }
       ]
     });
     registry.register(adapter);
 
-    const route = createDefaultRoute({ baseUrl: "https://stream.example.com/v1" });
+    const route = createDefaultRoute({ provider: "test-provider", baseUrl: "https://stream.example.com/v1" });
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: route,
       stream: true

@@ -100,7 +100,9 @@ export function resolveRuntimeCredential(
   }
 
   return {
-    credential: { kind: "none", id: `${options.providerId}:none` },
-    diagnostic: { ok: true },
+    diagnostic: {
+      ok: false,
+      message: `Provider ${options.providerId} requires api_key credentials but no credential reference is configured.`,
+    },
   };
 }

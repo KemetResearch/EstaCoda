@@ -12,6 +12,7 @@ import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { compareModels, matchesPreferences, routeProvider } from "./provider-router.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
+import { getProviderMetadata } from "./provider-metadata.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -223,6 +224,7 @@ export class ProviderExecutor {
         providerId: route.provider,
         route: { apiKeyEnv: route.apiKeyEnv },
         credentialPools: this.#credentialPools,
+        metadata: getProviderMetadata(route.provider),
       });
 
       if (!resolution.diagnostic.ok) {

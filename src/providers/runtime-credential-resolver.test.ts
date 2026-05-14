@@ -3,6 +3,50 @@ import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { CredentialPool, CredentialPoolRegistry } from "./credential-pool.js";
 import type { ProviderMetadata } from "./provider-metadata.js";
 
+function hostedMetadata(): ProviderMetadata {
+  return {
+    id: "openai",
+    displayName: "OpenAI",
+    catalogKnown: true,
+    configurable: true,
+    runnable: true,
+    visibility: {
+      modelPicker: true,
+      setup: true,
+      catalogExplore: true,
+    },
+    apiMode: "openai_chat_completions",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultApiKeyEnv: "OPENAI_API_KEY",
+    authMethods: ["api_key"],
+    defaultAuthMethod: "api_key",
+    allowsCustomBaseUrl: true,
+    requiresModelSelection: true,
+  };
+}
+
+function localMetadata(): ProviderMetadata {
+  return {
+    id: "local",
+    displayName: "Local",
+    catalogKnown: true,
+    configurable: true,
+    runnable: true,
+    visibility: {
+      modelPicker: true,
+      setup: true,
+      catalogExplore: true,
+    },
+    apiMode: "custom_openai_compatible",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultApiKeyEnv: undefined,
+    authMethods: ["none"],
+    defaultAuthMethod: "none",
+    allowsCustomBaseUrl: true,
+    requiresModelSelection: true,
+  };
+}
+
 describe("resolveRuntimeCredential", () => {
   const originalEnv = process.env;
 
@@ -19,6 +63,7 @@ describe("resolveRuntimeCredential", () => {
     const result = resolveRuntimeCredential({
       providerId: "openai",
       route: { apiKeyEnv: "ROUTE_KEY" },
+      metadata: hostedMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(true);
@@ -35,6 +80,7 @@ describe("resolveRuntimeCredential", () => {
       providerId: "openai",
       route: { apiKeyEnv: "ROUTE_KEY" },
       providerConfig: { apiKeyEnv: "PROVIDER_KEY" },
+      metadata: hostedMetadata(),
     });
 
     expect(result.credential?.id).toBe("ROUTE_KEY");
@@ -46,6 +92,7 @@ describe("resolveRuntimeCredential", () => {
       providerId: "openai",
       route: {},
       providerConfig: { apiKeyEnv: "PROVIDER_KEY" },
+      metadata: hostedMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(true);
@@ -70,6 +117,7 @@ describe("resolveRuntimeCredential", () => {
     const result = resolveRuntimeCredential({
       providerId: "openai",
       credentialPools: poolRegistry,
+      metadata: hostedMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(true);
@@ -98,6 +146,7 @@ describe("resolveRuntimeCredential", () => {
       providerId: "openai",
       route: { apiKeyEnv: "ENV_KEY" },
       credentialPools: poolRegistry,
+      metadata: hostedMetadata(),
     });
 
     expect(result.credential?.id).toBe("ENV_KEY");
@@ -105,23 +154,9 @@ describe("resolveRuntimeCredential", () => {
   });
 
   it("returns none for local provider with no auth", () => {
-    const metadata: ProviderMetadata = {
-      id: "local",
-      displayName: "Local",
-      catalogKnown: true,
-      configurable: true,
-      runnable: true,
-      visibility: { modelPicker: true, setup: true, catalogExplore: true },
-      apiMode: "custom_openai_compatible",
-      authMethods: ["none"],
-      defaultAuthMethod: "none",
-      allowsCustomBaseUrl: true,
-      requiresModelSelection: true,
-    };
-
     const result = resolveRuntimeCredential({
       providerId: "local",
-      metadata,
+      metadata: localMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(true);
@@ -129,11 +164,12 @@ describe("resolveRuntimeCredential", () => {
     expect(result.credential?.id).toBe("local:none");
   });
 
-  it("returns diagnostic for missing env var", () => {
+  it("returns diagnostic for missing route env var", () => {
     delete process.env.MISSING_KEY;
     const result = resolveRuntimeCredential({
       providerId: "openai",
       route: { apiKeyEnv: "MISSING_KEY" },
+      metadata: hostedMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(false);
@@ -141,39 +177,45 @@ describe("resolveRuntimeCredential", () => {
     expect(result.credential).toBeUndefined();
   });
 
-  it("returns diagnostic for empty env var", () => {
+  it("returns diagnostic for empty route env var", () => {
     process.env.EMPTY_KEY = "";
     const result = resolveRuntimeCredential({
       providerId: "openai",
       route: { apiKeyEnv: "EMPTY_KEY" },
+      metadata: hostedMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(false);
     expect(result.credential).toBeUndefined();
   });
 
-  it("returns none when no credential is available", () => {
+  it("returns diagnostic for missing provider env var", () => {
+    delete process.env.MISSING_PROVIDER_KEY;
     const result = resolveRuntimeCredential({
       providerId: "openai",
+      providerConfig: { apiKeyEnv: "MISSING_PROVIDER_KEY" },
+      metadata: hostedMetadata(),
     });
 
-    expect(result.diagnostic.ok).toBe(true);
-    expect(result.credential?.kind).toBe("none");
-    expect(result.credential?.id).toBe("openai:none");
+    expect(result.diagnostic.ok).toBe(false);
+    expect(result.diagnostic.message).toContain("Missing env var MISSING_PROVIDER_KEY");
+    expect(result.credential).toBeUndefined();
   });
 
-  it("never returns raw secret in diagnostic", () => {
-    process.env.MY_KEY = "super-secret-value";
+  it("returns clear auth diagnostic for hosted api_key provider with no credential reference", () => {
     const result = resolveRuntimeCredential({
       providerId: "openai",
-      route: { apiKeyEnv: "MY_KEY" },
+      metadata: hostedMetadata(),
     });
 
-    expect(result.diagnostic.ok).toBe(true);
-    expect(JSON.stringify(result.diagnostic)).not.toContain("super-secret-value");
+    expect(result.diagnostic.ok).toBe(false);
+    expect(result.diagnostic.message).toBe(
+      "Provider openai requires api_key credentials but no credential reference is configured."
+    );
+    expect(result.credential).toBeUndefined();
   });
 
-  it("returns none when pool is empty", () => {
+  it("returns clear auth diagnostic for hosted api_key provider with empty pool", () => {
     const poolRegistry = new CredentialPoolRegistry();
     poolRegistry.register(
       new CredentialPool({
@@ -185,9 +227,57 @@ describe("resolveRuntimeCredential", () => {
     const result = resolveRuntimeCredential({
       providerId: "openai",
       credentialPools: poolRegistry,
+      metadata: hostedMetadata(),
+    });
+
+    expect(result.diagnostic.ok).toBe(false);
+    expect(result.diagnostic.message).toBe(
+      "Provider openai requires api_key credentials but no credential reference is configured."
+    );
+    expect(result.credential).toBeUndefined();
+  });
+
+  it("returns none for no-auth provider even when pool is empty", () => {
+    const poolRegistry = new CredentialPoolRegistry();
+    poolRegistry.register(
+      new CredentialPool({
+        provider: "local",
+        entries: [],
+      })
+    );
+
+    const result = resolveRuntimeCredential({
+      providerId: "local",
+      credentialPools: poolRegistry,
+      metadata: localMetadata(),
     });
 
     expect(result.diagnostic.ok).toBe(true);
     expect(result.credential?.kind).toBe("none");
+    expect(result.credential?.id).toBe("local:none");
+  });
+
+  it("never returns raw secret in diagnostic", () => {
+    process.env.MY_KEY = "super-secret-value";
+    const result = resolveRuntimeCredential({
+      providerId: "openai",
+      route: { apiKeyEnv: "MY_KEY" },
+      metadata: hostedMetadata(),
+    });
+
+    expect(result.diagnostic.ok).toBe(true);
+    expect(JSON.stringify(result.diagnostic)).not.toContain("super-secret-value");
+  });
+
+  it("legacy compatibility: returns auth diagnostic when metadata is absent for a hosted provider", () => {
+    const result = resolveRuntimeCredential({
+      providerId: "openai",
+    });
+
+    expect(result.diagnostic.ok).toBe(false);
+    expect(result.diagnostic.message).toBe(
+      "Provider openai requires api_key credentials but no credential reference is configured."
+    );
+    expect(result.credential).toBeUndefined();
   });
 });
