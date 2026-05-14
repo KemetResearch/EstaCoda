@@ -37,7 +37,12 @@ function catalog(): FirstRunCatalog {
 
 function fakePrompt(overrides: Record<string, string | boolean> = {}): Prompt {
   const prompt = Object.assign(
-    async () => "",
+    async (_question: string, options?: { secret?: boolean }) => {
+      if (options?.secret === true) {
+        return typeof overrides.__secret === "string" ? overrides.__secret : "";
+      }
+      return "";
+    },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
         const requested = overrides[input.title];
@@ -201,5 +206,36 @@ describe("runFirstRunSetup", () => {
       model?: { provider?: string; id?: string };
     };
     expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+  });
+
+  it("writes API key to .env when user provides one during first-run", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-first-run-key-7890" }),
+      catalog: catalog(),
+    });
+
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    expect(envContent).toContain('OPENAI_API_KEY="sk-first-run-key-7890"');
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-first-run-key-7890");
+    expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
+  });
+
+  it("does not write .env when user skips API key entry", async () => {
+    const outputLines: string[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "" }),
+      catalog: catalog(),
+      output: { write: (value) => outputLines.push(value) },
+    });
+
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    const combined = outputLines.join("");
+    expect(combined).toContain("Config will expect OPENAI_API_KEY to be available externally");
   });
 });
