@@ -8,6 +8,7 @@ import {
 import { getDefaultApiKeyEnv } from "../../providers/provider-metadata.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { promptForApiKey } from "../../cli/secret-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { createModelSelectionCatalog } from "../../providers/model-selection-catalog.js";
 import {
@@ -237,20 +238,27 @@ export async function runFirstRunSetup(
   });
 
   const providerRequiresCredential = providerOptions.find((provider) => provider.id === primaryProvider)?.requiresCredential ?? primaryProvider !== "local";
+  const defaultEnvVar = getDefaultApiKeyEnv(primaryProvider);
   const primaryCredential = providerRequiresCredential
     ? {
         kind: "env" as const,
-        name: await askWithDefault(
-          prompt,
-          `${copy(language, "onboarding.providers.primaryCredential")} [${getDefaultApiKeyEnv(primaryProvider)}]: `,
-          options.defaultSelections?.primaryCredential?.kind === "env"
-            ? options.defaultSelections.primaryCredential.name
-            : getDefaultApiKeyEnv(primaryProvider)
-        ),
+        name: defaultEnvVar,
       }
     : { kind: "none" as const };
 
-  if (!providerRequiresCredential) {
+  if (providerRequiresCredential) {
+    const promptResult = await promptForApiKey({
+      prompt,
+      providerId: primaryProvider,
+      envVarName: defaultEnvVar,
+      homeDir: options.homeDir,
+      question: `${copy(language, "onboarding.providers.primaryCredential")} [${defaultEnvVar}]: `,
+    });
+
+    if (promptResult.kind === "skipped") {
+      write(options, `Config will expect ${defaultEnvVar} to be available externally.\n`);
+    }
+  } else {
     write(options, `${copy(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
   }
 
