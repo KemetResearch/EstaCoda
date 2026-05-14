@@ -57,6 +57,23 @@ describe("security policy factory", () => {
       expect(executionOptions!.primaryRoute.apiKeyEnv).toBe("OPENAI_API_KEY");
     });
 
+    it("does not synthesize a placeholder route for provider/model overrides without real defaults", async () => {
+      const executor = createMockExecutor();
+      const assessor: SecurityAssessorRuntimeConfig = {
+        enabled: true,
+        provider: "nous",
+        model: "hermes-4",
+        timeoutMs: 5000,
+        providerExecutor: executor
+      };
+
+      const policy = createSecurityPolicyForMode("adaptive", { assessor });
+      const result = await policy.assess!(baseRequest);
+
+      expect(executor.complete).not.toHaveBeenCalled();
+      expect(result.assessor).toEqual({ used: false, status: "unavailable" });
+    });
+
     it("uses full auxiliaryModels.approval resolved route when override absent", async () => {
       const executor = createMockExecutor();
       const resolvedRoute: ResolvedModelRoute = {

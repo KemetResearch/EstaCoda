@@ -28,7 +28,7 @@ import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import { getDefaultBaseUrl, getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
+import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -1084,7 +1084,7 @@ function setToolsetAvailability(availableToolsets: Set<ToolsetName>, toolset: To
   availableToolsets.delete(toolset);
 }
 
-function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderRegistry {
+export function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderRegistry {
   const registry = new ProviderRegistry();
   const catalogModels = uniqueModels([
     inferModelProfile({
@@ -1099,10 +1099,19 @@ function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderReg
     const models = catalogModels.filter((model) => model.provider === provider);
 
     if (isOpenAICompatibleProvider(provider)) {
+      const metadata = getProviderMetadata(provider);
+      if (!metadata.runnable || metadata.defaultBaseUrl === undefined) {
+        registry.register(createCatalogProvider({
+          id: provider,
+          models
+        }));
+        continue;
+      }
+
       registry.register(createOpenAICompatibleProvider({
         id: provider,
         endpoint: {
-          baseUrl: getDefaultBaseUrl(provider),
+          baseUrl: metadata.defaultBaseUrl,
           apiKey: provider === "local"
             ? { kind: "none" }
             : { kind: "env", name: getDefaultApiKeyEnv(provider) }

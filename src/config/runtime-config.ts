@@ -24,7 +24,6 @@ import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import {
-  getDefaultBaseUrl,
   getDefaultApiKeyEnv,
   getProviderMetadata,
   buildResolvedModelRoute
