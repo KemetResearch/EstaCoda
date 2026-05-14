@@ -276,11 +276,18 @@ export function getProviderMetadata(providerId: ProviderId): ProviderMetadata {
 }
 
 /**
- * Return the default base URL for a provider.
- * Falls back to a safe invalid placeholder for unknown providers.
+ * Return the real default base URL for a provider when metadata defines one.
+ */
+export function getProviderDefaultBaseUrl(providerId: ProviderId): string | undefined {
+  return getProviderMetadata(providerId).defaultBaseUrl;
+}
+
+/**
+ * @deprecated Use getProviderDefaultBaseUrl for runtime/config/security route construction.
+ * This legacy helper returns a placeholder for compatibility-only callers.
  */
 export function getDefaultBaseUrl(providerId: ProviderId): string {
-  return getProviderMetadata(providerId).defaultBaseUrl ?? "https://example.invalid/v1";
+  return getProviderDefaultBaseUrl(providerId) ?? "https://example.invalid/v1";
 }
 
 /**

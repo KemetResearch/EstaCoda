@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { createRuntime } from "./create-runtime.js";
+import { createRuntime, createDefaultProviderRegistry } from "./create-runtime.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -132,6 +132,66 @@ describe("createRuntime MCP trust gating", () => {
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");
+  });
+});
+
+describe("createDefaultProviderRegistry", () => {
+  it("does not register metadata-non-runnable fallback providers as executable adapters", () => {
+    const registry = createDefaultProviderRegistry({
+      id: "gpt-4o",
+      provider: "openai",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    });
+
+    const nous = registry.get("nous");
+    expect(nous).toBeDefined();
+    expect(nous!.executable).toBe(false);
+    expect(nous!.endpoint).toBeUndefined();
+
+    const anthropic = registry.get("anthropic");
+    expect(anthropic).toBeDefined();
+    expect(anthropic!.executable).toBe(false);
+    expect(anthropic!.endpoint).toBeUndefined();
+  });
+
+  it("registers known runnable providers with real metadata default endpoints", () => {
+    const registry = createDefaultProviderRegistry({
+      id: "gpt-4o",
+      provider: "openai",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    });
+
+    const openai = registry.get("openai");
+    expect(openai).toBeDefined();
+    expect(openai!.executable).not.toBe(false);
+    expect(openai!.endpoint?.baseUrl).toBe("https://api.openai.com/v1");
+
+    const local = registry.get("local");
+    expect(local).toBeDefined();
+    expect(local!.executable).not.toBe(false);
+    expect(local!.endpoint?.baseUrl).toBe("http://localhost:11434/v1");
+  });
+
+  it("does not use placeholder endpoints in executable provider adapters", () => {
+    const registry = createDefaultProviderRegistry({
+      id: "gpt-4o",
+      provider: "openai",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    });
+
+    for (const provider of registry.list()) {
+      if (provider.executable === false) continue;
+      expect(provider.endpoint?.baseUrl).not.toBe("https://example.invalid/v1");
+    }
   });
 });
 

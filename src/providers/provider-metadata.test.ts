@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getProviderMetadata,
+  getProviderDefaultBaseUrl,
   getDefaultBaseUrl,
   getDefaultApiKeyEnv,
   isProviderRunnable,
@@ -52,7 +53,18 @@ describe("provider-metadata", () => {
   });
 
   describe("defaults match legacy consumers", () => {
-    it("defaultBaseUrl matches runtime-config and create-runtime expectations", () => {
+    it("provider default base URL returns real metadata defaults only", () => {
+      expect(getProviderDefaultBaseUrl("openai")).toBe("https://api.openai.com/v1");
+      expect(getProviderDefaultBaseUrl("deepseek")).toBe("https://api.deepseek.com/v1");
+      expect(getProviderDefaultBaseUrl("kimi")).toBe("https://api.moonshot.cn/v1");
+      expect(getProviderDefaultBaseUrl("google")).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+      expect(getProviderDefaultBaseUrl("openrouter")).toBe("https://openrouter.ai/api/v1");
+      expect(getProviderDefaultBaseUrl("local")).toBe("http://localhost:11434/v1");
+      expect(getProviderDefaultBaseUrl("unknown-provider" as ProviderId)).toBeUndefined();
+      expect(getProviderDefaultBaseUrl("nous")).toBeUndefined();
+    });
+
+    it("legacy defaultBaseUrl helper keeps placeholder compatibility only", () => {
       expect(getDefaultBaseUrl("openai")).toBe("https://api.openai.com/v1");
       expect(getDefaultBaseUrl("deepseek")).toBe("https://api.deepseek.com/v1");
       expect(getDefaultBaseUrl("kimi")).toBe("https://api.moonshot.cn/v1");
