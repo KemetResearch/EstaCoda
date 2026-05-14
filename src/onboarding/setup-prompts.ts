@@ -17,7 +17,7 @@ export type SetupChoice<T> = {
   readonly value: T;
 };
 
-export type SetupPromptValue = string | readonly string[] | boolean | undefined;
+export type SetupPromptValue = string | number | readonly string[] | boolean | undefined;
 
 export type SetupCardOption = {
   readonly id: string;

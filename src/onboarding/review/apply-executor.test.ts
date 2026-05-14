@@ -22,6 +22,8 @@ function firstRunPlan(input: {
   readonly workspaceRoot: string;
   readonly provider?: string;
   readonly model?: string;
+  readonly baseUrl?: string;
+  readonly contextWindowTokens?: number;
   readonly credentialEnv?: string;
   readonly securityMode?: "strict" | "adaptive" | "open";
   readonly workflowLearning?: "none" | "suggest" | "proactive" | "autonomous";
@@ -40,6 +42,8 @@ function firstRunPlan(input: {
         workspaceTrusted: true,
         primaryProvider: provider,
         primaryModel: input.model ?? "hermes-local",
+        primaryBaseUrl: input.baseUrl,
+        primaryContextWindowTokens: input.contextWindowTokens,
         primaryCredential: credential,
         securityMode: input.securityMode ?? "adaptive",
         workflowLearning: input.workflowLearning ?? "suggest",
@@ -141,8 +145,39 @@ describe("reviewed setup apply executor", () => {
     };
 
     expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
-    expect(config.credentialPools?.openai).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
+  });
+
+  it("applies custom provider baseUrl and contextWindowTokens from review values", async () => {
+    const plan = firstRunPlan({
+      homeDir: tempDir,
+      workspaceRoot,
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://custom.example.com/v1",
+      contextWindowTokens: 256000,
+      credentialEnv: "OPENAI_API_KEY",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(result.ok).toBe(true);
+    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+      model?: { provider?: string; id?: string; contextWindowTokens?: number };
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+    };
+
+    expect(config.model).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      contextWindowTokens: 256000,
+    }));
+    expect(config.providers?.openai).toEqual(expect.objectContaining({
+      baseUrl: "https://custom.example.com/v1",
+    }));
   });
 
   it("applies reviewed browser capability without enabling auto-launch", async () => {

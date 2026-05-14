@@ -13,6 +13,7 @@ import {
   buildSetupEditorDraftBundle,
   type SetupDraftBundle,
 } from "./setup-drafts.js";
+import type { ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
@@ -94,13 +95,22 @@ function recommendedAction(kind: SetupEntryStateKind): SetupEntryRecommendedActi
   }
 }
 
-function firstRunBundle(): SetupDraftBundle {
+function firstRunBundle(overrides: Partial<{
+  primaryBaseUrl?: string;
+  primaryContextWindowTokens?: number;
+  primaryApiMode?: ProviderApiMode;
+  primaryAuthMethod?: ProviderAuthMethod;
+}> = {}): SetupDraftBundle {
   const decision = routeSetupEntryState(state("new-user"), {
     firstRunSelections: {
       workspaceRoot: "/tmp/workspace",
       workspaceTrusted: true,
       primaryProvider: "openai",
       primaryModel: "gpt-4.1-mini",
+      primaryBaseUrl: overrides.primaryBaseUrl,
+      primaryContextWindowTokens: overrides.primaryContextWindowTokens,
+      primaryApiMode: overrides.primaryApiMode,
+      primaryAuthMethod: overrides.primaryAuthMethod,
       primaryCredential: { kind: "env", name: "OPENAI_API_KEY" },
       securityMode: "adaptive",
       workflowLearning: "suggest",
@@ -165,6 +175,23 @@ describe("setup draft bundles", () => {
       preserveUnrelatedConfig: true,
     });
     expect(draft?.preserveUnrelatedConfig).toBe(true);
+  });
+
+  it("carries route metadata in provider-model draft review values", () => {
+    const bundle = firstRunBundle({
+      primaryBaseUrl: "https://custom.example.com/v1",
+      primaryContextWindowTokens: 256000,
+      primaryApiMode: "custom_openai_compatible",
+      primaryAuthMethod: "api_key",
+    });
+    const draft = bundle.drafts.find((candidate) => candidate.kind === "provider-model-route");
+
+    expect(draft?.review.values.provider).toBe("openai");
+    expect(draft?.review.values.model).toBe("gpt-4.1-mini");
+    expect(draft?.review.values.baseUrl).toBe("https://custom.example.com/v1");
+    expect(draft?.review.values.contextWindowTokens).toBe(256000);
+    expect(draft?.review.values.apiMode).toBe("custom_openai_compatible");
+    expect(draft?.review.values.authMethod).toBe("api_key");
   });
 
   it("redacts credential drafts and shows env var refs only", () => {

@@ -205,12 +205,16 @@ async function applyProviderRoute(
   if (provider === undefined || model === undefined) {
     throw new Error("Provider/model apply requires provider and model review values.");
   }
+  const baseUrl = stringValue(operation.review.values.baseUrl);
+  const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
   const target = configApplyTarget(operation, options);
   await setupProviderConfig({
     ...target,
     input: {
       provider,
       model,
+      baseUrl,
+      contextWindowTokens,
       apiKeyEnv: context.credentialEnv,
       requiresCredential: provider !== "local",
       scope: target.scope,
@@ -434,6 +438,10 @@ function arrayValue(value: unknown): string[] {
 
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }
 
 function providerIdValue(value: unknown): ProviderId | undefined {

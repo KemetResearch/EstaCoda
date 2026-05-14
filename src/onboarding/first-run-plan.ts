@@ -1,6 +1,6 @@
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
-import type { ProviderId } from "../contracts/provider.js";
+import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 
@@ -164,6 +164,10 @@ export type FirstRunOnboardingSelections = {
   readonly workspaceTrusted?: boolean;
   readonly primaryProvider?: ProviderId;
   readonly primaryModel?: string;
+  readonly primaryBaseUrl?: string;
+  readonly primaryContextWindowTokens?: number;
+  readonly primaryApiMode?: ProviderApiMode;
+  readonly primaryAuthMethod?: ProviderAuthMethod;
   readonly primaryCredential?: FirstRunCredentialReference;
   readonly securityMode?: SecurityApprovalMode;
   readonly workflowLearning?: SkillAutonomy;
