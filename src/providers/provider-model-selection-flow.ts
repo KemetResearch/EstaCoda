@@ -70,6 +70,7 @@ export type ProviderModelSelectionResult = {
   authMethod: ProviderAuthMethod;
   credentialAction: CredentialAction;
   profile: ModelProfile;
+  resolvedViaAlias?: string;
 };
 
 export type ProviderSelectionDiagnostic = {

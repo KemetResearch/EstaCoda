@@ -446,3 +446,37 @@ const MEDIA_ONLY_PROVIDERS = new Set<string>([
 export function isProviderMediaOnly(providerId: ProviderId): boolean {
   return MEDIA_ONLY_PROVIDERS.has(providerId);
 }
+
+/**
+ * Whether the given API mode is executable by the current build.
+ */
+export function isExecutableApiMode(apiMode: ProviderApiMode): boolean {
+  return apiMode === "openai_chat_completions" || apiMode === "custom_openai_compatible";
+}
+
+/**
+ * Validate a resolved route for model-switching operations.
+ * Blocks non-runnable providers, unsupported API modes, missing base URLs,
+ * and placeholder endpoints.
+ */
+export function validateResolvedRouteForModelSwitch(
+  route: ResolvedModelRoute
+): { ok: true } | { ok: false; reason: string } {
+  const meta = getProviderMetadata(route.provider);
+  const apiMode = route.apiMode ?? meta.apiMode;
+  const baseUrl = route.baseUrl ?? meta.defaultBaseUrl;
+
+  if (!meta.runnable) {
+    return { ok: false, reason: `Provider ${meta.displayName} is not runnable in this build.` };
+  }
+  if (!isExecutableApiMode(apiMode)) {
+    return { ok: false, reason: `Provider ${meta.displayName} uses unsupported API mode ${apiMode}.` };
+  }
+  if (providerRequiresBaseUrl(route.provider) && !baseUrl) {
+    return { ok: false, reason: `Provider ${route.provider} requires an explicit base URL.` };
+  }
+  if (baseUrl === "https://example.invalid/v1") {
+    return { ok: false, reason: `Provider ${route.provider} has no valid endpoint.` };
+  }
+  return { ok: true };
+}

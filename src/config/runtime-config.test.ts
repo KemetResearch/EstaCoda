@@ -758,6 +758,59 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
   });
 });
 
+describe("modelAliases normalization", () => {
+  it("merges model_aliases into canonical modelAliases", async () => {
+    const { mergeConfig } = await import("./runtime-config.js");
+    const merged = mergeConfig(
+      { model_aliases: { qwen: { provider: "local", model: "qwen2.5" } } },
+      { modelAliases: { gpt4: { provider: "openai", model: "gpt-4o" } } }
+    );
+    expect(merged.modelAliases).toBeDefined();
+    expect(merged.modelAliases?.qwen).toEqual({ provider: "local", model: "qwen2.5" });
+    expect(merged.modelAliases?.gpt4).toEqual({ provider: "openai", model: "gpt-4o" });
+    expect(merged.model_aliases).toBeUndefined();
+  });
+
+  it("loads model_aliases input into canonical modelAliases", async () => {
+    const { loadRuntimeConfig } = await import("./runtime-config.js");
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-alias-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      model_aliases: {
+        myllm: { provider: "local", model: "llama3" }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3" });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("saves config with canonical modelAliases, not model_aliases", async () => {
+    const { saveRuntimeConfig } = await import("./runtime-config.js");
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-save-alias-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    await saveRuntimeConfig(configPath, {
+      modelAliases: {
+        qwen: { provider: "local", model: "qwen2.5" }
+      }
+    });
+
+    const raw = await readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.modelAliases).toBeDefined();
+    expect(parsed.model_aliases).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 async function findProductionTypeScriptFiles(repoRoot: string): Promise<string[]> {
   const files: string[] = [];
 
