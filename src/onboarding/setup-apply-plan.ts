@@ -255,13 +255,21 @@ export function evaluateSetupApplyEligibility(manifest: SetupReviewManifest): Se
   for (const line of manifest.blockers) {
     const lineBlockers = line.blockers.length > 0 ? line.blockers : [line.summaryKey];
     if (line.section === "blockers") {
+      const unresolvedLineBlockers: string[] = [];
       for (const blocker of lineBlockers) {
         if (isWorkspaceTrustBlocker(blocker) && hasWorkspaceTrustGrant(manifest)) {
           continue;
         }
+        if (isCredentialBlocker(blocker) && hasCredentialReference(manifest)) {
+          continue;
+        }
         blockers.add(blocker);
+        unresolvedLineBlockers.push(blocker);
       }
-      const intent = repairIntentForLine(line);
+      const intent = unresolvedLineBlockers.length === 0 ? undefined : repairIntentForLine({
+        ...line,
+        blockers: unresolvedLineBlockers,
+      });
       if (intent !== undefined) {
         repairIntents.push(intent);
       }
@@ -481,8 +489,18 @@ function hasWorkspaceTrustGrant(manifest: SetupReviewManifest): boolean {
   return manifest.sections["workspace-trust-grants"].length > 0;
 }
 
+function hasCredentialReference(manifest: SetupReviewManifest): boolean {
+  return manifest.sections["secret-refs-to-store"].some((line) =>
+    Array.isArray(line.review.values.envVars) && line.review.values.envVars.length > 0
+  );
+}
+
 function isWorkspaceTrustBlocker(blocker: string): boolean {
   return /workspace.*trust|not trusted/i.test(blocker);
+}
+
+function isCredentialBlocker(blocker: string): boolean {
+  return /credential|api key|env|credential pool/i.test(blocker);
 }
 
 function redactedReviewForApply(review: SetupDraftReviewMetadata): SetupDraftReviewMetadata {
