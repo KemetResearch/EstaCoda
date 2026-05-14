@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { promptForApiKey, maskSecret, redactInObject } from "./secret-prompt.js";
+import { promptForApiKey, promptForApiKeyInput, maskSecret, redactInObject } from "./secret-prompt.js";
 import type { Prompt } from "./readline-prompt.js";
 
 async function makeTempDir(): Promise<string> {
@@ -93,6 +93,44 @@ describe("promptForApiKey", () => {
     if (process.platform !== "win32") {
       expect(s.mode & 0o777).toBe(0o600);
     }
+  });
+});
+
+describe("promptForApiKeyInput", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("collects non-empty key without writing .env", async () => {
+    const result = await promptForApiKeyInput({
+      prompt: fakePrompt("sk-deferred-key-1234"),
+      providerId: "openai",
+      envVarName: "OPENAI_API_KEY",
+    });
+
+    expect(result).toEqual({
+      kind: "entered",
+      envVarName: "OPENAI_API_KEY",
+      value: "sk-deferred-key-1234",
+    });
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+  });
+
+  it("returns skipped for empty input without writing .env", async () => {
+    const result = await promptForApiKeyInput({
+      prompt: fakePrompt("   "),
+      providerId: "openai",
+      envVarName: "OPENAI_API_KEY",
+    });
+
+    expect(result).toEqual({ kind: "skipped", envVarName: "OPENAI_API_KEY" });
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
   });
 });
 

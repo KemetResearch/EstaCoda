@@ -213,9 +213,15 @@ async function listModelCandidatesImpl(
   providerId: ProviderId,
   mode: ProviderModelSelectionFlowMode
 ): Promise<ModelCandidate[]> {
+  const meta = getProviderMetadata(providerId);
+  if (!providerSupportsModelListingInMode(meta, mode)) {
+    return [];
+  }
+
+  const includeCatalogOnly = mode === "catalog-explore" || mode === "setup";
   const models = await catalog.listModels({
     provider: providerId,
-    includeCatalogOnly: mode === "catalog-explore",
+    includeCatalogOnly,
     executableOnly: mode === "normal"
   });
 
@@ -228,6 +234,26 @@ async function listModelCandidatesImpl(
     catalogOnly: m.catalogOnly,
     supportsVision: m.profile.supportsVision ?? false
   }));
+}
+
+function providerSupportsModelListingInMode(
+  meta: ProviderMetadata,
+  mode: ProviderModelSelectionFlowMode
+): boolean {
+  switch (mode) {
+    case "normal":
+      return meta.visibility.modelPicker === true && meta.runnable === true;
+    case "setup":
+      return (
+        meta.visibility.setup === true &&
+        meta.configurable === true &&
+        meta.runnable === true
+      );
+    case "catalog-explore":
+      return meta.visibility.catalogExplore === true && meta.catalogKnown === true;
+    default:
+      return false;
+  }
 }
 
 // ── Selection resolution ─────────────────────────────────────────────────────

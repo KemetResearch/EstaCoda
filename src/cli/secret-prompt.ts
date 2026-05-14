@@ -6,13 +6,16 @@ export type PromptForApiKeyResult =
   | { kind: "stored"; envVarName: string; envPath: string }
   | { kind: "skipped"; envVarName: string };
 
-export async function promptForApiKey(options: {
+export type PromptForApiKeyInputResult =
+  | { kind: "entered"; envVarName: string; value: string }
+  | { kind: "skipped"; envVarName: string };
+
+export async function promptForApiKeyInput(options: {
   prompt: Prompt;
   providerId: ProviderId;
   envVarName: string;
-  homeDir?: string;
   question?: string;
-}): Promise<PromptForApiKeyResult> {
+}): Promise<PromptForApiKeyInputResult> {
   const question = options.question ?? `Enter API key for ${options.providerId}: `;
   const raw = (await options.prompt(question, { secret: true })).trim();
 
@@ -20,10 +23,26 @@ export async function promptForApiKey(options: {
     return { kind: "skipped", envVarName: options.envVarName };
   }
 
+  return { kind: "entered", envVarName: options.envVarName, value: raw };
+}
+
+export async function promptForApiKey(options: {
+  prompt: Prompt;
+  providerId: ProviderId;
+  envVarName: string;
+  homeDir?: string;
+  question?: string;
+}): Promise<PromptForApiKeyResult> {
+  const input = await promptForApiKeyInput(options);
+
+  if (input.kind === "skipped") {
+    return { kind: "skipped", envVarName: options.envVarName };
+  }
+
   const result: EnvSecretWriteResult = await writeEnvSecret({
     homeDir: options.homeDir,
     key: options.envVarName,
-    value: raw,
+    value: input.value,
   });
 
   return { kind: "stored", envVarName: result.key, envPath: result.path };

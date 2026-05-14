@@ -5,9 +5,10 @@ import {
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
+import { writeEnvSecret } from "../../config/env-secret-store.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
-import { promptForApiKey } from "../../cli/secret-prompt.js";
+import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import {
@@ -80,6 +81,13 @@ type InterfaceStyleChoice = SetupChoice<{
 }> & {
   readonly labelKey: SetupCopyKey;
   readonly descriptionKey: SetupCopyKey;
+};
+
+type PendingCredentialWrite = {
+  readonly providerId: ProviderId;
+  readonly envVarName: string;
+  readonly value: string;
+  readonly source: "first-run-review";
 };
 
 const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
@@ -227,6 +235,7 @@ export async function runFirstRunSetup(
   const primaryAuthMethod = resolution.authMethod;
 
   let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
+  let pendingCredentialWrite: PendingCredentialWrite | undefined;
 
   switch (resolution.credentialAction.kind) {
     case "none": {
@@ -247,16 +256,22 @@ export async function runFirstRunSetup(
     case "collect": {
       const envVarName = resolution.credentialAction.envVarName;
       primaryCredential = { kind: "env", name: envVarName };
-      const promptResult = await promptForApiKey({
+      const promptResult = await promptForApiKeyInput({
         prompt,
         providerId: primaryProvider,
         envVarName,
-        homeDir: options.homeDir,
         question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${envVarName}]: `,
       });
 
       if (promptResult.kind === "skipped") {
         write(options, `Config will expect ${envVarName} to be available externally.\n`);
+      } else {
+        pendingCredentialWrite = {
+          providerId: primaryProvider,
+          envVarName: promptResult.envVarName,
+          value: promptResult.value,
+          source: "first-run-review",
+        };
       }
       break;
     }
@@ -408,6 +423,17 @@ export async function runFirstRunSetup(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+  if (
+    pendingCredentialWrite !== undefined &&
+    applyPlanningResult.kind === "apply-plan-ready" &&
+    options.applyExecutor !== undefined
+  ) {
+    await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: pendingCredentialWrite.envVarName,
+      value: pendingCredentialWrite.value,
+    });
+  }
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
     : undefined;

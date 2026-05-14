@@ -502,6 +502,52 @@ describe("provider-model-selection-flow", () => {
     );
 
     it(
+      "includes catalog models for setup mode without a registered adapter",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup"
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        const gpt4o = models.find((m) => m.id === "gpt-4o");
+        expect(gpt4o).toBeDefined();
+        expect(gpt4o!.catalogOnly).toBe(true);
+        expect(gpt4o!.profile.contextWindowTokens).toBe(128_000);
+      })
+    );
+
+    it(
+      "does not expose non-setup-visible provider models in setup mode",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup"
+          })
+        );
+
+        await expect(flow.listModelCandidates("codex" as ProviderId)).resolves.toEqual([]);
+        await expect(flow.listModelCandidates("anthropic" as ProviderId)).resolves.toEqual([]);
+      })
+    );
+
+    it(
+      "keeps normal mode executable-model listing strict",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal"
+          })
+        );
+
+        await expect(flow.listModelCandidates("openai")).resolves.toEqual([]);
+      })
+    );
+
+    it(
       "includes vision capability metadata",
       withFixture(async (fixturePath, cachePath) => {
         process.env.OPENAI_API_KEY = "sk-test";

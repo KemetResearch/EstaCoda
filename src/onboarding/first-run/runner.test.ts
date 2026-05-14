@@ -163,6 +163,32 @@ function fakePrompt(overrides: Record<string, string | boolean> = {}): Prompt {
   return prompt as Prompt;
 }
 
+function reviewedExecutor(homeDir: string, workspaceRoot: string) {
+  return createReviewedSetupApplyExecutor({
+    homeDir,
+    workspaceRoot,
+    collectVerification: () => ({
+      stateWritable: true,
+      envFilePresent: false,
+      envFileSecure: true,
+      workspaceTrusted: true,
+      securityModeLabel: "Adaptive",
+      securityModeValue: "adaptive",
+      skillAutonomyLabel: "Suggest",
+      skillAutonomyValue: "suggest",
+      providerDiagnostic: {
+        status: "ready",
+        lines: ["Provider status: ready"],
+        warnings: [],
+      },
+      toolStatus: "skipped",
+      configSources: [],
+      warnings: [],
+      issueCodes: [],
+    }),
+  });
+}
+
 describe("runFirstRunSetup", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -247,6 +273,24 @@ describe("runFirstRunSetup", () => {
     expect(result.output).toContain("cancelled");
   });
 
+  it("does not write a collected API key when review is cancelled", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      flowEngine: flowEngine(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-cancelled-secret" }),
+      defaultSelections: { reviewAccepted: false },
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(JSON.stringify(result)).not.toContain("sk-cancelled-secret");
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
   it("lets real prompts select optional capabilities independently", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
@@ -284,29 +328,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt(),
       flowEngine: flowEngine(),
-      applyExecutor: createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        collectVerification: () => ({
-          stateWritable: true,
-          envFilePresent: false,
-          envFileSecure: true,
-          workspaceTrusted: true,
-          securityModeLabel: "Adaptive",
-          securityModeValue: "adaptive",
-          skillAutonomyLabel: "Suggest",
-          skillAutonomyValue: "suggest",
-          providerDiagnostic: {
-            status: "ready",
-            lines: ["Provider status: ready"],
-            warnings: [],
-          },
-          toolStatus: "skipped",
-          configSources: [],
-          warnings: [],
-          issueCodes: [],
-        }),
-      }),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
     });
 
     expect(result.completed).toBe(true);
@@ -317,7 +339,7 @@ describe("runFirstRunSetup", () => {
     expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
   });
 
-  it("writes API key to .env when user provides one during first-run", async () => {
+  it("keeps collected API key in memory during dry-run first-run", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
@@ -326,9 +348,26 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
-    const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
-    expect(envContent).toContain('OPENAI_API_KEY="sk-fir...7890"');
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("sk-fir...7890");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-fir...7890");
+    expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
+  });
+
+  it("writes collected API key to .env only after approved reviewed apply", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-approved-secret" }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    expect(envContent).toContain('OPENAI_API_KEY="sk-approved-secret"');
+    expect(JSON.stringify(result)).not.toContain("sk-approved-secret");
     expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
   });
 
@@ -451,25 +490,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-test" }),
       flowEngine: flowEngine({ baseUrl: "https://custom.example.com/v1", contextWindowTokens: 256000 }),
-      applyExecutor: createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        collectVerification: () => ({
-          stateWritable: true,
-          envFilePresent: false,
-          envFileSecure: true,
-          workspaceTrusted: true,
-          securityModeLabel: "Adaptive",
-          securityModeValue: "adaptive",
-          skillAutonomyLabel: "Suggest",
-          skillAutonomyValue: "suggest",
-          providerDiagnostic: { status: "ready", lines: ["ready"], warnings: [] },
-          toolStatus: "skipped",
-          configSources: [],
-          warnings: [],
-          issueCodes: [],
-        }),
-      }),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
     });
 
     expect(result.completed).toBe(true);
