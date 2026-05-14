@@ -235,8 +235,8 @@ function resolveSelectionImpl(
   const config = options.config;
   const meta = getProviderMetadata(providerId);
 
-  // Non-runnable/catalog-only providers cannot be selected for execution
-  if (mode !== "catalog-explore" && !meta.runnable) {
+  // Non-runnable/catalog-only providers cannot be selected for execution in any mode
+  if (!meta.runnable) {
     return {
       kind: "diagnostic",
       provider: providerId,

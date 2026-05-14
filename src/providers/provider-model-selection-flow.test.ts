@@ -626,11 +626,27 @@ describe("provider-model-selection-flow", () => {
 
   describe("resolveSelection invalid selections", () => {
     it(
-      "returns diagnostic for non-runnable provider",
+      "returns diagnostic for non-runnable provider in normal mode",
       withFixture(async (fixturePath, cachePath) => {
         const flow = await createProviderModelSelectionFlow(
           buildOptions(fixturePath, cachePath, {
             mode: "normal"
+          })
+        );
+
+        const result = flow.resolveSelection("codex", "codex-model");
+        expect(result.kind).toBe("diagnostic");
+        if (result.kind !== "diagnostic") return;
+        expect(result.reason).toContain("not runnable");
+      })
+    );
+
+    it(
+      "returns diagnostic for non-runnable provider in catalog-explore mode",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "catalog-explore"
           })
         );
 
