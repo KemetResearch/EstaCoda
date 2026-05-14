@@ -202,6 +202,15 @@ describe("buildSetupEditorPlan", () => {
     expect(scopedPatches.every((patch) => patch.preserveUnrelatedConfig === true)).toBe(true);
   });
 
+  it("carries current security and workflow values for guided editor defaults", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const security = plan.actions.find((action) => action.id === "edit-security-mode");
+    const workflow = plan.actions.find((action) => action.id === "edit-workflow-learning");
+
+    expect(security?.reviewValues).toEqual({ securityMode: "adaptive" });
+    expect(workflow?.reviewValues).toEqual({ workflowLearning: "suggest" });
+  });
+
   it("represents optional capabilities as independent placeholders", () => {
     const capabilities = section(buildSetupEditorPlan(state("configured-ready")), "optional-capabilities");
 

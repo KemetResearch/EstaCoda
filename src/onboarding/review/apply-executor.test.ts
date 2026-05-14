@@ -119,7 +119,7 @@ describe("reviewed setup apply executor", () => {
     expect(trust.grants?.[0]?.root).toBe(await realpath(workspaceRoot));
   });
 
-  it("applies hosted credential references without raw secret values", async () => {
+  it("applies hosted credential references as provider route refs without raw secret values", async () => {
     const plan = firstRunPlan({
       homeDir: tempDir,
       workspaceRoot,
@@ -141,7 +141,7 @@ describe("reviewed setup apply executor", () => {
     };
 
     expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
-    expect(config.credentialPools?.openai?.entries?.[0]?.source).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(config.credentialPools?.openai).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
   });
 

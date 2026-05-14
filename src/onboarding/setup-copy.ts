@@ -117,7 +117,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.workflowLearning.options.proactive.label", "Proactive", "استباقي", [], "workflow-learning"),
   copy("onboarding.workflowLearning.options.proactive.description", "Surface more learning opportunities.", "أظهر فرص تعلّم أكثر.", [], "workflow-learning"),
   copy("onboarding.workflowLearning.options.autonomous.label", "Autonomous", "ذاتي", [], "workflow-learning"),
-  copy("onboarding.workflowLearning.options.autonomous.description", "Plan for stronger learning automation after review.", "خطّط لأتمتة تعلّم أقوى بعد المراجعة.", [], "workflow-learning"),
+  copy("onboarding.workflowLearning.options.autonomous.description", "Create stronger workflow suggestions where supported; promotion stays reviewable.", "أنشئ اقتراحات أقوى لسير العمل حيث يكون ذلك مدعومًا؛ تبقى الترقية قابلة للمراجعة.", [], "workflow-learning"),
   copy("onboarding.workflowLearning.validation.selected", "Choose a workflow learning mode.", "اختر وضع تعلّم سير العمل.", [], "workflow-learning"),
   copy("onboarding.optionalCapabilities", "Add extra capabilities now, or start light. Skipping them does not weaken core setup.", "أضف القدرات الإضافية الآن، أو ابدأ بتشغيل خفيف. تخطيها لا يضعف الإعداد الأساسي.", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.skipped", "Optional capabilities skipped. Core setup remains valid.", "تم تخطي القدرات الاختيارية. يظل الإعداد الأساسي صالحًا.", [], "optional-capability"),

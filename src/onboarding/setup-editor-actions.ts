@@ -62,6 +62,7 @@ export type SetupEditorActionDraft = {
     readonly name: string;
     readonly value: "not-included";
   }[];
+  readonly reviewValues?: Record<string, string | readonly string[] | boolean | undefined>;
 };
 
 export function setupEditorAction(input: Omit<SetupEditorActionDraft, "kind" | "mutatesConfig" | "preservesUnrelatedConfig">): SetupEditorActionDraft {
