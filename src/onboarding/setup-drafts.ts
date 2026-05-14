@@ -71,7 +71,7 @@ export type SetupDraftReviewMetadata = {
   readonly copyKey: string;
   readonly summaryKey: string;
   readonly redacted: true;
-  readonly values: Record<string, string | readonly string[] | boolean | undefined>;
+  readonly values: Record<string, string | readonly string[] | boolean | number | undefined>;
 };
 
 export type SetupDraftApplyIntent = {
@@ -196,6 +196,10 @@ function firstRunProviderModelDraft(
     values: {
       provider: selections.primaryProvider,
       model: selections.primaryModel,
+      baseUrl: selections.primaryBaseUrl,
+      contextWindowTokens: selections.primaryContextWindowTokens,
+      apiMode: selections.primaryApiMode,
+      authMethod: selections.primaryAuthMethod,
     },
   });
 }

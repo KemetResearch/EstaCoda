@@ -5,11 +5,15 @@ import {
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
-import { getDefaultApiKeyEnv } from "../../providers/provider-metadata.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKey } from "../../cli/secret-prompt.js";
-import { createModelSelectionCatalog } from "../../providers/model-selection-catalog.js";
+
+import type { SelectPromptInput } from "../../cli/interactive-select.js";
+import {
+  createProviderModelSelectionFlow,
+  type FlowEngine,
+} from "../../providers/provider-model-selection-flow.js";
 import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
@@ -46,28 +50,9 @@ import {
   type SetupChoice,
 } from "../setup-prompts.js";
 
-export type FirstRunProviderOption = {
-  readonly id: ProviderId;
-  readonly label: string;
-  readonly description?: string;
-  readonly requiresCredential: boolean;
-};
-
-export type FirstRunModelOption = {
-  readonly provider: ProviderId;
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-};
-
-export type FirstRunCatalog = {
-  readonly listProviders: () => Promise<readonly FirstRunProviderOption[]>;
-  readonly listModels: (provider: ProviderId) => Promise<readonly FirstRunModelOption[]>;
-};
-
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
-  readonly catalog?: FirstRunCatalog;
+  readonly flowEngine?: FlowEngine;
   readonly defaultSelections?: FirstRunOnboardingSelections;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
@@ -122,7 +107,7 @@ export async function runFirstRunSetup(
   const prompt = options.prompt;
   const state = await collectSetupEntryState(options);
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
-  const catalog = options.catalog ?? await createDefaultCatalog(options);
+  const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";
 
   await showSetupCard(prompt, initialLocale, {
@@ -198,55 +183,84 @@ export async function runFirstRunSetup(
     defaultValue: options.defaultSelections?.workspaceTrusted ?? true,
   });
 
-  const providerOptions = await catalog.listProviders();
+
+  const providerCandidates = await flowEngine.listProviderCandidates();
   const primaryProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(language, "onboarding.providers.primary.title"),
     message: `${setupCopyText(language, "onboarding.providers.primary")}\n`,
-    choices: providerOptions.map((provider) => ({
+    choices: providerCandidates.map((provider) => ({
       id: provider.id,
-      label: provider.label,
-      description: provider.description,
+      label: provider.displayName,
+      description: provider.baseUrl ? `${provider.baseUrl} (${provider.modelsCount} models)` : `${provider.modelsCount} models`,
       value: provider.id,
     })),
-    defaultValue: options.defaultSelections?.primaryProvider ?? providerOptions[0]?.id,
+    defaultValue: options.defaultSelections?.primaryProvider ?? providerCandidates[0]?.id,
   });
 
-  const modelOptions = await catalog.listModels(primaryProvider);
+
+  const modelCandidates = await flowEngine.listModelCandidates(primaryProvider);
   const primaryModel = await promptSetupChoice(prompt, {
     title: setupCopyText(language, "onboarding.providers.primaryModel.title"),
     message: `${setupCopyText(language, "onboarding.providers.primaryModel").replace("{providerId}", primaryProvider)}\n`,
-    choices: modelOptions.map((model) => ({
+    choices: modelCandidates.map((model) => ({
       id: model.id,
-      label: model.label,
-      description: model.description,
+      label: model.id,
+      description: [
+        model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
+        model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
+        model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
+        model.profile.status !== undefined ? model.profile.status : undefined,
+      ].filter((part): part is string => part !== undefined).join(", "),
       value: model.id,
     })),
-    defaultValue: options.defaultSelections?.primaryModel ?? modelOptions[0]?.id,
+    defaultValue: options.defaultSelections?.primaryModel ?? modelCandidates[0]?.id,
   });
 
-  const providerRequiresCredential = providerOptions.find((provider) => provider.id === primaryProvider)?.requiresCredential ?? primaryProvider !== "local";
-  const defaultEnvVar = getDefaultApiKeyEnv(primaryProvider);
-  const primaryCredential = providerRequiresCredential
-    ? {
-        kind: "env" as const,
-        name: defaultEnvVar,
-      }
-    : { kind: "none" as const };
+  const resolution = await flowEngine.resolveSelection(primaryProvider, primaryModel);
+  if (resolution.kind === "diagnostic") {
+    throw new Error(`Provider/model selection failed: ${resolution.reason}`);
+  }
 
-  if (providerRequiresCredential) {
-    const promptResult = await promptForApiKey({
-      prompt,
-      providerId: primaryProvider,
-      envVarName: defaultEnvVar,
-      homeDir: options.homeDir,
-      question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${defaultEnvVar}]: `,
-    });
+  const primaryBaseUrl = resolution.baseUrl;
+  const primaryContextWindowTokens = resolution.profile.contextWindowTokens;
+  const primaryApiMode = resolution.apiMode;
+  const primaryAuthMethod = resolution.authMethod;
 
-    if (promptResult.kind === "skipped") {
-      write(options, `Config will expect ${defaultEnvVar} to be available externally.\n`);
+  let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
+
+  switch (resolution.credentialAction.kind) {
+    case "none": {
+      primaryCredential = { kind: "none" };
+      write(options, `${setupCopyText(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
+      break;
     }
-  } else {
-    write(options, `${setupCopyText(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
+    case "reuse": {
+      const ref = resolution.credentialAction.reference;
+      if (!ref.startsWith("env:")) {
+        throw new Error(`Malformed reuse credential reference: ${ref}`);
+      }
+      const envVarName = ref.slice(4);
+      primaryCredential = { kind: "env", name: envVarName };
+      write(options, `Using existing credential from ${envVarName}.\n`);
+      break;
+    }
+    case "collect": {
+      const envVarName = resolution.credentialAction.envVarName;
+      primaryCredential = { kind: "env", name: envVarName };
+      const promptResult = await promptForApiKey({
+        prompt,
+        providerId: primaryProvider,
+        envVarName,
+        homeDir: options.homeDir,
+        question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${envVarName}]: `,
+      });
+
+      if (promptResult.kind === "skipped") {
+        write(options, `Config will expect ${envVarName} to be available externally.\n`);
+      }
+      break;
+    }
+
   }
 
   const securityMode = await promptSetupChoice(prompt, {
@@ -336,6 +350,10 @@ export async function runFirstRunSetup(
     workspaceTrusted,
     primaryProvider,
     primaryModel,
+    primaryBaseUrl,
+    primaryContextWindowTokens,
+    primaryApiMode,
+    primaryAuthMethod,
     primaryCredential,
     securityMode,
     workflowLearning,
@@ -414,45 +432,17 @@ export async function runFirstRunSetup(
   };
 }
 
-async function createDefaultCatalog(options: CollectSetupEntryStateOptions): Promise<FirstRunCatalog> {
+async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): Promise<FlowEngine> {
   const loaded = await loadRuntimeConfig(options);
-  const catalog = await createModelSelectionCatalog({
+  const flow = await createProviderModelSelectionFlow({
     config: loaded.config,
     providerRegistry: loaded.providerRegistry,
     homeDir: options.homeDir,
     allowNetwork: false,
+    mode: "setup",
   });
 
-  return {
-    listProviders: async () => {
-      const providers = (await catalog.listProviders()).filter((provider) => provider.id !== "unconfigured");
-      return providers.map((provider) => ({
-        id: provider.id,
-        label: provider.name,
-        description: provider.catalogOnly
-          ? setupCopyText("en", "onboarding.catalog.provider.catalogOnly")
-          : provider.configured
-            ? setupCopyText("en", "onboarding.catalog.provider.configured")
-            : setupCopyText("en", "onboarding.catalog.provider.available"),
-        requiresCredential: provider.setupMode !== "none" && provider.id !== "local",
-      }));
-    },
-    listModels: async (providerId) => {
-      const models = (await catalog.listModels({ provider: providerId, includeBeta: true }))
-        .filter((model) => model.id !== "unconfigured");
-      return models.map((model) => ({
-        provider: model.provider,
-        id: model.id,
-        label: model.id,
-        description: [
-          model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
-          model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
-          model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-          model.profile.status !== undefined ? model.profile.status : undefined,
-        ].filter((part): part is string => part !== undefined).join(", "),
-      }));
-    },
-  };
+  return flow;
 }
 
 async function chooseOptionalCapabilities(

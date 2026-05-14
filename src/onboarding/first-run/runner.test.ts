@@ -4,34 +4,138 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
-import type { ProviderId } from "../../contracts/provider.js";
+import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
-import { runFirstRunSetup, type FirstRunCatalog } from "./runner.js";
+import { runFirstRunSetup } from "./runner.js";
+import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
 }
 
-function catalog(): FirstRunCatalog {
+function flowEngine(overrides: {
+  credentialAction?: "collect" | "reuse" | "none";
+  baseUrl?: string;
+  contextWindowTokens?: number;
+} = {}): FlowEngine {
+  const action = overrides.credentialAction ?? "collect";
   return {
-    listProviders: async () => [
+    listProviderCandidates: async () => [
       {
-        id: "local",
-        label: "Local",
-        description: "Local OpenAI-compatible provider.",
-        requiresCredential: false,
+        id: "local" as ProviderId,
+        displayName: "Local",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 1,
+        credentialReady: true,
       },
       {
-        id: "openai",
-        label: "OpenAI",
-        description: "Hosted OpenAI provider.",
-        requiresCredential: true,
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 5,
+        credentialReady: action === "reuse",
       },
     ],
-    listModels: async (provider: ProviderId) => provider === "local"
-      ? [{ provider, id: "hermes-local", label: "hermes-local" }]
-      : [{ provider, id: "gpt-5.5", label: "gpt-5.5" }],
+    listModelCandidates: async (providerId: ProviderId) => providerId === "local"
+      ? [{
+          id: "hermes-local",
+          provider: providerId,
+          profile: {
+            id: "hermes-local",
+            provider: providerId,
+            supportsTools: false,
+            supportsVision: false,
+            supportsReasoning: false,
+            supportsStructuredOutput: false,
+            contextWindowTokens: 8192,
+          },
+          configured: true,
+          executable: true,
+          catalogOnly: false,
+          supportsVision: false,
+        }]
+      : [{
+          id: "gpt-5.5",
+          provider: providerId,
+          profile: {
+            id: "gpt-5.5",
+            provider: providerId,
+            supportsTools: true,
+            supportsVision: true,
+            supportsReasoning: false,
+            supportsStructuredOutput: true,
+            contextWindowTokens: overrides.contextWindowTokens ?? 128000,
+          },
+          configured: true,
+          executable: true,
+          catalogOnly: false,
+          supportsVision: true,
+        }],
+    resolveSelection: async (providerId: ProviderId, modelId: string) => {
+      if (providerId === "local") {
+        return {
+          kind: "selected" as const,
+          provider: providerId,
+          model: modelId,
+          baseUrl: overrides.baseUrl,
+          apiMode: "custom_openai_compatible" as ProviderApiMode,
+          authMethod: "none" as ProviderAuthMethod,
+          credentialAction: { kind: "none" as const },
+          profile: {
+            id: modelId,
+            provider: providerId,
+            supportsTools: false,
+            supportsVision: false,
+            supportsReasoning: false,
+            supportsStructuredOutput: false,
+            contextWindowTokens: 8192,
+          },
+        };
+      }
+      if (action === "reuse") {
+        return {
+          kind: "selected" as const,
+          provider: providerId,
+          model: modelId,
+          baseUrl: overrides.baseUrl ?? "https://api.openai.com/v1",
+          apiMode: "custom_openai_compatible" as ProviderApiMode,
+          authMethod: "api_key" as ProviderAuthMethod,
+          credentialAction: { kind: "reuse" as const, reference: "env:OPENAI_API_KEY" },
+          profile: {
+            id: modelId,
+            provider: providerId,
+            supportsTools: true,
+            supportsVision: true,
+            supportsReasoning: false,
+            supportsStructuredOutput: true,
+            contextWindowTokens: overrides.contextWindowTokens ?? 128000,
+          },
+        };
+      }
+      return {
+        kind: "selected" as const,
+        provider: providerId,
+        model: modelId,
+        baseUrl: overrides.baseUrl ?? "https://api.openai.com/v1",
+        apiMode: "custom_openai_compatible" as ProviderApiMode,
+        authMethod: "api_key" as ProviderAuthMethod,
+        credentialAction: { kind: "collect" as const, envVarName: "OPENAI_API_KEY" },
+        profile: {
+          id: modelId,
+          provider: providerId,
+          supportsTools: true,
+          supportsVision: true,
+          supportsReasoning: false,
+          supportsStructuredOutput: true,
+          contextWindowTokens: overrides.contextWindowTokens ?? 128000,
+        },
+      };
+    },
   };
 }
 
@@ -80,7 +184,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
 
@@ -89,6 +193,8 @@ describe("runFirstRunSetup", () => {
     expect(result.state.kind).toBe("new-user");
     expect(result.selections.primaryProvider).toBe("local");
     expect(result.selections.primaryCredential).toEqual({ kind: "none" });
+    expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
+    expect(result.selections.primaryAuthMethod).toBe("none");
     expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(1);
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
@@ -108,11 +214,14 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Primary provider": "OpenAI" }),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
     });
 
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(result.selections.primaryBaseUrl).toBe("https://api.openai.com/v1");
+    expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
+    expect(result.selections.primaryAuthMethod).toBe("api_key");
     expect(result.reviewManifest.sections["secret-refs-to-store"]).toHaveLength(1);
     expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-");
@@ -126,7 +235,7 @@ describe("runFirstRunSetup", () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      catalog: catalog(),
+      flowEngine: flowEngine(),
       prompt: fakePrompt(),
       defaultSelections: { reviewAccepted: false },
     });
@@ -143,7 +252,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ Telegram: true, Browser: true }),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
     });
 
     expect(result.selections.optionalCapabilities).toEqual(["channels", "browser"]);
@@ -159,7 +268,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Setup language": "العربية" }),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
 
@@ -174,7 +283,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -205,21 +314,21 @@ describe("runFirstRunSetup", () => {
     const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
       model?: { provider?: string; id?: string };
     };
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
   });
 
   it("writes API key to .env when user provides one during first-run", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-first-run-key-7890" }),
-      catalog: catalog(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-fir...7890" }),
+      flowEngine: flowEngine(),
     });
 
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
     const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
-    expect(envContent).toContain('OPENAI_API_KEY="sk-first-run-key-7890"');
-    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-first-run-key-7890");
+    expect(envContent).toContain('OPENAI_API_KEY="sk-fir...7890"');
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-fir...7890");
     expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
   });
 
@@ -229,7 +338,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "" }),
-      catalog: catalog(),
+      flowEngine: flowEngine(),
       output: { write: (value) => outputLines.push(value) },
     });
 
@@ -237,5 +346,145 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
     const combined = outputLines.join("");
     expect(combined).toContain("Config will expect OPENAI_API_KEY to be available externally");
+  });
+
+  it("carries shared-flow route metadata through first-run review without raw secrets", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }),
+      flowEngine: flowEngine({
+        baseUrl: "https://custom.example.com/v1",
+        contextWindowTokens: 256000,
+      }),
+    });
+
+    expect(result.selections.primaryProvider).toBe("openai");
+    expect(result.selections.primaryModel).toBe("gpt-5.5");
+    expect(result.selections.primaryBaseUrl).toBe("https://custom.example.com/v1");
+    expect(result.selections.primaryContextWindowTokens).toBe(256000);
+    expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
+    expect(result.selections.primaryAuthMethod).toBe("api_key");
+
+    const providerModelDraft = result.draftBundle.drafts.find((d) => d.kind === "provider-model-route");
+    expect(providerModelDraft?.review.values.baseUrl).toBe("https://custom.example.com/v1");
+    expect(providerModelDraft?.review.values.contextWindowTokens).toBe(256000);
+    expect(providerModelDraft?.review.values.apiMode).toBe("custom_openai_compatible");
+    expect(providerModelDraft?.review.values.authMethod).toBe("api_key");
+
+    const serialized = JSON.stringify(result.reviewManifest);
+    expect(serialized).toContain("https://custom.example.com/v1");
+    expect(serialized).toContain("256000");
+    expect(serialized).not.toContain("sk-");
+  });
+
+  it("reuses existing credential without prompting when flow reports reuse", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }),
+      flowEngine: flowEngine({ credentialAction: "reuse" }),
+    });
+
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+  });
+
+  it("throws on malformed reuse credential reference", async () => {
+    const badFlow: FlowEngine = {
+      listProviderCandidates: async () => [{
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 5,
+        credentialReady: true,
+      }],
+      listModelCandidates: async () => [{
+        id: "gpt-5.5",
+        provider: "openai" as ProviderId,
+        profile: {
+          id: "gpt-5.5",
+          provider: "openai" as ProviderId,
+          supportsTools: true,
+          supportsVision: false,
+          supportsReasoning: false,
+          supportsStructuredOutput: true,
+          contextWindowTokens: 128000,
+        },
+        configured: true,
+        executable: true,
+        catalogOnly: false,
+        supportsVision: false,
+      }],
+      resolveSelection: async () => ({
+        kind: "selected" as const,
+        provider: "openai" as ProviderId,
+        model: "gpt-5.5",
+        apiMode: "custom_openai_compatible" as ProviderApiMode,
+        authMethod: "api_key" as ProviderAuthMethod,
+        credentialAction: { kind: "reuse" as const, reference: "invalid-ref" as `env:${string}` },
+        profile: {
+          id: "gpt-5.5",
+          provider: "openai" as ProviderId,
+          supportsTools: true,
+          supportsVision: false,
+          supportsReasoning: false,
+          supportsStructuredOutput: true,
+          contextWindowTokens: 128000,
+        },
+      }),
+    };
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }),
+      flowEngine: badFlow,
+    })).rejects.toThrow("Malformed reuse credential reference");
+  });
+
+  it("does not persist apiMode or authMethod in saved config", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-test" }),
+      flowEngine: flowEngine({ baseUrl: "https://custom.example.com/v1", contextWindowTokens: 256000 }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => ({
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: { status: "ready", lines: ["ready"], warnings: [] },
+          toolStatus: "skipped",
+          configSources: [],
+          warnings: [],
+          issueCodes: [],
+        }),
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const config = JSON.parse(rawConfig) as Record<string, unknown>;
+
+    expect(rawConfig).not.toContain("apiMode");
+    expect(rawConfig).not.toContain("authMethod");
+    expect(config.model).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      contextWindowTokens: 256000,
+    }));
+    expect((config.providers as Record<string, unknown>)?.openai).toEqual(expect.objectContaining({
+      baseUrl: "https://custom.example.com/v1",
+    }));
   });
 });
