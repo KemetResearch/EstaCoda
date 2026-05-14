@@ -7,7 +7,12 @@ import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { SetupEntryRecommendedAction, SetupEntryState, SetupEntryStateKind } from "./setup-entry-state.js";
 import type { SetupVerificationReport } from "./verification.js";
 import { routeSetupEntryState } from "./setup-router.js";
-import { buildFirstRunDraftBundle, buildSetupEditorDraftBundle, type SetupDraftBundle } from "./setup-drafts.js";
+import {
+  buildFirstRunDraftBundle,
+  buildSetupEditorActionDraftBundle,
+  buildSetupEditorDraftBundle,
+  type SetupDraftBundle,
+} from "./setup-drafts.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
@@ -205,6 +210,38 @@ describe("setup draft bundles", () => {
       scope: ["skills.autonomy"],
       preserveUnrelatedConfig: true,
     }));
+  });
+
+  it("builds selected setup editor security and workflow drafts with reviewed values", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+    const securityAction = decision.setupEditorPlanSession.plan.actions.find((action) => action.id === "edit-security-mode");
+    const workflowAction = decision.setupEditorPlanSession.plan.actions.find((action) => action.id === "edit-workflow-learning");
+    if (securityAction === undefined || workflowAction === undefined) {
+      throw new Error("Expected security and workflow editor actions");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      {
+        ...securityAction,
+        reviewValues: { securityMode: "strict" },
+      },
+      {
+        ...workflowAction,
+        reviewValues: { workflowLearning: "autonomous" },
+      },
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+
+    expect(bundle.drafts.map((draft) => draft.review.summaryKey)).toEqual([
+      "setupDrafts.securityMode.summary",
+      "setupDrafts.workflowLearning.summary",
+    ]);
+    expect(bundle.drafts[0]?.review.values.securityMode).toBe("strict");
+    expect(bundle.drafts[1]?.review.values.workflowLearning).toBe("autonomous");
   });
 
   it("keeps optional capability drafts independent and skippable", () => {

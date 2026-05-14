@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
+import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
 
 async function makeTempDir(): Promise<string> {
@@ -56,7 +57,9 @@ describe("runConfigEditor", () => {
     expect(result.applyEndState).toBeUndefined();
     expect(applyCalled).toBe(false);
     expect(output.join("")).toContain("EstaCoda guided setup editor");
-    expect(output.join("")).toContain("Available non-mutating actions:");
+    expect(output.join("")).toContain("Available setup actions:");
+    expect(output.join("")).toContain("edit-security-mode");
+    expect(output.join("")).toContain("edit-workflow-learning");
     expect(output.join("")).toContain("verify-setup - Verify setup");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit");
@@ -101,7 +104,7 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("State: configured-ready");
   });
 
-  it("rejects mutating route actions in the PR4 skeleton", async () => {
+  it("rejects unsupported route actions in the guided editor", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -115,10 +118,136 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.selectedActionId).toBe("review-edit-config");
-    expect(result.output).toContain("not available in the read-only setup editor skeleton");
+    expect(result.output).toContain("not available in the guided setup editor");
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.applyEndState).toBeUndefined();
+  });
+
+  it("applies reviewed security mode changes while preserving unrelated config", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      security: {
+        approvalMode: "adaptive",
+        assessor: {
+          enabled: true,
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["strict"] }),
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+      model?: unknown;
+      providers?: unknown;
+      security?: { approvalMode?: string; assessor?: { enabled?: boolean } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(result.reviewManifest?.sections["security-mode"].length).toBe(1);
+    expect(result.reviewManifest?.sections["verification-checks"].length).toBe(1);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    expect(config.security?.approvalMode).toBe("strict");
+    expect(config.security?.assessor?.enabled).toBe(true);
+    expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+    expect(config.providers).toEqual((localReadyConfig() as { providers: unknown }).providers);
+  });
+
+  it("applies reviewed workflow learning changes while preserving unrelated skill config", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      skills: {
+        autonomy: "suggest",
+        externalDirs: ["/tmp/estacoda-skills"],
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["autonomous"] }),
+      defaultActionId: "edit-workflow-learning",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+      skills?: { autonomy?: string; externalDirs?: string[] };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-workflow-learning");
+    expect(result.reviewManifest?.sections["workflow-learning"].length).toBe(1);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    expect(config.skills?.autonomy).toBe("autonomous");
+    expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
+  });
+
+  it("grants workspace trust only after explicit confirmation and reviewed approval", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    const trustStorePath = join(tempDir, ".estacoda", "trust.json");
+    const store = new WorkspaceTrustStore({ path: trustStorePath });
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      trustStorePath,
+      prompt: fakePrompt({ values: [true, true] }),
+      defaultActionId: "trust-workspace",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        trustStorePath,
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.initialDecision.state.kind).toBe("untrusted-workspace");
+    expect(result.selectedActionId).toBe("repair-workspace-trust");
+    expect(result.reviewManifest?.sections["workspace-trust-grants"].length).toBe(1);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    await expect(store.isTrusted(workspaceRoot)).resolves.toBe(true);
+  });
+
+  it("does not grant workspace trust when explicit confirmation is declined", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    const trustStorePath = join(tempDir, ".estacoda", "trust.json");
+    const store = new WorkspaceTrustStore({ path: trustStorePath });
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      trustStorePath,
+      prompt: fakePrompt({ values: [false] }),
+      defaultActionId: "trust-workspace",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain("Workspace trust was not changed");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(applyCalled).toBe(false);
+    await expect(store.isTrusted(workspaceRoot)).resolves.toBe(false);
   });
 
   it("renders broken config as a repair-first diagnostic surface", async () => {
@@ -166,9 +295,17 @@ describe("runConfigEditor", () => {
   });
 });
 
-function fakePrompt(): Prompt {
+function fakePrompt(options: { readonly values?: readonly unknown[] } = {}): Prompt {
+  const values = [...(options.values ?? [])];
   const prompt = (async () => "") as Prompt;
-  prompt.select = async (input) => input.options[input.defaultIndex ?? 0]?.value ?? input.options[0]!.value;
+  prompt.select = async (input) => {
+    const next = values.shift();
+    if (next !== undefined) {
+      const match = input.options.find((option) => Object.is(option.value, next));
+      if (match !== undefined) return match.value;
+    }
+    return input.options[input.defaultIndex ?? 0]?.value ?? input.options[0]!.value;
+  };
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
   return prompt;
@@ -185,7 +322,7 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   }).grant(workspaceRoot, { label: "test" });
 }
 
-function localReadyConfig(modelId = "hermes-local"): unknown {
+function localReadyConfig(modelId = "hermes-local"): Record<string, unknown> {
   return {
     model: {
       provider: "local",

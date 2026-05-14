@@ -293,6 +293,9 @@ function securityModeSection(state: SetupEntryState): SetupEditorSection {
         readOnly: false,
         requiresExplicitApply: true,
         patch: scopedPatch(["security.approvalMode"]),
+        reviewValues: {
+          securityMode: state.setupVerification.securityModeValue,
+        },
       }),
     ],
   });
@@ -320,6 +323,9 @@ function workflowLearningSection(state: SetupEntryState): SetupEditorSection {
         readOnly: false,
         requiresExplicitApply: true,
         patch: scopedPatch(["skills.autonomy"]),
+        reviewValues: {
+          workflowLearning: state.setupVerification.skillAutonomyValue,
+        },
       }),
     ],
   });

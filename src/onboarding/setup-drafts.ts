@@ -154,6 +154,22 @@ export function buildSetupEditorDraftBundle(
   options: SetupDraftBundleOptions = {}
 ): SetupDraftBundle {
   const drafts = session.plan.actions.map((action) => draftFromEditorAction(action, options));
+  return buildSetupEditorDraftBundleFromActions(session, drafts);
+}
+
+export function buildSetupEditorActionDraftBundle(
+  session: SetupEditorPlanSession,
+  actions: readonly SetupEditorActionDraft[],
+  options: SetupDraftBundleOptions = {}
+): SetupDraftBundle {
+  const drafts = actions.map((action) => draftFromEditorAction(action, options));
+  return buildSetupEditorDraftBundleFromActions(session, drafts);
+}
+
+function buildSetupEditorDraftBundleFromActions(
+  session: SetupEditorPlanSession,
+  drafts: readonly SetupDraft[]
+): SetupDraftBundle {
   return bundle(
     "setup-editor-plan-session",
     `setup-editor:${session.plan.sourceState}`,
@@ -306,6 +322,32 @@ function draftFromEditorAction(
 
   if (action.id === "run-readonly-verification") {
     return verificationDraft(source);
+  }
+
+  if (action.id === "edit-security-mode") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "security-mode",
+      source,
+      riskSurface: "security-policy",
+      scope: action.patch?.fields ?? [],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.securityMode.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
+  if (action.id === "edit-workflow-learning") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "workflow-learning",
+      source,
+      riskSurface: "workflow-learning",
+      scope: action.patch?.fields ?? [],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.workflowLearning.summary",
+      values: action.reviewValues ?? {},
+    });
   }
 
   if (action.id === "cancel-setup-editor") {
