@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -104,6 +105,21 @@ describe("cli setup command", () => {
     expect(await new WorkspaceTrustStore({
       path: join(tempDir, ".estacoda", "trust.json"),
     }).isTrusted(workspaceRoot)).toBe(false);
+  });
+
+  it("starts interactive setup through the real entrypoint without Node unsettled top-level await", async () => {
+    const result = await runEntrypoint({
+      argv: ["setup", "--interactive"],
+      cwd: process.cwd(),
+      homeDir: tempDir,
+      input: "n\n",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("EstaCoda setup");
+    expect(result.stdout).toContain("Setup language");
+    expect(result.stderr).not.toContain("unsettled top-level await");
+    expect(result.stderr).not.toContain("Warning: Detected unsettled");
   });
 
   it("renders configured-ready setup through the new setup route", async () => {
@@ -313,6 +329,59 @@ function valueOrDefault<T>(selection: SelectPromptInput<T>, value: unknown): T {
 
 function allBooleanOptions<T>(selection: SelectPromptInput<T>): boolean {
   return selection.options.every((option) => typeof option.value === "boolean");
+}
+
+type EntrypointResult = {
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+};
+
+function runEntrypoint(input: {
+  readonly argv: readonly string[];
+  readonly cwd: string;
+  readonly homeDir: string;
+  readonly input: string;
+}): Promise<EntrypointResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "--import",
+      "tsx",
+      join(process.cwd(), "src", "index.ts"),
+      ...input.argv
+    ], {
+      cwd: input.cwd,
+      env: {
+        ...process.env,
+        HOME: input.homeDir,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Timed out waiting for entrypoint setup command."));
+    }, 10_000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stdout, stderr });
+    });
+    child.stdin.end(input.input);
+  });
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
