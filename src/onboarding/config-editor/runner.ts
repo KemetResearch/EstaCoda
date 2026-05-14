@@ -305,7 +305,7 @@ async function handleCredentialAction(
   action: ConfigEditorRenderedAction
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
-  const resolved = await selectResolvedProviderRoute(options, initialDecision);
+  const resolved = await resolveActiveProviderRoute(options, initialDecision);
   if (resolved.kind === "diagnostic") {
     return diagnosticResult(options, initialDecision, action.id, resolved.output);
   }
@@ -478,6 +478,51 @@ async function selectResolvedProviderRoute(
   const resolved = await flowEngine.resolveSelection(provider.id, model.id);
   if (resolved.kind === "diagnostic") {
     return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+  }
+
+  return { kind: "selected", selection: resolved };
+}
+
+async function resolveActiveProviderRoute(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision
+): Promise<
+  | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
+  | { readonly kind: "diagnostic"; readonly output: string }
+> {
+  const activeRoute = initialDecision.state.model;
+  if (activeRoute === undefined) {
+    return {
+      kind: "diagnostic",
+      output: "No active provider/model route is configured. Use provider/model repair to choose a setup-visible route.",
+    };
+  }
+
+  const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
+  const providers = await flowEngine.listProviderCandidates();
+  const provider = providers.find((candidate) => candidate.id === activeRoute.provider);
+  if (provider === undefined) {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+    };
+  }
+
+  const models = await flowEngine.listModelCandidates(provider.id);
+  const model = models.find((candidate) => candidate.id === activeRoute.id);
+  if (model === undefined) {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+    };
+  }
+
+  const resolved = await flowEngine.resolveSelection(provider.id, model.id);
+  if (resolved.kind === "diagnostic") {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} cannot be repaired through credential-only setup: ${resolved.reason}. Use provider/model repair to choose a setup-visible route.`,
+    };
   }
 
   return { kind: "selected", selection: resolved };
