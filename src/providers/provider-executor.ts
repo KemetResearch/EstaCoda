@@ -193,7 +193,11 @@ export class ProviderExecutor {
 
       // Effective API mode gate: only executable modes are allowed
       const apiMode = route.apiMode ?? metadata.apiMode;
-      const executableModes: ProviderApiMode[] = ["openai_chat_completions", "custom_openai_compatible"];
+      const executableModes: ProviderApiMode[] = [
+        "openai_chat_completions",
+        "custom_openai_compatible",
+        "openai_responses"
+      ];
       if (!executableModes.includes(apiMode)) {
         const reason = `Provider ${route.provider} uses unsupported API mode ${apiMode}.`;
         attempts.push({
@@ -554,13 +558,31 @@ function extractToolCallsFromProviderResponse(raw: unknown): ProviderExecutionRe
         }>;
       };
     }>;
+    output?: Array<{
+      type?: string;
+      call_id?: string;
+      name?: string;
+      arguments?: string;
+    }>;
   };
 
-  return (payload.choices?.[0]?.message?.tool_calls ?? []).map((toolCall, index) => ({
+  const chatToolCalls = (payload.choices?.[0]?.message?.tool_calls ?? []).map((toolCall, index) => ({
     index,
     id: toolCall.id,
     name: toolCall.function?.name,
     argumentsText: toolCall.function?.arguments,
     raw: toolCall
   }));
+
+  const responsesToolCalls = (payload.output ?? [])
+    .filter((item) => item.type === "function_call")
+    .map((item, index) => ({
+      index,
+      id: item.call_id,
+      name: item.name,
+      argumentsText: item.arguments,
+      raw: item
+    }));
+
+  return [...chatToolCalls, ...responsesToolCalls];
 }

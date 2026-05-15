@@ -373,8 +373,12 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://stream.example.com/v1");
   });
 
-  it("registered adapter for codex does not execute", async () => {
-    const codexAdapter = createMockAdapter({ id: "codex" });
+  it("registered openai_responses adapter for codex does not execute while runnable=false", async () => {
+    const { createOpenAIResponsesProvider } = await import("./openai-responses-provider.js");
+    const codexAdapter = createOpenAIResponsesProvider({
+      id: "codex",
+      endpoint: { baseUrl: "https://chatgpt.com/backend-api/codex", apiKey: { kind: "none" } }
+    });
     registry.register(codexAdapter);
 
     const route: ResolvedModelRoute = {
@@ -387,7 +391,8 @@ describe("ProviderExecutor route-based execution", () => {
         supportsTools: true,
         supportsVision: false,
         supportsStructuredOutput: true
-      }
+      },
+      apiMode: "openai_responses"
     };
 
     const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
@@ -396,7 +401,6 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.attempts.length).toBe(1);
     expect(result.attempts[0].errorClass).toBe("unsupported");
     expect(result.attempts[0].content).toContain("not runnable");
-    expect(codexAdapter.calls.length).toBe(0);
   });
 
   it("registered adapter for anthropic does not execute while metadata says non-runnable / unsupported mode", async () => {
@@ -424,18 +428,20 @@ describe("ProviderExecutor route-based execution", () => {
     expect(anthropicAdapter.calls.length).toBe(0);
   });
 
-  it("route with apiMode: openai_responses is rejected before adapter call", async () => {
+    it("openai_responses route executes when provider is runnable and adapter is registered", async () => {
     const mockAdapter = createMockAdapter({ id: "openai" });
     registry.register(mockAdapter);
+    process.env.OPENAI_API_KEY = "sk-test";
 
-    const route = createDefaultRoute({ apiMode: "openai_responses" });
-    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+    try {
+      const route = createDefaultRoute({ apiMode: "openai_responses", apiKeyEnv: "OPENAI_API_KEY" });
+      const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
 
-    expect(result.ok).toBe(false);
-    expect(result.attempts.length).toBe(1);
-    expect(result.attempts[0].errorClass).toBe("unsupported");
-    expect(result.attempts[0].content).toContain("unsupported API mode");
-    expect(mockAdapter.calls.length).toBe(0);
+      expect(result.ok).toBe(true);
+      expect(mockAdapter.calls.length).toBe(1);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
   });
 
   it("legitimate runnable OpenAI-compatible providers still execute", async () => {

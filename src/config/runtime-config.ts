@@ -24,6 +24,7 @@ import {
 } from "../providers/model-catalog.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
+import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import {
   getDefaultApiKeyEnv,
@@ -1285,6 +1286,28 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
         // missing an explicit base URL.
         continue;
       }
+
+      if (metadata.apiMode === "openai_responses") {
+        registry.register(createOpenAIResponsesProvider({
+          id: providerId,
+          endpoint: {
+            baseUrl: resolvedBaseUrl,
+            apiKey: providerConfig.apiKeyEnv === undefined
+              ? { kind: "none" }
+              : { kind: "env", name: providerConfig.apiKeyEnv },
+            headers: providerConfig.headers
+          } satisfies ProviderEndpoint,
+          models: enrichModelProfiles({
+            provider: providerId,
+            models,
+            catalogProfiles: options.catalogProfiles
+          }),
+          enableNetwork: providerConfig.enableNetwork ?? false,
+          fetch: options.fetch
+        }));
+        continue;
+      }
+
       registry.register(createOpenAICompatibleProvider({
         id: providerId,
         endpoint: {

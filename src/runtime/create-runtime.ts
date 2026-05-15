@@ -27,6 +27,7 @@ import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolve
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
+import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
@@ -1114,6 +1115,20 @@ export function createDefaultProviderRegistry(selectedModel: ModelProfile): Prov
       if (!metadata.runnable || metadata.defaultBaseUrl === undefined) {
         registry.register(createCatalogProvider({
           id: provider,
+          models
+        }));
+        continue;
+      }
+
+      if (metadata.apiMode === "openai_responses") {
+        registry.register(createOpenAIResponsesProvider({
+          id: provider,
+          endpoint: {
+            baseUrl: metadata.defaultBaseUrl,
+            apiKey: provider === "local"
+              ? { kind: "none" }
+              : { kind: "env", name: getDefaultApiKeyEnv(provider) }
+          },
           models
         }));
         continue;

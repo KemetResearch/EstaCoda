@@ -24,7 +24,7 @@ describe("provider-metadata", () => {
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["local", "Local", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
       ["anthropic", "Anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY", true, false, "api_key", "anthropic_messages"],
-      ["codex", "OpenAI Codex", undefined, undefined, true, false, "oauth_device_pkce", "openai_responses"],
+      ["codex", "OpenAI Codex", "https://chatgpt.com/backend-api/codex", undefined, true, false, "oauth_device_pkce", "openai_responses"],
       ["minimax", "MiniMax", undefined, undefined, true, false, "api_key", "openai_chat_completions"],
       ["nous", "Nous", undefined, undefined, true, false, "api_key", "custom_openai_compatible"],
       ["unconfigured", "Unconfigured", undefined, undefined, false, false, "none", "custom_openai_compatible"],

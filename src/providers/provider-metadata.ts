@@ -174,7 +174,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
       catalogExplore: true
     },
     apiMode: "openai_responses",
-    defaultBaseUrl: undefined,
+    defaultBaseUrl: "https://chatgpt.com/backend-api/codex",
     defaultApiKeyEnv: undefined,
     authMethods: ["oauth_device_pkce", "oauth_external"],
     defaultAuthMethod: "oauth_device_pkce",
@@ -437,7 +437,9 @@ export function isProviderMediaOnly(providerId: ProviderId): boolean {
  * Whether the given API mode is executable by the current build.
  */
 export function isExecutableApiMode(apiMode: ProviderApiMode): boolean {
-  return apiMode === "openai_chat_completions" || apiMode === "custom_openai_compatible";
+  return apiMode === "openai_chat_completions"
+    || apiMode === "custom_openai_compatible"
+    || apiMode === "openai_responses";
 }
 
 /**
