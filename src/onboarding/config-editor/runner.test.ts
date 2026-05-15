@@ -483,6 +483,44 @@ describe("runConfigEditor", () => {
     await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
   });
 
+  it("does not offer skip for already configured optional capabilities", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TELEGRAM_BOT_TOKEN",
+          allowedUserIds: ["42"],
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const optionLabels: string[][] = [];
+
+    const prompt = fakePrompt();
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      optionLabels.push(input.options.map((option) => option.label));
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "review-optional-capabilities",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(optionLabels[0]).toEqual(["Leave unchanged", "Enable/configure"]);
+    expect(optionLabels.slice(1)).toEqual([
+      ["Leave unchanged", "Skip", "Enable/configure"],
+      ["Leave unchanged", "Skip", "Enable/configure"],
+      ["Leave unchanged", "Skip", "Enable/configure"],
+    ]);
+    expect(result.reviewManifest).toBeUndefined();
+  });
+
   it("blocks Telegram optional capability apply without allowed remote-control identities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);

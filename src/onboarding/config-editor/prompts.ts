@@ -219,6 +219,15 @@ export async function promptOptionalCapabilityAction(
     readonly configured: boolean;
   }
 ): Promise<OptionalCapabilityPromptAction> {
+  const skipChoice = input.configured
+    ? []
+    : [{
+        id: `${input.id}-skip`,
+        label: "Skip",
+        description: "Keep this optional capability non-blocking for core setup.",
+        value: "skip" as const,
+      }];
+
   return promptSetupChoice(prompt, {
     title: input.title,
     message: `${input.title}\n`,
@@ -231,12 +240,7 @@ export async function promptOptionalCapabilityAction(
           : "Do not configure this optional capability now.",
         value: "unchanged" as const,
       },
-      {
-        id: `${input.id}-skip`,
-        label: "Skip",
-        description: "Keep this optional capability non-blocking for core setup.",
-        value: "skip" as const,
-      },
+      ...skipChoice,
       {
         id: `${input.id}-enable`,
         label: "Enable/configure",
