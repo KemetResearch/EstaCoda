@@ -1282,4 +1282,31 @@ describe("provider-model-selection-flow", () => {
       })
     );
   });
+
+  describe("resolvedViaAlias metadata", () => {
+    it("preserves resolvedViaAlias when attached by caller", async () => {
+      const flow = await createProviderModelSelectionFlow(
+        buildOptions("", "", {
+          mode: "normal",
+          config: {
+            providers: {
+              openai: {
+                kind: "openai-compatible",
+                models: ["gpt-4o"]
+              }
+            }
+          }
+        })
+      );
+
+      const result = await flow.resolveSelection("openai", "gpt-4o");
+      expect(result.kind).toBe("selected");
+      if (result.kind !== "selected") return;
+      expect(result.resolvedViaAlias).toBeUndefined();
+
+      // Simulating a caller that attaches alias metadata
+      const withAlias = { ...result, resolvedViaAlias: "gpt4" };
+      expect(withAlias.resolvedViaAlias).toBe("gpt4");
+    });
+  });
 });

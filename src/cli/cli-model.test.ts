@@ -1477,4 +1477,195 @@ describe("cli model", () => {
       expect(result.output).not.toContain("Credential pool:");
     });
   });
+
+  describe("model alias resolution", () => {
+    it("estacoda model openai/gpt-4o persists exact route", async () => {
+      delete process.env.OPENAI_API_KEY;
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({ secrets: ["sk-test"] });
+
+      const result = await runCliCommand({
+        argv: ["model", "openai/gpt-4o"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("openai");
+      expect(config.model?.id).toBe("gpt-4o");
+    });
+
+    it("estacoda model anthropic/claude-opus fails while Anthropic is non-runnable", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const result = await runCliCommand({
+        argv: ["model", "anthropic/claude-opus-4-1"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Anthropic is not runnable");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("estacoda model custom/mymodel fails without explicit baseUrl", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const result = await runCliCommand({
+        argv: ["model", "custom/mymodel"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("requires an explicit base URL");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("direct alias persists resolved route, not alias string", async () => {
+      await writeUserConfig(tmpDir, {
+        modelAliases: {
+          qwen: {
+            provider: "local",
+            model: "qwen2.5:3b"
+          }
+        },
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "qwen"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("local");
+      expect(config.model?.id).toBe("qwen2.5:3b");
+      expect(config.model?.id).not.toBe("qwen");
+    });
+
+    it("curated alias to non-runnable provider returns diagnostic and does not mutate config", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const result = await runCliCommand({
+        argv: ["model", "sonnet"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("sonnet");
+      expect(result.output).toContain("Anthropic is not runnable");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("direct alias with custom baseUrl succeeds", async () => {
+      delete process.env.OPENAI_COMPATIBLE_API_KEY;
+      await writeUserConfig(tmpDir, {
+        modelAliases: {
+          myllm: {
+            provider: "custom",
+            model: "qwen3.5:397b",
+            baseUrl: "http://localhost:11434/v1"
+          }
+        },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({ secrets: [""] });
+
+      const result = await runCliCommand({
+        argv: ["model", "myllm"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("custom");
+      expect(config.model?.id).toBe("qwen3.5:397b");
+    });
+  });
 });

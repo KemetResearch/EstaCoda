@@ -92,6 +92,8 @@ import { skillsCommand } from "./skill-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import { promptForApiKey } from "./secret-prompt.js";
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
+import { normalizeModelInput } from "../providers/model-normalization.js";
+import { validateResolvedRouteForModelSwitch } from "../providers/provider-metadata.js";
 import { readConfig, saveRuntimeConfig } from "../config/runtime-config.js";
 import {
   applyRegisterProviderConfig,
@@ -860,7 +862,187 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     };
   }
 
+  const KNOWN_SUBCOMMANDS = new Set(["status", "list", "search", "providers", "refresh", "setup", "diagnose", "auxiliary", "fallback", "set"]);
+  if (args[0] !== undefined && !KNOWN_SUBCOMMANDS.has(args[0])) {
+    return runModelAliasCommand(options, config, args[0]);
+  }
+
   return runBareModelPickerOrOverview(options, config);
+}
+
+async function runModelAliasCommand(
+  options: CliOptions,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+  aliasInput: string
+): Promise<CliCommandResult> {
+  const catalog = await createModelSelectionCatalog({
+    config: config.config,
+    providerRegistry: config.providerRegistry,
+    homeDir: options.homeDir,
+    modelsDevOptions: options.modelsDevOptions
+  });
+
+  const normalized = await normalizeModelInput(aliasInput, {
+    config: config.config,
+    catalog
+  });
+
+  if (normalized.kind === "unknown") {
+    return { handled: true, exitCode: 1, output: normalized.reason };
+  }
+
+  if (normalized.kind === "ambiguous") {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `${normalized.reason}\nCandidates:\n${normalized.candidates.map((c) => `  ${c.provider}/${c.model}`).join("\n")}`
+    };
+  }
+
+  const gate = validateResolvedRouteForModelSwitch(normalized.route);
+  if (!gate.ok) {
+    const aliasNote = normalized.resolvedViaAlias
+      ? `Alias '${normalized.resolvedViaAlias}' resolves to ${normalized.route.provider}/${normalized.route.id}, but ${gate.reason}`
+      : gate.reason;
+    return { handled: true, exitCode: 1, output: aliasNote };
+  }
+
+  // Reuse the existing flow resolution + credential + config path.
+  // Pre-seed any alias-specific provider metadata so the flow sees the baseUrl.
+  let seededConfig = config.config;
+  if (normalized.route.baseUrl || normalized.route.apiKeyEnv) {
+    seededConfig = applyRegisterProviderConfig(seededConfig, {
+      provider: normalized.route.provider,
+      baseUrl: normalized.route.baseUrl,
+      apiKeyEnv: normalized.route.apiKeyEnv
+    });
+    seededConfig = applyRegisterProviderModel(seededConfig, {
+      provider: normalized.route.provider,
+      models: [normalized.route.id]
+    });
+  }
+
+  const flow = await createProviderModelSelectionFlow({
+    config: seededConfig,
+    providerRegistry: config.providerRegistry,
+    homeDir: options.homeDir,
+    modelsDevOptions: options.modelsDevOptions,
+    allowNetwork: false,
+    mode: "setup"
+  });
+
+  const resolution = await flow.resolveSelection(
+    normalized.route.provider,
+    normalized.route.id
+  );
+
+  if (resolution.kind === "diagnostic") {
+    return { handled: true, exitCode: 1, output: `Selection failed: ${resolution.reason}` };
+  }
+
+  // Attach alias metadata for rendering
+  const selectionResult: typeof resolution = {
+    ...resolution,
+    resolvedViaAlias: normalized.resolvedViaAlias
+  };
+
+  return persistModelSelection(options, config, selectionResult);
+}
+
+async function persistModelSelection(
+  options: CliOptions,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+  resolution: import("../providers/provider-model-selection-flow.js").ProviderModelSelectionResult
+): Promise<CliCommandResult> {
+  const prompt = options.prompt!;
+
+  // ── Credential handling ──
+  let envVarName: string | undefined;
+  let credentialStored = false;
+  let credentialSkipped = false;
+
+  switch (resolution.credentialAction.kind) {
+    case "none": {
+      break;
+    }
+    case "reuse": {
+      const ref = resolution.credentialAction.reference;
+      if (!ref.startsWith("env:")) {
+        return {
+          handled: true,
+          exitCode: 1,
+          output: `Invalid credential reference: ${ref}`
+        };
+      }
+      envVarName = ref.slice(4);
+      break;
+    }
+    case "collect": {
+      envVarName = resolution.credentialAction.envVarName;
+      const promptResult = await promptForApiKey({
+        prompt,
+        providerId: resolution.provider,
+        envVarName,
+        homeDir: options.homeDir,
+        question: `Enter API key for ${resolution.provider} [${envVarName}]: `
+      });
+
+      if (promptResult.kind === "stored") {
+        credentialStored = true;
+      } else {
+        credentialSkipped = true;
+      }
+      break;
+    }
+  }
+
+  // ── Config mutation (pure, in-memory) ──
+  let mutated = applyRegisterProviderConfig(config.config, {
+    provider: resolution.provider,
+    baseUrl: resolution.baseUrl,
+    apiKeyEnv: envVarName
+  });
+
+  mutated = applyRegisterProviderModel(mutated, {
+    provider: resolution.provider,
+    models: [resolution.model]
+  });
+
+  mutated = applySetPreferredModelRoute(mutated, {
+    provider: resolution.provider,
+    model: resolution.model,
+    baseUrl: resolution.baseUrl,
+    apiKeyEnv: envVarName,
+    contextWindowTokens: resolution.profile.contextWindowTokens
+  });
+
+  // ── Persist config ──
+  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  try {
+    await saveRuntimeConfig(targetPath, mutated);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      handled: true,
+      exitCode: 1,
+      output: credentialStored
+        ? `Credential stored, but config save failed: ${message}`
+        : `Config save failed: ${message}`
+    };
+  }
+
+  // ── Render success ──
+  const summary = toPickerSuccessSummary(resolution, targetPath, {
+    credentialStored,
+    credentialSkipped,
+    envVarName
+  });
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: renderModelPickerSuccess(summary)
+  };
 }
 
 async function runBareModelPickerOrOverview(

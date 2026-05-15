@@ -217,6 +217,14 @@ export type ModelFallbackConfig = {
   contextWindowTokens?: number;
 };
 
+export type ModelAliasDefinition = {
+  provider: ProviderId;
+  model: string;
+  baseUrl?: string;
+  apiMode?: string;
+  apiKeyEnv?: string;
+};
+
 export type EstaCodaConfig = {
   model?: {
     provider?: ProviderId;
@@ -224,6 +232,8 @@ export type EstaCodaConfig = {
     contextWindowTokens?: number;
     fallbacks?: ModelFallbackConfig[];
   };
+  modelAliases?: Record<string, ModelAliasDefinition>;
+  model_aliases?: Record<string, ModelAliasDefinition>;
   providers?: Record<string, {
     kind?: "openai-compatible" | "catalog";
     baseUrl?: string;
@@ -731,6 +741,10 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     },
     providers: mergeRecordEntries(merged.providers, config.providers),
     credentialPools: mergeRecordEntries(merged.credentialPools, config.credentialPools),
+    modelAliases: mergeRecordEntries(
+      mergeRecordEntries(merged.modelAliases, merged.model_aliases),
+      mergeRecordEntries(config.modelAliases, config.model_aliases)
+    ),
     auxiliaryModels: mergeAuxiliaryModels(merged.auxiliaryModels, config.auxiliaryModels),
     web: {
       ...(merged.web ?? {}),
