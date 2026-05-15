@@ -850,6 +850,14 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
   }
 
   if (args[0] === "set") {
+    /**
+     * Deprecated/rejected compatibility path.
+     *
+     * Persistent model switching is handled by bare `estacoda model`.
+     * Session-scoped switching belongs to the later `/model` session override work.
+     *
+     * Do not implement new switching behavior here.
+     */
     return {
       handled: true,
       exitCode: 1,

@@ -155,6 +155,13 @@ export class AgentLoop {
   readonly #profileId: string;
   readonly #toolExecutor: ToolExecutor;
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
+  /**
+   * Retained for existing runtime/skill workflow gating.
+   *
+   * Removing this requires a dedicated runtime refactor that proves the
+   * ProviderTurnLoop-owned execution capability is exposed through the correct
+   * API. Do not remove as provider cleanup.
+   */
   readonly #providerExecutor: ProviderExecutor | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
   readonly #memoryContext: MemoryProviderContext | undefined;

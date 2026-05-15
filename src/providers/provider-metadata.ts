@@ -283,27 +283,11 @@ export function getProviderDefaultBaseUrl(providerId: ProviderId): string | unde
 }
 
 /**
- * @deprecated Use getProviderDefaultBaseUrl for runtime/config/security route construction.
- * This legacy helper returns a placeholder for compatibility-only callers.
- */
-export function getDefaultBaseUrl(providerId: ProviderId): string {
-  return getProviderDefaultBaseUrl(providerId) ?? "https://example.invalid/v1";
-}
-
-/**
  * Return the default API key environment variable name for a provider.
  * Falls back to a generic name for unknown providers.
  */
 export function getDefaultApiKeyEnv(providerId: ProviderId): string {
   return getProviderMetadata(providerId).defaultApiKeyEnv ?? "OPENAI_COMPATIBLE_API_KEY";
-}
-
-/**
- * Alias for backward compatibility with existing consumers.
- * @deprecated Use getDefaultApiKeyEnv directly from provider-metadata.
- */
-export function defaultEnvKey(providerId: ProviderId): string {
-  return getDefaultApiKeyEnv(providerId);
 }
 
 /**

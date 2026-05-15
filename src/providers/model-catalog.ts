@@ -29,8 +29,6 @@ export const fallbackKnownModelProfiles: readonly ModelProfile[] = [
   model("unconfigured", "unconfigured", 0, {})
 ];
 
-export const knownModelProfiles = fallbackKnownModelProfiles;
-
 export type ProfileResolutionSource = "models-dev" | "fallback-known" | "inferred";
 
 export type ProfileResolutionContext = {
@@ -150,33 +148,6 @@ export async function resolveModelProfileFromCatalog(input: {
   }
 
   return inferModelProfile(input);
-}
-
-export async function resolveProviderModelsFromCatalog(input: {
-  provider: ProviderId;
-  models?: string[];
-} & ModelsDevRegistryOptions): Promise<ModelProfile[]> {
-  const provider = normalizeProviderIdForEstaCoda(input.provider);
-
-  if (input.models !== undefined && input.models.length > 0) {
-    const profiles = await resolveModelProfilesFromCatalog(input);
-
-    return input.models.map((modelId) =>
-      profiles.find((candidate) => candidate.provider === provider && candidate.id === modelId) ??
-      inferModelProfile({ provider, model: modelId })
-    );
-  }
-
-  const modelInfo = await listModelsByProvider(provider, input);
-  const catalogModels = modelInfo
-    .filter((model) => model.status !== "deprecated" && model.status !== "alpha" && model.status !== "beta")
-    .map(modelInfoToProfile);
-  const fallbackModels = fallbackKnownModelProfiles.filter((model) => model.provider === provider && isDefaultRoutableModel(model));
-
-  return uniqueModels([
-    ...fallbackModels,
-    ...catalogModels
-  ]);
 }
 
 export function enrichModelProfiles(input: {

@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveAuxiliaryModelRoute,
-  resolveAllAuxiliaryRoutes,
-  summarizeAuxiliaryRoutes
+  resolveAllAuxiliaryRoutes
 } from "./auxiliary-model-resolver.js";
 import type {
   AuxiliaryModelSlotConfig,
@@ -325,16 +324,5 @@ describe("resolveAllAuxiliaryRoutes", () => {
     expect(results.length).toBe(2);
     expect(results.find((r) => r.task === "vision")?.source).toBe("auto-main");
     expect(results.find((r) => r.task === "approval")?.source).toBe("main");
-  });
-});
-
-describe("summarizeAuxiliaryRoutes", () => {
-  it("joins routes into a comma-separated summary", () => {
-    const routes = [
-      { task: "vision" as AuxiliaryModelTask, route: { provider: "openai", id: "gpt-4o" } as ResolvedModelRoute, source: "auto-main" as const, fallbackToMain: true, diagnostics: [] },
-      { task: "approval" as AuxiliaryModelTask, route: undefined, source: "disabled" as const, fallbackToMain: false, diagnostics: [] },
-    ];
-    const summary = summarizeAuxiliaryRoutes(routes);
-    expect(summary).toBe("vision:openai/gpt-4o, approval:unavailable");
   });
 });

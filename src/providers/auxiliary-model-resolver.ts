@@ -248,14 +248,6 @@ function computeFallbackToMain(options: {
   return true;
 }
 
-export function summarizeAuxiliaryRoutes(routes: ResolvedAuxiliaryRoute[]): string {
-  return routes
-    .map((route) =>
-      `${route.task}:${route.route === undefined ? "unavailable" : `${route.route.provider}/${route.route.id}`}`
-    )
-    .join(", ");
-}
-
 export async function resolveAllAuxiliaryRoutes(
   config: AuxiliaryModelConfig,
   context: {

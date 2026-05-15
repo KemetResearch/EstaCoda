@@ -398,6 +398,14 @@ export async function handleSlashCommand(input: {
       return false;
     case "model": {
       if (args[0] === "set" && args[1] !== undefined) {
+        /**
+         * Deprecated/rejected compatibility path.
+         *
+         * Persistent model switching is handled by bare `estacoda model`.
+         * Session-scoped switching belongs to the later `/model` session override work.
+         *
+         * Do not implement new switching behavior here.
+         */
         input.output.write(
           "Session-scoped model switching is not supported. Persistent `estacoda model set` is deprecated and disabled. Use `estacoda model setup local` or `estacoda model setup custom` to configure a model endpoint.\n\n"
         );
