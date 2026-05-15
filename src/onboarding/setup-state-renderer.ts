@@ -1,4 +1,5 @@
 import type { SetupRouteDecision } from "./setup-router.js";
+import { setupCopyText } from "./setup-prompts.js";
 
 export function renderSetupRouteSummary(input: {
   readonly decision: SetupRouteDecision;
@@ -6,7 +7,9 @@ export function renderSetupRouteSummary(input: {
 }): string {
   const { decision } = input;
   const lines = [
-    input.advanced === true ? "EstaCoda advanced setup" : "EstaCoda setup",
+    input.advanced === true
+      ? setupCopyText("en", "setupStateSummary.advancedTitle")
+      : setupCopyText("en", "setupStateSummary.title"),
     decision.title,
     decision.summary,
     "",
@@ -38,8 +41,7 @@ export function renderSetupRouteSummary(input: {
     "Advanced path:",
     "  estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
     "",
-    "Direct provider example:",
-    "  estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
+    setupCopyText("en", "setupStateSummary.directProviderExample"),
     "",
     "After setup:",
     "  estacoda verify",

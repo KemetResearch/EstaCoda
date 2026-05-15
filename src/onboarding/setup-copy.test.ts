@@ -45,6 +45,31 @@ const FIRST_RUN_KEYS = [
 ] as const;
 
 const SETUP_EDITOR_KEYS = [
+  "setupRouter.firstRun.title",
+  "setupRouter.firstRun.summary",
+  "setupRouter.configured.title",
+  "setupRouter.configured.summary",
+  "setupRouter.degraded.title",
+  "setupRouter.degraded.summary",
+  "setupRouter.repair.title",
+  "setupRoute.action.launchAgent",
+  "setupRoute.action.acceptLimitedMode",
+  "setupRoute.action.verifySetup",
+  "setupRoute.action.exit",
+  "setupStateSummary.title",
+  "setupStateSummary.advancedTitle",
+  "setupStateSummary.directProviderExample",
+  "setupEditor.shell.title",
+  "setupEditor.shell.labels.state",
+  "setupEditor.shell.labels.kind",
+  "setupEditor.shell.labels.route",
+  "setupEditor.shell.labels.editorMode",
+  "setupEditor.shell.labels.recommended",
+  "setupEditor.shell.labels.model",
+  "setupEditor.shell.labels.userConfig",
+  "setupEditor.shell.labels.projectConfig",
+  "setupEditor.sections.heading",
+  "setupEditor.actions.heading",
   "setupEditor.summary.configuredReady",
   "setupEditor.summary.configuredDegraded",
   "setupEditor.summary.repairFirst",
@@ -71,6 +96,54 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.repairBrokenConfig",
   "setupEditor.actions.repairStateDirectory",
   "setupEditor.actions.cancelSetupEditor",
+  "setupEditor.actions.repairWorkspaceTrust.description",
+  "setupEditor.actions.editSecurityMode.description",
+  "setupEditor.actions.editWorkflowLearning.description",
+  "setupEditor.actions.repairPrimaryProvider.description",
+  "setupEditor.actions.editPrimaryModelRoute.description",
+  "setupEditor.actions.repairMissingCredential.description",
+  "setupEditor.actions.editPrimaryCredentialReference.description",
+  "setupEditor.actions.reviewOptionalCapabilities.description",
+  "setupEditor.diagnostics.title",
+  "setupEditor.diagnostics.manualRepair.brokenConfig",
+  "setupEditor.diagnostics.manualRepair.stateNotWritable",
+  "setupEditor.prompt.action.title",
+  "setupEditor.prompt.action.body",
+  "setupEditor.prompt.postApply.title",
+  "setupEditor.prompt.postApply.body",
+  "setupEditor.prompt.postApply.launch",
+  "setupEditor.prompt.postApply.acceptLimitedMode",
+  "setupEditor.prompt.postApply.repairAgain",
+  "setupEditor.prompt.postApply.exit",
+  "setupEditor.postApply.warningList",
+  "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged",
+  "setupEditor.prompt.optionalCapabilityAction.skip",
+  "setupEditor.prompt.optionalCapabilityAction.enableConfigure",
+  "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description",
+  "setupEditor.prompt.optionalCapabilityAction.skip.description",
+  "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description",
+  "setupEditor.prompt.telegram.summary",
+  "setupEditor.prompt.telegram.botTokenEnv",
+  "setupEditor.prompt.telegram.allowedUserIds",
+  "setupEditor.prompt.telegram.allowedChatIds",
+  "setupEditor.prompt.telegram.remoteControlRisk",
+  "setupEditor.prompt.voice.summary",
+  "setupEditor.prompt.voice.ttsProvider",
+  "setupEditor.prompt.voice.ttsModel",
+  "setupEditor.prompt.voice.ttsApiKeyEnv",
+  "setupEditor.prompt.voice.sttProvider",
+  "setupEditor.prompt.voice.sttModel",
+  "setupEditor.prompt.voice.sttApiKeyEnv",
+  "setupEditor.prompt.vision.summary",
+  "setupEditor.prompt.vision.provider",
+  "setupEditor.prompt.vision.model",
+  "setupEditor.prompt.vision.apiKeyEnv",
+  "setupEditor.prompt.vision.useGateway",
+  "setupEditor.prompt.browser.summary",
+  "setupEditor.prompt.browser.backend",
+  "setupEditor.prompt.browser.cdpUrl",
+  "setupEditor.prompt.browser.launchCommand",
+  "setupEditor.prompt.browser.noAutoLaunch",
 ] as const;
 
 const SETUP_MODULE_KEYS = [
@@ -246,6 +319,11 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{configPath}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupStateSummary.directProviderExample")).toContain(isolateLtr("estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.summary")).not.toContain("OAuth");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
   });
 
   it("can return raw Arabic source copy without isolation for review tooling", () => {

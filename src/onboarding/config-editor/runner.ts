@@ -51,6 +51,7 @@ import {
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
   renderSetupReviewManifest,
+  setupCopyText,
 } from "../setup-prompts.js";
 import {
   promptConfigEditorAction,
@@ -740,7 +741,7 @@ function renderConcreteVerificationWarnings(endState: SetupApplyEndState): strin
   ].filter((warning, index, allWarnings) => warning.trim().length > 0 && allWarnings.indexOf(warning) === index);
   if (warnings.length === 0) return undefined;
   return [
-    "Verification warnings:",
+    `${setupCopyText("en", "setupEditor.postApply.warningList")}:`,
     ...warnings.map((warning) => `- ${warning}`),
   ].join("\n");
 }

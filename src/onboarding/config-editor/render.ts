@@ -30,24 +30,24 @@ export function renderConfigEditor(input: {
 }): string {
   const { decision, session } = input;
   const lines = [
-    "EstaCoda guided setup editor",
+    setupCopyText("en", "setupEditor.shell.title"),
     decision.title,
     decision.summary,
     "",
-    "State:",
-    `  kind: ${decision.state.kind}`,
-    `  route: ${decision.kind}`,
-    `  editor mode: ${session.plan.mode}`,
-    `  recommended: ${decision.state.recommendedAction}`,
+    `${setupCopyText("en", "setupEditor.shell.labels.state")}:`,
+    `  ${setupCopyText("en", "setupEditor.shell.labels.kind")}: ${decision.state.kind}`,
+    `  ${setupCopyText("en", "setupEditor.shell.labels.route")}: ${decision.kind}`,
+    `  ${setupCopyText("en", "setupEditor.shell.labels.editorMode")}: ${session.plan.mode}`,
+    `  ${setupCopyText("en", "setupEditor.shell.labels.recommended")}: ${decision.state.recommendedAction}`,
   ];
 
   if (decision.state.model !== undefined) {
-    lines.push(`  model: ${decision.state.model.provider}/${decision.state.model.id}`);
+    lines.push(`  ${setupCopyText("en", "setupEditor.shell.labels.model")}: ${decision.state.model.provider}/${decision.state.model.id}`);
   }
 
   lines.push(
-    `  user config: ${decision.state.configPaths.user}`,
-    `  project config: ${decision.state.configPaths.project}`
+    `  ${setupCopyText("en", "setupEditor.shell.labels.userConfig")}: ${decision.state.configPaths.user}`,
+    `  ${setupCopyText("en", "setupEditor.shell.labels.projectConfig")}: ${decision.state.configPaths.project}`
   );
 
   if (decision.state.kind === "state-not-writable") {
@@ -64,7 +64,7 @@ export function renderConfigEditor(input: {
 
   appendUnsafeStateGuidance(lines, decision);
 
-  lines.push("", "Sections:");
+  lines.push("", `${setupCopyText("en", "setupEditor.sections.heading")}:`);
   for (const section of session.activeSections) {
     lines.push(`  ${section.id} - ${setupCopyText("en", section.copyKey)}`);
     lines.push(`    status: ${section.status}`);
@@ -76,7 +76,7 @@ export function renderConfigEditor(input: {
     }
   }
 
-  lines.push("", "Available setup actions:");
+  lines.push("", `${setupCopyText("en", "setupEditor.actions.heading")}:`);
   if (input.actions.length === 0) {
     lines.push("  none");
   } else {
@@ -91,7 +91,7 @@ export function renderConfigEditor(input: {
 
 export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): string {
   const lines = [
-    "Setup diagnostics",
+    setupCopyText("en", "setupEditor.diagnostics.title"),
     `State: ${decision.state.kind}`,
     `Route: ${decision.kind}`,
     `Recommended: ${decision.state.recommendedAction}`,
@@ -178,8 +178,8 @@ function syntheticAction(id: SetupRouteActionId): ConfigEditorRenderedAction {
     case "verify-setup":
       return {
         id,
-        label: "Verify setup",
-        description: "Run read-only setup verification.",
+        label: setupCopyText("en", "setupRoute.action.verifySetup"),
+        description: setupCopyText("en", "setupEditor.actions.runReadonlyVerification"),
         readOnly: true,
         source: "synthetic",
       };
@@ -194,7 +194,7 @@ function syntheticAction(id: SetupRouteActionId): ConfigEditorRenderedAction {
     case "exit":
       return {
         id,
-        label: setupCopyText("en", "setupEditor.actions.cancelSetupEditor"),
+        label: setupCopyText("en", "setupRoute.action.exit"),
         description: "Leave setup without changing config.",
         readOnly: true,
         source: "synthetic",
@@ -207,21 +207,21 @@ function syntheticAction(id: SetupRouteActionId): ConfigEditorRenderedAction {
 function editorActionDescription(action: SetupEditorActionDraft): string {
   switch (action.id) {
     case "repair-workspace-trust":
-      return "Draft an explicit workspace trust grant for review before applying.";
+      return setupCopyText("en", "setupEditor.actions.repairWorkspaceTrust.description");
     case "edit-security-mode":
-      return "Choose strict, adaptive, or open approval mode and review the scoped config patch.";
+      return setupCopyText("en", "setupEditor.actions.editSecurityMode.description");
     case "edit-workflow-learning":
-      return "Choose workflow learning behavior and review the scoped config patch.";
+      return setupCopyText("en", "setupEditor.actions.editWorkflowLearning.description");
     case "review-optional-capabilities":
-      return "Review Telegram, voice, vision/image generation, and browser capability settings independently.";
+      return setupCopyText("en", "setupEditor.actions.reviewOptionalCapabilities.description");
     case "repair-primary-provider":
-      return "Repair the primary provider/model route through the shared setup flow.";
+      return setupCopyText("en", "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":
-      return "Choose a primary provider/model route through the shared setup flow.";
+      return setupCopyText("en", "setupEditor.actions.editPrimaryModelRoute.description");
     case "repair-missing-credential":
-      return "Repair the primary provider credential reference through the shared setup flow.";
+      return setupCopyText("en", "setupEditor.actions.repairMissingCredential.description");
     case "edit-primary-credential-reference":
-      return "Choose a primary provider credential reference through the shared setup flow.";
+      return setupCopyText("en", "setupEditor.actions.editPrimaryCredentialReference.description");
     default:
       return setupCopyText("en", action.copyKey);
   }
@@ -232,8 +232,7 @@ function appendUnsafeStateGuidance(lines: string[], decision: SetupRouteDecision
     lines.push(
       "",
       "Manual repair guidance:",
-      "- Normal config edits are blocked until the config file can be parsed.",
-      "- Open the listed config path, fix the parse/load error, then run read-only verification again.",
+      `- ${setupCopyText("en", "setupEditor.diagnostics.manualRepair.brokenConfig")}`,
       "- Only diagnostics, verification, and exit are available from this state."
     );
   }
@@ -242,9 +241,7 @@ function appendUnsafeStateGuidance(lines: string[], decision: SetupRouteDecision
     lines.push(
       "",
       "Manual repair guidance:",
-      "- EstaCoda cannot safely apply setup changes while its state/config path is not writable.",
-      "- Normal writes are blocked until state write permissions are restored.",
-      "- Restore write permission for the state/config path above, then run read-only verification again.",
+      `- ${setupCopyText("en", "setupEditor.diagnostics.manualRepair.stateNotWritable")}`,
       "- Only diagnostics, verification, and exit are available from this state."
     );
   }

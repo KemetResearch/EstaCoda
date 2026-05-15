@@ -59,13 +59,13 @@ describe("runConfigEditor", () => {
     expect(result.applyEndState).toBeUndefined();
     expect(applyCalled).toBe(false);
     expect(output.join("")).toContain("EstaCoda guided setup editor");
-    expect(output.join("")).toContain("Available setup actions:");
+    expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
     expect(output.join("")).toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Verify setup");
+    expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
-    expect(output.join("")).toContain("exit - Exit");
+    expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
   });
 
@@ -290,7 +290,7 @@ describe("runConfigEditor", () => {
     expect(result.exitCode).toBe(1);
     expect(result.nextActionId).toBe("exit");
     expect(result.applyEndState?.kind).toBe("blocked");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
     expect(result.output).toContain("Verification blocked");
     expect(result.output).toContain("Exited after setup apply without launching");
   });
@@ -321,7 +321,7 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.nextActionId).toBe("exit");
     expect(result.applyEndState?.kind).toBe("saved-not-launched");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
     expect(result.output).toContain("Setup prepared without launch handoff");
     expect(result.output).toContain("Exited after setup apply without launching");
   });
@@ -354,7 +354,7 @@ describe("runConfigEditor", () => {
     expect(result.postApplyRouteDecision?.state.kind).toBe("untrusted-workspace");
     expect(result.nextActionId).toBe("exit");
     expect(result.applyEndState?.kind).toBe("verified-ready");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
   });
 
   it("repair-again re-enters the editor with a fresh route without bypassing review/apply", async () => {
@@ -862,9 +862,9 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Verify setup");
+    expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
-    expect(output.join("")).toContain("exit - Exit");
+    expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");
     expect(output.join("")).not.toContain("edit-security-mode");
     expect(output.join("")).not.toContain("repair-state-directory");
@@ -893,7 +893,7 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("write permission");
     expect(result.output).toContain("Restore write permission");
     expect(result.output).toContain("read-only verification again");
-    expect(result.output).toContain("Normal writes are blocked until state write permissions are restored.");
+    expect(result.output).toContain("Normal writes are blocked until the state/config path is writable.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
     expect(result.output).not.toContain("Config cannot be edited normally until it can be parsed safely");
     expect(result.output).not.toContain("parse safety");
