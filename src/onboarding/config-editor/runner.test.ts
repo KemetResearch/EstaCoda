@@ -252,7 +252,13 @@ describe("runConfigEditor", () => {
     expect(result.applyEndState.acceptedDegraded).toBe(true);
     expect(result.limitedModeAccepted).toBe(true);
     expect(result.output).toContain("Verification completed with warnings");
+    expect(result.output).toContain("Verification warnings:");
+    expect(result.output).toContain("Network inference is disabled for the selected hosted provider.");
+    expect(result.output).toContain("Configured model context window is below 64K tokens.");
     expect(result.output).toContain("Limited mode accepted for launch");
+    expect(result.output.indexOf("Network inference is disabled")).toBeLessThan(
+      result.output.indexOf("Limited mode accepted for launch")
+    );
   });
 
   it("does not expose launch after blocked verification", async () => {
@@ -995,7 +1001,7 @@ function degradedVerification(configPath: string) {
     providerDiagnostic: {
       status: "warning" as const,
       lines: ["Provider status: warning"],
-      warnings: ["Network inference is disabled for the selected hosted provider."],
+      warnings: ["Configured model context window is below 64K tokens."],
     },
     warnings: ["Network inference is disabled for the selected hosted provider."],
     issueCodes: ["network-disabled"],

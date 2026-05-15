@@ -609,6 +609,12 @@ async function handlePostApplyHandoff(input: {
 
   const postApplyRouteDecision = await collectSetupRoute(options);
   const handoffState = postApplyHandoffState(applyEndState, postApplyRouteDecision);
+  const handoffWarningOutput = handoffState === "degraded"
+    ? renderConcreteVerificationWarnings(applyEndState)
+    : undefined;
+  if (handoffWarningOutput !== undefined) {
+    write(options, `${handoffWarningOutput}\n`);
+  }
   const nextActionId = await promptConfigEditorPostApplyAction(options.prompt, {
     state: handoffState,
     launchEligible: handoffState === "ready",
@@ -616,7 +622,11 @@ async function handlePostApplyHandoff(input: {
   });
 
   if (nextActionId === "repair-again") {
-    const output = `${renderedApplyOutput}\nRepair again selected. Re-entering guided setup editor.`;
+    const output = [
+      renderedApplyOutput,
+      handoffWarningOutput,
+      "Repair again selected. Re-entering guided setup editor.",
+    ].filter((line): line is string => line !== undefined).join("\n");
     write(options, "Repair again selected. Re-entering guided setup editor.\n");
     return {
       completed: true,
@@ -650,7 +660,11 @@ async function handlePostApplyHandoff(input: {
     return {
       completed: true,
       exitCode: 0,
-      output: `${renderedApplyOutput}\n${launchOutput}`,
+      output: [
+        renderedApplyOutput,
+        handoffWarningOutput,
+        launchOutput,
+      ].filter((line): line is string => line !== undefined).join("\n"),
       initialDecision,
       finalDecision: postApplyRouteDecision,
       postApplyRouteDecision,
@@ -679,7 +693,11 @@ async function handlePostApplyHandoff(input: {
     return {
       completed: true,
       exitCode: 0,
-      output: `${renderedApplyOutput}\n${launchOutput}`,
+      output: [
+        renderedApplyOutput,
+        handoffWarningOutput,
+        launchOutput,
+      ].filter((line): line is string => line !== undefined).join("\n"),
       initialDecision,
       finalDecision: postApplyRouteDecision,
       postApplyRouteDecision,
@@ -692,7 +710,11 @@ async function handlePostApplyHandoff(input: {
     };
   }
 
-  const exitOutput = `${renderedApplyOutput}\nExited after setup apply without launching.`;
+  const exitOutput = [
+    renderedApplyOutput,
+    handoffWarningOutput,
+    "Exited after setup apply without launching.",
+  ].filter((line): line is string => line !== undefined).join("\n");
   write(options, "Exited after setup apply without launching.\n");
   return {
     completed: applyEndState.kind !== "blocked",
@@ -707,6 +729,20 @@ async function handlePostApplyHandoff(input: {
     applyPlanningResult,
     applyEndState,
   };
+}
+
+function renderConcreteVerificationWarnings(endState: SetupApplyEndState): string | undefined {
+  const launchableEndState = launchableApplyEndState(endState);
+  if (launchableEndState === undefined) return undefined;
+  const warnings = [
+    ...launchableEndState.verification.warnings,
+    ...launchableEndState.verification.providerDiagnostic.warnings,
+  ].filter((warning, index, allWarnings) => warning.trim().length > 0 && allWarnings.indexOf(warning) === index);
+  if (warnings.length === 0) return undefined;
+  return [
+    "Verification warnings:",
+    ...warnings.map((warning) => `- ${warning}`),
+  ].join("\n");
 }
 
 function postApplyHandoffState(
