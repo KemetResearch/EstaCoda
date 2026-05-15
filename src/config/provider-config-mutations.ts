@@ -22,6 +22,7 @@ export type RegisterProviderConfigInput = {
   kind?: "openai-compatible" | "catalog";
   baseUrl?: string;
   apiKeyEnv?: string;
+  apiMode?: ProviderApiMode;
   enableNetwork?: boolean;
   headers?: Record<string, string>;
 };
@@ -78,6 +79,7 @@ export function applyRegisterProviderConfig(
     providerConfig.baseUrl = meta.defaultBaseUrl;
   }
   if (input.apiKeyEnv !== undefined) providerConfig.apiKeyEnv = input.apiKeyEnv;
+  if (input.apiMode !== undefined) providerConfig.apiMode = input.apiMode;
   if (input.enableNetwork !== undefined) providerConfig.enableNetwork = input.enableNetwork;
   if (input.headers !== undefined) providerConfig.headers = input.headers;
 

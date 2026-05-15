@@ -326,7 +326,9 @@ async function resolveSelectionImpl(
       contextWindowTokens: config.model?.contextWindowTokens
     });
 
-  const apiKeyEnv = config.providers?.[providerId]?.apiKeyEnv ?? meta.defaultApiKeyEnv;
+  const providerConfig = config.providers?.[providerId];
+  const apiKeyEnv = providerConfig?.apiKeyEnv ?? meta.defaultApiKeyEnv;
+  const apiMode = providerConfig?.apiMode ?? meta.apiMode;
 
   // Check credential readiness without exposing secret values
   const credentialAction = determineCredentialAction(providerId, apiKeyEnv, meta);
@@ -336,7 +338,7 @@ async function resolveSelectionImpl(
     provider: providerId,
     model: modelId,
     baseUrl,
-    apiMode: meta.apiMode,
+    apiMode,
     authMethod: meta.defaultAuthMethod,
     credentialAction,
     profile

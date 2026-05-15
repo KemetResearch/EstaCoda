@@ -671,6 +671,32 @@ describe("provider-model-selection-flow", () => {
         expect(result.credentialAction).toHaveProperty("envVarName", "OPENAI_API_KEY");
       })
     );
+
+    it(
+      "returns provider-configured apiMode over metadata default",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"],
+                  apiMode: "custom_openai_compatible"
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-4o");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.apiMode).toBe("custom_openai_compatible");
+      })
+    );
   });
 
   describe("resolveSelection invalid selections", () => {

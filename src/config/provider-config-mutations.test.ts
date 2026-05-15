@@ -95,6 +95,17 @@ describe("applyRegisterProviderConfig", () => {
     });
     expect(result.providers!["my-custom-provider"]!.baseUrl).toBe("https://custom.example.com/v1");
   });
+
+  it("stores explicit apiMode as route metadata", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applyRegisterProviderConfig(existing, {
+      provider: "custom-openai",
+      kind: "openai-compatible",
+      baseUrl: "https://llm.example.com/v1",
+      apiMode: "custom_openai_compatible"
+    });
+    expect(result.providers!["custom-openai"]!.apiMode).toBe("custom_openai_compatible");
+  });
 });
 
 describe("applyStoreProviderCredential", () => {

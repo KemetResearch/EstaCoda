@@ -914,7 +914,8 @@ async function runModelAliasCommand(
     seededConfig = applyRegisterProviderConfig(seededConfig, {
       provider: normalized.route.provider,
       baseUrl: normalized.route.baseUrl,
-      apiKeyEnv: normalized.route.apiKeyEnv
+      apiKeyEnv: normalized.route.apiKeyEnv,
+      apiMode: normalized.route.apiMode
     });
     seededConfig = applyRegisterProviderModel(seededConfig, {
       provider: normalized.route.provider,
@@ -954,8 +955,6 @@ async function persistModelSelection(
   config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
   resolution: import("../providers/provider-model-selection-flow.js").ProviderModelSelectionResult
 ): Promise<CliCommandResult> {
-  const prompt = options.prompt!;
-
   // ── Credential handling ──
   let envVarName: string | undefined;
   let credentialStored = false;
@@ -979,8 +978,15 @@ async function persistModelSelection(
     }
     case "collect": {
       envVarName = resolution.credentialAction.envVarName;
+      if (options.prompt === undefined) {
+        return {
+          handled: true,
+          exitCode: 1,
+          output: `Credential required for ${resolution.provider}. Set ${envVarName} or rerun interactive estacoda model.`
+        };
+      }
       const promptResult = await promptForApiKey({
-        prompt,
+        prompt: options.prompt,
         providerId: resolution.provider,
         envVarName,
         homeDir: options.homeDir,
@@ -1000,7 +1006,8 @@ async function persistModelSelection(
   let mutated = applyRegisterProviderConfig(config.config, {
     provider: resolution.provider,
     baseUrl: resolution.baseUrl,
-    apiKeyEnv: envVarName
+    apiKeyEnv: envVarName,
+    apiMode: resolution.apiMode
   });
 
   mutated = applyRegisterProviderModel(mutated, {
