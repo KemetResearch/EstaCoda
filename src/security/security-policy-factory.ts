@@ -8,6 +8,7 @@ import {
   type SecurityRequest
 } from "../contracts/security.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
+import { buildResolvedModelRoute, getProviderMetadata } from "../providers/provider-metadata.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
 
@@ -106,7 +107,7 @@ async function assessAdaptive(
 
   const hasExecutableRoute =
     assessor?.route !== undefined ||
-    (assessor?.provider !== undefined && assessor?.model !== undefined);
+    buildSecurityAssessorRoute(assessor) !== undefined;
 
   if (
     assessor?.enabled !== true ||
@@ -241,6 +242,8 @@ async function assessWithAuxiliaryProvider(
 
     if (assessor.route !== undefined) {
       executionOptions.primaryRoute = assessor.route;
+    } else if (assessor.provider !== undefined && assessor.model !== undefined) {
+      executionOptions.primaryRoute = buildSecurityAssessorRoute(assessor);
     }
 
     const execution = await assessor.providerExecutor.complete({
@@ -276,7 +279,7 @@ async function assessWithAuxiliaryProvider(
       responseFormat: { type: "json_object" }
     }, {
       requireStructuredOutput: true,
-      providerOrder: assessor.route === undefined ? [assessor.provider] : undefined
+      providerOrder: undefined
     }, executionOptions);
 
     if (!execution.ok || execution.response === undefined) {
@@ -355,6 +358,37 @@ async function assessWithAuxiliaryProvider(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function buildSecurityAssessorRoute(
+  assessor: Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "route"> | undefined
+): ResolvedModelRoute | undefined {
+  if (assessor?.route !== undefined) {
+    return assessor.route;
+  }
+  if (assessor?.provider === undefined || assessor.model === undefined) {
+    return undefined;
+  }
+
+  const metadata = getProviderMetadata(assessor.provider);
+  if (!metadata.runnable || metadata.defaultBaseUrl === undefined) {
+    return undefined;
+  }
+
+  return buildResolvedModelRoute({
+    provider: assessor.provider,
+    model: assessor.model,
+    profile: {
+      id: assessor.model,
+      provider: assessor.provider,
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    },
+    baseUrl: metadata.defaultBaseUrl,
+    apiKeyEnv: metadata.defaultApiKeyEnv
+  });
 }
 
 function parseAssessorResponse(content: string): {

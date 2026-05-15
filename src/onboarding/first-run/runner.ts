@@ -1,15 +1,18 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import {
-  defaultEnvKey,
   loadRuntimeConfig,
   type ActivityLabelsLocale,
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
+import { writeEnvSecret } from "../../config/env-secret-store.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
-import type { SelectPromptInput } from "../../cli/interactive-select.js";
-import { createModelSelectionCatalog } from "../../providers/model-selection-catalog.js";
+import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
+import {
+  createProviderModelSelectionFlow,
+  type FlowEngine,
+} from "../../providers/provider-model-selection-flow.js";
 import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
@@ -18,7 +21,6 @@ import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts
 import {
   buildSetupReviewManifest,
   type SetupReviewManifest,
-  type SetupReviewManifestSection,
 } from "../setup-review-manifest.js";
 import {
   executeSetupApplyPlan,
@@ -34,30 +36,22 @@ import {
   type SetupEntryState,
 } from "../setup-entry-state.js";
 import { routeSetupEntryState, type FirstRunPlanSession } from "../setup-router.js";
-import { hasSetupCopyKey, resolveSetupCopy, type SetupCopyKey, type SetupCopyLocale } from "../setup-copy.js";
-
-export type FirstRunProviderOption = {
-  readonly id: ProviderId;
-  readonly label: string;
-  readonly description?: string;
-  readonly requiresCredential: boolean;
-};
-
-export type FirstRunModelOption = {
-  readonly provider: ProviderId;
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-};
-
-export type FirstRunCatalog = {
-  readonly listProviders: () => Promise<readonly FirstRunProviderOption[]>;
-  readonly listModels: (provider: ProviderId) => Promise<readonly FirstRunModelOption[]>;
-};
+import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
+import {
+  formatSetupCopy,
+  promptSetupChoice,
+  promptSetupStringWithDefault,
+  renderSetupApplyEndState,
+  renderSetupApplyPlanningResult,
+  renderSetupReviewManifest,
+  setupCopyText,
+  showSetupCard,
+  type SetupChoice,
+} from "../setup-prompts.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
-  readonly catalog?: FirstRunCatalog;
+  readonly flowEngine?: FlowEngine;
   readonly defaultSelections?: FirstRunOnboardingSelections;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
@@ -79,14 +73,7 @@ export type FirstRunSetupRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
 };
 
-type Choice<T> = {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-  readonly value: T;
-};
-
-type InterfaceStyleChoice = Choice<{
+type InterfaceStyleChoice = SetupChoice<{
   readonly flavor: UiFlavor;
   readonly activityLabels: ActivityLabelsLocale;
 }> & {
@@ -94,19 +81,9 @@ type InterfaceStyleChoice = Choice<{
   readonly descriptionKey: SetupCopyKey;
 };
 
-const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey> = {
-  "files-to-write-update": "setupReview.sections.filesToWriteUpdate",
-  "secret-refs-to-store": "setupReview.sections.secretRefsToStore",
-  "workspace-trust-grants": "setupReview.sections.workspaceTrustGrants",
-  "provider-model-network": "setupReview.sections.providerModelNetwork",
-  "enabled-optional-capabilities": "setupReview.sections.enabledOptionalCapabilities",
-  "remote-control-surfaces": "setupReview.sections.remoteControlSurfaces",
-  "security-mode": "setupReview.sections.securityMode",
-  "workflow-learning": "setupReview.sections.workflowLearning",
-  "verification-checks": "setupReview.sections.verificationChecks",
-  "launch-handoff": "setupReview.sections.launchHandoff",
-  blockers: "setupReview.sections.blockers",
-  warnings: "setupReview.sections.warnings",
+type PendingCredentialWrite = {
+  readonly envVarName: string;
+  readonly value: string;
 };
 
 const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
@@ -134,29 +111,29 @@ export async function runFirstRunSetup(
   const prompt = options.prompt;
   const state = await collectSetupEntryState(options);
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
-  const catalog = options.catalog ?? await createDefaultCatalog(options);
+  const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";
 
-  await showCard(prompt, initialLocale, {
-    title: copy(initialLocale, "onboarding.welcome.title"),
-    bodyLines: [copy(initialLocale, "onboarding.welcome")],
-    options: [{ id: "begin", label: copy(initialLocale, "onboarding.common.begin") }],
+  await showSetupCard(prompt, initialLocale, {
+    title: setupCopyText(initialLocale, "onboarding.welcome.title"),
+    bodyLines: [setupCopyText(initialLocale, "onboarding.welcome")],
+    options: [{ id: "begin", label: setupCopyText(initialLocale, "onboarding.common.begin") }],
   });
 
-  const language = await choose(prompt, {
-    title: copy(initialLocale, "onboarding.interfaceLanguage.title"),
-    message: `${copy(initialLocale, "onboarding.interfaceLanguage")}\n`,
+  const language = await promptSetupChoice(prompt, {
+    title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
+    message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
     choices: [
       {
         id: "en",
-        label: copy(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
-        description: copy(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
+        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
+        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
         value: "en" as const,
       },
       {
         id: "ar",
-        label: copy(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
-        description: copy(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
+        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
+        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
         value: "ar" as const,
       },
     ],
@@ -167,145 +144,186 @@ export async function runFirstRunSetup(
   const defaultInterfaceChoice = interfaceChoices.find((choice) =>
     choice.value.flavor === options.defaultSelections?.interfaceFlavor
   )?.value ?? interfaceChoices[0]!.value;
-  const interfaceChoice = await choose(prompt, {
-    title: copy(language, "onboarding.interfaceStyle.title"),
-    message: `${copy(language, "onboarding.interfaceStyle.prompt")}\n`,
+  const interfaceChoice = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.interfaceStyle.title"),
+    message: `${setupCopyText(language, "onboarding.interfaceStyle.prompt")}\n`,
     choices: interfaceChoices.map((choice) => ({
       ...choice,
-      label: copy(language, choice.labelKey),
-      description: copy(language, choice.descriptionKey),
+      label: setupCopyText(language, choice.labelKey),
+      description: setupCopyText(language, choice.descriptionKey),
     })),
     defaultValue: defaultInterfaceChoice,
   });
 
-  await showCard(prompt, language, {
-    title: copy(language, "onboarding.workspace.title"),
-    bodyLines: [copy(language, "onboarding.workspace.root")],
+  await showSetupCard(prompt, language, {
+    title: setupCopyText(language, "onboarding.workspace.title"),
+    bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
     technicalLines: [options.workspaceRoot],
     options: [{ id: "workspace", label: options.workspaceRoot, technical: true }],
   });
-  const workspaceRoot = await askWithDefault(
+  const workspaceRoot = await promptSetupStringWithDefault(
     prompt,
-    `${copy(language, "onboarding.workspace.root")} [${options.workspaceRoot}]: `,
+    `${setupCopyText(language, "onboarding.workspace.root")} [${options.workspaceRoot}]: `,
     options.defaultSelections?.workspaceRoot ?? options.workspaceRoot
   );
 
-  const workspaceTrusted = await choose(prompt, {
-    title: copy(language, "onboarding.workspace.trust.title"),
-    message: `${copy(language, "onboarding.workspace.trust")}\n`,
+  const workspaceTrusted = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.workspace.trust.title"),
+    message: `${setupCopyText(language, "onboarding.workspace.trust")}\n`,
     choices: [
       {
         id: "trust",
-        label: copy(language, "onboarding.workspace.trustAction.label"),
-        description: copy(language, "onboarding.workspace.trustAction.description"),
+        label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
+        description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
         value: true,
       },
       {
         id: "skip",
-        label: copy(language, "onboarding.workspace.deferTrustAction.label"),
-        description: copy(language, "onboarding.workspace.deferTrustAction.description"),
+        label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
+        description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
         value: false,
       },
     ],
     defaultValue: options.defaultSelections?.workspaceTrusted ?? true,
   });
 
-  const providerOptions = await catalog.listProviders();
-  const primaryProvider = await choose(prompt, {
-    title: copy(language, "onboarding.providers.primary.title"),
-    message: `${copy(language, "onboarding.providers.primary")}\n`,
-    choices: providerOptions.map((provider) => ({
+
+  const providerCandidates = await flowEngine.listProviderCandidates();
+  const primaryProvider = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.providers.primary.title"),
+    message: `${setupCopyText(language, "onboarding.providers.primary")}\n`,
+    choices: providerCandidates.map((provider) => ({
       id: provider.id,
-      label: provider.label,
-      description: provider.description,
+      label: provider.displayName,
+      description: provider.baseUrl ? `${provider.baseUrl} (${provider.modelsCount} models)` : `${provider.modelsCount} models`,
       value: provider.id,
     })),
-    defaultValue: options.defaultSelections?.primaryProvider ?? providerOptions[0]?.id,
+    defaultValue: options.defaultSelections?.primaryProvider ?? providerCandidates[0]?.id,
   });
 
-  const modelOptions = await catalog.listModels(primaryProvider);
-  const primaryModel = await choose(prompt, {
-    title: copy(language, "onboarding.providers.primaryModel.title"),
-    message: `${copy(language, "onboarding.providers.primaryModel").replace("{providerId}", primaryProvider)}\n`,
-    choices: modelOptions.map((model) => ({
+
+  const modelCandidates = await flowEngine.listModelCandidates(primaryProvider);
+  const primaryModel = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.providers.primaryModel.title"),
+    message: `${setupCopyText(language, "onboarding.providers.primaryModel").replace("{providerId}", primaryProvider)}\n`,
+    choices: modelCandidates.map((model) => ({
       id: model.id,
-      label: model.label,
-      description: model.description,
+      label: model.id,
+      description: [
+        model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
+        model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
+        model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
+        model.profile.status !== undefined ? model.profile.status : undefined,
+      ].filter((part): part is string => part !== undefined).join(", "),
       value: model.id,
     })),
-    defaultValue: options.defaultSelections?.primaryModel ?? modelOptions[0]?.id,
+    defaultValue: options.defaultSelections?.primaryModel ?? modelCandidates[0]?.id,
   });
 
-  const providerRequiresCredential = providerOptions.find((provider) => provider.id === primaryProvider)?.requiresCredential ?? primaryProvider !== "local";
-  const primaryCredential = providerRequiresCredential
-    ? {
-        kind: "env" as const,
-        name: await askWithDefault(
-          prompt,
-          `${copy(language, "onboarding.providers.primaryCredential")} [${defaultEnvKey(primaryProvider)}]: `,
-          options.defaultSelections?.primaryCredential?.kind === "env"
-            ? options.defaultSelections.primaryCredential.name
-            : defaultEnvKey(primaryProvider)
-        ),
-      }
-    : { kind: "none" as const };
-
-  if (!providerRequiresCredential) {
-    write(options, `${copy(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
+  const resolution = await flowEngine.resolveSelection(primaryProvider, primaryModel);
+  if (resolution.kind === "diagnostic") {
+    throw new Error(`Provider/model selection failed: ${resolution.reason}`);
   }
 
-  const securityMode = await choose(prompt, {
-    title: copy(language, "onboarding.security.title"),
-    message: `${copy(language, "onboarding.security")}\n`,
+  const primaryBaseUrl = resolution.baseUrl;
+  const primaryContextWindowTokens = resolution.profile.contextWindowTokens;
+  const primaryApiMode = resolution.apiMode;
+  const primaryAuthMethod = resolution.authMethod;
+
+  let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
+  let pendingCredentialWrite: PendingCredentialWrite | undefined;
+
+  switch (resolution.credentialAction.kind) {
+    case "none": {
+      primaryCredential = { kind: "none" };
+      write(options, `${setupCopyText(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
+      break;
+    }
+    case "reuse": {
+      const ref = resolution.credentialAction.reference;
+      if (!ref.startsWith("env:")) {
+        throw new Error(`Malformed reuse credential reference: ${ref}`);
+      }
+      const envVarName = ref.slice(4);
+      primaryCredential = { kind: "env", name: envVarName };
+      write(options, `Using existing credential from ${envVarName}.\n`);
+      break;
+    }
+    case "collect": {
+      const envVarName = resolution.credentialAction.envVarName;
+      primaryCredential = { kind: "env", name: envVarName };
+      const promptResult = await promptForApiKeyInput({
+        prompt,
+        providerId: primaryProvider,
+        envVarName,
+        question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${envVarName}]: `,
+      });
+
+      if (promptResult.kind === "skipped") {
+        write(options, `Config will expect ${envVarName} to be available externally.\n`);
+      } else {
+        pendingCredentialWrite = {
+          envVarName: promptResult.envVarName,
+          value: promptResult.value,
+        };
+      }
+      break;
+    }
+
+  }
+
+  const securityMode = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.security.title"),
+    message: `${setupCopyText(language, "onboarding.security")}\n`,
     choices: [
       {
         id: "adaptive",
-        label: copy(language, "onboarding.security.options.adaptive.label"),
-        description: copy(language, "onboarding.security.options.adaptive.description"),
+        label: setupCopyText(language, "onboarding.security.options.adaptive.label"),
+        description: setupCopyText(language, "onboarding.security.options.adaptive.description"),
         value: "adaptive" as const,
       },
       {
         id: "strict",
-        label: copy(language, "onboarding.security.options.strict.label"),
-        description: copy(language, "onboarding.security.options.strict.description"),
+        label: setupCopyText(language, "onboarding.security.options.strict.label"),
+        description: setupCopyText(language, "onboarding.security.options.strict.description"),
         value: "strict" as const,
       },
       {
         id: "open",
-        label: copy(language, "onboarding.security.options.open.label"),
-        description: copy(language, "onboarding.security.options.open.description"),
+        label: setupCopyText(language, "onboarding.security.options.open.label"),
+        description: setupCopyText(language, "onboarding.security.options.open.description"),
         value: "open" as const,
       },
     ],
     defaultValue: options.defaultSelections?.securityMode ?? "adaptive",
   });
 
-  const workflowLearning = await choose(prompt, {
-    title: copy(language, "onboarding.workflowLearning.title"),
-    message: `${copy(language, "onboarding.workflowLearning")}\n`,
+  const workflowLearning = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.workflowLearning.title"),
+    message: `${setupCopyText(language, "onboarding.workflowLearning")}\n`,
     choices: [
       {
         id: "suggest",
-        label: copy(language, "onboarding.workflowLearning.options.suggest.label"),
-        description: copy(language, "onboarding.workflowLearning.options.suggest.description"),
+        label: setupCopyText(language, "onboarding.workflowLearning.options.suggest.label"),
+        description: setupCopyText(language, "onboarding.workflowLearning.options.suggest.description"),
         value: "suggest" as const,
       },
       {
         id: "none",
-        label: copy(language, "onboarding.workflowLearning.options.none.label"),
-        description: copy(language, "onboarding.workflowLearning.options.none.description"),
+        label: setupCopyText(language, "onboarding.workflowLearning.options.none.label"),
+        description: setupCopyText(language, "onboarding.workflowLearning.options.none.description"),
         value: "none" as const,
       },
       {
         id: "proactive",
-        label: copy(language, "onboarding.workflowLearning.options.proactive.label"),
-        description: copy(language, "onboarding.workflowLearning.options.proactive.description"),
+        label: setupCopyText(language, "onboarding.workflowLearning.options.proactive.label"),
+        description: setupCopyText(language, "onboarding.workflowLearning.options.proactive.description"),
         value: "proactive" as const,
       },
       {
         id: "autonomous",
-        label: copy(language, "onboarding.workflowLearning.options.autonomous.label"),
-        description: copy(language, "onboarding.workflowLearning.options.autonomous.description"),
+        label: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.label"),
+        description: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.description"),
         value: "autonomous" as const,
       },
     ],
@@ -313,20 +331,20 @@ export async function runFirstRunSetup(
   });
 
   const optionalCapabilities = await chooseOptionalCapabilities(prompt, language, options.defaultSelections);
-  const launchSelected = await choose(prompt, {
-    title: copy(language, "onboarding.launch.preferenceTitle"),
-    message: `${copy(language, "onboarding.launch")}\n`,
+  const launchSelected = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
+    message: `${setupCopyText(language, "onboarding.launch")}\n`,
     choices: [
       {
         id: "skip",
-        label: copy(language, "onboarding.launch.skipAction.label"),
-        description: copy(language, "onboarding.launch.skipAction.description"),
+        label: setupCopyText(language, "onboarding.launch.skipAction.label"),
+        description: setupCopyText(language, "onboarding.launch.skipAction.description"),
         value: false,
       },
       {
         id: "offer",
-        label: copy(language, "onboarding.launch.offerAction.label"),
-        description: copy(language, "onboarding.launch.offerAction.description"),
+        label: setupCopyText(language, "onboarding.launch.offerAction.label"),
+        description: setupCopyText(language, "onboarding.launch.offerAction.description"),
         value: true,
       },
     ],
@@ -341,6 +359,10 @@ export async function runFirstRunSetup(
     workspaceTrusted,
     primaryProvider,
     primaryModel,
+    primaryBaseUrl,
+    primaryContextWindowTokens,
+    primaryApiMode,
+    primaryAuthMethod,
     primaryCredential,
     securityMode,
     workflowLearning,
@@ -364,23 +386,23 @@ export async function runFirstRunSetup(
     trustStorePath: stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const reviewText = renderReviewManifest(reviewManifest, language);
-  write(options, `${copy(language, "onboarding.review")}\n${reviewText}\n`);
+  const reviewText = renderSetupReviewManifest(reviewManifest, language);
+  write(options, `${setupCopyText(language, "onboarding.review")}\n${reviewText}\n`);
 
-  const reviewAccepted = await choose(prompt, {
-    title: copy(language, "onboarding.review"),
-    message: `${copy(language, "onboarding.review.validation.accepted")}\n`,
+  const reviewAccepted = await promptSetupChoice(prompt, {
+    title: setupCopyText(language, "onboarding.review"),
+    message: `${setupCopyText(language, "onboarding.review.validation.accepted")}\n`,
     choices: [
       {
         id: "approve",
-        label: copy(language, "onboarding.review.approveAction"),
-        description: copy(language, "setupApply.review.approved"),
+        label: setupCopyText(language, "onboarding.review.approveAction"),
+        description: setupCopyText(language, "setupApply.review.approved"),
         value: true,
       },
       {
         id: "cancel",
-        label: copy(language, "onboarding.review.cancelAction"),
-        description: copy(language, "setupApply.review.cancelled"),
+        label: setupCopyText(language, "onboarding.review.cancelAction"),
+        description: setupCopyText(language, "setupApply.review.cancelled"),
         value: false,
       },
     ],
@@ -395,12 +417,23 @@ export async function runFirstRunSetup(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+  if (
+    pendingCredentialWrite !== undefined &&
+    applyPlanningResult.kind === "apply-plan-ready" &&
+    options.applyExecutor !== undefined
+  ) {
+    await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: pendingCredentialWrite.envVarName,
+      value: pendingCredentialWrite.value,
+    });
+  }
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
     : undefined;
   const output = applyEndState === undefined
-    ? resultSummary(applyPlanningResult, language)
-    : endStateSummary(applyEndState, language);
+    ? renderSetupApplyPlanningResult(applyPlanningResult, language)
+    : renderSetupApplyEndState(applyEndState, language);
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
@@ -419,77 +452,17 @@ export async function runFirstRunSetup(
   };
 }
 
-async function createDefaultCatalog(options: CollectSetupEntryStateOptions): Promise<FirstRunCatalog> {
+async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): Promise<FlowEngine> {
   const loaded = await loadRuntimeConfig(options);
-  const catalog = await createModelSelectionCatalog({
+  const flow = await createProviderModelSelectionFlow({
     config: loaded.config,
     providerRegistry: loaded.providerRegistry,
     homeDir: options.homeDir,
     allowNetwork: false,
+    mode: "setup",
   });
 
-  return {
-    listProviders: async () => {
-      const providers = (await catalog.listProviders()).filter((provider) => provider.id !== "unconfigured");
-      return providers.map((provider) => ({
-        id: provider.id,
-        label: provider.name,
-        description: provider.catalogOnly
-          ? copy("en", "onboarding.catalog.provider.catalogOnly")
-          : provider.configured
-            ? copy("en", "onboarding.catalog.provider.configured")
-            : copy("en", "onboarding.catalog.provider.available"),
-        requiresCredential: provider.setupMode !== "none" && provider.id !== "local",
-      }));
-    },
-    listModels: async (providerId) => {
-      const models = (await catalog.listModels({ provider: providerId, includeBeta: true }))
-        .filter((model) => model.id !== "unconfigured");
-      return models.map((model) => ({
-        provider: model.provider,
-        id: model.id,
-        label: model.id,
-        description: [
-          model.profile.supportsTools ? copy("en", "onboarding.catalog.model.features.tools") : undefined,
-          model.profile.supportsVision ? copy("en", "onboarding.catalog.model.features.vision") : undefined,
-          model.profile.supportsReasoning ? copy("en", "onboarding.catalog.model.features.reasoning") : undefined,
-          model.profile.status !== undefined ? model.profile.status : undefined,
-        ].filter((part): part is string => part !== undefined).join(", "),
-      }));
-    },
-  };
-}
-
-async function choose<T>(prompt: Prompt, input: {
-  readonly title: string;
-  readonly message: string;
-  readonly choices: readonly Choice<T>[];
-  readonly defaultValue?: T;
-}): Promise<T> {
-  if (input.choices.length === 0) {
-    throw new Error(`${input.title} has no choices.`);
-  }
-
-  const defaultIndex = Math.max(0, input.choices.findIndex((choice) => Object.is(choice.value, input.defaultValue)));
-  if (prompt.select !== undefined) {
-    return prompt.select({
-      title: input.title,
-      body: input.message.trim(),
-      options: input.choices.map((choice) => ({
-        label: choice.label,
-        description: choice.description,
-        value: choice.value,
-      })),
-      defaultIndex,
-      fallbackPrompt: "Choose: ",
-      surface: "onboarding",
-    } satisfies SelectPromptInput<T>);
-  }
-
-  const options = input.choices.map((choice, index) => `${index + 1}. ${choice.label}`).join("\n");
-  const raw = await prompt(`${input.message}${options}\nChoose [${(defaultIndex === -1 ? 0 : defaultIndex) + 1}]: `);
-  const selectedIndex = Number.parseInt(raw.trim(), 10) - 1;
-  return input.choices[selectedIndex]?.value ?? input.choices[defaultIndex === -1 ? 0 : defaultIndex]!.value;
+  return flow;
 }
 
 async function chooseOptionalCapabilities(
@@ -502,23 +475,23 @@ async function chooseOptionalCapabilities(
 
   for (const capabilityId of OPTIONAL_CAPABILITY_IDS) {
     const capabilityCopy = OPTIONAL_CAPABILITY_COPY_KEYS[capabilityId];
-    const title = copy(locale, capabilityCopy.title);
-    const enabled = await choose(prompt, {
+    const title = setupCopyText(locale, capabilityCopy.title);
+    const enabled = await promptSetupChoice(prompt, {
       title,
-      message: `${formatCopy(locale, "onboarding.optionalCapabilities.promptCapability", {
+      message: `${formatSetupCopy(locale, "onboarding.optionalCapabilities.promptCapability", {
         capabilityId: title,
       })}\n`,
       choices: [
         {
           id: "enable",
-          label: copy(locale, "onboarding.optionalCapabilities.enable"),
-          description: formatCopy(locale, "onboarding.optionalCapabilities.enableDescription", { capabilityId: title }),
+          label: setupCopyText(locale, "onboarding.optionalCapabilities.enable"),
+          description: formatSetupCopy(locale, "onboarding.optionalCapabilities.enableDescription", { capabilityId: title }),
           value: true,
         },
         {
           id: "skip",
-          label: copy(locale, "onboarding.optionalCapabilities.skip"),
-          description: formatCopy(locale, "setupValidation.capability.skipped", { capabilityId: title }),
+          label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
+          description: formatSetupCopy(locale, "setupValidation.capability.skipped", { capabilityId: title }),
           value: false,
         },
       ],
@@ -530,32 +503,6 @@ async function chooseOptionalCapabilities(
   }
 
   return result;
-}
-
-async function askWithDefault(prompt: Prompt, question: string, defaultValue: string): Promise<string> {
-  const answer = (await prompt(question)).trim();
-  return answer.length > 0 ? answer : defaultValue;
-}
-
-async function showCard(
-  prompt: Prompt,
-  locale: SetupCopyLocale,
-  input: {
-    readonly title: string;
-    readonly bodyLines: readonly string[];
-    readonly technicalLines?: readonly string[];
-    readonly options: readonly { readonly id: string; readonly label: string; readonly description?: string; readonly technical?: boolean }[];
-  }
-): Promise<void> {
-  await prompt.onboardingCard?.({
-    title: input.title,
-    bodyLines: input.bodyLines,
-    technicalLines: input.technicalLines,
-    options: input.options,
-    selectedOptionIndex: 0,
-    locale,
-    direction: locale === "ar" ? "rtl" : "ltr",
-  });
 }
 
 function interfaceStyleChoices(language: UiLanguage): readonly InterfaceStyleChoice[] {
@@ -598,119 +545,6 @@ function interfaceStyleChoices(language: UiLanguage): readonly InterfaceStyleCho
       value: { flavor: "arabic-light", activityLabels: "en" },
     },
   ];
-}
-
-function renderReviewManifest(manifest: SetupReviewManifest, locale: SetupCopyLocale): string {
-  const lines = [copy(locale, "setupReview.title")];
-  for (const section of Object.keys(REVIEW_SECTION_COPY_KEYS) as SetupReviewManifestSection[]) {
-    const entries = manifest.sections[section];
-    if (entries.length === 0) continue;
-    lines.push("", copy(locale, REVIEW_SECTION_COPY_KEYS[section]));
-    for (const line of entries) {
-      lines.push(`- ${renderReviewLine(locale, line.summaryKey, line.review.values)}`);
-    }
-  }
-  if (manifest.metadata.lineCount === 0) {
-    lines.push(`- ${copy(locale, "setupReview.empty")}`);
-  }
-  return lines.join("\n");
-}
-
-function renderReviewLine(
-  locale: SetupCopyLocale,
-  summaryKey: string,
-  values: Record<string, string | readonly string[] | boolean | undefined>
-): string {
-  if (hasSetupCopyKey(summaryKey)) {
-    return formatCopy(locale, summaryKey, reviewPlaceholderValues(values));
-  }
-  return copy(locale, "setupReview.itemFallback");
-}
-
-function resultSummary(result: SetupApplyPlanningResult, locale: SetupCopyLocale): string {
-  switch (result.kind) {
-    case "apply-plan-ready":
-      return copy(locale, "setupApply.plan.ready");
-    case "blocked":
-      return formatCopy(locale, "setupApply.review.blocked", {
-        blockerCount: String(result.eligibility.blockers.length),
-      });
-    case "cancelled":
-      return copy(locale, "setupApply.review.cancelled");
-  }
-}
-
-function endStateSummary(endState: SetupApplyEndState, locale: SetupCopyLocale): string {
-  switch (endState.kind) {
-    case "verified-ready":
-      return copy(locale, "setupApply.endState.verifiedReady");
-    case "verified-degraded":
-      return copy(locale, "setupApply.endState.verifiedDegraded");
-    case "blocked":
-      if (endState.reason === "save-failed") {
-        return formatCopy(locale, "setupApply.endState.saveFailed", {
-          error: endState.blockers[0] ?? "unknown",
-        });
-      }
-      if (endState.reason === "verification-blocked") {
-        return formatCopy(locale, "setupApply.endState.verificationBlocked", {
-          blocker: endState.blockers[0] ?? "unknown",
-        });
-      }
-      return formatCopy(locale, "setupApply.review.blocked", {
-        blockerCount: String(endState.blockers.length),
-      });
-    case "cancelled":
-      return copy(locale, "setupApply.review.cancelled");
-    case "saved-not-launched":
-      return copy(locale, "setupApply.endState.savedNotLaunched");
-    case "launched":
-      return [
-        copy(locale, "setupApply.endState.launched"),
-        endState.acceptedDegraded ? copy(locale, "setupApply.endState.acceptedDegraded") : undefined,
-      ].filter((line): line is string => line !== undefined).join("\n");
-  }
-}
-
-function copy(locale: SetupCopyLocale, key: SetupCopyKey): string {
-  return resolveSetupCopy(locale, key);
-}
-
-function formatCopy(
-  locale: SetupCopyLocale,
-  key: SetupCopyKey,
-  values: Record<string, string | readonly string[] | boolean | undefined>
-): string {
-  const template = copy(locale, key);
-  return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/gu, (_match, name: string) => {
-    const value = values[name];
-    if (value === undefined) return "";
-    if (Array.isArray(value)) return value.join(", ");
-    return String(value);
-  });
-}
-
-function reviewPlaceholderValues(
-  values: Record<string, string | readonly string[] | boolean | undefined>
-): Record<string, string | readonly string[] | boolean | undefined> {
-  const envVars = values.envVars;
-  return {
-    ...values,
-    providerId: values.providerId ?? values.provider,
-    modelId: values.modelId ?? values.model,
-    envVar: values.envVar ?? (Array.isArray(envVars) ? envVars.join(", ") : envVars),
-    workspacePath: values.workspacePath ?? values.workspaceRoot,
-    workflowMode: values.workflowMode ?? values.workflowLearning,
-    capabilities: values.capabilities,
-    launchPreference: values.launchPreference ?? launchPreference(values.launchSelected),
-  };
-}
-
-function launchPreference(value: string | readonly string[] | boolean | undefined): string | undefined {
-  if (value === true) return "offer-after-verify";
-  if (value === false) return "skip-launch";
-  if (typeof value === "string") return value;
-  return undefined;
 }
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {

@@ -85,10 +85,10 @@ describe("ProviderExecutor route-based execution", () => {
   });
 
   it("honors route-level baseUrl during execution", async () => {
-    const adapter = createMockAdapter({ id: "openai" });
+    const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
 
-    const route = createDefaultRoute({ baseUrl: "https://custom.example.com/v1" });
+    const route = createDefaultRoute({ provider: "test-provider", baseUrl: "https://custom.example.com/v1" });
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: route
     });
@@ -125,11 +125,11 @@ describe("ProviderExecutor route-based execution", () => {
   });
 
   it("same provider ID with different base URLs does not overwrite each other", async () => {
-    const adapter = createMockAdapter({ id: "openai" });
+    const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
 
-    const routeA = createDefaultRoute({ baseUrl: "https://a.example.com/v1" });
-    const routeB = createDefaultRoute({ baseUrl: "https://b.example.com/v1" });
+    const routeA = createDefaultRoute({ provider: "test-provider", baseUrl: "https://a.example.com/v1" });
+    const routeB = createDefaultRoute({ provider: "test-provider", baseUrl: "https://b.example.com/v1" });
 
     await executor.complete({ messages: [] }, {}, { primaryRoute: routeA });
     await executor.complete({ messages: [] }, {}, { primaryRoute: routeB });
@@ -219,19 +219,19 @@ describe("ProviderExecutor route-based execution", () => {
     }
   });
 
-  it("still works with existing hosted provider execution without primaryRoute", async () => {
+  it("fails clearly without primaryRoute", async () => {
     const adapter = createMockAdapter({
-      id: "openai",
+      id: "test-provider",
       completeResponse: {
         ok: true,
-        content: "legacy-response",
-        model: "gpt-4o",
-        provider: "openai"
+        content: "should not be called",
+        model: "legacy-model",
+        provider: "test-provider"
       },
       models: [
         {
-          id: "gpt-4o",
-          provider: "openai",
+          id: "legacy-model",
+          provider: "test-provider",
           contextWindowTokens: 128_000,
           supportsTools: true,
           supportsVision: true,
@@ -242,14 +242,16 @@ describe("ProviderExecutor route-based execution", () => {
     registry.register(adapter);
 
     const result = await executor.complete({
-      provider: "openai",
-      model: "gpt-4o",
+      provider: "test-provider",
+      model: "legacy-model",
       messages: []
     });
 
-    expect(result.ok).toBe(true);
-    expect(result.response?.content).toBe("legacy-response");
-    expect(adapter.calls.length).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("missing-route");
+    expect(result.attempts[0].content).toContain("No explicit primary route");
+    expect(adapter.calls.length).toBe(0);
   });
 
   it("fails early with clear not-executable error for catalog-only providers", async () => {
@@ -351,16 +353,16 @@ describe("ProviderExecutor route-based execution", () => {
 
   it("streams with route-level endpoint override", async () => {
     const adapter = createMockAdapter({
-      id: "openai",
+      id: "test-provider",
       streamEvents: [
-        { kind: "start", provider: "openai", model: "gpt-4o" },
-        { kind: "token", provider: "openai", model: "gpt-4o", text: "hello" },
-        { kind: "done", provider: "openai", model: "gpt-4o", response: { ok: true, content: "hello", model: "gpt-4o", provider: "openai" } }
+        { kind: "start", provider: "test-provider", model: "legacy-model" },
+        { kind: "token", provider: "test-provider", model: "legacy-model", text: "hello" },
+        { kind: "done", provider: "test-provider", model: "legacy-model", response: { ok: true, content: "hello", model: "legacy-model", provider: "test-provider" } }
       ]
     });
     registry.register(adapter);
 
-    const route = createDefaultRoute({ baseUrl: "https://stream.example.com/v1" });
+    const route = createDefaultRoute({ provider: "test-provider", baseUrl: "https://stream.example.com/v1" });
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: route,
       stream: true
@@ -369,5 +371,117 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.ok).toBe(true);
     expect(adapter.calls.length).toBe(1);
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://stream.example.com/v1");
+  });
+
+  it("registered adapter for codex does not execute", async () => {
+    const codexAdapter = createMockAdapter({ id: "codex" });
+    registry.register(codexAdapter);
+
+    const route: ResolvedModelRoute = {
+      provider: "codex",
+      id: "codex-model",
+      profile: {
+        id: "codex-model",
+        provider: "codex",
+        contextWindowTokens: 128_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }
+    };
+
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(result.attempts[0].content).toContain("not runnable");
+    expect(codexAdapter.calls.length).toBe(0);
+  });
+
+  it("registered adapter for anthropic does not execute while metadata says non-runnable / unsupported mode", async () => {
+    const anthropicAdapter = createMockAdapter({ id: "anthropic" });
+    registry.register(anthropicAdapter);
+
+    const route: ResolvedModelRoute = {
+      provider: "anthropic",
+      id: "claude-3-opus",
+      profile: {
+        id: "claude-3-opus",
+        provider: "anthropic",
+        contextWindowTokens: 200_000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStructuredOutput: true
+      }
+    };
+
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(anthropicAdapter.calls.length).toBe(0);
+  });
+
+  it("route with apiMode: openai_responses is rejected before adapter call", async () => {
+    const mockAdapter = createMockAdapter({ id: "openai" });
+    registry.register(mockAdapter);
+
+    const route = createDefaultRoute({ apiMode: "openai_responses" });
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(result.attempts[0].content).toContain("unsupported API mode");
+    expect(mockAdapter.calls.length).toBe(0);
+  });
+
+  it("legitimate runnable OpenAI-compatible providers still execute", async () => {
+    const openaiAdapter = createMockAdapter({ id: "openai" });
+    registry.register(openaiAdapter);
+    process.env.OPENAI_API_KEY = "sk-test";
+
+    try {
+      const route = createDefaultRoute({ apiMode: "openai_chat_completions", apiKeyEnv: "OPENAI_API_KEY" });
+      const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+      expect(result.ok).toBe(true);
+      expect(openaiAdapter.calls.length).toBe(1);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+
+  it("custom route with explicit base URL and executable API mode still works", async () => {
+    process.env.CUSTOM_API_KEY = "custom-secret";
+    const customAdapter = createMockAdapter({ id: "custom-provider" });
+    registry.register(customAdapter);
+
+    try {
+      const route: ResolvedModelRoute = {
+        provider: "custom-provider",
+        id: "custom-model",
+        profile: {
+          id: "custom-model",
+          provider: "custom-provider",
+          contextWindowTokens: 128_000,
+          supportsTools: false,
+          supportsVision: false,
+          supportsStructuredOutput: false
+        },
+        baseUrl: "https://custom.example.com/v1",
+        apiMode: "custom_openai_compatible"
+      };
+
+      const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+      expect(result.ok).toBe(true);
+      expect(customAdapter.calls.length).toBe(1);
+      expect(customAdapter.calls[0].options?.endpoint?.baseUrl).toBe("https://custom.example.com/v1");
+    } finally {
+      delete process.env.CUSTOM_API_KEY;
+    }
   });
 });

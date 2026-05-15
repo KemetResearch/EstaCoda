@@ -1,6 +1,5 @@
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import { defaultEnvKey } from "../config/runtime-config.js";
-import type { ProviderId } from "../contracts/provider.js";
+import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 
@@ -164,6 +163,10 @@ export type FirstRunOnboardingSelections = {
   readonly workspaceTrusted?: boolean;
   readonly primaryProvider?: ProviderId;
   readonly primaryModel?: string;
+  readonly primaryBaseUrl?: string;
+  readonly primaryContextWindowTokens?: number;
+  readonly primaryApiMode?: ProviderApiMode;
+  readonly primaryAuthMethod?: ProviderAuthMethod;
   readonly primaryCredential?: FirstRunCredentialReference;
   readonly securityMode?: SecurityApprovalMode;
   readonly workflowLearning?: SkillAutonomy;
@@ -275,7 +278,7 @@ export function getRequiredCredentialReference(
   if (selections.primaryProvider === undefined || selections.primaryProvider === "local") {
     return undefined;
   }
-  return selections.primaryCredential ?? { kind: "env", name: defaultEnvKey(selections.primaryProvider) };
+  return selections.primaryCredential;
 }
 
 function normalizeSelections(selections: FirstRunOnboardingSelections): FirstRunOnboardingSelections {

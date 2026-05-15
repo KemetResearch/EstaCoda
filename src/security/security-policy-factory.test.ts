@@ -46,9 +46,32 @@ describe("security policy factory", () => {
       await policy.assess!(baseRequest);
 
       expect(executor.complete).toHaveBeenCalledTimes(1);
-      const [request, preferences] = (executor.complete as any).mock.calls[0];
+      const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
       expect(request.model).toBe("gpt-4o");
-      expect(preferences!.providerOrder).toEqual(["openai"]);
+      expect(preferences!.providerOrder).toBeUndefined();
+      expect(executionOptions!.primaryRoute).toBeDefined();
+      expect(executionOptions!.primaryRoute.provider).toBe("openai");
+      expect(executionOptions!.primaryRoute.id).toBe("gpt-4o");
+      expect(executionOptions!.primaryRoute.apiMode).toBe("openai_chat_completions");
+      expect(executionOptions!.primaryRoute.baseUrl).toBe("https://api.openai.com/v1");
+      expect(executionOptions!.primaryRoute.apiKeyEnv).toBe("OPENAI_API_KEY");
+    });
+
+    it("does not synthesize a placeholder route for provider/model overrides without real defaults", async () => {
+      const executor = createMockExecutor();
+      const assessor: SecurityAssessorRuntimeConfig = {
+        enabled: true,
+        provider: "nous",
+        model: "hermes-4",
+        timeoutMs: 5000,
+        providerExecutor: executor
+      };
+
+      const policy = createSecurityPolicyForMode("adaptive", { assessor });
+      const result = await policy.assess!(baseRequest);
+
+      expect(executor.complete).not.toHaveBeenCalled();
+      expect(result.assessor).toEqual({ used: false, status: "unavailable" });
     });
 
     it("uses full auxiliaryModels.approval resolved route when override absent", async () => {

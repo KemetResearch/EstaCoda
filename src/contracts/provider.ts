@@ -111,6 +111,7 @@ export type ResolvedModelRoute = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  apiMode?: ProviderApiMode;
 };
 
 export type AuxiliaryModelProvider = ProviderId | "auto" | "main";
@@ -220,6 +221,7 @@ export type ProviderErrorClass =
   | "incomplete-stream"
   | "model-unavailable"
   | "unsupported"
+  | "missing-route"
   | "unknown";
 
 export type ProviderRoutePreferences = {
@@ -272,3 +274,17 @@ export type CredentialPoolSnapshot = {
     usageCount: number;
   }>;
 };
+
+export type ProviderAuthMethod =
+  | "none"
+  | "api_key"
+  | "oauth_device"
+  | "oauth_device_pkce"
+  | "oauth_pkce_poll"
+  | "oauth_external";
+
+export type ProviderApiMode =
+  | "openai_chat_completions"
+  | "openai_responses"
+  | "anthropic_messages"
+  | "custom_openai_compatible";

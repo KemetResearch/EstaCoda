@@ -42,7 +42,7 @@ export function buildFallbackResponse(input: {
   if (input.selectedSkill === undefined) {
     return {
       label: input.label,
-      text: "I did not find a matching skill yet. I would answer directly and record this interaction for future skill discovery.",
+      text: "I could not generate a full model response for this turn. Check provider configuration or try again once a model provider is available.",
       matchedSkills: [],
       intent: input.intent,
       securityDecision: input.securityDecision,
@@ -57,7 +57,7 @@ export function buildFallbackResponse(input: {
         "received prompt",
         ...contextProgress,
         `intent: ${input.intent.labels.join(", ")}`,
-        "no skill selected",
+        "direct response mode",
         "ready for direct response"
       ]
     };

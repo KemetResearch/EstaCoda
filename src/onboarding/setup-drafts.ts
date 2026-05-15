@@ -71,7 +71,7 @@ export type SetupDraftReviewMetadata = {
   readonly copyKey: string;
   readonly summaryKey: string;
   readonly redacted: true;
-  readonly values: Record<string, string | readonly string[] | boolean | undefined>;
+  readonly values: Record<string, string | readonly string[] | boolean | number | undefined>;
 };
 
 export type SetupDraftApplyIntent = {
@@ -154,6 +154,22 @@ export function buildSetupEditorDraftBundle(
   options: SetupDraftBundleOptions = {}
 ): SetupDraftBundle {
   const drafts = session.plan.actions.map((action) => draftFromEditorAction(action, options));
+  return buildSetupEditorDraftBundleFromActions(session, drafts);
+}
+
+export function buildSetupEditorActionDraftBundle(
+  session: SetupEditorPlanSession,
+  actions: readonly SetupEditorActionDraft[],
+  options: SetupDraftBundleOptions = {}
+): SetupDraftBundle {
+  const drafts = actions.map((action) => draftFromEditorAction(action, options));
+  return buildSetupEditorDraftBundleFromActions(session, drafts);
+}
+
+function buildSetupEditorDraftBundleFromActions(
+  session: SetupEditorPlanSession,
+  drafts: readonly SetupDraft[]
+): SetupDraftBundle {
   return bundle(
     "setup-editor-plan-session",
     `setup-editor:${session.plan.sourceState}`,
@@ -180,6 +196,10 @@ function firstRunProviderModelDraft(
     values: {
       provider: selections.primaryProvider,
       model: selections.primaryModel,
+      baseUrl: selections.primaryBaseUrl,
+      contextWindowTokens: selections.primaryContextWindowTokens,
+      apiMode: selections.primaryApiMode,
+      authMethod: selections.primaryAuthMethod,
     },
   });
 }
@@ -308,6 +328,45 @@ function draftFromEditorAction(
     return verificationDraft(source);
   }
 
+  if (action.id === "edit-security-mode") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "security-mode",
+      source,
+      riskSurface: "security-policy",
+      scope: action.patch?.fields ?? [],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.securityMode.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
+  if (action.id === "edit-workflow-learning") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "workflow-learning",
+      source,
+      riskSurface: "workflow-learning",
+      scope: action.patch?.fields ?? [],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.workflowLearning.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
+  if (action.id === "edit-primary-model-route" || action.id === "repair-primary-provider") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "provider-model-route",
+      source,
+      riskSurface: "provider-selection",
+      scope: action.patch?.fields ?? ["provider.route"],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.providerModelRoute.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
   if (action.id === "cancel-setup-editor") {
     return {
       id: editorDraftId(action),
@@ -324,28 +383,37 @@ function draftFromEditorAction(
     };
   }
 
-  if (action.id === "repair-broken-config") {
+  if (action.id === "repair-broken-config" || action.id === "repair-state-directory") {
     return {
       id: editorDraftId(action),
       kind: "diagnostic-blocker",
       source,
       riskSurface: "config-repair",
       target: { kind: "diagnostic-only" },
-      review: review("setupDrafts.brokenConfig.summary", {}),
+      review: review(action.id === "repair-state-directory"
+        ? "setupDrafts.stateDirectory.summary"
+        : "setupDrafts.brokenConfig.summary", {}),
       applyIntent: intent("diagnostic-only"),
       requiresReview: true,
       readOnly: true,
-      blockers: ["Normal config editing is blocked until config can be parsed."],
+      blockers: [action.id === "repair-state-directory"
+        ? "Normal config editing is blocked until the EstaCoda state directory is writable."
+        : "Normal config editing is blocked until config can be parsed."],
       warnings: [],
     };
   }
 
   if (action.credentialRefs !== undefined || action.id === "edit-primary-credential-reference" || action.id === "repair-missing-credential") {
+    const envVar = stringReviewValue(action.reviewValues?.apiKeyEnv);
+    const credentialRefs = action.credentialRefs?.map((ref) => ref.name) ?? [];
     return credentialDraft({
       id: editorDraftId(action),
       source,
       configPath: options.configPath,
-      envVars: action.credentialRefs?.map((ref) => ref.name) ?? [],
+      scope: action.patch?.fields ?? ["provider.credentialReference"],
+      envVars: envVar === undefined ? credentialRefs : [envVar],
+      provider: stringReviewValue(action.reviewValues?.provider),
+      model: stringReviewValue(action.reviewValues?.model),
     });
   }
 
@@ -397,7 +465,10 @@ function credentialDraft(input: {
   readonly id: string;
   readonly source: SetupDraftSource;
   readonly configPath?: string;
+  readonly scope?: readonly SetupEditorPatchField[];
   readonly envVars: readonly string[];
+  readonly provider?: string;
+  readonly model?: string;
 }): SetupDraft {
   return {
     id: input.id,
@@ -406,13 +477,15 @@ function credentialDraft(input: {
     riskSurface: "credential-reference",
     target: {
       kind: "config-scope",
-      scope: ["providers.*.apiKeyEnv"],
+      scope: input.scope ?? ["providers.*.apiKeyEnv"],
       path: input.configPath,
       preserveUnrelatedConfig: true,
     },
     review: review("setupDrafts.credentialReference.summary", {
       envVars: [...new Set(input.envVars)].sort(),
       credentialValuesIncluded: false,
+      provider: input.provider,
+      model: input.model,
     }),
     applyIntent: intent("credential-reference"),
     preserveUnrelatedConfig: true,
@@ -421,6 +494,10 @@ function credentialDraft(input: {
     blockers: [],
     warnings: [],
   };
+}
+
+function stringReviewValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function workspaceTrustDraft(input: {

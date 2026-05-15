@@ -9,6 +9,7 @@ import type {
   CredentialRotationStrategy,
   ModelProfile,
   ProviderEndpoint,
+  ProviderApiMode,
   ProviderId,
   ResolvedModelRoute
 } from "../contracts/provider.js";
@@ -23,6 +24,11 @@ import {
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import {
+  getDefaultApiKeyEnv,
+  getProviderMetadata,
+  buildResolvedModelRoute
+} from "../providers/provider-metadata.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -212,6 +218,14 @@ export type ModelFallbackConfig = {
   contextWindowTokens?: number;
 };
 
+export type ModelAliasDefinition = {
+  provider: ProviderId;
+  model: string;
+  baseUrl?: string;
+  apiMode?: string;
+  apiKeyEnv?: string;
+};
+
 export type EstaCodaConfig = {
   model?: {
     provider?: ProviderId;
@@ -219,10 +233,13 @@ export type EstaCodaConfig = {
     contextWindowTokens?: number;
     fallbacks?: ModelFallbackConfig[];
   };
+  modelAliases?: Record<string, ModelAliasDefinition>;
+  model_aliases?: Record<string, ModelAliasDefinition>;
   providers?: Record<string, {
     kind?: "openai-compatible" | "catalog";
     baseUrl?: string;
     apiKeyEnv?: string;
+    apiMode?: ProviderApiMode;
     models?: string[];
     enableNetwork?: boolean;
     headers?: Record<string, string>;
@@ -606,14 +623,15 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       console.warn(`[config] ${warning}`);
     }
   }
-  const primaryModelRoute: ResolvedModelRoute = {
+  const primaryModelRoute = buildResolvedModelRoute({
     provider: config.model?.provider ?? "unconfigured",
-    id: config.model?.id ?? "unconfigured",
+    model: config.model?.id ?? "unconfigured",
     profile: model,
     baseUrl: config.providers?.[config.model?.provider ?? ""]?.baseUrl,
     apiKeyEnv: config.providers?.[config.model?.provider ?? ""]?.apiKeyEnv,
+    apiMode: config.providers?.[config.model?.provider ?? ""]?.apiMode,
     contextWindowTokens: config.model?.contextWindowTokens
-  };
+  });
 
   const modelFallbackRoutes: ResolvedModelRoute[] = [];
   for (const fallback of normalizedFallbacks.fallbacks) {
@@ -626,14 +644,15 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       ...options.modelsDevOptions
     });
     const fallbackProviderConfig = config.providers?.[fallback.provider];
-    modelFallbackRoutes.push({
+    modelFallbackRoutes.push(buildResolvedModelRoute({
       provider: fallback.provider,
-      id: fallback.id,
+      model: fallback.id,
       profile: fallbackProfile,
       baseUrl: fallback.baseUrl ?? fallbackProviderConfig?.baseUrl,
       apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
+      apiMode: fallbackProviderConfig?.apiMode,
       contextWindowTokens: fallback.contextWindowTokens
-    });
+    }));
   }
 
   return {
@@ -726,6 +745,10 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     },
     providers: mergeRecordEntries(merged.providers, config.providers),
     credentialPools: mergeRecordEntries(merged.credentialPools, config.credentialPools),
+    modelAliases: mergeRecordEntries(
+      mergeRecordEntries(merged.modelAliases, merged.model_aliases),
+      mergeRecordEntries(config.modelAliases, config.model_aliases)
+    ),
     auxiliaryModels: mergeAuxiliaryModels(merged.auxiliaryModels, config.auxiliaryModels),
     web: {
       ...(merged.web ?? {}),
@@ -836,6 +859,15 @@ function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
       compacted.auxiliaryModels = stripped;
     }
   }
+  /**
+   * Legacy config cleanup for the old `auxiliaryProviders` key.
+   *
+   * This key is not a supported write target. Keep stripping it so stale configs
+   * do not preserve deprecated auxiliary-provider shape.
+   *
+   * TODO(config-cleanup): remove only after the migration window is explicitly
+   * closed and tests/docs no longer need compatibility coverage.
+   */
   // Strip deprecated auxiliaryProviders so it is never serialized
   if ("auxiliaryProviders" in compacted) {
     delete (compacted as Record<string, unknown>).auxiliaryProviders;
@@ -1244,10 +1276,17 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
 
     const kind = providerConfig.kind ?? "openai-compatible";
     if (kind === "openai-compatible") {
+      const metadata = getProviderMetadata(providerId);
+      const resolvedBaseUrl = providerConfig.baseUrl ?? metadata.defaultBaseUrl;
+      if (resolvedBaseUrl === undefined) {
+        // Skip registering an executable adapter for custom providers
+        // missing an explicit base URL.
+        continue;
+      }
       registry.register(createOpenAICompatibleProvider({
         id: providerId,
         endpoint: {
-          baseUrl: providerConfig.baseUrl ?? defaultBaseUrl(providerId),
+          baseUrl: resolvedBaseUrl,
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
@@ -1309,6 +1348,20 @@ export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): P
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+/**
+ * Compatibility wrapper for direct setup/model setup/config-tool paths.
+ *
+ * Do not use for new first-run onboarding, guided setup repair,
+ * bare `estacoda model`, `/model` session switching, gateway model cards,
+ * or runtime route mutation.
+ *
+ * New flows should use the smaller provider config mutation helpers and
+ * reviewed setup apply paths.
+ *
+ * TODO(provider-cleanup): migrate remaining direct setup/model setup/config-tool
+ * callers to the smaller helpers in a dedicated compatibility migration PR,
+ * then remove this wrapper.
+ */
 export async function setupProviderConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -1328,7 +1381,9 @@ export async function setupProviderConfig(options: {
   const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
   const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
   const requiresCredential = explicitlyProvidesCredential || forceCredential;
-  const envName = requiresCredential ? options.input.apiKeyEnv ?? defaultEnvKey(options.input.provider) : undefined;
+  const envName = requiresCredential ? options.input.apiKeyEnv ?? getDefaultApiKeyEnv(options.input.provider) : undefined;
+
+  // Write raw secret to .env boundary, never into config JSON
   let secretPath: string | undefined;
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
     const secret = await writeEnvSecret({
@@ -1339,19 +1394,32 @@ export async function setupProviderConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
-  const previousModels = existing.config.providers?.[options.input.provider]?.models ?? [];
+
+  // Preserve unrelated provider fields by spreading the existing block first
+  const existingProvider = existing.config.providers?.[options.input.provider] ?? {};
+  const previousModels = existingProvider.models ?? [];
   const nextModels = uniqueStrings([
     ...previousModels,
     ...(options.input.models ?? []),
     options.input.model
   ]);
-  const providerConfig = {
+  const providerMetadata = getProviderMetadata(options.input.provider);
+  const resolvedBaseUrl =
+    options.input.baseUrl ??
+    existingProvider.baseUrl ??
+    providerMetadata.defaultBaseUrl;
+
+  const providerConfig: Record<string, unknown> = {
+    ...existingProvider,
     kind: "openai-compatible" as const,
-    baseUrl: options.input.baseUrl ?? defaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
+  if (resolvedBaseUrl !== undefined) {
+    providerConfig.baseUrl = resolvedBaseUrl;
+  }
+
   const contextWindowPatch = options.input.contextWindowTokens !== undefined
     ? { contextWindowTokens: options.input.contextWindowTokens }
     : {};
@@ -1364,25 +1432,34 @@ export async function setupProviderConfig(options: {
         ...contextWindowPatch
       }
     };
-  const config = mergeConfig(existing.config, {
-    ...primaryModelPatch,
-    providers: {
-      [options.input.provider]: providerConfig
-    },
-    credentialPools: envName === undefined
-      ? {}
-      : {
+
+  // Only configure credential pools when explicit rotation is requested.
+  // Normal API-key storage is provider/route env reference + .env, not pool.
+  const credentialPoolPatch =
+    options.input.credentialPoolStrategy !== undefined && envName !== undefined
+      ? {
+        credentialPools: {
           [options.input.provider]: {
-            strategy: options.input.credentialPoolStrategy ?? "fill_first",
+            strategy: options.input.credentialPoolStrategy,
             entries: [
               {
                 id: `${options.input.provider}-${envName}`,
-                source: { kind: "env", name: envName },
+                source: { kind: "env" as const, name: envName },
                 priority: 1
               }
             ]
           }
         }
+      }
+      : {};
+
+  // Single read, single merge, single save — no multi-write partial states
+  const config = mergeConfig(existing.config, {
+    ...primaryModelPatch,
+    providers: {
+      [options.input.provider]: providerConfig
+    },
+    ...credentialPoolPatch
   });
 
   await saveRuntimeConfig(targetPath, config);
@@ -2402,42 +2479,6 @@ function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttP
       return config.openai?.apiKeyEnv ?? config.openai?.api_key_env;
     case "mistral":
       return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
-  }
-}
-
-function defaultBaseUrl(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "https://api.openai.com/v1";
-    case "deepseek":
-      return "https://api.deepseek.com/v1";
-    case "kimi":
-      return "https://api.moonshot.ai/v1";
-    case "google":
-      return "https://generativelanguage.googleapis.com/v1beta/openai";
-    case "openrouter":
-      return "https://openrouter.ai/api/v1";
-    case "local":
-      return "http://localhost:11434/v1";
-    default:
-      return "https://example.invalid/v1";
-  }
-}
-
-export function defaultEnvKey(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "deepseek":
-      return "DEEPSEEK_API_KEY";
-    case "kimi":
-      return "KIMI_API_KEY";
-    case "google":
-      return "GOOGLE_API_KEY";
-    case "openrouter":
-      return "OPENROUTER_API_KEY";
-    default:
-      return "OPENAI_COMPATIBLE_API_KEY";
   }
 }
 

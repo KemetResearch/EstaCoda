@@ -124,12 +124,12 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("preserves fallback route metadata during execution", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "fail", model: "gpt-4o", provider: "openai", errorClass: "server" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "fail", model: "m1", provider: "test-primary", errorClass: "server" }
     });
     const fallback = createMockAdapter({
-      id: "deepseek",
-      completeResponse: { ok: true, content: "ok", model: "ds", provider: "deepseek" }
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "ok", model: "m2", provider: "test-fallback" }
     });
     registry.register(primary);
     registry.register(fallback);
@@ -139,8 +139,8 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o", { baseUrl: "https://primary.example.com/v1" }),
-        fallbackChain: [createRoute("deepseek", "ds", { baseUrl: "https://fallback.example.com/v1" })]
+        primaryRoute: createRoute("test-primary", "m1", { baseUrl: "https://primary.example.com/v1" }),
+        fallbackChain: [createRoute("test-fallback", "m2", { baseUrl: "https://fallback.example.com/v1" })]
       }
     );
 
@@ -152,8 +152,8 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("executes primary only when no fallback chain exists", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "fail", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "fail", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
     });
     registry.register(primary);
 
@@ -162,7 +162,7 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o")
+        primaryRoute: createRoute("test-primary", "m1")
       }
     );
 
@@ -174,12 +174,12 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("does not use arbitrary registered models as fallbacks", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "fail", model: "gpt-4o", provider: "openai", errorClass: "model-unavailable" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "fail", model: "m1", provider: "test-primary", errorClass: "model-unavailable" }
     });
     const other = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "kimi ok", model: "kimi-k2.5", provider: "kimi" }
+      id: "test-other",
+      completeResponse: { ok: true, content: "other ok", model: "m2", provider: "test-other" }
     });
     registry.register(primary);
     registry.register(other);
@@ -189,7 +189,7 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
+        primaryRoute: createRoute("test-primary", "m1"),
         fallbackChain: []
       }
     );
@@ -200,29 +200,29 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("retries primary on each new turn regardless of prior fallback", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "fail", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "fail", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
     });
     const fallback = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "ok", model: "kimi-k2.5", provider: "kimi" }
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "ok", model: "m2", provider: "test-fallback" }
     });
     registry.register(primary);
     registry.register(fallback);
 
     const executor = new ProviderExecutor({ registry });
     const options = {
-      primaryRoute: createRoute("openai", "gpt-4o"),
-      fallbackChain: [createRoute("kimi", "kimi-k2.5")]
+      primaryRoute: createRoute("test-primary", "m1"),
+      fallbackChain: [createRoute("test-fallback", "m2")]
     };
 
     const result1 = await executor.complete({ messages: [] }, {}, options);
     expect(result1.ok).toBe(true);
-    expect(result1.attempts[0].provider).toBe("openai");
+    expect(result1.attempts[0].provider).toBe("test-primary");
 
     const result2 = await executor.complete({ messages: [] }, {}, options);
     expect(result2.ok).toBe(true);
-    expect(result2.attempts[0].provider).toBe("openai");
+    expect(result2.attempts[0].provider).toBe("test-primary");
 
     expect(primary.calls.length).toBe(2);
     expect(fallback.calls.length).toBe(2);
@@ -240,18 +240,18 @@ describe("ProviderExecutor fallback behavior", () => {
     ["unsupported", false]
   ])("eligible failure class %s triggers fallback: %s", async (errorClass: string, shouldTrigger: boolean) => {
     const primary = createMockAdapter({
-      id: "openai",
+      id: "test-primary",
       completeResponse: {
         ok: false,
         content: "fail",
-        model: "gpt-4o",
-        provider: "openai",
+        model: "m1",
+        provider: "test-primary",
         errorClass: errorClass as any
       }
     });
     const fallback = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "ok", model: "kimi-k2.5", provider: "kimi" }
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "ok", model: "m2", provider: "test-fallback" }
     });
     registry.register(primary);
     registry.register(fallback);
@@ -261,15 +261,15 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
-        fallbackChain: [createRoute("kimi", "kimi-k2.5")]
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-fallback", "m2")]
       }
     );
 
     if (shouldTrigger) {
       expect(result.ok).toBe(true);
       expect(result.attempts.length).toBe(2);
-      expect(result.attempts[1].provider).toBe("kimi");
+      expect(result.attempts[1].provider).toBe("test-fallback");
     } else {
       expect(result.ok).toBe(false);
       expect(result.attempts.length).toBe(1);
@@ -279,12 +279,12 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("falls back on auth error when explicit fallback chain exists", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "auth fail", model: "gpt-4o", provider: "openai", errorClass: "auth" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "auth fail", model: "m1", provider: "test-primary", errorClass: "auth" }
     });
     const fallback = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "ok", model: "kimi-k2.5", provider: "kimi" }
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "ok", model: "m2", provider: "test-fallback" }
     });
     registry.register(primary);
     registry.register(fallback);
@@ -295,8 +295,8 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
-        fallbackChain: [createRoute("kimi", "kimi-k2.5")],
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-fallback", "m2")],
         onEvent: (event) => {
           events.push(event);
         }
@@ -305,15 +305,15 @@ describe("ProviderExecutor fallback behavior", () => {
 
     expect(result.ok).toBe(true);
     expect(result.attempts.length).toBe(2);
-    const primaryEnd = events.find((e): e is Extract<ProviderRuntimeEvent, { kind: "provider-attempt-end" }> => e.kind === "provider-attempt-end" && e.provider === "openai");
+    const primaryEnd = events.find((e): e is Extract<ProviderRuntimeEvent, { kind: "provider-attempt-end" }> => e.kind === "provider-attempt-end" && e.provider === "test-primary");
     expect(primaryEnd).toBeDefined();
     expect(primaryEnd!.willFallback).toBe(true);
   });
 
   it("blocks on auth error when no fallback chain exists", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "auth fail", model: "gpt-4o", provider: "openai", errorClass: "auth" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "auth fail", model: "m1", provider: "test-primary", errorClass: "auth" }
     });
     registry.register(primary);
 
@@ -323,7 +323,7 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
+        primaryRoute: createRoute("test-primary", "m1"),
         onEvent: (event) => {
           events.push(event);
         }
@@ -332,20 +332,20 @@ describe("ProviderExecutor fallback behavior", () => {
 
     expect(result.ok).toBe(false);
     expect(result.attempts.length).toBe(1);
-    const primaryEnd = events.find((e): e is Extract<ProviderRuntimeEvent, { kind: "provider-attempt-end" }> => e.kind === "provider-attempt-end" && e.provider === "openai");
+    const primaryEnd = events.find((e): e is Extract<ProviderRuntimeEvent, { kind: "provider-attempt-end" }> => e.kind === "provider-attempt-end" && e.provider === "test-primary");
     expect(primaryEnd).toBeDefined();
     expect(primaryEnd!.willFallback).toBe(false);
   });
 
   it("does not fallback on cancellation", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "fail", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" },
+      id: "test-primary",
+      completeResponse: { ok: false, content: "fail", model: "m1", provider: "test-primary", errorClass: "rate-limit" },
       delayMs: 50
     });
     const fallback = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "ok", model: "kimi-k2.5", provider: "kimi" }
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "ok", model: "m2", provider: "test-fallback" }
     });
     registry.register(primary);
     registry.register(fallback);
@@ -356,8 +356,8 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
-        fallbackChain: [createRoute("kimi", "kimi-k2.5")],
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-fallback", "m2")],
         signal: controller.signal
       }
     );
@@ -369,52 +369,6 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.ok).toBe(false);
     expect(primary.calls.length).toBe(1);
     expect(fallback.calls.length).toBe(0);
-  });
-
-  it("registry caller fallback when primary fails", async () => {
-    const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "rate limited", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" },
-      models: [
-        {
-          id: "gpt-4o",
-          provider: "openai",
-          contextWindowTokens: 128_000,
-          supportsTools: true,
-          supportsVision: true,
-          supportsStructuredOutput: true
-        }
-      ]
-    });
-    const fallback = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: true, content: "kimi ok", model: "kimi-k2.5", provider: "kimi" },
-      models: [
-        {
-          id: "kimi-k2.5",
-          provider: "kimi",
-          contextWindowTokens: 128_000,
-          supportsTools: true,
-          supportsVision: true,
-          supportsStructuredOutput: true
-        }
-      ]
-    });
-    registry.register(primary);
-    registry.register(fallback);
-
-    const executor = new ProviderExecutor({ registry });
-    const result = await executor.complete({
-      provider: "openai",
-      model: "gpt-4o",
-      messages: []
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.fallbackUsed).toBe(true);
-    expect(result.attempts.length).toBe(2);
-    expect(result.attempts[0].provider).toBe("openai");
-    expect(result.attempts[1].provider).toBe("kimi");
   });
 
   it("blocks auth fallback when same provider and same apiKeyEnv", async () => {
@@ -443,8 +397,8 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("blocks auth fallback when same provider and both use pool", async () => {
     const adapter = createMockAdapter({
-      id: "openai",
-      completeHandler: (request) => ({ ok: false, content: "auth fail", model: request.model, provider: "openai", errorClass: "auth" })
+      id: "test-primary",
+      completeHandler: (request) => ({ ok: false, content: "auth fail", model: request.model, provider: "test-primary", errorClass: "auth" })
     });
     registry.register(adapter);
 
@@ -453,8 +407,8 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
-        fallbackChain: [createRoute("openai", "gpt-4o-mini")]
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-primary", "m2")]
       }
     );
 
@@ -494,16 +448,16 @@ describe("ProviderExecutor fallback behavior", () => {
 
   it("all fallbacks fail -> attempts length is complete and final error is clear", async () => {
     const primary = createMockAdapter({
-      id: "openai",
-      completeResponse: { ok: false, content: "primary fail", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" }
+      id: "test-primary",
+      completeResponse: { ok: false, content: "primary fail", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
     });
     const fallback1 = createMockAdapter({
-      id: "kimi",
-      completeResponse: { ok: false, content: "fallback1 fail", model: "kimi-k2.5", provider: "kimi", errorClass: "server" }
+      id: "test-fallback1",
+      completeResponse: { ok: false, content: "fallback1 fail", model: "m2", provider: "test-fallback1", errorClass: "server" }
     });
     const fallback2 = createMockAdapter({
-      id: "deepseek",
-      completeResponse: { ok: false, content: "fallback2 fail", model: "ds", provider: "deepseek", errorClass: "network" }
+      id: "test-fallback2",
+      completeResponse: { ok: false, content: "fallback2 fail", model: "m3", provider: "test-fallback2", errorClass: "network" }
     });
     registry.register(primary);
     registry.register(fallback1);
@@ -514,16 +468,16 @@ describe("ProviderExecutor fallback behavior", () => {
       { messages: [] },
       {},
       {
-        primaryRoute: createRoute("openai", "gpt-4o"),
-        fallbackChain: [createRoute("kimi", "kimi-k2.5"), createRoute("deepseek", "ds")]
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-fallback1", "m2"), createRoute("test-fallback2", "m3")]
       }
     );
 
     expect(result.ok).toBe(false);
     expect(result.attempts.length).toBe(3);
-    expect(result.attempts[0].provider).toBe("openai");
-    expect(result.attempts[1].provider).toBe("kimi");
-    expect(result.attempts[2].provider).toBe("deepseek");
+    expect(result.attempts[0].provider).toBe("test-primary");
+    expect(result.attempts[1].provider).toBe("test-fallback1");
+    expect(result.attempts[2].provider).toBe("test-fallback2");
     expect(result.attempts[2].errorClass).toBe("network");
     expect(result.attempts[2].content).toBe("fallback2 fail");
   });

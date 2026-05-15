@@ -125,6 +125,7 @@ describe("buildSetupEditorPlan", () => {
     expect(plan.warnings).toContain("Configured model context window is below 64K tokens.");
     expect(route.status).toBe("warning");
     expect(route.actions[0]?.id).toBe("repair-primary-provider");
+    expect(route.actions[0]?.patch?.fields).toEqual(["provider.route"]);
     expect(plan.actions.some((action) => action.id === "edit-primary-model-route")).toBe(true);
     expect(section(plan, "verification").actions[0]?.id).toBe("run-readonly-verification");
   });
@@ -136,6 +137,7 @@ describe("buildSetupEditorPlan", () => {
     expect(plan.mode).toBe("repair-first");
     expect(route.status).toBe("repair-required");
     expect(route.actions[0]?.id).toBe("repair-primary-provider");
+    expect(route.actions[0]?.patch?.fields).toEqual(["provider.route"]);
     expect(route.actions[0]?.patch?.preserveUnrelatedConfig).toBe(true);
   });
 
@@ -145,9 +147,11 @@ describe("buildSetupEditorPlan", () => {
     const repair = credentials.actions.find((action) => action.id === "repair-missing-credential");
 
     expect(credentials.status).toBe("repair-required");
+    expect(repair?.patch?.fields).toEqual(["provider.credentialReference"]);
     expect(repair?.credentialRefs).toContainEqual({ kind: "env", name: "OPENAI_API_KEY", value: "not-included" });
     expect(JSON.stringify(repair)).not.toContain("sk-");
     expect(JSON.stringify(repair)).not.toContain("secretValue");
+    expect(JSON.stringify(repair)).not.toContain("providers.*.apiKeyEnv");
   });
 
   it("keeps workspace trust separate and repairable", () => {
@@ -170,6 +174,25 @@ describe("buildSetupEditorPlan", () => {
     expect(sectionIds(plan)).toEqual(["config-summary", "config-safety", "verification", "exit"]);
     expect(plan.actions.some((action) => action.id === "edit-primary-model-route")).toBe(false);
     expect(section(plan, "config-safety").actions[0]?.id).toBe("repair-broken-config");
+  });
+
+  it("does not build normal editor sections for state-not-writable", () => {
+    const plan = buildSetupEditorPlan(state("state-not-writable"));
+
+    expect(plan.safeForNormalConfigEditing).toBe(false);
+    expect(sectionIds(plan)).toEqual(["config-summary", "config-safety", "verification", "exit"]);
+    expect(plan.actions.some((action) => action.patch !== undefined)).toBe(false);
+    expect(plan.actions.map((action) => action.id)).toEqual([
+      "repair-state-directory",
+      "run-readonly-verification",
+      "cancel-setup-editor",
+    ]);
+    expect(section(plan, "config-safety").copyKey).toBe("setupEditor.sections.stateSafety");
+    expect(section(plan, "config-safety").actions[0]).toEqual(expect.objectContaining({
+      id: "repair-state-directory",
+      effect: "diagnostic-only",
+      readOnly: true,
+    }));
   });
 
   it("keeps verification read-only", () => {
@@ -200,6 +223,15 @@ describe("buildSetupEditorPlan", () => {
     expect(scopedPatches.length).toBeGreaterThan(0);
     expect(scopedPatches.every((patch) => patch.kind === "scoped-config-patch-intent")).toBe(true);
     expect(scopedPatches.every((patch) => patch.preserveUnrelatedConfig === true)).toBe(true);
+  });
+
+  it("carries current security and workflow values for guided editor defaults", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const security = plan.actions.find((action) => action.id === "edit-security-mode");
+    const workflow = plan.actions.find((action) => action.id === "edit-workflow-learning");
+
+    expect(security?.reviewValues).toEqual({ securityMode: "adaptive" });
+    expect(workflow?.reviewValues).toEqual({ workflowLearning: "suggest" });
   });
 
   it("represents optional capabilities as independent placeholders", () => {

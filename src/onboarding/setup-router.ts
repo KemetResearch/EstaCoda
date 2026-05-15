@@ -1,4 +1,5 @@
 import { collectSetupEntryState, type CollectSetupEntryStateOptions, type SetupEntryState } from "./setup-entry-state.js";
+import { setupCopyText } from "./setup-prompts.js";
 import {
   buildFirstRunOnboardingPlan,
   createFirstRunOnboardingState,
@@ -166,13 +167,13 @@ function firstRunDecision(
 ): SetupRouteDecision {
   return {
     kind: "first-run-onboarding",
-    title: "First-run setup",
-    summary: "No usable setup config was found. Start first-run onboarding.",
+    title: setupCopyText("en", "setupRouter.firstRun.title"),
+    summary: setupCopyText("en", "setupRouter.firstRun.summary"),
     state,
     actions: [
       action("run-guided-onboarding", "Start first-run setup", "Choose language, trust, provider, security, optional capabilities, review, verify, and launch.", true),
-      action("verify-setup", "Verify setup", "Run read-only setup verification before changing anything.", false),
-      action("exit", "Exit", "Leave setup without changing config.", false),
+      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification before changing anything.", false),
+      action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ],
     warnings: state.warnings,
     blockers: state.blockers,
@@ -214,8 +215,8 @@ function createFirstRunPlanSession(selections: FirstRunOnboardingSelections): Fi
 function configuredDecision(state: SetupEntryState): SetupRouteDecision {
   return {
     kind: "configured-menu",
-    title: "EstaCoda is already configured",
-    summary: "Setup looks ready. Choose whether to launch, review config, verify, or exit.",
+    title: setupCopyText("en", "setupRouter.configured.title"),
+    summary: setupCopyText("en", "setupRouter.configured.summary"),
     state,
     actions: configuredActions(),
     warnings: state.warnings,
@@ -228,15 +229,15 @@ function configuredDecision(state: SetupEntryState): SetupRouteDecision {
 function configuredDegradedDecision(state: SetupEntryState): SetupRouteDecision {
   return {
     kind: "configured-degraded-menu",
-    title: "EstaCoda is configured with warnings",
-    summary: "Setup is usable, but verification found warnings. Review or repair before launch if needed.",
+    title: setupCopyText("en", "setupRouter.degraded.title"),
+    summary: setupCopyText("en", "setupRouter.degraded.summary"),
     state,
     actions: [
       action("repair-setup", "Fix now", "Open the guided repair path for the reported warnings.", true),
-      action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
-      action("launch-agent", "Continue in limited mode", "Launch the agent while accepting the current degraded state.", false),
+      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+      action("launch-agent", setupCopyText("en", "setupRoute.action.acceptLimitedMode"), "Launch the agent while accepting the current degraded state.", false),
       action("review-edit-config", "Review/edit config", "Inspect guided configuration sections.", true),
-      action("exit", "Exit", "Leave setup without changing config.", false),
+      action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ],
     warnings: state.warnings,
     blockers: state.blockers,
@@ -248,7 +249,7 @@ function configuredDegradedDecision(state: SetupEntryState): SetupRouteDecision 
 function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
   return {
     kind: "repair-first-menu",
-    title: "Setup needs repair",
+    title: setupCopyText("en", "setupRouter.repair.title"),
     summary: repairSummary(state),
     state,
     actions: repairFirstActions(state),
@@ -262,10 +263,9 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
 function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
   if (state.kind === "broken-config" || state.kind === "state-not-writable") {
     return [
-      action("repair-setup", "Repair setup", "Start the guided diagnostic repair path for the current blockers.", true),
       action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
-      action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
-      action("exit", "Exit", "Leave setup without changing config.", false),
+      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+      action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ];
   }
 
@@ -274,8 +274,8 @@ function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
     action("review-edit-config", "Open config editor", "Inspect or edit guided configuration sections.", true),
     action("run-guided-onboarding", "Run full onboarding", "Restart the guided setup flow from the beginning.", true),
     action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
-    action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
-    action("exit", "Exit", "Leave setup without changing config.", false),
+    action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+    action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
   ];
 }
 
@@ -316,12 +316,12 @@ function createSetupEditorPlanSession(state: SetupEntryState): SetupEditorPlanSe
 function verifyDecision(state: SetupEntryState): SetupRouteDecision {
   return {
     kind: "verify-readonly",
-    title: "Verify setup",
+    title: setupCopyText("en", "setupRoute.action.verifySetup"),
     summary: "Run setup verification without changing config.",
     state,
     actions: [
-      action("verify-setup", "Verify setup", "Collect structured setup, provider, trust, state, and tool readiness diagnostics.", false),
-      action("exit", "Exit", "Leave setup without changing config.", false),
+      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Collect structured setup, provider, trust, state, and tool readiness diagnostics.", false),
+      action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ],
     warnings: state.warnings,
     blockers: state.blockers,
@@ -331,11 +331,11 @@ function verifyDecision(state: SetupEntryState): SetupRouteDecision {
 
 function configuredActions(): SetupRouteAction[] {
   return [
-    action("launch-agent", "Launch agent", "Start the interactive EstaCoda agent session.", false),
+    action("launch-agent", setupCopyText("en", "setupRoute.action.launchAgent"), "Start the interactive EstaCoda agent session.", false),
     action("review-edit-config", "Review/edit config", "Inspect guided configuration sections.", true),
     action("run-guided-onboarding", "Run guided onboarding again", "Run guided setup again intentionally.", true),
-    action("verify-setup", "Verify setup", "Run read-only setup verification.", false),
-    action("exit", "Exit", "Leave setup without changing config.", false),
+    action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification.", false),
+    action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
   ];
 }
 

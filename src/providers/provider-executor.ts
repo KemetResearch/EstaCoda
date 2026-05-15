@@ -1,16 +1,17 @@
 import type {
-  ModelProfile,
   ProviderEndpoint,
   ProviderRequest,
   ProviderResponse,
   ProviderRoutePreferences,
   ProviderStreamEvent,
   ProviderId,
-  ResolvedModelRoute
+  ResolvedModelRoute,
+  ProviderApiMode
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { compareModels, matchesPreferences, routeProvider } from "./provider-router.js";
+import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
+import { getProviderMetadata } from "./provider-metadata.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -95,80 +96,29 @@ export class ProviderExecutor {
 
   async complete(
     request: Omit<ProviderRequest, "model"> & { model?: string },
-    preferences: ProviderRoutePreferences = {},
+    _preferences: ProviderRoutePreferences = {},
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
-    let primaryRoute = options.primaryRoute;
-    let fallbackChain = options.fallbackChain;
+    const primaryRoute = options.primaryRoute;
 
     if (primaryRoute === undefined) {
-      const resolved = await this.#resolveRoutesFromRegistry(request, preferences);
-      if (resolved === undefined) {
-        return {
-          ok: false,
-          fallbackUsed: false,
-          attempts: [],
-          toolCalls: []
-        };
-      }
-      primaryRoute = resolved.primaryRoute;
-      fallbackChain = resolved.fallbackChain;
+      return {
+        ok: false,
+        fallbackUsed: false,
+        attempts: [
+          {
+            provider: request.provider ?? "none",
+            model: request.model ?? "none",
+            ok: false,
+            errorClass: "missing-route",
+            content: "No explicit primary route is available. Production execution requires a resolved model route."
+          }
+        ],
+        toolCalls: []
+      };
     }
 
-    return this.#executeRouteChain(request, {
-      ...options,
-      primaryRoute,
-      fallbackChain
-    });
-  }
-
-  async #resolveRoutesFromRegistry(
-    request: Omit<ProviderRequest, "model"> & { model?: string },
-    preferences: ProviderRoutePreferences
-  ): Promise<{ primaryRoute: ResolvedModelRoute; fallbackChain: ResolvedModelRoute[] } | undefined> {
-    const models = await this.#registry.listModels();
-    let primary: ModelProfile | undefined;
-    let fallbackModels: ModelProfile[] = [];
-
-    if (request.provider !== undefined && request.model !== undefined) {
-      primary = models.find((model) => model.provider === request.provider && model.id === request.model);
-      if (primary === undefined) {
-        return undefined;
-      }
-      fallbackModels = models
-        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
-        .filter((model) => matchesPreferences(model, preferences))
-        .sort((left, right) => compareModels(left, right, preferences));
-    } else if (request.model !== undefined) {
-      primary = models.find((model) => model.id === request.model);
-      if (primary === undefined) {
-        return undefined;
-      }
-      fallbackModels = models
-        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
-        .filter((model) => matchesPreferences(model, preferences))
-        .sort((left, right) => compareModels(left, right, preferences));
-    } else {
-      const route = routeProvider(models, preferences);
-      if (route === undefined) {
-        return undefined;
-      }
-      primary = route.primary;
-      fallbackModels = route.fallbacks;
-    }
-
-    return {
-      primaryRoute: this.#modelToResolvedRoute(primary),
-      fallbackChain: fallbackModels.map((model) => this.#modelToResolvedRoute(model))
-    };
-  }
-
-  #modelToResolvedRoute(model: ModelProfile): ResolvedModelRoute {
-    return {
-      provider: model.provider,
-      id: model.id,
-      profile: model
-    };
+    return this.#executeRouteChain(request, options);
   }
 
   async #executeRouteChain(
@@ -217,38 +167,86 @@ export class ProviderExecutor {
         continue;
       }
 
-      // Credential resolution: route.apiKeyEnv takes precedence over pool
-      let credential: { id: string; value?: string } | undefined;
-      if (route.apiKeyEnv !== undefined) {
-        const value = process.env[route.apiKeyEnv];
-        if (value === undefined) {
-          const errorContent = `Missing env var ${route.apiKeyEnv}`;
-          attempts.push({
-            provider: route.provider,
-            model: route.id,
-            ok: false,
-            errorClass: "auth",
-            content: errorContent
-          });
-          await options.onEvent?.({
-            kind: "provider-attempt-end",
-            provider: route.provider,
-            model: route.id,
-            ok: false,
-            errorClass: "auth",
-            fallback: index > 0,
-            willFallback: index < chain.length - 1
-          });
-          continue;
-        }
-        credential = { id: route.apiKeyEnv, value };
-      } else {
-        const poolCredential = this.#credentialPools?.resolve(route.provider);
-        credential = poolCredential === undefined ? undefined : {
-          id: poolCredential.id,
-          value: poolCredential.value
-        };
+      const metadata = getProviderMetadata(route.provider);
+
+      // Metadata runnable gate: non-runnable providers must not execute
+      if (!metadata.runnable) {
+        const reason = `Provider ${route.provider} is not runnable.`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          content: reason
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
       }
+
+      // Effective API mode gate: only executable modes are allowed
+      const apiMode = route.apiMode ?? metadata.apiMode;
+      const executableModes: ProviderApiMode[] = ["openai_chat_completions", "custom_openai_compatible"];
+      if (!executableModes.includes(apiMode)) {
+        const reason = `Provider ${route.provider} uses unsupported API mode ${apiMode}.`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          content: reason
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
+      // Credential resolution: route.apiKeyEnv takes precedence over pool
+      const resolution = resolveRuntimeCredential({
+        providerId: route.provider,
+        route: { apiKeyEnv: route.apiKeyEnv },
+        credentialPools: this.#credentialPools,
+        metadata: getProviderMetadata(route.provider),
+      });
+
+      if (!resolution.diagnostic.ok) {
+        const errorContent = resolution.diagnostic.message ?? `Missing credential for ${route.provider}`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "auth",
+          content: errorContent
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "auth",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
+      const credential = resolution.credential?.kind === "bearer"
+        ? { id: resolution.credential.id, value: resolution.credential.value }
+        : undefined;
 
       await options.onEvent?.({
         kind: "provider-attempt-start",

@@ -9,9 +9,14 @@ import type { EstaCodaConfig } from "../config/runtime-config.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import {
   fallbackKnownModelProfiles,
-  inferModelProfile,
-  resolveModelProfilesFromCatalog
+  buildProfileResolutionContext,
+  resolveModelProfile,
+  type ProfileResolutionContext
 } from "./model-catalog.js";
+import {
+  getProviderMetadata,
+  isProviderRunnable as metadataIsProviderRunnable
+} from "./provider-metadata.js";
 import type {
   ModelInfo,
   ModelsDevRegistryOptions,
@@ -112,11 +117,13 @@ export async function createModelSelectionCatalog(
     snapshotProviderMap.set(provider.id, provider);
   }
 
+  const profileContext = buildProfileResolutionContext(snapshot);
+
   return {
     listProviders: async (listOpts) => listProvidersImpl(options, snapshot, listOpts),
-    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts),
+    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts),
     searchModels: async (query, listOpts) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts);
       const normalized = normalizeLookupKey(query);
       return all.filter((model) =>
         normalizeLookupKey(model.id).includes(normalized) ||
@@ -125,7 +132,7 @@ export async function createModelSelectionCatalog(
       );
     },
     resolveModel: async (provider, id, baseUrl) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext);
       const key = routeKey(provider, id, baseUrl);
       return all.find((model) => model.routeKey === key);
     },
@@ -237,6 +244,7 @@ async function listModelsImpl(
   snapshotModelMap: Map<string, ModelProfile>,
   snapshotInfoMap: Map<string, ModelInfo>,
   snapshotProviderMap: Map<string, ProviderInfo>,
+  profileContext: ProfileResolutionContext,
   listOpts?: CatalogListOptions
 ): Promise<SelectableModel[]> {
   const config = options.config;
@@ -264,7 +272,7 @@ async function listModelsImpl(
       continue;
     }
 
-    const profile = snapshotModelMap.get(routeKey(provider, id)) ?? inferModelProfile({ provider, model: id });
+    const { profile } = resolveModelProfile(provider, id, profileContext);
     const apiKeyEnv = config.providers?.[provider]?.apiKeyEnv;
     const executable = isExecutable(provider, registry);
 
@@ -338,10 +346,7 @@ async function listModelsImpl(
         continue;
       }
 
-      // Resolve profile: snapshot > fallback-known > inferred
-      const snapshotProfile = snapshotModelMap.get(routeKey(provider, modelId));
-      const fallbackProfile = fallbackKnownModelProfiles.find((p) => p.provider === provider && p.id === modelId);
-      const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider, model: modelId });
+      const { profile } = resolveModelProfile(provider, modelId, profileContext);
 
       if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
         continue;
@@ -396,11 +401,7 @@ async function listModelsImpl(
       continue;
     }
 
-    const snapshotProfile = snapshotModelMap.get(routeKey(route.provider, route.id));
-    const fallbackProfile = fallbackKnownModelProfiles.find(
-      (p) => p.provider === route.provider && p.id === route.id
-    );
-    const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider: route.provider, model: route.id });
+    const { profile } = resolveModelProfile(route.provider, route.id, profileContext);
     const executable = isExecutable(route.provider, registry);
 
     if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
@@ -434,7 +435,7 @@ async function listModelsImpl(
     result = result.filter((m) => m.profile.supportsTools);
   }
   if (listOpts?.requireVision) {
-    result = result.filter((m) => m.profile.supportsVision);
+    result = result.filter((m) => m.executable && m.profile.supportsVision);
   }
   if (listOpts?.requireStructuredOutput) {
     result = result.filter((m) => m.profile.supportsStructuredOutput);
@@ -540,33 +541,27 @@ function buildSelectableModel(params: {
 }
 
 function inferEndpointType(provider: ProviderId, baseUrl?: string): "openai" | "anthropic" | "custom" | undefined {
-  if (provider === "anthropic") return "anthropic";
+  const meta = getProviderMetadata(provider);
+  if (meta.apiMode === "anthropic_messages") return "anthropic";
   if (baseUrl !== undefined) {
-    const defaults: Record<string, string> = {
-      openai: "https://api.openai.com/v1",
-      kimi: "https://api.moonshot.cn/v1",
-      deepseek: "https://api.deepseek.com/v1",
-      openrouter: "https://openrouter.ai/api/v1"
-    };
-    if (defaults[provider] === baseUrl) {
-      return provider === "anthropic" ? "anthropic" : "openai";
+    // Local is always custom when a base URL is explicitly configured
+    if (provider === "local") return "custom";
+    if (meta.defaultBaseUrl === baseUrl) {
+      return "openai";
     }
     return "custom";
   }
-  if (provider === "local") return "custom";
-  if (provider === "anthropic") return "anthropic";
   return "openai";
 }
 
 function isExecutable(providerId: ProviderId, registry: ProviderRegistry): boolean {
+  const meta = getProviderMetadata(providerId);
+  // Metadata runnable is the primary gate. A provider marked non-runnable
+  // must never be treated as executable, regardless of registry state.
+  if (!meta.runnable) return false;
+
   const adapter = registry.get(providerId);
   return adapter !== undefined && adapter.executable !== false;
-}
-
-function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean {
-  if (providerId === "local" && apiKeyEnv === undefined) return true;
-  if (apiKeyEnv !== undefined) return process.env[apiKeyEnv] !== undefined;
-  return false;
 }
 
 function isEndpointReady(baseUrl?: string): boolean {
@@ -580,9 +575,10 @@ function isEndpointReady(baseUrl?: string): boolean {
 }
 
 function inferProviderUxKind(providerId: ProviderId, baseUrl?: string): ProviderUxKind {
-  if (providerId === "local") return "local";
-  if (providerId === "openrouter") return "openrouter";
-  if (baseUrl !== undefined) return "custom-openai-compatible";
+  const meta = getProviderMetadata(providerId);
+  if (meta.id === "local") return "local";
+  if (meta.id === "openrouter") return "openrouter";
+  if (baseUrl !== undefined && meta.allowsCustomBaseUrl) return "custom-openai-compatible";
   return "hosted";
 }
 
@@ -593,17 +589,31 @@ function inferProviderSetupMode(
 ): ProviderSetupMode {
   const hasBaseUrl = baseUrl !== undefined;
   const hasApiKey = apiKeyEnv !== undefined;
+  const meta = getProviderMetadata(providerId);
+  const supportsNone = meta.authMethods.includes("none");
 
   if (hasBaseUrl && hasApiKey) return "api-key-and-base-url";
   if (hasBaseUrl) return "base-url";
   if (hasApiKey) return "api-key";
-  if (providerId === "local") return "none";
+  if (supportsNone) return "none";
   return "api-key";
 }
 
 function providerDisplayName(providerId: ProviderId, snapshot: ModelsDevSnapshot): string {
+  const meta = getProviderMetadata(providerId);
+  if (meta.catalogKnown) {
+    return meta.displayName;
+  }
   const info = snapshot.providers.find((p) => p.id === providerId);
-  return info?.name || providerId;
+  return info?.name || meta.displayName;
+}
+
+function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean {
+  const meta = getProviderMetadata(providerId);
+  if (meta.defaultAuthMethod === "none" && apiKeyEnv === undefined) return true;
+  const envKey = apiKeyEnv ?? meta.defaultApiKeyEnv;
+  if (envKey !== undefined) return process.env[envKey] !== undefined;
+  return false;
 }
 
 function shouldIncludeStatus(

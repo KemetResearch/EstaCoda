@@ -98,6 +98,12 @@ export class ProviderTurnLoop {
     this.#budgets = options.budgets;
   }
 
+  canRunProvider(): boolean {
+    return this.#providerExecutor !== undefined &&
+      this.#model !== undefined &&
+      this.#model.provider !== "unconfigured";
+  }
+
   async run(input: {
     userText: string;
     routedText: string;

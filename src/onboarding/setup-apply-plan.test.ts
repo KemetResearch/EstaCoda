@@ -182,6 +182,47 @@ describe("setup apply plan", () => {
     expect(result.eligibility.repairIntents.map((intent) => intent.kind)).toContain("credential-repair");
   });
 
+  it("does not suppress a credential blocker with a mismatched env ref", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Missing credential env OPENAI_API_KEY."),
+      credentialReferenceBundle("ANTHROPIC_API_KEY", "anthropic"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Missing credential env OPENAI_API_KEY.");
+  });
+
+  it("suppresses a credential blocker with an exact matching env ref", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Missing credential env OPENAI_API_KEY."),
+      credentialReferenceBundle("OPENAI_API_KEY", "openai"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("keeps generic credential blockers blocked when no exact env match is available", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Missing credential for the active provider."),
+      credentialReferenceBundle("OPENAI_API_KEY", "openai"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Missing credential for the active provider.");
+  });
+
   it("broken config blocks normal apply", () => {
     const manifest = buildSetupReviewManifest([
       buildSetupModuleDraftBundle(moduleContext({ brokenConfig: true })),
@@ -198,6 +239,21 @@ describe("setup apply plan", () => {
     expect(result.kind).toBe("blocked");
     expect(result.eligibility.blockers).toContain("Broken config blocks normal apply planning.");
     expect(result.eligibility.repairIntents.map((intent) => intent.kind)).toContain("config-repair");
+  });
+
+  it("state-not-writable diagnostic repair blocks normal apply", () => {
+    const manifest = buildSetupReviewManifest([
+      diagnosticBundle("EstaCoda state directory is not writable."),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.applyPlan).toBeUndefined();
+    expect(result.eligibility.blockers).toContain("Unsafe diagnostic-only config repair blocks normal apply planning.");
+    expect(result.eligibility.blockers).toContain("EstaCoda state directory is not writable.");
   });
 
   it("workspace trust is not granted on cancellation", () => {
@@ -252,6 +308,24 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent.preference).toBe("offer-after-verify");
   });
 
+  it("verified-ready can defer launch handoff for an explicit editor choice", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport()),
+      { allowAutomaticLaunch: false }
+    );
+
+    expect(endState.kind).toBe("verified-ready");
+    if (endState.kind !== "verified-ready") throw new Error("expected verified ready");
+    expect(endState.launchHandoffIntent?.preference).toBe("offer-after-verify");
+  });
+
   it("verified-degraded requires explicit continue or limited-mode decision", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
@@ -299,6 +373,31 @@ describe("setup apply plan", () => {
     expect(endState.kind).toBe("launched");
     if (endState.kind !== "launched") throw new Error("expected launch");
     expect(endState.acceptedDegraded).toBe(true);
+  });
+
+  it("degraded verification does not launch when automatic handoff is disabled", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport({
+        providerDiagnostic: {
+          status: "warning",
+          lines: ["Provider status: warning"],
+          warnings: ["Network inference is disabled for the selected hosted provider."],
+        },
+        warnings: ["Network inference is disabled for the selected hosted provider."],
+        issueCodes: ["network-disabled"],
+      })),
+      { acceptDegraded: true, allowAutomaticLaunch: false }
+    );
+
+    expect(endState.kind).toBe("verified-degraded");
+    if (endState.kind !== "verified-degraded") throw new Error("expected degraded");
+    expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
   it("blocked verification prevents automatic launch", async () => {
@@ -456,6 +555,78 @@ function diagnosticBundle(blocker: string): SetupDraftBundle {
       draftCount: 1,
       requiresReviewCount: 1,
       readOnlyCount: 1,
+    },
+  };
+}
+
+function blockerOnlyBundle(blocker: string): SetupDraftBundle {
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-module-session",
+    sourceId: `blocker:${blocker}`,
+    drafts: [],
+    blockers: [blocker],
+    warnings: [],
+    safeToApplyLater: true,
+    metadata: {
+      draftCount: 0,
+      requiresReviewCount: 0,
+      readOnlyCount: 0,
+    },
+  };
+}
+
+function credentialReferenceBundle(envVar: string, provider: string): SetupDraftBundle {
+  const draft: SetupDraft = {
+    id: `credential.${envVar}`,
+    kind: "credential-reference",
+    source: {
+      kind: "setup-editor",
+      sectionId: "credentials",
+      actionId: "repair-missing-credential",
+    },
+    riskSurface: "credential-reference",
+    target: {
+      kind: "config-scope",
+      scope: ["provider.credentialReference"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    },
+    review: {
+      copyKey: "setupDrafts.review",
+      summaryKey: "setupDrafts.credentialReference.summary",
+      redacted: true,
+      values: {
+        provider,
+        envVars: [envVar],
+        credentialValuesIncluded: false,
+      },
+    },
+    applyIntent: {
+      kind: "dry-run-apply-intent",
+      effect: "credential-reference",
+      dryRunOnly: true,
+      writesConfig: false,
+      writesTrustStore: false,
+    },
+    preserveUnrelatedConfig: true,
+    requiresReview: true,
+    readOnly: false,
+    blockers: [],
+    warnings: [],
+  };
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-editor-plan-session",
+    sourceId: `credential:${envVar}`,
+    drafts: [draft],
+    blockers: [],
+    warnings: [],
+    safeToApplyLater: true,
+    metadata: {
+      draftCount: 1,
+      requiresReviewCount: 1,
+      readOnlyCount: 0,
     },
   };
 }
