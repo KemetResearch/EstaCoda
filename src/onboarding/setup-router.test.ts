@@ -293,7 +293,7 @@ describe("routeSetupEntryState", () => {
     expect(first).toBe(second);
     expect(first).toContain("EstaCoda is configured with warnings");
     expect(first).toContain("State: configured-degraded");
-    expect(first).toContain("- verify-setup: Verify setup");
+    expect(first).toContain("- verify-setup: Run read-only verification");
   });
 });
 
