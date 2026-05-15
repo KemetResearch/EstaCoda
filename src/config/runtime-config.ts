@@ -10,6 +10,7 @@ import type {
   ModelProfile,
   ProviderEndpoint,
   ProviderApiMode,
+  ProviderAuthMethod,
   ProviderId,
   ResolvedModelRoute
 } from "../contracts/provider.js";
@@ -240,6 +241,7 @@ export type EstaCodaConfig = {
     baseUrl?: string;
     apiKeyEnv?: string;
     apiMode?: ProviderApiMode;
+    authMethod?: ProviderAuthMethod;
     models?: string[];
     enableNetwork?: boolean;
     headers?: Record<string, string>;

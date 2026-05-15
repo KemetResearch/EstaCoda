@@ -153,6 +153,7 @@ import {
   probeOpenAIModels,
   type OpenAIModelProbe
 } from "./model-setup.js";
+import { runModelSetupCodex } from "./model-setup-codex.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -760,13 +761,24 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     if (args[1] === "custom") {
       return runModelSetupCustom(options, args.slice(2));
     }
+    if (args[1] === "codex") {
+      return runModelSetupCodex({
+        homeDir: options.homeDir,
+        workspaceRoot: options.workspaceRoot,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        prompt: options.prompt,
+        fetchLike: options.providerFetch
+      });
+    }
     return {
       handled: true,
       exitCode: 0,
       output: [
         "Model setup commands:",
         "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
-        "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]"
+        "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
+        "  estacoda model setup codex"
       ].join("\n")
     };
   }
@@ -1297,6 +1309,7 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("  estacoda model diagnose");
   diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]");
+  diagnosticLines.push("  estacoda model setup codex");
   diagnosticLines.push("  estacoda model set <provider>/<model> (deprecated; disabled)");
   diagnosticLines.push("  estacoda model auxiliary status");
   diagnosticLines.push("  estacoda model fallback status");
