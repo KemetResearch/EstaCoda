@@ -506,8 +506,14 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("State: state-not-writable");
     expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
     expect(result.output).toContain("not writable");
+    expect(result.output).toContain("write permission");
     expect(result.output).toContain("Restore write permission");
+    expect(result.output).toContain("read-only verification again");
+    expect(result.output).toContain("Normal writes are blocked until state write permissions are restored.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).not.toContain("Config cannot be edited normally until it can be parsed safely");
+    expect(result.output).not.toContain("parse safety");
+    expect(result.output).not.toContain("config parse failure");
     expect(result.initialDecision.setupEditorPlanSession?.plan.safeForNormalConfigEditing).toBe(false);
     expect(result.initialDecision.setupEditorPlanSession?.plan.actions.some((action) => action.patch !== undefined)).toBe(false);
   });

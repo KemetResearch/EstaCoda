@@ -187,6 +187,7 @@ describe("buildSetupEditorPlan", () => {
       "run-readonly-verification",
       "cancel-setup-editor",
     ]);
+    expect(section(plan, "config-safety").copyKey).toBe("setupEditor.sections.stateSafety");
     expect(section(plan, "config-safety").actions[0]).toEqual(expect.objectContaining({
       id: "repair-state-directory",
       effect: "diagnostic-only",

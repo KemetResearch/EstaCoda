@@ -135,7 +135,9 @@ function unsafeDiagnosticSections(state: SetupEntryState): SetupEditorSection[] 
     configSummarySection(state),
     section({
       id: "config-safety",
-      copyKey: "setupEditor.sections.configSafety",
+      copyKey: state.kind === "state-not-writable"
+        ? "setupEditor.sections.stateSafety"
+        : "setupEditor.sections.configSafety",
       required: true,
       sensitiveSurface: "config-repair",
       status: "repair-required",

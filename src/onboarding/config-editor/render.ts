@@ -239,7 +239,8 @@ function appendUnsafeStateGuidance(lines: string[], decision: SetupRouteDecision
     lines.push(
       "",
       "Manual repair guidance:",
-      "- EstaCoda cannot safely apply setup changes while its state directory is not writable.",
+      "- EstaCoda cannot safely apply setup changes while its state/config path is not writable.",
+      "- Normal writes are blocked until state write permissions are restored.",
       "- Restore write permission for the state/config path above, then run read-only verification again.",
       "- Only diagnostics, verification, and exit are available from this state."
     );
