@@ -112,6 +112,7 @@ export type ResolvedModelRoute = {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   apiMode?: ProviderApiMode;
+  authMethod?: ProviderAuthMethod;
 };
 
 export type AuxiliaryModelProvider = ProviderId | "auto" | "main";

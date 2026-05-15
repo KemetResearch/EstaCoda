@@ -1810,7 +1810,7 @@ describe("cli model", () => {
           badmode: {
             provider: "openai",
             model: "gpt-4o",
-            apiMode: "openai_responses" as any
+            apiMode: "totally_unsupported_api_mode" as any
           }
         },
         providers: {
@@ -1825,7 +1825,7 @@ describe("cli model", () => {
         }
       });
       const original = await readUserConfig(tmpDir);
-      const prompt = createMockPrompt({ secrets: ["sk-should-not-write"] });
+      const prompt = createMockPrompt({ secrets: ["sk-sho...rite"] });
 
       const result = await runCliCommand({
         argv: ["model", "badmode"],
@@ -1836,9 +1836,49 @@ describe("cli model", () => {
 
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(1);
-      expect(result.output).toContain("unsupported API mode openai_responses");
+      expect(result.output).toContain("unsupported API mode totally_unsupported_api_mode");
       expect(await readUserConfig(tmpDir)).toEqual(original);
       await expect(readFile(join(tmpDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    });
+  });
+
+  describe("model setup codex CLI routing", () => {
+    it("routes model setup codex through CLI dispatch", async () => {
+      const result = await runCliCommand({
+        argv: ["model", "setup", "codex"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.output).toBe("Cancelled. No changes were made.");
+    });
+
+    it("model setup help includes codex command", async () => {
+      const result = await runCliCommand({
+        argv: ["model", "setup"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.output).toContain("estacoda model setup codex");
+    });
+
+    it("bare model command help includes codex setup", async () => {
+      await writeUserConfig(tmpDir, {
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: false
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.output).toContain("estacoda model setup codex");
     });
   });
 });

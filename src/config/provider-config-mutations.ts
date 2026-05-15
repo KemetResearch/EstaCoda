@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import type {
   ProviderId,
   ProviderApiMode,
+  ProviderAuthMethod,
   CredentialRotationStrategy
 } from "../contracts/provider.js";
 import {
@@ -23,6 +24,7 @@ export type RegisterProviderConfigInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   apiMode?: ProviderApiMode;
+  authMethod?: ProviderAuthMethod;
   enableNetwork?: boolean;
   headers?: Record<string, string>;
 };
@@ -80,6 +82,7 @@ export function applyRegisterProviderConfig(
   }
   if (input.apiKeyEnv !== undefined) providerConfig.apiKeyEnv = input.apiKeyEnv;
   if (input.apiMode !== undefined) providerConfig.apiMode = input.apiMode;
+  if (input.authMethod !== undefined) providerConfig.authMethod = input.authMethod;
   if (input.enableNetwork !== undefined) providerConfig.enableNetwork = input.enableNetwork;
   if (input.headers !== undefined) providerConfig.headers = input.headers;
 

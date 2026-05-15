@@ -166,17 +166,17 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     id: "codex",
     displayName: "OpenAI Codex",
     catalogKnown: true,
-    configurable: false,
-    runnable: false,
+    configurable: true,
+    runnable: true,
     visibility: {
-      modelPicker: false,
-      setup: false,
+      modelPicker: true,
+      setup: true,
       catalogExplore: true
     },
     apiMode: "openai_responses",
-    defaultBaseUrl: undefined,
+    defaultBaseUrl: "https://chatgpt.com/backend-api/codex",
     defaultApiKeyEnv: undefined,
-    authMethods: ["oauth_device_pkce", "oauth_external"],
+    authMethods: ["oauth_device_pkce"],
     defaultAuthMethod: "oauth_device_pkce",
     allowsCustomBaseUrl: false,
     requiresModelSelection: true
@@ -377,6 +377,7 @@ export function buildResolvedModelRoute(options: {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   apiMode?: ProviderApiMode;
+  authMethod?: ProviderAuthMethod;
 }): ResolvedModelRoute {
   const metadata = getProviderMetadata(options.provider);
   return {
@@ -386,7 +387,8 @@ export function buildResolvedModelRoute(options: {
     baseUrl: options.baseUrl,
     apiKeyEnv: options.apiKeyEnv,
     contextWindowTokens: options.contextWindowTokens,
-    apiMode: options.apiMode ?? metadata.apiMode
+    apiMode: options.apiMode ?? metadata.apiMode,
+    authMethod: options.authMethod ?? metadata.defaultAuthMethod
   };
 }
 
@@ -435,7 +437,9 @@ export function isProviderMediaOnly(providerId: ProviderId): boolean {
  * Whether the given API mode is executable by the current build.
  */
 export function isExecutableApiMode(apiMode: ProviderApiMode): boolean {
-  return apiMode === "openai_chat_completions" || apiMode === "custom_openai_compatible";
+  return apiMode === "openai_chat_completions"
+    || apiMode === "custom_openai_compatible"
+    || apiMode === "openai_responses";
 }
 
 /**

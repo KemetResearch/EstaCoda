@@ -780,6 +780,78 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     expect(json).not.toContain("https://example.invalid/v1");
     await rm(workspace, { recursive: true, force: true });
   });
+
+  it("openai_responses adapter is registered for providers with matching metadata apiMode", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      providers: {
+        codex: {
+          kind: "openai-compatible",
+          models: ["codex-model"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    const adapter = loaded.providerRegistry.get("codex");
+    expect(adapter).toBeDefined();
+    expect(adapter?.name).toContain("Responses");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("setup-generated Codex config round-trips to Responses adapter", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    // Exact shape emitted by model-setup-codex.ts (no kind field)
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      model: { provider: "codex", id: "o3" },
+      providers: {
+        codex: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMethod: "oauth_device_pkce"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    // 1. Adapter is registered
+    const adapter = loaded.providerRegistry.get("codex");
+    expect(adapter).toBeDefined();
+    expect(adapter?.name).toContain("Responses");
+
+    // 2. Codex is runnable in metadata after Stage 6 flip
+    const { getProviderMetadata } = await import("../providers/provider-metadata.js");
+    const metadata = getProviderMetadata("codex");
+    expect(metadata.runnable).toBe(true);
+
+    // 3. Without OAuth credential, executor rejects with auth error (not unsupported)
+    const { ProviderExecutor } = await import("../providers/provider-executor.js");
+    const executor = new ProviderExecutor({
+      registry: loaded.providerRegistry
+    });
+
+    const route = loaded.primaryModelRoute;
+    expect(route.apiMode).toBe("openai_responses");
+
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("auth");
+    expect(result.attempts[0].content).toContain("requires OAuth authentication");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
 });
 
 describe("modelAliases normalization", () => {
