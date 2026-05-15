@@ -125,6 +125,8 @@ import {
   runChannelsDisable,
   runGatewayStop,
   runGatewayRestart,
+  runGatewayStartDryRun,
+  runGatewayStartBackground,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -2873,6 +2875,24 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       };
     }
 
+    if (hasFlag(rest, "--dry-run")) {
+      const result = await runGatewayStartDryRun(options);
+      return {
+        handled: true,
+        exitCode: result.ok ? 0 : 1,
+        output: result.output,
+      };
+    }
+
+    if (hasFlag(rest, "--background")) {
+      const result = await runGatewayStartBackground(options);
+      return {
+        handled: true,
+        exitCode: result.ok ? 0 : 1,
+        output: result.output,
+      };
+    }
+
     const result = await runGatewaySupervisor({
       ...options,
       once: hasFlag(rest, "--once"),
@@ -2898,6 +2918,8 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway restart",
       "  estacoda gateway restart --graceful",
       "  estacoda gateway start",
+      "  estacoda gateway start --dry-run",
+      "  estacoda gateway start --background",
       "  estacoda gateway start --once",
     ].join("\n"),
   };

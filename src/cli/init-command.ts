@@ -21,6 +21,9 @@ export const DEFAULT_STATE_DIRS = [
   "skills/.evolution",
   "packs",
   "cron",
+  "cron/output",
+  "cron/locks",
+  "logs",
   ".backups"
 ];
 
