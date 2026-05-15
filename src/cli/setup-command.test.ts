@@ -158,10 +158,11 @@ describe("cli setup command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("EstaCoda is already configured");
-    expect(result.output).toContain("kind: configured-ready");
-    expect(result.output).toContain("verify-setup - Verify setup");
+    expect(result.output).toContain("Kind: configured-ready");
+    expect(result.output).toContain("Route: configured-menu");
+    expect(result.output).toContain("verify-setup - Run read-only verification");
     expect(result.output).toContain("show-diagnostics - Show diagnostics");
-    expect(result.output).toContain("exit - Exit");
+    expect(result.output).toContain("exit - Exit without changes");
     expect(result.output).not.toContain("review-edit-config - Review/edit config");
     expect(result.output).not.toContain("launch-agent - Launch agent");
   });
@@ -181,7 +182,9 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("kind: configured-degraded");
+    expect(result.output).toContain("Kind: configured-degraded");
+    expect(result.output).toContain("Route: configured-degraded-menu");
+    expect(result.output).toContain("Configured model context window is below 64K tokens.");
     expect(result.output).toContain("show-diagnostics - Show diagnostics");
     expect(result.output).not.toContain("repair-setup - Fix now");
     expect(result.output).not.toContain("launch-agent - Continue in limited mode");
@@ -216,7 +219,10 @@ describe("cli setup command", () => {
 
       expect(result.handled).toBe(true);
       expect(result.output).toContain("EstaCoda guided setup editor");
-      expect(result.output).toContain("kind: missing-secret");
+      expect(result.output).toContain("Kind: missing-secret");
+      expect(result.output).toContain("Route: repair-first-menu");
+      expect(result.output).toContain("repair-missing-credential - Repair missing credential reference");
+      expect(result.output).toContain("Blockers:");
       expect(result.output).toContain("OPENAI_API_KEY");
       expect(result.output).not.toContain("repair-setup - Repair setup");
       expect(result.output).not.toContain("sk-");
@@ -245,7 +251,9 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("kind: broken-config");
+    expect(result.output).toContain("Kind: broken-config");
+    expect(result.output).toContain("Route: repair-first-menu");
+    expect(result.output).toContain("status: blocked");
     expect(result.output).toContain(configPath);
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
@@ -269,8 +277,11 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("kind: untrusted-workspace");
+    expect(result.output).toContain("Kind: untrusted-workspace");
+    expect(result.output).toContain("Route: configured-menu");
     expect(result.output).toContain("workspace-trust");
+    expect(result.output).toContain("repair-workspace-trust - Review workspace trust grant");
+    expect(result.output).toContain("status: repair-required");
     expect(result.output).not.toContain("trust-workspace - Trust workspace");
   });
 
@@ -289,7 +300,10 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("kind: state-not-writable");
+    expect(result.output).toContain("Kind: state-not-writable");
+    expect(result.output).toContain("Route: repair-first-menu");
+    expect(result.output).toContain("state writable: no");
+    expect(result.output).toContain("status: blocked");
     expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
     expect(result.output).toContain("fix-state-directory");
     expect(result.output).toContain("Restore write permission");
