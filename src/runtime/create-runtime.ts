@@ -702,7 +702,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     profileId,
     toolExecutor,
     toolCallPlanner,
-    providerExecutor,
     memoryProvider,
     memoryContext,
     model: options.model,

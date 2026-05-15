@@ -19,7 +19,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
-import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -85,7 +85,6 @@ export type AgentLoopOptions = {
   profileId: string;
   toolExecutor: ToolExecutor;
   toolCallPlanner?: ToolCallPlanner;
-  providerExecutor?: ProviderExecutor;
   memoryProvider?: MemoryProvider;
   memoryContext?: MemoryProviderContext;
   model?: ModelProfile;
@@ -155,14 +154,6 @@ export class AgentLoop {
   readonly #profileId: string;
   readonly #toolExecutor: ToolExecutor;
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
-  /**
-   * Retained for existing runtime/skill workflow gating.
-   *
-   * Removing this requires a dedicated runtime refactor that proves the
-   * ProviderTurnLoop-owned execution capability is exposed through the correct
-   * API. Do not remove as provider cleanup.
-   */
-  readonly #providerExecutor: ProviderExecutor | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
   readonly #memoryContext: MemoryProviderContext | undefined;
   readonly #model: ModelProfile | undefined;
@@ -196,7 +187,6 @@ export class AgentLoop {
     this.#profileId = options.profileId;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
-    this.#providerExecutor = options.providerExecutor;
     this.#memoryProvider = options.memoryProvider;
     this.#memoryContext = options.memoryContext;
     this.#model = options.model;
@@ -496,9 +486,7 @@ export class AgentLoop {
       signal: input.signal,
       onEvent: input.onEvent
     });
-    const useDeterministicSkillWorkflow = this.#providerExecutor === undefined ||
-      this.#model === undefined ||
-      this.#model.provider === "unconfigured";
+    const useDeterministicSkillWorkflow = !this.#providerTurnLoop.canRunProvider();
     const skillToolExecutions = useDeterministicSkillWorkflow
       ? await this.#skillWorkflowExecutor.executeSkillWorkflow({
       selectedSkill,

@@ -7,7 +7,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
-import { ProviderTurnLoop } from "./provider-turn-loop.js";
+import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 
 function createMockAdapter() {
   return {
@@ -62,6 +62,93 @@ const fallbackRoute: ResolvedModelRoute = {
   baseUrl: "https://fallback.example.com/v1",
   apiKeyEnv: "FALLBACK_KEY"
 };
+
+async function createProviderTurnLoopForTest(
+  overrides: Partial<Pick<ProviderTurnLoopOptions, "providerExecutor" | "model">> = {}
+): Promise<ProviderTurnLoop> {
+  const registry = new ProviderRegistry();
+  registry.register(createMockAdapter());
+  const providerExecutor = new ProviderExecutor({ registry });
+  const sessionDb = new InMemorySessionDB();
+  const sessionId = `test-session-${Date.now()}-${Math.random()}`;
+  await sessionDb.createSession({ id: sessionId, profileId: "default", title: "test" });
+  const trajectoryRecorder = new TrajectoryRecorder({
+    profileId: "default",
+    sessionId,
+    modelId: "test-model"
+  });
+  const runRecorder = new RunRecorder({
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    profileId: "default"
+  });
+  const toolPlanRunner = new ToolPlanRunner({
+    toolCallPlanner: undefined,
+    toolExecutor: {} as any,
+    runRecorder,
+    sessionId,
+    maxConcurrentSafeTools: 4
+  });
+
+  return new ProviderTurnLoop({
+    providerExecutor,
+    model: mockModel,
+    primaryModelRoute: primaryRoute,
+    modelFallbackRoutes: [fallbackRoute],
+    providerPreferences: {
+      providerOrder: ["test-provider"]
+    },
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    runRecorder,
+    toolPlanRunner,
+    soul: undefined,
+    frozenMemory: undefined,
+    skillsIndex: [],
+    ui: undefined,
+    agentProfile: undefined,
+    budgets: {
+      maxProviderIterations: 2,
+      maxProviderToolCalls: 4,
+      maxRepeatedToolFailures: 2,
+      maxProviderWallClockMs: 10_000
+    },
+    ...overrides
+  });
+}
+
+describe("ProviderTurnLoop provider availability", () => {
+  it("can run provider when executor and configured model are present", async () => {
+    const loop = await createProviderTurnLoopForTest();
+
+    expect(loop.canRunProvider()).toBe(true);
+  });
+
+  it("cannot run provider without a provider executor", async () => {
+    const loop = await createProviderTurnLoopForTest({ providerExecutor: undefined });
+
+    expect(loop.canRunProvider()).toBe(false);
+  });
+
+  it("cannot run provider without a model", async () => {
+    const loop = await createProviderTurnLoopForTest({ model: undefined });
+
+    expect(loop.canRunProvider()).toBe(false);
+  });
+
+  it("cannot run provider for the unconfigured provider", async () => {
+    const loop = await createProviderTurnLoopForTest({
+      model: {
+        ...mockModel,
+        provider: "unconfigured"
+      }
+    });
+
+    expect(loop.canRunProvider()).toBe(false);
+  });
+});
 
 describe("ProviderTurnLoop explicit route propagation", () => {
   it("always passes primaryRoute and fallbackChain to ProviderExecutor.complete", async () => {
