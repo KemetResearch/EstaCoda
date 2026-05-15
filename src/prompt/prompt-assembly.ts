@@ -357,9 +357,26 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       name: "fallback",
       cacheable: false,
       priority: 7,
-      content: `Deterministic fallback response if model cannot improve it:\n${input.fallbackText}`
+      content: renderResponseGuidance(input)
     })
   ];
+}
+
+function renderResponseGuidance(input: ProviderPromptInput): string {
+  if (input.selectedSkill === undefined) {
+    return [
+      "Response guidance:",
+      "No specialized workflow was selected for this turn.",
+      "Answer the user directly using the available context.",
+      "Do not mention internal routing, discovery, or fallback handling."
+    ].join("\n");
+  }
+
+  return [
+    "Response guidance:",
+    `Use the selected ${input.selectedSkill.name} skill and available context to answer the user.`,
+    "Do not mention internal fallback handling unless a provider or tool failure is directly relevant to the user."
+  ].join("\n");
 }
 
 function renderChannelAttachments(attachments: ChannelAttachment[] | undefined): string {
