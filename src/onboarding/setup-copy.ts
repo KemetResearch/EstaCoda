@@ -260,6 +260,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupDrafts.launch.summary", "Launch preference: {launchPreference}.", "تفضيل التشغيل: {launchPreference}.", ["{launchPreference}"], "agent-launch"),
   copy("setupDrafts.exit.summary", "Exit without applying setup changes.", "اخرج دون تطبيق تغييرات الإعداد.", [], "none"),
   copy("setupDrafts.brokenConfig.summary", "Normal editing is blocked until config is repaired.", "التحرير العادي محظور حتى يتم إصلاح الإعدادات.", [], "config-repair"),
+  copy("setupDrafts.stateDirectory.summary", "Normal editing is blocked until the state directory is writable.", "التحرير العادي محظور حتى يصبح مجلد الحالة قابلًا للكتابة.", [], "config-repair"),
 
   copy("setupApply.review.approved", "Review approved. An apply plan can be prepared without executing it.", "تمت الموافقة على المراجعة. يمكن تجهيز خطة تطبيق دون تنفيذ.", [], "setup-review"),
   copy("setupApply.review.cancelled", "Review cancelled. No apply plan, config write, or trust grant will be created.", "أُلغيت المراجعة. لن تُنشأ خطة تطبيق أو كتابة إعدادات أو منح ثقة.", [], "none"),
