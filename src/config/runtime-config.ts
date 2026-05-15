@@ -9,6 +9,7 @@ import type {
   CredentialRotationStrategy,
   ModelProfile,
   ProviderEndpoint,
+  ProviderApiMode,
   ProviderId,
   ResolvedModelRoute
 } from "../contracts/provider.js";
@@ -238,6 +239,7 @@ export type EstaCodaConfig = {
     kind?: "openai-compatible" | "catalog";
     baseUrl?: string;
     apiKeyEnv?: string;
+    apiMode?: ProviderApiMode;
     models?: string[];
     enableNetwork?: boolean;
     headers?: Record<string, string>;
@@ -627,6 +629,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     profile: model,
     baseUrl: config.providers?.[config.model?.provider ?? ""]?.baseUrl,
     apiKeyEnv: config.providers?.[config.model?.provider ?? ""]?.apiKeyEnv,
+    apiMode: config.providers?.[config.model?.provider ?? ""]?.apiMode,
     contextWindowTokens: config.model?.contextWindowTokens
   });
 
@@ -647,6 +650,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       profile: fallbackProfile,
       baseUrl: fallback.baseUrl ?? fallbackProviderConfig?.baseUrl,
       apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
+      apiMode: fallbackProviderConfig?.apiMode,
       contextWindowTokens: fallback.contextWindowTokens
     }));
   }

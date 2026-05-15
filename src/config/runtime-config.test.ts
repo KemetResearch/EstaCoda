@@ -331,6 +331,30 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
     expect(loaded.primaryModelRoute.apiMode).toBe("openai_chat_completions");
   });
 
+  it("preserves provider-configured apiMode on primaryModelRoute", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    await writeFile(configPath, JSON.stringify({
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          apiMode: "custom_openai_compatible"
+        }
+      },
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
+    });
+
+    expect(loaded.primaryModelRoute.apiMode).toBe("custom_openai_compatible");
+  });
+
   it("enriches each modelFallbackRoute with apiMode from provider metadata", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(join(workspace, ".estacoda"), { recursive: true });

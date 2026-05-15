@@ -1509,6 +1509,71 @@ describe("cli model", () => {
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");
       expect(config.model?.id).toBe("gpt-4o");
+
+      const envContent = await readFile(join(tmpDir, ".estacoda", ".env"), "utf8");
+      expect(envContent).toContain('OPENAI_API_KEY="sk-test"');
+    });
+
+    it("estacoda model openai/gpt-4o noninteractive reports missing credential without writing", async () => {
+      delete process.env.OPENAI_API_KEY;
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const result = await runCliCommand({
+        argv: ["model", "openai/gpt-4o"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("OPENAI_API_KEY");
+      expect(result.output).toContain("rerun interactive");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+      await expect(readFile(join(tmpDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    });
+
+    it("estacoda model openai/gpt-4o reuses existing env credential without prompt", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"],
+            apiKeyEnv: "OPENAI_API_KEY"
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+      await writeFile(join(tmpDir, ".estacoda", ".env"), "OPENAI_API_KEY=sk-existing\n", "utf8");
+
+      const result = await runCliCommand({
+        argv: ["model", "openai/gpt-4o"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("openai");
+      expect(config.model?.id).toBe("gpt-4o");
     });
 
     it("estacoda model anthropic/claude-opus fails while Anthropic is non-runnable", async () => {
@@ -1666,6 +1731,92 @@ describe("cli model", () => {
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("custom");
       expect(config.model?.id).toBe("qwen3.5:397b");
+    });
+
+    it("direct alias persists explicit route metadata without alias display fields", async () => {
+      delete process.env.MY_LLM_KEY;
+      await writeUserConfig(tmpDir, {
+        modelAliases: {
+          myllm: {
+            provider: "custom",
+            model: "qwen3.5:397b",
+            baseUrl: "http://localhost:11434/v1",
+            apiMode: "custom_openai_compatible",
+            apiKeyEnv: "MY_LLM_KEY"
+          }
+        },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({ secrets: [""] });
+
+      const result = await runCliCommand({
+        argv: ["model", "myllm"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("custom");
+      expect(config.model?.id).toBe("qwen3.5:397b");
+      expect(config.model?.id).not.toBe("myllm");
+      expect(config.providers?.custom?.baseUrl).toBe("http://localhost:11434/v1");
+      expect(config.providers?.custom?.apiMode).toBe("custom_openai_compatible");
+      expect(config.providers?.custom?.apiKeyEnv).toBe("MY_LLM_KEY");
+      const json = JSON.stringify(config);
+      expect(json).not.toContain("resolvedViaAlias");
+      expect(json).not.toContain("authMethod");
+      expect(json).not.toContain("MY_SECRET_VALUE");
+    });
+
+    it("unsupported alias apiMode fails before config or secret writes", async () => {
+      await writeUserConfig(tmpDir, {
+        modelAliases: {
+          badmode: {
+            provider: "openai",
+            model: "gpt-4o",
+            apiMode: "openai_responses" as any
+          }
+        },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+      const prompt = createMockPrompt({ secrets: ["sk-should-not-write"] });
+
+      const result = await runCliCommand({
+        argv: ["model", "badmode"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("unsupported API mode openai_responses");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+      await expect(readFile(join(tmpDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
     });
   });
 });
