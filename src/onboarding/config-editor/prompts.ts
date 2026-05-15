@@ -32,8 +32,8 @@ export async function promptConfigEditorAction(
 
   const defaultAction = actions.find((action) => action.id === defaultActionId) ?? actions[0];
   return promptSetupChoice(prompt, {
-    title: "Guided setup editor",
-    message: "Choose a setup action.\n",
+    title: setupCopyText("en", "setupEditor.prompt.action.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.action.body")}\n`,
     choices: actions.map((action) => ({
       id: action.id,
       label: action.label,
@@ -228,7 +228,7 @@ export async function promptConfigEditorPostApplyAction(
   const launchChoices = input.launchEligible
     ? [{
         id: "launch",
-        label: "Launch",
+        label: setupCopyText("en", "setupEditor.prompt.postApply.launch"),
         description: "Start the interactive session after verified-ready setup.",
         value: "launch" as const,
       }]
@@ -236,7 +236,7 @@ export async function promptConfigEditorPostApplyAction(
   const limitedChoices = input.limitedModeEligible
     ? [{
         id: "accept-limited-mode",
-        label: "Accept limited mode",
+        label: setupCopyText("en", "setupEditor.prompt.postApply.acceptLimitedMode"),
         description: "Launch with the verified warnings shown above.",
         value: "accept-limited-mode" as const,
       }]
@@ -245,21 +245,21 @@ export async function promptConfigEditorPostApplyAction(
     ? []
     : [{
         id: "repair-again",
-        label: "Repair again",
+        label: setupCopyText("en", "setupEditor.prompt.postApply.repairAgain"),
         description: "Re-check setup and return to the guided repair editor.",
         value: "repair-again" as const,
       }];
 
   return promptSetupChoice(prompt, {
-    title: "Setup next action",
-    message: "Choose what to do after setup apply.\n",
+    title: setupCopyText("en", "setupEditor.prompt.postApply.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.postApply.body")}\n`,
     choices: [
       ...launchChoices,
       ...limitedChoices,
       ...repairChoices,
       {
         id: "exit",
-        label: "Exit",
+        label: setupCopyText("en", "setupEditor.prompt.postApply.exit"),
         description: "Leave setup without launching.",
         value: "exit" as const,
       },
@@ -280,8 +280,8 @@ export async function promptOptionalCapabilityAction(
     ? []
     : [{
         id: `${input.id}-skip`,
-        label: "Skip",
-        description: "Keep this optional capability non-blocking for core setup.",
+        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip"),
+        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
       }];
 
@@ -291,17 +291,15 @@ export async function promptOptionalCapabilityAction(
     choices: [
       {
         id: `${input.id}-unchanged`,
-        label: "Leave unchanged",
-        description: input.configured
-          ? "Keep the current optional capability config exactly as-is."
-          : "Do not configure this optional capability now.",
+        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
+        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
       },
       ...skipChoice,
       {
         id: `${input.id}-enable`,
-        label: "Enable/configure",
-        description: "Draft reviewed config references for this optional capability.",
+        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure"),
+        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
         value: "enable" as const,
       },
     ],
@@ -323,17 +321,21 @@ export async function promptTelegramCapability(
 }> {
   const botTokenEnv = await promptSetupStringWithDefault(
     prompt,
-    "Telegram bot token environment variable [ESTACODA_TELEGRAM_BOT_TOKEN]: ",
+    [
+      setupCopyText("en", "setupEditor.prompt.telegram.summary"),
+      setupCopyText("en", "setupEditor.prompt.telegram.remoteControlRisk"),
+      `${setupCopyText("en", "setupEditor.prompt.telegram.botTokenEnv")} [ESTACODA_TELEGRAM_BOT_TOKEN]: `,
+    ].join("\n"),
     current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
   );
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    "Allowed Telegram user IDs, comma-separated: ",
+    `${setupCopyText("en", "setupEditor.prompt.telegram.allowedUserIds")}, comma-separated: `,
     (current.allowedUserIds ?? []).join(",")
   ));
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    "Allowed Telegram chat IDs, comma-separated: ",
+    `${setupCopyText("en", "setupEditor.prompt.telegram.allowedChatIds")}, comma-separated: `,
     (current.allowedChatIds ?? []).join(",")
   ));
 
@@ -364,7 +366,7 @@ export async function promptVoiceCapability(
 }> {
   const ttsProvider = await promptSetupChoice(prompt, {
     title: setupCopyText("en", "setupModules.voice.title"),
-    message: "Choose a TTS provider.\n",
+    message: `${setupCopyText("en", "setupEditor.prompt.voice.summary")}\n${setupCopyText("en", "setupEditor.prompt.voice.ttsProvider")}\n`,
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
       label: provider,
@@ -372,11 +374,11 @@ export async function promptVoiceCapability(
     })),
     defaultValue: current.ttsProvider ?? "openai",
   });
-  const ttsModel = await promptSetupStringWithDefault(prompt, "TTS model: ", current.ttsModel ?? "gpt-4o-mini-tts");
-  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, "TTS API key environment variable: ", current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
+  const ttsModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.ttsModel")}: `, current.ttsModel ?? "gpt-4o-mini-tts");
+  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.ttsApiKeyEnv")}: `, current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
   const sttProvider = await promptSetupChoice(prompt, {
     title: setupCopyText("en", "setupModules.voice.title"),
-    message: "Choose an STT provider.\n",
+    message: `${setupCopyText("en", "setupEditor.prompt.voice.sttProvider")}\n`,
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
       label: provider,
@@ -384,8 +386,8 @@ export async function promptVoiceCapability(
     })),
     defaultValue: current.sttProvider ?? "openai",
   });
-  const sttModel = await promptSetupStringWithDefault(prompt, "STT model: ", current.sttModel ?? "gpt-4o-mini-transcribe");
-  const sttApiKeyEnv = await promptSetupStringWithDefault(prompt, "STT API key environment variable: ", current.sttApiKeyEnv ?? "OPENAI_API_KEY");
+  const sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "gpt-4o-mini-transcribe");
+  const sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? "OPENAI_API_KEY");
 
   return {
     ttsProvider,
@@ -413,7 +415,7 @@ export async function promptVisionCapability(
 }> {
   const provider = await promptSetupChoice(prompt, {
     title: setupCopyText("en", "setupModules.vision.title"),
-    message: "Choose an image generation provider.\n",
+    message: `${setupCopyText("en", "setupEditor.prompt.vision.summary")}\n${setupCopyText("en", "setupEditor.prompt.vision.provider")}\n`,
     choices: imageProviders.map((candidate) => ({
       id: candidate,
       label: candidate,
@@ -421,11 +423,11 @@ export async function promptVisionCapability(
     })),
     defaultValue: current.provider ?? "fal",
   });
-  const model = await promptSetupStringWithDefault(prompt, "Image generation model: ", current.model ?? "fal-ai/imagen4/preview");
-  const apiKeyEnv = await promptSetupStringWithDefault(prompt, "Image API key environment variable: ", current.apiKeyEnv ?? "FAL_KEY");
+  const model = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.vision.model")}: `, current.model ?? "fal-ai/imagen4/preview");
+  const apiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.vision.apiKeyEnv")}: `, current.apiKeyEnv ?? "FAL_KEY");
   const useGateway = await promptSetupChoice(prompt, {
     title: setupCopyText("en", "setupModules.vision.title"),
-    message: "Use image gateway if configured?\n",
+    message: `${setupCopyText("en", "setupEditor.prompt.vision.useGateway")}?\n`,
     choices: [
       { id: "gateway-no", label: "No", value: false },
       { id: "gateway-yes", label: "Yes", value: true },
@@ -456,7 +458,7 @@ export async function promptBrowserCapability(
 }> {
   const backend = await promptSetupChoice(prompt, {
     title: setupCopyText("en", "setupModules.browser.title"),
-    message: "Choose a browser backend. Browser setup will not launch a browser during planning.\n",
+    message: `${setupCopyText("en", "setupEditor.prompt.browser.summary")}\n${setupCopyText("en", "setupEditor.prompt.browser.backend")}\n`,
     choices: browserBackends.map((candidate) => ({
       id: candidate,
       label: candidate,
@@ -464,8 +466,8 @@ export async function promptBrowserCapability(
     })),
     defaultValue: current.backend ?? "local-cdp",
   });
-  const cdpUrl = await promptSetupStringWithDefault(prompt, "Browser CDP URL: ", current.cdpUrl ?? "http://127.0.0.1:9222");
-  const launchCommand = await promptSetupStringWithDefault(prompt, "Browser launch command reference: ", current.launchCommand ?? "");
+  const cdpUrl = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.browser.cdpUrl")}: `, current.cdpUrl ?? "http://127.0.0.1:9222");
+  const launchCommand = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.browser.launchCommand")}: `, current.launchCommand ?? "");
 
   return {
     backend,
