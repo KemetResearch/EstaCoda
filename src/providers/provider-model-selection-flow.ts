@@ -331,7 +331,7 @@ async function resolveSelectionImpl(
   const apiMode = providerConfig?.apiMode ?? meta.apiMode;
 
   // Check credential readiness without exposing secret values
-  const credentialAction = determineCredentialAction(providerId, apiKeyEnv, meta);
+  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, meta);
 
   return {
     kind: "selected",
@@ -352,11 +352,11 @@ async function resolveSelectionImpl(
  * Calls resolveRuntimeCredential to check readiness, then immediately
  * discards any credential object so the value never escapes.
  */
-function determineCredentialAction(
+async function determineCredentialAction(
   providerId: ProviderId,
   apiKeyEnv: string | undefined,
   meta: ProviderMetadata
-): CredentialAction {
+): Promise<CredentialAction> {
   // No-auth providers never need credentials
   if (meta.authMethods.includes("none") && meta.defaultAuthMethod === "none") {
     return { kind: "none" };
@@ -365,7 +365,7 @@ function determineCredentialAction(
   const envVarName = apiKeyEnv ?? meta.defaultApiKeyEnv ?? `${providerId.toUpperCase()}_API_KEY`;
 
   // Check readiness via resolver, then discard the credential value
-  const resolution = resolveRuntimeCredential({
+  const resolution = await resolveRuntimeCredential({
     providerId,
     route: apiKeyEnv ? { apiKeyEnv } : undefined,
     providerConfig: apiKeyEnv ? { apiKeyEnv } : undefined,

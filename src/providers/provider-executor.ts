@@ -216,9 +216,9 @@ export class ProviderExecutor {
       }
 
       // Credential resolution: route.apiKeyEnv takes precedence over pool
-      const resolution = resolveRuntimeCredential({
+      const resolution = await resolveRuntimeCredential({
         providerId: route.provider,
-        route: { apiKeyEnv: route.apiKeyEnv },
+        route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
         credentialPools: this.#credentialPools,
         metadata: getProviderMetadata(route.provider),
       });

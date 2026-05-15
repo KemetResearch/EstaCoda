@@ -377,6 +377,7 @@ export function buildResolvedModelRoute(options: {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   apiMode?: ProviderApiMode;
+  authMethod?: ProviderAuthMethod;
 }): ResolvedModelRoute {
   const metadata = getProviderMetadata(options.provider);
   return {
@@ -386,7 +387,8 @@ export function buildResolvedModelRoute(options: {
     baseUrl: options.baseUrl,
     apiKeyEnv: options.apiKeyEnv,
     contextWindowTokens: options.contextWindowTokens,
-    apiMode: options.apiMode ?? metadata.apiMode
+    apiMode: options.apiMode ?? metadata.apiMode,
+    authMethod: options.authMethod ?? metadata.defaultAuthMethod
   };
 }
 
