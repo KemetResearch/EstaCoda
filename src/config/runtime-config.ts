@@ -859,6 +859,15 @@ function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
       compacted.auxiliaryModels = stripped;
     }
   }
+  /**
+   * Legacy config cleanup for the old `auxiliaryProviders` key.
+   *
+   * This key is not a supported write target. Keep stripping it so stale configs
+   * do not preserve deprecated auxiliary-provider shape.
+   *
+   * TODO(config-cleanup): remove only after the migration window is explicitly
+   * closed and tests/docs no longer need compatibility coverage.
+   */
   // Strip deprecated auxiliaryProviders so it is never serialized
   if ("auxiliaryProviders" in compacted) {
     delete (compacted as Record<string, unknown>).auxiliaryProviders;
@@ -1339,6 +1348,20 @@ export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): P
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+/**
+ * Compatibility wrapper for direct setup/model setup/config-tool paths.
+ *
+ * Do not use for new first-run onboarding, guided setup repair,
+ * bare `estacoda model`, `/model` session switching, gateway model cards,
+ * or runtime route mutation.
+ *
+ * New flows should use the smaller provider config mutation helpers and
+ * reviewed setup apply paths.
+ *
+ * TODO(provider-cleanup): migrate remaining direct setup/model setup/config-tool
+ * callers to the smaller helpers in a dedicated compatibility migration PR,
+ * then remove this wrapper.
+ */
 export async function setupProviderConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -2457,10 +2480,6 @@ function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttP
     case "mistral":
       return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
   }
-}
-
-export function defaultEnvKey(provider: ProviderId): string {
-  return getDefaultApiKeyEnv(provider);
 }
 
 function expandConfiguredPaths(paths: string[], homeDir?: string): string[] {

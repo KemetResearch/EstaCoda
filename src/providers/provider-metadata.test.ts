@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getProviderMetadata,
   getProviderDefaultBaseUrl,
-  getDefaultBaseUrl,
   getDefaultApiKeyEnv,
   isProviderRunnable,
   isProviderConfigurable,
@@ -62,16 +61,6 @@ describe("provider-metadata", () => {
       expect(getProviderDefaultBaseUrl("local")).toBe("http://localhost:11434/v1");
       expect(getProviderDefaultBaseUrl("unknown-provider" as ProviderId)).toBeUndefined();
       expect(getProviderDefaultBaseUrl("nous")).toBeUndefined();
-    });
-
-    it("legacy defaultBaseUrl helper keeps placeholder compatibility only", () => {
-      expect(getDefaultBaseUrl("openai")).toBe("https://api.openai.com/v1");
-      expect(getDefaultBaseUrl("deepseek")).toBe("https://api.deepseek.com/v1");
-      expect(getDefaultBaseUrl("kimi")).toBe("https://api.moonshot.cn/v1");
-      expect(getDefaultBaseUrl("google")).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
-      expect(getDefaultBaseUrl("openrouter")).toBe("https://openrouter.ai/api/v1");
-      expect(getDefaultBaseUrl("local")).toBe("http://localhost:11434/v1");
-      expect(getDefaultBaseUrl("unknown-provider" as ProviderId)).toBe("https://example.invalid/v1");
     });
 
     it("defaultApiKeyEnv matches runtime-config and create-runtime expectations", () => {

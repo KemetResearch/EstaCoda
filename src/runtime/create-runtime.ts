@@ -1084,6 +1084,18 @@ function setToolsetAvailability(availableToolsets: Set<ToolsetName>, toolset: To
   availableToolsets.delete(toolset);
 }
 
+/**
+ * Default/scaffold provider registry construction.
+ *
+ * This is not a route-selection mechanism and must not be used to infer
+ * executable routes from catalog presence alone.
+ *
+ * It must not create executable adapters with placeholder endpoints such as
+ * `https://example.invalid/v1`.
+ *
+ * TODO(provider-cleanup): remove or shrink once all runtime/smoke/test callers
+ * have explicit registry or route construction.
+ */
 export function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderRegistry {
   const registry = new ProviderRegistry();
   const catalogModels = uniqueModels([
