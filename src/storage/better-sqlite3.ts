@@ -5,6 +5,8 @@ type BetterSQLiteDatabase = Database.Database;
 type BetterSQLiteStatement = Database.Statement;
 type BetterSQLiteRunResult = Database.RunResult;
 
+const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
+
 function normalizeRunResult(result: BetterSQLiteRunResult): SQLiteRunResult {
   return {
     changes: Number(result.changes),
@@ -61,11 +63,11 @@ export function openBetterSQLiteDatabase(options: OpenSQLiteDatabaseOptions): SQ
   if (options.readonly !== undefined) {
     databaseOptions.readonly = options.readonly;
   }
-  if (options.timeoutMs !== undefined) {
-    databaseOptions.timeout = options.timeoutMs;
-  }
+  const timeoutMs = options.timeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS;
+  databaseOptions.timeout = timeoutMs;
 
   const database = new Database(options.path, databaseOptions);
+  database.pragma(`busy_timeout = ${timeoutMs}`);
 
   return new BetterSQLiteDatabaseAdapter(database);
 }

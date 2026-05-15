@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
 import { resolveStateHome } from "../config/state-home.js";
 
 export type InitOptions = {
@@ -34,6 +33,20 @@ export async function bootstrapStateDirectories(homeDir: string): Promise<void> 
   }
 }
 
+function isFileAlreadyExistsError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
+}
+
+async function writeFileIfAbsent(path: string, contents: string): Promise<void> {
+  try {
+    await writeFile(path, contents, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (!isFileAlreadyExistsError(error)) {
+      throw error;
+    }
+  }
+}
+
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const homeDir = stateHome.homeDir;
@@ -50,33 +63,26 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
   try {
     await bootstrapStateDirectories(homeDir);
 
-    const configPath = stateHome.configPath;
-    if (!existsSync(configPath)) {
-      const defaultConfig = {
-        model: {
-          provider: "unconfigured",
-          id: "unconfigured"
-        },
-        providers: {},
-        skills: {
-          autonomy: "suggest"
-        },
-        ui: {
-          language: "en",
-          flavor: "standard",
-          activityLabels: "en"
-        },
-        security: {
-          approvalMode: "confirm"
-        }
-      };
-      await writeFile(configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf8");
-    }
-
-    const trustPath = stateHome.trustJsonPath;
-    if (!existsSync(trustPath)) {
-      await writeFile(trustPath, "{}\n", "utf8");
-    }
+    const defaultConfig = {
+      model: {
+        provider: "unconfigured",
+        id: "unconfigured"
+      },
+      providers: {},
+      skills: {
+        autonomy: "suggest"
+      },
+      ui: {
+        language: "en",
+        flavor: "standard",
+        activityLabels: "en"
+      },
+      security: {
+        approvalMode: "confirm"
+      }
+    };
+    await writeFileIfAbsent(stateHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
+    await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
 
     return {
       ok: true,

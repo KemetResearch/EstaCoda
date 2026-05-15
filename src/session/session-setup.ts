@@ -1,16 +1,22 @@
 import { mkdir, chmod, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { existsSync } from "node:fs";
 import { resolveStateHome } from "../config/state-home.js";
 import { SQLiteSessionDB } from "./sqlite-session-db.js";
+
+function isFileAlreadyExistsError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
+}
 
 export async function prepareSessionDbFile(path: string): Promise<void> {
   const dir = dirname(path);
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
-  if (!existsSync(path)) {
-    await writeFile(path, "", { mode: 0o600 });
-  } else {
+  try {
+    await writeFile(path, "", { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if (!isFileAlreadyExistsError(error)) {
+      throw error;
+    }
     await chmod(path, 0o600).catch(() => undefined);
   }
 }
