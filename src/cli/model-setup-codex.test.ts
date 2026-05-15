@@ -221,6 +221,33 @@ describe("model setup codex", () => {
       expect(result.output).toBe("Cancelled. No changes were made.");
     });
 
+    it("timeout during polling returns exit code 1 with timed out message", async () => {
+      const fetchLike = createMockFetch({
+        authorize: () => ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: {
+            device_code: "dev-123",
+            user_code: "ABC-DEF",
+            verification_uri: "https://auth.openai.com/verify",
+            expires_in: 0, // immediate timeout
+            interval: 0
+          }
+        })
+        // No token polls: timeout happens before first poll
+      });
+
+      const result = await runModelSetupCodex(baseOptions({
+        prompt: createMockPrompt(["1"]),
+        fetchLike
+      }));
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Authentication timed out");
+    });
+
     it("writes auth.json with 0600 permissions through existing store behavior", async () => {
       const fetchLike = createMockFetch({
         authorize: () => ({

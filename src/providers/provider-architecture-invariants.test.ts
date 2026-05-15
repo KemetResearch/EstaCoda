@@ -92,6 +92,91 @@ describe("provider architecture invariants", () => {
       expect(setupIds).not.toContain("codex");
       expect(pickerIds).not.toContain("codex");
     });
+
+    it("Codex adapter registration does not bypass runnable=false in catalog", async () => {
+      const registry = new ProviderRegistry();
+      // Register a Codex-like openai_responses adapter (same as runtime does)
+      registry.register({
+        id: "codex" as ProviderId,
+        name: "OpenAI Codex",
+        executable: true,
+        health() {
+          return { available: true };
+        },
+        listModels() {
+          return [];
+        },
+        async complete() {
+          return { ok: true, content: "", model: "", provider: "codex" };
+        }
+      });
+
+      const catalog = await makeCatalog({
+        providers: {
+          codex: {
+            kind: "catalog",
+            models: ["o3"]
+          }
+        }
+      }, registry);
+
+      const models = await catalog.listModels();
+      const codex = models.find((m) => m.provider === "codex" && m.id === "o3");
+      expect(codex).toBeDefined();
+      // Adapter is registered, but metadata runnable=false overrides
+      expect(codex!.executable).toBe(false);
+      expect(codex!.catalogOnly).toBe(true);
+    });
+
+    it("no hidden or development picker option exposes Codex", async () => {
+      const registry = new ProviderRegistry();
+      const catalog = await makeCatalog({
+        providers: {
+          codex: {
+            kind: "catalog",
+            models: ["o3"]
+          }
+        }
+      }, registry);
+
+      // listProviders with includeCatalogOnly=false is what pickers use
+      const providers = await catalog.listProviders({ includeCatalogOnly: false });
+      expect(providers.some((p) => p.id === "codex")).toBe(false);
+
+      // Even with network-allowed dev options, Codex stays hidden
+      const devCatalog = await createModelSelectionCatalog({
+        config: EMPTY_CONFIG,
+        providerRegistry: registry,
+        homeDir: "/tmp",
+        modelsDevOptions: { allowNetwork: true }
+      });
+      const devProviders = await devCatalog.listProviders({ includeCatalogOnly: false });
+      expect(devProviders.some((p) => p.id === "codex")).toBe(false);
+    });
+
+    it("Codex cannot be selected through normal model/setup picker flows", async () => {
+      const registry = new ProviderRegistry();
+      const catalog = await makeCatalog({
+        providers: {
+          codex: {
+            kind: "catalog",
+            models: ["o3"]
+          }
+        }
+      }, registry);
+
+      const models = await catalog.listModels();
+      const codexModel = models.find((m) => m.provider === "codex" && m.id === "o3");
+      // Codex model may appear in catalog list, but is never executable
+      if (codexModel !== undefined) {
+        expect(codexModel.executable).toBe(false);
+        expect(codexModel.catalogOnly).toBe(true);
+      }
+
+      // Setup-visible and picker-visible lists exclude Codex
+      expect(listProvidersVisibleInSetup().some((m) => m.id === "codex")).toBe(false);
+      expect(listProvidersVisibleInModelPicker().some((m) => m.id === "codex")).toBe(false);
+    });
   });
 
   describe("Anthropic invariants", () => {
