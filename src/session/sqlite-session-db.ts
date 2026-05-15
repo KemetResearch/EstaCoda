@@ -73,6 +73,24 @@ type FailureRow = {
   context_json: string | null;
 };
 
+const MIGRATION_LOCK_TIMEOUT_MS = 5_000;
+const MIGRATION_LOCK_RETRY_INTERVAL_MS = 25;
+const MIGRATION_LOCK_SLEEP_BUFFER = new SharedArrayBuffer(4);
+const MIGRATION_LOCK_SLEEP_VIEW = new Int32Array(MIGRATION_LOCK_SLEEP_BUFFER);
+
+function isSQLiteBusyError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  if (code === "SQLITE_BUSY" || code === "SQLITE_LOCKED") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /busy|locked/i.test(message);
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(MIGRATION_LOCK_SLEEP_VIEW, 0, 0, ms);
+}
+
 export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   readonly #db: SQLiteDatabase;
   readonly #now: () => Date;
@@ -408,113 +426,145 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrate(): void {
-    this.#db.exec(`pragma journal_mode = wal;`);
+    this.#execMigrationControlSql(`pragma journal_mode = wal;`);
 
-    // ─── Baseline: legacy tables (idempotent, always safe) ───
-    this.#db.exec(`
-      create table if not exists sessions (
-        id text primary key,
-        profile_id text not null,
-        title text,
-        created_at text not null,
-        updated_at text not null,
-        parent_session_id text,
-        metadata_json text
-      );
+    this.#withMigrationLock(() => {
+      // ─── Baseline: legacy tables (idempotent, always safe) ───
+      this.#db.exec(`
+        create table if not exists sessions (
+          id text primary key,
+          profile_id text not null,
+          title text,
+          created_at text not null,
+          updated_at text not null,
+          parent_session_id text,
+          metadata_json text
+        );
 
-      create table if not exists messages (
-        id text primary key,
-        session_id text not null references sessions(id) on delete cascade,
-        role text not null,
-        content text not null,
-        created_at text not null,
-        channel text,
-        metadata_json text
-      );
+        create table if not exists messages (
+          id text primary key,
+          session_id text not null references sessions(id) on delete cascade,
+          role text not null,
+          content text not null,
+          created_at text not null,
+          channel text,
+          metadata_json text
+        );
 
-      create virtual table if not exists messages_fts using fts5(
-        message_id unindexed,
-        content,
-        tokenize = 'unicode61'
-      );
+        create virtual table if not exists messages_fts using fts5(
+          message_id unindexed,
+          content,
+          tokenize = 'unicode61'
+        );
 
-      create table if not exists session_events (
-        id text primary key,
-        session_id text not null references sessions(id) on delete cascade,
-        created_at text not null,
-        event_json text not null
-      );
+        create table if not exists session_events (
+          id text primary key,
+          session_id text not null references sessions(id) on delete cascade,
+          created_at text not null,
+          event_json text not null
+        );
 
-      create index if not exists idx_sessions_profile_updated on sessions(profile_id, updated_at);
-      create index if not exists idx_messages_session_created on messages(session_id, created_at);
-      create index if not exists idx_events_session_created on session_events(session_id, created_at);
+        create index if not exists idx_sessions_profile_updated on sessions(profile_id, updated_at);
+        create index if not exists idx_messages_session_created on messages(session_id, created_at);
+        create index if not exists idx_events_session_created on session_events(session_id, created_at);
 
-      create table if not exists trajectories (
-        id text primary key,
-        session_id text not null references sessions(id) on delete cascade,
-        profile_id text not null,
-        model_id text not null,
-        created_at text not null,
-        completed_at text,
-        event_count integer not null default 0,
-        events_json text not null,
-        outcome_json text,
-        compressed_json text
-      );
+        create table if not exists trajectories (
+          id text primary key,
+          session_id text not null references sessions(id) on delete cascade,
+          profile_id text not null,
+          model_id text not null,
+          created_at text not null,
+          completed_at text,
+          event_count integer not null default 0,
+          events_json text not null,
+          outcome_json text,
+          compressed_json text
+        );
 
-      create table if not exists trajectory_failures (
-        id text primary key,
-        trajectory_id text not null references trajectories(id) on delete cascade,
-        session_id text not null,
-        timestamp text not null,
-        class text not null,
-        message text not null,
-        recoverable integer not null default 0,
-        context_json text
-      );
+        create table if not exists trajectory_failures (
+          id text primary key,
+          trajectory_id text not null references trajectories(id) on delete cascade,
+          session_id text not null,
+          timestamp text not null,
+          class text not null,
+          message text not null,
+          recoverable integer not null default 0,
+          context_json text
+        );
 
-      create index if not exists idx_trajectories_session on trajectories(session_id, created_at);
-      create index if not exists idx_trajectories_profile on trajectories(profile_id, created_at);
-      create index if not exists idx_failures_class on trajectory_failures(class, timestamp);
-      create index if not exists idx_failures_trajectory on trajectory_failures(trajectory_id);
-    `);
+        create index if not exists idx_trajectories_session on trajectories(session_id, created_at);
+        create index if not exists idx_trajectories_profile on trajectories(profile_id, created_at);
+        create index if not exists idx_failures_class on trajectory_failures(class, timestamp);
+        create index if not exists idx_failures_trajectory on trajectory_failures(trajectory_id);
+      `);
 
-    // ─── Schema versioning (new in v0.8) ───
-    this.#db.exec(`
-      create table if not exists schema_version (
-        version integer primary key
-      );
-    `);
+      // ─── Schema versioning (new in v0.8) ───
+      this.#db.exec(`
+        create table if not exists schema_version (
+          version integer primary key
+        );
+      `);
+    });
 
+    this.#runMigrationStep(1, "v0.8-schema-v1", () => this.#migrateV1());
+    this.#runMigrationStep(2, "v0.8-schema-v2", () => this.#migrateV2());
+    this.#runMigrationStep(3, "v0.8-schema-v3", () => this.#migrateV3());
+    this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
+  }
+
+  #withMigrationLock(migrate: () => void): void {
+    this.#execMigrationControlSql("begin immediate");
+    try {
+      migrate();
+      this.#db.exec("commit");
+    } catch (error) {
+      try {
+        this.#db.exec("rollback");
+      } catch {
+        // Ignore rollback errors so the original migration failure is preserved.
+      }
+      throw error;
+    }
+  }
+
+  #execMigrationControlSql(sql: string): void {
+    const deadline = Date.now() + MIGRATION_LOCK_TIMEOUT_MS;
+    while (true) {
+      try {
+        this.#db.exec(sql);
+        return;
+      } catch (error) {
+        if (!isSQLiteBusyError(error) || Date.now() >= deadline) {
+          throw error;
+        }
+        sleepSync(MIGRATION_LOCK_RETRY_INTERVAL_MS);
+      }
+    }
+  }
+
+  #runMigrationStep(targetVersion: number, backupLabel: string, migrate: () => void): void {
+    if (this.#readSchemaVersion() >= targetVersion) {
+      return;
+    }
+
+    this.#backupDbBeforeMigration(backupLabel);
+
+    this.#withMigrationLock(() => {
+      if (this.#readSchemaVersion() >= targetVersion) {
+        return;
+      }
+      migrate();
+      this.#db
+        .query("insert into schema_version (version) values (?) on conflict(version) do update set version = ?")
+        .run(targetVersion, targetVersion);
+    });
+  }
+
+  #readSchemaVersion(): number {
     const versionRow = this.#db
-      .query<{ version: number }>("select version from schema_version limit 1")
+      .query<{ version: number | null }>("select max(version) as version from schema_version")
       .get();
-
-    const currentVersion = versionRow?.version ?? 0;
-
-    if (currentVersion < 1) {
-      this.#backupDbBeforeMigration("v0.8-schema-v1");
-      this.#migrateV1();
-      this.#db.query("insert into schema_version (version) values (1) on conflict(version) do update set version = 1").run();
-    }
-
-    if (currentVersion < 2) {
-      this.#backupDbBeforeMigration("v0.8-schema-v2");
-      this.#migrateV2();
-      this.#db.query("insert into schema_version (version) values (2) on conflict(version) do update set version = 2").run();
-    }
-
-    if (currentVersion < 3) {
-      this.#backupDbBeforeMigration("v0.8-schema-v3");
-      this.#migrateV3();
-      this.#db.query("insert into schema_version (version) values (3) on conflict(version) do update set version = 3").run();
-    }
-
-    if (currentVersion < 4) {
-      this.#backupDbBeforeMigration("v0.9-schema-v4-cron-executions");
-      this.#migrateV4();
-      this.#db.query("insert into schema_version (version) values (4) on conflict(version) do update set version = 4").run();
-    }
+    return versionRow?.version ?? 0;
   }
 
   #migrateV4(): void {

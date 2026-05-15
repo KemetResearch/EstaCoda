@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInitCommand, bootstrapStateDirectories } from "./init-command.js";
@@ -50,6 +50,29 @@ describe("runInitCommand", () => {
   it("creates trust.json", async () => {
     await runInitCommand({ homeDir: tempHome });
     expect(existsSync(join(tempHome, ".estacoda", "trust.json"))).toBe(true);
+  });
+
+  it("supports concurrent fresh-home init without malformed bootstrap files", async () => {
+    const results = await Promise.all(
+      Array.from({ length: 16 }, () => runInitCommand({ homeDir: tempHome }))
+    );
+
+    expect(results.map((result) => result.exitCode)).toEqual(Array.from({ length: 16 }, () => 0));
+    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "config.json"), "utf8"))).not.toThrow();
+    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "trust.json"), "utf8"))).not.toThrow();
+    expect(existsSync(join(tempHome, ".estacoda", "cron", "output"))).toBe(true);
+    expect(existsSync(join(tempHome, ".estacoda", "cron", "locks"))).toBe(true);
+    expect(existsSync(join(tempHome, ".estacoda", "logs"))).toBe(true);
+  });
+
+  it("supports repeated init after initialization", async () => {
+    const first = await runInitCommand({ homeDir: tempHome });
+    const second = await runInitCommand({ homeDir: tempHome });
+
+    expect(first.exitCode).toBe(0);
+    expect(second.exitCode).toBe(0);
+    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "config.json"), "utf8"))).not.toThrow();
+    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "trust.json"), "utf8"))).not.toThrow();
   });
 
   it("fails when homeDir is empty and state root cannot be resolved", async () => {
