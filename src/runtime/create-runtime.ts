@@ -19,6 +19,8 @@ import { createMemoryTool } from "../memory/memory-tool.js";
 import { createKnowledgeMemoryTools } from "../memory/knowledge-memory-tools.js";
 import { createKnowledgeCodeTools } from "../knowledge/knowledge-code-tools.js";
 import { MemoryStore } from "../memory/memory-store.js";
+import { loadIdentityContext } from "../memory/identity-loader.js";
+import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
@@ -46,7 +48,6 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
-import { syncBundledSkills } from "../skills/skill-bundled-sync.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
 
@@ -282,11 +283,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
 
   const bundledSkillsDir = new URL("../../skills/official", import.meta.url).pathname;
-  const bundledSync = await syncBundledSkills({
-    bundledSkillsDir,
-    localSkillsRoot
-  });
-  const skillLoadWarnings = [...bundledSync.warnings];
+  const skillLoadWarnings: string[] = [];
   const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers
@@ -297,11 +294,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       toolRegistry.register(tool);
     }
   }
-  // Load skills from three sources with explicit priority:
-  // 1. local/        -> sourceKind: "local"    (highest priority)
-  // 2. packs/        -> sourceKind: "external"  (lowest priority)
-  // 3. everything else -> sourceKind: "bundled" (middle priority)
-  const localUserRoot = join(localSkillsRoot, "local");
+  // Load skills from explicit profile-local and package sources:
+  // 1. packs/ under the selected profile (external, lowest priority)
+  // 2. package bundled skills (middle priority)
+  // 3. profiles/<id>/skills/ direct directories (local, highest priority)
   const packsRoot = join(localSkillsRoot, "packs");
 
   // external: pack-materialized skills
@@ -314,21 +310,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillRegistry.register(skill);
   }
 
-  // bundled: synced built-in skills (excluding local/ and packs/)
-  const bundledLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
+  // bundled: built-in package skills
+  const bundledLoaded = await loadSkillsFromDirectory(bundledSkillsDir, {
     sourceKind: "bundled",
-    sourceRoot: localSkillsRoot,
-    exclude: ["local", "packs"]
+    sourceRoot: bundledSkillsDir
   }).catch(() => ({ skills: [], errors: [] }));
   skillLoadWarnings.push(...bundledLoaded.errors.map((error) => error.message));
   for (const skill of bundledLoaded.skills) {
     skillRegistry.register(skill);
   }
 
-  // local: user-local skills (highest priority, loaded last to win conflicts)
-  const localLoaded = await loadSkillsFromDirectory(localUserRoot, {
+  // local: selected profile skills (highest priority, loaded last to win conflicts)
+  const localLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
     sourceKind: "local",
-    sourceRoot: localUserRoot
+    sourceRoot: localSkillsRoot,
+    exclude: ["packs"]
   }).catch(() => ({ skills: [], errors: [] }));
   skillLoadWarnings.push(...localLoaded.errors.map((error) => error.message));
   for (const skill of localLoaded.skills) {
@@ -481,21 +477,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolRegistry.register(tool);
   }
 
-  const userMemoryRoot = options.userMemoryRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/memory/default`;
-  const projectMemoryRoot = options.projectMemoryRoot ?? `${workspaceRoot}/.estacoda/memory`;
+  const profileMemoryRoot = profilePaths.profileRoot;
+  const identityContext = await loadIdentityContext({ profilePaths });
+  const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
   const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
-  await memoryStore.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
-  await memoryStore.loadFromDirectory(userMemoryRoot);
-  await memoryStore.loadFromDirectory(projectMemoryRoot);
+  if (sharedMemoryContent !== undefined) {
+    memoryStore.write("SHARED.md", sharedMemoryContent);
+  }
+  if (identityContext.user !== undefined) {
+    memoryStore.write("USER.md", identityContext.user);
+  }
+  if (identityContext.soul !== undefined) {
+    memoryStore.write("SOUL.md", identityContext.soul);
+  }
+  if (identityContext.memory !== undefined) {
+    memoryStore.write("MEMORY.md", identityContext.memory);
+  }
   const memoryProvider = options.memoryProvider ?? new LocalMemoryProvider({
     store: memoryStore,
     saveRoots: {
-      "USER.md": userMemoryRoot,
-      "MEMORY.md": projectMemoryRoot,
-      "SOUL.md": projectMemoryRoot,
-      "AGENTS.md": projectMemoryRoot
+      "USER.md": profileMemoryRoot,
+      "MEMORY.md": profileMemoryRoot,
+      "SOUL.md": profileMemoryRoot
     },
-    promotionStorePath: join(userMemoryRoot, "promotions.json")
+    promotionStorePath: profilePaths.promotionsPath
   });
   for (const tool of createKnowledgeMemoryTools(
     memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
@@ -654,9 +659,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryRecorder,
     runRecorder,
     toolPlanRunner,
-    soul: frozenMemorySnapshot.files.get("SOUL.md"),
+    soul: undefined,
     frozenMemory: {
+      shared: frozenMemorySnapshot.files.get("SHARED.md"),
       user: frozenMemorySnapshot.files.get("USER.md"),
+      soul: frozenMemorySnapshot.files.get("SOUL.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
     skillsIndex: sessionSkillCatalog,
@@ -710,9 +717,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     contextReferenceExpander,
     projectContext,
     providerTools: providerToolSchemaCatalog.tools,
-    soul: frozenMemorySnapshot.files.get("SOUL.md"),
+    soul: undefined,
     frozenMemory: {
+      shared: frozenMemorySnapshot.files.get("SHARED.md"),
       user: frozenMemorySnapshot.files.get("USER.md"),
+      soul: frozenMemorySnapshot.files.get("SOUL.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
     skillsIndex: sessionSkillCatalog,
@@ -1158,6 +1167,14 @@ function isOpenAICompatibleProvider(provider: string): boolean {
     "openrouter",
     "nous"
   ].includes(provider);
+}
+
+function renderSharedMemory(entries: SharedMemoryEntry[]): string | undefined {
+  const sections = entries
+    .filter((entry) => entry.content.trim().length > 0)
+    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
+
+  return sections.length === 0 ? undefined : sections.join("\n\n");
 }
 
 function uniqueModels(models: ModelProfile[]): ModelProfile[] {

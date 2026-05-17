@@ -8,6 +8,10 @@ function defaultProfileConfigPath(homeDir: string): string {
   return join(homeDir, ".estacoda", "profiles", "default", "config.json");
 }
 
+function defaultProfileSkillsPath(homeDir: string): string {
+  return join(homeDir, ".estacoda", "profiles", "default", "skills");
+}
+
 describe("bootstrapStateDirectories", () => {
   let tempHome: string;
 
@@ -21,14 +25,8 @@ describe("bootstrapStateDirectories", () => {
 
   it("creates all expected directories", async () => {
     await bootstrapStateDirectories(tempHome);
-    expect(existsSync(join(tempHome, ".estacoda", "memory"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "skills", "local"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "skills", ".evolution"))).toBe(true);
+    expect(existsSync(join(tempHome, ".estacoda", "memory", "shared"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "packs"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "cron"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "cron", "output"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "cron", "locks"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "logs"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", ".backups"))).toBe(true);
   });
 });
@@ -49,6 +47,7 @@ describe("runInitCommand", () => {
     expect(result.exitCode).toBe(0);
     expect(result.ok).toBe(true);
     expect(existsSync(defaultProfileConfigPath(tempHome))).toBe(true);
+    expect(existsSync(defaultProfileSkillsPath(tempHome))).toBe(true);
   });
 
   it("creates trust.json", async () => {
@@ -64,9 +63,7 @@ describe("runInitCommand", () => {
     expect(results.map((result) => result.exitCode)).toEqual(Array.from({ length: 16 }, () => 0));
     expect(() => JSON.parse(readFileSync(defaultProfileConfigPath(tempHome), "utf8"))).not.toThrow();
     expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "trust.json"), "utf8"))).not.toThrow();
-    expect(existsSync(join(tempHome, ".estacoda", "cron", "output"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "cron", "locks"))).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "logs"))).toBe(true);
+    expect(existsSync(join(defaultProfileSkillsPath(tempHome), ".evolution"))).toBe(true);
   });
 
   it("supports repeated init after initialization", async () => {

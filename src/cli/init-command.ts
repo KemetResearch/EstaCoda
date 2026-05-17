@@ -15,15 +15,8 @@ export type InitResult = {
 };
 
 export const DEFAULT_STATE_DIRS = [
-  "memory",
-  "skills",
-  "skills/local",
-  "skills/.evolution",
+  "memory/shared",
   "packs",
-  "cron",
-  "cron/output",
-  "cron/locks",
-  "logs",
   ".backups"
 ];
 
@@ -85,6 +78,8 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
       }
     };
     await mkdir(profileHome.profileRoot, { recursive: true });
+    await mkdir(profileHome.skillsPath, { recursive: true });
+    await mkdir(join(profileHome.skillsPath, ".evolution"), { recursive: true });
     await writeFileIfAbsent(profileHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
     await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
 
@@ -96,6 +91,7 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         "Created:",
         ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
         `  profiles/${profileId}/config.json`,
+        `  profiles/${profileId}/skills/`,
         "  trust.json",
         "",
         "Next: run `estacoda` to start interactive setup, or `estacoda verify` to check readiness."

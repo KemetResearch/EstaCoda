@@ -258,7 +258,6 @@ export async function createSmokeContext(): Promise<SmokeContext> {
   }
   tools.register(createMemoryTool(memory));
 
-  await memory.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
   memory.apply({
     kind: "append",
     file: "MEMORY.md",

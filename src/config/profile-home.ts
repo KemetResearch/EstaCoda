@@ -26,6 +26,7 @@ export type ProfileStatePaths = {
   soulMdPath: string;
   memoryMdPath: string;
   userMdPath: string;
+  promotionsPath: string;
   skillsPath: string;
   logsPath: string;
   channelMediaPath: string;
@@ -72,6 +73,7 @@ export function resolveProfileStateHome(options: { homeDir?: string; profileId: 
     soulMdPath: join(profileRoot, "SOUL.md"),
     memoryMdPath: join(profileRoot, "MEMORY.md"),
     userMdPath: join(profileRoot, "USER.md"),
+    promotionsPath: join(profileRoot, "promotions.json"),
     skillsPath: join(profileRoot, "skills"),
     logsPath: join(profileRoot, "logs"),
     channelMediaPath: join(profileRoot, "channel-media"),

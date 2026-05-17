@@ -47,6 +47,7 @@ describe("profile home paths", () => {
       soulMdPath: join(profileRoot, "SOUL.md"),
       memoryMdPath: join(profileRoot, "MEMORY.md"),
       userMdPath: join(profileRoot, "USER.md"),
+      promotionsPath: join(profileRoot, "promotions.json"),
       skillsPath: join(profileRoot, "skills"),
       logsPath: join(profileRoot, "logs"),
       channelMediaPath: join(profileRoot, "channel-media"),
