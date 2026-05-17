@@ -16,6 +16,7 @@ export type SetupVerificationResult = {
 export type SetupVerificationOptions = {
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
   runtime?: Runtime;
   trustStorePath?: string;
 };
@@ -78,7 +79,7 @@ export async function collectSetupVerificationReport(
   const workspaceTrusted = await isWorkspaceTrusted(trustStore, options.workspaceRoot);
   const stateRoot = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda");
   const verifyFile = join(stateRoot, ".verify");
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const envPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).envPath;
   let stateWritable = false;
   let envFilePresent = false;

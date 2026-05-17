@@ -359,7 +359,8 @@ describe("setup copy", () => {
     expect(copy.verification.skippedNoPackageJson).toContain(isolateLtr("package.json"));
     expect(copy.verification.nextReady).toContain(isolateLtr("estacoda telegram setup"));
     expect(copy.verification.nextReady).toContain(isolateLtr("estacoda browser setup"));
-    expect(copy.verification.actions.secretPermissions).toContain(isolateLtr("chmod 600 ~/.estacoda/.env"));
+    expect(copy.verification.actions.secretPermissions).toContain(isolateLtr("0600"));
+    expect(copy.verification.actions.secretPermissions).toContain(isolateLtr("estacoda verify"));
     expect(copy.verification.actions.missingApiKey("OPENAI_API_KEY")).toContain(isolateLtr("OPENAI_API_KEY"));
   });
 

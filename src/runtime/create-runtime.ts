@@ -429,7 +429,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   for (const tool of createConfigTools({
     workspaceRoot,
-    homeDir: options.homeDir
+    homeDir: options.homeDir,
+    profileId: options.profileId
   })) {
     toolRegistry.register(tool);
   }
@@ -937,6 +938,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return [
         `${options.theme.branding.responseLabel} is ready`,
         `model: ${options.model.provider}/${options.model.id}`,
+        `profile: ${options.profileId}`,
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
@@ -950,6 +952,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return buildStatusViewModel({
         agentName: options.theme.branding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
+        profileId: options.profileId,
         securityMode: `${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         skillCount: sessionSkillCatalog.length,
         skillAutonomy: options.skillAutonomy ?? "suggest",
@@ -994,6 +997,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const verificationReport = await collectSetupVerificationReport({
         workspaceRoot,
         homeDir: options.homeDir,
+        profileId: options.profileId,
         trustStorePath: options.trustStorePath,
         runtime: this as Runtime,
       });

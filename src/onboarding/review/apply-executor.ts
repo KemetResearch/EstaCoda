@@ -42,6 +42,7 @@ import type { SkillAutonomy } from "../../skills/skill-learning.js";
 export type ReviewedSetupApplyExecutorOptions = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
+  readonly profileId?: string;
   readonly trustStorePath?: string;
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
@@ -49,6 +50,7 @@ export type ReviewedSetupApplyExecutorOptions = {
 type ConfigApplyTarget = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
+  readonly profileId?: string;
 };
 
 type PlanContext = {
@@ -142,6 +144,7 @@ async function verifyReviewedSetup(
   return collectSetupVerificationReport({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     trustStorePath: options.trustStorePath,
   });
 }
@@ -450,6 +453,7 @@ function configApplyTarget(
   return {
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
+    profileId: options.profileId,
   };
 }
 

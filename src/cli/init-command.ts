@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { ensureDefaultProfileState } from "./profile-state.js";
 
 export type InitOptions = {
   homeDir?: string;
@@ -44,7 +45,6 @@ async function writeFileIfAbsent(path: string, contents: string): Promise<void> 
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const profileHome = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const homeDir = stateHome.homeDir;
   if (homeDir.length === 0) {
     return {
@@ -59,28 +59,7 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
   try {
     await bootstrapStateDirectories(homeDir);
 
-    const defaultConfig = {
-      model: {
-        provider: "unconfigured",
-        id: "unconfigured"
-      },
-      providers: {},
-      skills: {
-        autonomy: "suggest"
-      },
-      ui: {
-        language: "en",
-        flavor: "standard",
-        activityLabels: "en"
-      },
-      security: {
-        approvalMode: "confirm"
-      }
-    };
-    await mkdir(profileHome.profileRoot, { recursive: true });
-    await mkdir(profileHome.skillsPath, { recursive: true });
-    await mkdir(join(profileHome.skillsPath, ".evolution"), { recursive: true });
-    await writeFileIfAbsent(profileHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
+    await ensureDefaultProfileState({ homeDir: options.homeDir, profileId });
     await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
 
     return {
@@ -90,8 +69,17 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         `Home: ${root}`,
         "Created:",
         ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
-        `  profiles/${profileId}/config.json`,
-        `  profiles/${profileId}/skills/`,
+        "  config.json",
+        "  .env",
+        "  auth.json",
+        "  USER.md",
+        "  SOUL.md",
+        "  MEMORY.md",
+        "  promotions.json",
+        "  skills/",
+        "  cron/",
+        "  logs/",
+        "  gateway/",
         "  trust.json",
         "",
         "Next: run `estacoda` to start interactive setup, or `estacoda verify` to check readiness."

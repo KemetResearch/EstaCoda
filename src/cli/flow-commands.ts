@@ -70,7 +70,7 @@ export async function flowCommand(options: CliOptions, args: string[]): Promise<
 }
 
 async function openFlowDb(options: CliOptions): Promise<{ db: SQLiteSessionDB; profileId: string; close: () => void }> {
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   if (options.runtime?.sessionDb instanceof SQLiteSessionDB) {
     return { db: options.runtime.sessionDb, profileId, close: () => undefined };
   }

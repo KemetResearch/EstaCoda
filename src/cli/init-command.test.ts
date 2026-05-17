@@ -12,6 +12,10 @@ function defaultProfileSkillsPath(homeDir: string): string {
   return join(homeDir, ".estacoda", "profiles", "default", "skills");
 }
 
+function defaultProfilePath(homeDir: string, path: string): string {
+  return join(homeDir, ".estacoda", "profiles", "default", path);
+}
+
 describe("bootstrapStateDirectories", () => {
   let tempHome: string;
 
@@ -47,7 +51,21 @@ describe("runInitCommand", () => {
     expect(result.exitCode).toBe(0);
     expect(result.ok).toBe(true);
     expect(existsSync(defaultProfileConfigPath(tempHome))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, ".env"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "auth.json"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "USER.md"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "SOUL.md"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "MEMORY.md"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "promotions.json"))).toBe(true);
     expect(existsSync(defaultProfileSkillsPath(tempHome))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "cron"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "logs"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "gateway"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "channel-media"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "audio-cache"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "image-cache"))).toBe(true);
+    expect(existsSync(defaultProfilePath(tempHome, "temp"))).toBe(true);
+    expect(existsSync(join(tempHome, ".estacoda", "active-profile.json"))).toBe(true);
   });
 
   it("creates trust.json", async () => {

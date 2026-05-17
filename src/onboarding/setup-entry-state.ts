@@ -60,6 +60,7 @@ export type SetupEntryState = {
 export type CollectSetupEntryStateOptions = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
+  readonly profileId?: string;
   readonly providerFetch?: ProviderFetchLike;
   readonly modelsDevOptions?: ModelsDevRegistryOptions;
   readonly runtime?: Runtime;
@@ -96,6 +97,7 @@ export async function collectSetupEntryState(
   const verificationReport = await collectSetupVerificationReport({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     runtime: options.runtime,
     trustStorePath: options.trustStorePath,
   });
@@ -248,7 +250,7 @@ function collectBlockers(
 }
 
 function setupConfigPaths(options: CollectSetupEntryStateOptions): SetupEntryState["configPaths"] {
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   return {
     profile: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
   };

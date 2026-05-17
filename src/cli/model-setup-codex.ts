@@ -14,6 +14,7 @@ const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 export type ModelSetupCodexOptions = {
   homeDir?: string;
+  profileId?: string;
   workspaceRoot: string;
   prompt?: Prompt;
   fetchLike?: FetchLike;
@@ -243,7 +244,7 @@ async function handleNewAuthentication(
 async function configureCodexRoute(
   options: ModelSetupCodexOptions
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   try {

@@ -22,6 +22,7 @@ import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-dia
 export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -421,7 +422,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       isAvailable: () => true,
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
-        const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+        const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
         const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
         const key = loaded.imageGen.apiKeyEnv;
         return {

@@ -4,7 +4,7 @@ import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-co
 import { resolveStateHome } from "./config/state-home.js";
 import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
-import { runCliCommand } from "./cli/cli.js";
+import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive } from "./cli/readline-prompt.js";
 import { createRuntime } from "./runtime/create-runtime.js";
@@ -21,7 +21,13 @@ import { createSQLiteSessionDB } from "./session/session-setup.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
-  const argv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
+  const initialArgv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
+  const parsedGlobalOptions = parseGlobalCliOptions(initialArgv);
+  if (!parsedGlobalOptions.ok) {
+    console.error(parsedGlobalOptions.error);
+    process.exit(1);
+  }
+  const argv = parsedGlobalOptions.argv;
 
   // Handle --version / -v immediately, before any async init
   if (argv.includes("--version") || argv.includes("-v")) {
@@ -36,14 +42,15 @@ async function main(): Promise<void> {
   let launchLocale: UiLocale | undefined;
 
   const stateHome = resolveStateHome();
-  const profileId = readActiveProfile()?.profileId ?? defaultProfileId();
+  const profileId = parsedGlobalOptions.profileId ?? readActiveProfile()?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
 
   if (argv[0] === "setup") {
     const setupCommand = await runCliCommand({
       argv,
-      workspaceRoot
+      workspaceRoot,
+      profileId
     });
 
     if (setupCommand.handled) {
@@ -57,7 +64,8 @@ async function main(): Promise<void> {
   if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
     const helpCommand = await runCliCommand({
       argv,
-      workspaceRoot
+      workspaceRoot,
+      profileId
     });
 
     if (helpCommand.handled) {
@@ -70,7 +78,7 @@ async function main(): Promise<void> {
 
   // Bare launch: use interactive launcher for onboarding/session routing
   if (argv.length === 0 && canRunInteractive()) {
-    const launchResult = await launchInteractiveSession({ workspaceRoot });
+    const launchResult = await launchInteractiveSession({ workspaceRoot, profileId });
 
     if (!launchResult.launched) {
       if (launchResult.output.length > 0) {
@@ -96,7 +104,8 @@ async function main(): Promise<void> {
     if (argv[0] === "doctor" || argv[0] === "verify") {
       const diagnosticCommand = await runCliCommand({
         argv,
-        workspaceRoot
+        workspaceRoot,
+        profileId
       });
 
       if (diagnosticCommand.handled) {
@@ -155,7 +164,8 @@ async function main(): Promise<void> {
   if (argv[0] === "acp") {
     const acpCommand = await runCliCommand({
       argv,
-      workspaceRoot
+      workspaceRoot,
+      profileId
     });
 
     if (acpCommand.handled) {
@@ -177,6 +187,7 @@ async function main(): Promise<void> {
   const command = await runCliCommand({
     argv,
     workspaceRoot,
+    profileId,
     tools: runtime.tools(),
     runtime
   });

@@ -94,6 +94,10 @@ function extractOpenAIModelIds(value: unknown): string[] {
   return [];
 }
 
+function selectedProfileId(options: Pick<CliOptions, "homeDir" | "profileId">): string {
+  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+}
+
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((v) => v.length > 0))];
 }
@@ -323,7 +327,7 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     };
   }
 
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = selectedProfileId(options);
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   const existing = await readConfig(targetPath);

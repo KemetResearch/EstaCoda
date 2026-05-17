@@ -6,6 +6,7 @@ import { collectSetupRoute, type SetupRouteDecision } from "../onboarding/setup-
 export type LaunchOptions = {
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
   prompt?: Prompt;
 };
 
@@ -30,7 +31,8 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
 
   const setupRoute = await collectSetupRoute({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir
+    homeDir: options.homeDir,
+    profileId: options.profileId
   });
   const currentLocale = await loadLaunchLocale(options);
 
@@ -111,7 +113,8 @@ async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
   try {
     const config = await loadRuntimeConfig({
       workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir
+      homeDir: options.homeDir,
+      profileId: options.profileId
     });
     return config.ui.language === "ar" ? "ar" : "en";
   } catch {

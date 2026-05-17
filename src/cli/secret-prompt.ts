@@ -32,6 +32,7 @@ export async function promptForApiKey(options: {
   providerId: ProviderId;
   envVarName: string;
   homeDir?: string;
+  profileId?: string;
   question?: string;
 }): Promise<PromptForApiKeyResult> {
   const input = await promptForApiKeyInput(options);
@@ -42,7 +43,7 @@ export async function promptForApiKey(options: {
 
   const result: EnvSecretWriteResult = await writeEnvSecret({
     homeDir: options.homeDir,
-    profileId: readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
+    profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
     key: options.envVarName,
     value: input.value,
   });

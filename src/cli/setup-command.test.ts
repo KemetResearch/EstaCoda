@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
@@ -114,7 +114,7 @@ describe("cli setup command", () => {
     expect(result.output).not.toContain("Dry-run apply plan");
   });
 
-  it("cancels reviewed setup without writing config or trust", async () => {
+  it("cancels reviewed setup without applying config changes or trust", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({
       argv: ["setup", "--interactive"],
@@ -126,7 +126,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Review cancelled");
-    await expect(access(profileConfigPath(tempDir))).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     expect(await new WorkspaceTrustStore({
       path: join(tempDir, ".estacoda", "trust.json"),
     }).isTrusted(workspaceRoot)).toBe(false);

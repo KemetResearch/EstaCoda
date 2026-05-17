@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createTelegramPairingCode,
@@ -155,6 +155,8 @@ import {
   type OpenAIModelProbe
 } from "./model-setup.js";
 import { runModelSetupCodex } from "./model-setup-codex.js";
+import { profileCommand } from "./profile-commands.js";
+import type { ProfileContextualizer } from "./profile-state.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -166,6 +168,7 @@ export type CliOptions = {
   argv: string[];
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
   interactive?: boolean;
   tools?: ToolDefinition[];
   prompt?: Prompt;
@@ -174,9 +177,63 @@ export type CliOptions = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  profileContextualizer?: ProfileContextualizer;
 };
 
+export type ParsedGlobalCliOptions =
+  | { ok: true; argv: string[]; profileId?: string }
+  | { ok: false; error: string };
+
+export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliOptions {
+  const nextArgv: string[] = [];
+  let profileId: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--profile" || arg === "-p") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { ok: false, error: `${arg} requires a profile id.` };
+      }
+      try {
+        profileId = normalizeProfileId(value);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      const value = arg.slice("--profile=".length);
+      try {
+        profileId = normalizeProfileId(value);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      continue;
+    }
+    nextArgv.push(arg);
+  }
+
+  return profileId === undefined
+    ? { ok: true, argv: nextArgv }
+    : { ok: true, argv: nextArgv, profileId };
+}
+
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
+  const parsedGlobalOptions = parseGlobalCliOptions(options.argv);
+  if (!parsedGlobalOptions.ok) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: parsedGlobalOptions.error
+    };
+  }
+  options = {
+    ...options,
+    argv: parsedGlobalOptions.argv,
+    profileId: parsedGlobalOptions.profileId ?? options.profileId
+  };
   const [command, ...args] = options.argv;
 
   switch (command) {
@@ -215,7 +272,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "settings":
       return settings(options, args);
     case "profile":
-      return profile(options, args);
+      return profileCommand(options, args);
     case "trace":
       return trace(options, args);
     case "flow":
@@ -318,6 +375,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
+          profileId: options.profileId,
         }),
       });
 
@@ -340,6 +398,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
+          profileId: options.profileId,
         }),
         output: {
           write: (value) => chunks.push(value),
@@ -615,56 +674,8 @@ function formatProviderModel(provider: string, model: string): string {
   return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
 }
 
-async function profile(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand, value] = args;
-
-  if (subcommand === "set") {
-    const mode = parseProfileMode(value, false);
-    const result = await setupProfileConfig({
-      ...options,
-      input: { mode }
-    });
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Profile: ${result.config.profile?.mode ?? mode}.`,
-        `Config: ${result.path}`
-      ].join("\n")
-    };
-  }
-
-  if (subcommand === "language") {
-    const responseLanguage = parseResponseLanguage(value, false);
-    const result = await setupProfileConfig({
-      ...options,
-      input: { responseLanguage }
-    });
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Response language: ${result.config.profile?.responseLanguage ?? responseLanguage}.`,
-        `Config: ${result.path}`
-      ].join("\n")
-    };
-  }
-
-  const config = await loadRuntimeConfig(options);
-  return {
-    handled: true,
-    exitCode: 0,
-    output: [
-      renderProfileStatus(config.profile.mode, config.profile.responseLanguage),
-      "",
-      "Commands:",
-      "  estacoda profile set focused",
-      "  estacoda profile set operator",
-      "  estacoda profile set builder",
-      "  estacoda profile set research",
-      "  estacoda profile language match-user"
-    ].join("\n")
-  };
+function selectedProfileId(options: { homeDir?: string; profileId?: string }): string {
+  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
 }
 
 async function model(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -674,7 +685,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     return {
       handled: true,
       exitCode: 0,
-      output: renderModelStatus(config)
+      output: renderModelStatus(config, options)
     };
   }
 
@@ -1004,6 +1015,7 @@ async function persistModelSelection(
         providerId: resolution.provider,
         envVarName,
         homeDir: options.homeDir,
+        profileId: options.profileId,
         question: `Enter API key for ${resolution.provider} [${envVarName}]: `
       });
 
@@ -1038,7 +1050,7 @@ async function persistModelSelection(
   });
 
   // ── Persist config ──
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = selectedProfileId(options);
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
@@ -1216,6 +1228,7 @@ async function runBareModelPicker(
         providerId: resolution.provider,
         envVarName,
         homeDir: options.homeDir,
+        profileId: options.profileId,
         question: `Enter API key for ${resolution.provider} [${envVarName}]: `
       });
 
@@ -1249,7 +1262,7 @@ async function runBareModelPicker(
   });
 
   // ── Persist config ──
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileId = selectedProfileId(options);
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
@@ -1315,9 +1328,13 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   return diagnosticLines.join("\n");
 }
 
-function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>, options: CliOptions): string {
   const route = config.primaryModelRoute;
+  const profileId = selectedProfileId(options);
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const lines: string[] = [
+    `Profile: ${profileId}`,
+    `Config: ${profilePaths.configPath}`,
     `Primary: ${route.provider}/${route.id}`,
     `Context window: ${formatCount(config.model.contextWindowTokens)} tokens`,
     `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
@@ -1616,6 +1633,11 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const setupState = await collectSetupEntryState(options);
   let config: Awaited<ReturnType<typeof loadRuntimeConfig>> | undefined;
   let configSyntaxError: string | undefined;
+  const activeProfileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const selectedProfile = selectedProfileId(options);
+  const selectedProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
+  const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
 
   try {
     config = await loadRuntimeConfig(options);
@@ -1638,6 +1660,16 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const warnings: string[] = [];
   const notes: string[] = [];
 
+  if (!await pathExists(activeProfilePaths.profileRoot)) {
+    warnings.push(`Active profile is missing: ${activeProfileId}`);
+  }
+  if (!await pathExists(selectedProfilePaths.configPath)) {
+    warnings.push(`Selected profile config is missing: ${selectedProfilePaths.configPath}`);
+  }
+  if (!await trustStoreHealthy(stateHome.trustJsonPath)) {
+    warnings.push(`Global trust store is not valid JSON: ${stateHome.trustJsonPath}`);
+  }
+
   if (config !== undefined && config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
     warnings.push("Configured model context window is below 64K tokens.");
   }
@@ -1652,6 +1684,13 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
+  }
+
+  if (config !== undefined) {
+    const missingProfileEnv = collectMissingProfileEnv(config);
+    if (missingProfileEnv.length > 0) {
+      warnings.push(`Selected profile .env is missing required values: ${missingProfileEnv.join(", ")}`);
+    }
   }
 
   // State directory backup integrity
@@ -1687,6 +1726,10 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       : 1,
     output: [
       "EstaCoda doctor",
+      `Profile: ${selectedProfile}`,
+      `Profile config: ${selectedProfilePaths.configPath}`,
+      `Profile secrets: ${selectedProfilePaths.envPath}`,
+      `Global trust: ${stateHome.trustJsonPath}`,
       `Model: ${config === undefined ? "unknown/unknown" : `${config.model.provider}/${config.model.id}`}`,
       `Web extraction: ${config === undefined ? "unknown" : config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config?.browser.backend ?? "unknown"}`,
@@ -1784,6 +1827,46 @@ function renderLiveToolDiagnostic(diagnostic: LiveToolDiagnostic): string {
       ? "Live tool status: ready"
       : `Live tool warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
   ].join("\n");
+}
+
+function collectMissingProfileEnv(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string[] {
+  const envVars = new Set<string>();
+  if (config.primaryModelRoute.apiKeyEnv !== undefined) {
+    envVars.add(config.primaryModelRoute.apiKeyEnv);
+  }
+  for (const route of config.modelFallbackRoutes) {
+    if (route.apiKeyEnv !== undefined) {
+      envVars.add(route.apiKeyEnv);
+    }
+  }
+  for (const missing of config.channels.telegram.missing ?? []) {
+    envVars.add(missing);
+  }
+  return [...envVars].filter((envVar) => process.env[envVar] === undefined).sort();
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function trustStoreHealthy(path: string): Promise<boolean> {
+  try {
+    JSON.parse(await readFile(path, "utf8"));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return true;
+    }
+    return false;
+  }
 }
 
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -1988,7 +2071,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
 
   if (subcommand === "verify") {
     const config = await loadRuntimeConfig(options);
-    const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+    const profileId = selectedProfileId(options);
     const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
     const verification = await verifyImageGeneration({
       imageGen: config.imageGen,

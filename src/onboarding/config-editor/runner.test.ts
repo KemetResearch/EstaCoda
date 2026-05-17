@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
-import { resolveProfileStateHome } from "../../config/profile-home.js";
+import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -167,6 +167,44 @@ describe("runConfigEditor", () => {
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
     expect(config.providers).toEqual((localReadyConfig() as { providers: unknown }).providers);
   });
+
+  it("writes active profile config without prompting for profile awareness", async () => {
+    await writeUserConfig(tempDir, localReadyConfig("default-local"), "default");
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig("work-local"),
+      security: { approvalMode: "adaptive" },
+    }, "work");
+    writeActiveProfile("work", { homeDir: tempDir });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["strict"] }),
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    const defaultConfig = JSON.parse(await readFile(profileConfigPath(tempDir, "default"), "utf8")) as {
+      model?: { id?: string };
+      security?: { approvalMode?: string };
+    };
+    const workConfig = JSON.parse(await readFile(profileConfigPath(tempDir, "work"), "utf8")) as {
+      model?: { id?: string };
+      security?: { approvalMode?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.output).not.toMatch(/\bprofiles?\b/iu);
+    expect(defaultConfig.model?.id).toBe("default-local");
+    expect(defaultConfig.security?.approvalMode).toBeUndefined();
+    expect(workConfig.model?.id).toBe("work-local");
+    expect(workConfig.security?.approvalMode).toBe("strict");
+  });
+
 
   it("applies reviewed workflow learning changes while preserving unrelated skill config", async () => {
     await writeUserConfig(tempDir, {
@@ -928,18 +966,18 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   return prompt;
 }
 
-async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = profileConfigPath(homeDir);
+async function writeUserConfig(homeDir: string, config: unknown, profileId = "default"): Promise<void> {
+  const configPath = profileConfigPath(homeDir, profileId);
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-function profileConfigPath(homeDir: string): string {
-  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+function profileConfigPath(homeDir: string, profileId = "default"): string {
+  return resolveProfileStateHome({ homeDir, profileId }).configPath;
 }
 
-function profileEnvPath(homeDir: string): string {
-  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
+function profileEnvPath(homeDir: string, profileId = "default"): string {
+  return resolveProfileStateHome({ homeDir, profileId }).envPath;
 }
 
 async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<void> {

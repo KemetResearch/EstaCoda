@@ -811,8 +811,8 @@ function launchHandoffIntentForApplyEndState(endState: LaunchableApplyEndState):
   };
 }
 
-function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeDir">): string {
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeDir" | "profileId">): string {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
@@ -1032,7 +1032,7 @@ async function reviewAndApplyResolvedRoute(
   ) {
     await writeEnvSecret({
       homeDir: options.homeDir,
-      profileId: readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
+      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
       key: credentialResult.pendingCredentialWrite.envVarName,
       value: credentialResult.pendingCredentialWrite.value,
     });
