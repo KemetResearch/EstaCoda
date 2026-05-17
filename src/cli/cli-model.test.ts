@@ -502,8 +502,121 @@ describe("cli model", () => {
       expect(result.output).toContain("Tools:");
       expect(result.output).toContain("Vision:");
       expect(result.output).toContain("Structured output:");
-      expect(result.output).toContain("Network:");
+      expect(result.output).toContain("Provider network: not applicable");
+      expect(result.output).toContain("Web extraction: disabled");
       expect(result.output).toContain("Fallbacks: none");
+    });
+
+    it("uses provider network status when provider network is enabled and web extraction is disabled", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.openai.com/v1",
+            models: ["gpt-4o"],
+            enableNetwork: true
+          }
+        },
+        web: {
+          enableNetwork: false
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Provider network: enabled");
+      expect(result.output).not.toContain("Provider network: disabled");
+      expect(result.output).toContain("Web extraction: disabled");
+    });
+
+    it("uses provider network status when provider network is disabled and web extraction is enabled", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.openai.com/v1",
+            models: ["gpt-4o"],
+            enableNetwork: false
+          }
+        },
+        web: {
+          enableNetwork: true
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Provider network: disabled");
+      expect(result.output).not.toContain("Provider network: enabled");
+      expect(result.output).toContain("Web extraction: enabled");
+    });
+
+    it("renders local provider network as not applicable", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b"],
+            enableNetwork: true
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Provider network: not applicable");
+    });
+
+    it("renders missing provider config network status as unknown", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {},
+        model: {
+          provider: "missing",
+          id: "ghost-model"
+        }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Primary: missing/ghost-model");
+      expect(result.output).toContain("Provider network: unknown");
     });
   });
 
