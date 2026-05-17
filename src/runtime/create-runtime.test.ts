@@ -230,7 +230,7 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     );
     const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
-    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    await trustStore.grant(options.workspaceRoot);
     const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
     try {
       const readiness = await runtime.getStartupReadiness();
@@ -261,7 +261,7 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     );
     const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
-    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    await trustStore.grant(options.workspaceRoot);
     const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
     try {
       const readiness = await runtime.getStartupReadiness();

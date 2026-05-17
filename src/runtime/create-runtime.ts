@@ -419,7 +419,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createProcessTools({ processManager })) {
     toolRegistry.register(tool);
   }
-  for (const tool of createWorkspaceTrustTools({ workspaceRoot, profileId, trustStore })) {
+  for (const tool of createWorkspaceTrustTools({ workspaceRoot, trustStore })) {
     toolRegistry.register(tool);
   }
   for (const tool of createConfigTools({
@@ -562,7 +562,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
       return await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
-          profileId,
           sessionId,
           mode: activeSecurityMode
         });
@@ -584,7 +583,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     manager: delegationManager,
     parentSessionId: sessionId,
     profileId,
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
+    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   })) {
     toolRegistry.register(tool);
   }
@@ -594,7 +593,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     trajectoryRecorder,
     sessionId,
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
+    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   }));
   const providerToolAvailability = await toolRegistry.snapshot();
 
@@ -804,7 +803,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
     },
     async handle(input) {
-      const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot, { profileId });
+      const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
       // If an active TaskFlow is set, route through the adapter
@@ -831,7 +830,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async executeTool(input) {
-      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot, { profileId });
+      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
       return await toolExecutor.executeTool({
         tool: input.tool,
@@ -854,7 +853,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async grantApproval(input) {
       await options.approvalController?.grant({
         workspaceRoot,
-        profileId,
         sessionId,
         toolName: input.toolName,
         riskClass: input.riskClass,
@@ -866,7 +864,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async inspectApprovals() {
       return await options.approvalController?.inspect({
         workspaceRoot,
-        profileId,
         sessionId
       }) ?? {
         session: [],
@@ -876,8 +873,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async revokeApproval(id) {
       return await options.approvalController?.revokePersistent({
         id,
-        workspaceRoot,
-        profileId
+        workspaceRoot
       }) ?? false;
     },
     securityMode() {
@@ -896,15 +892,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async trustWorkspace() {
       await trustStore.grant(workspaceRoot, {
-        profileId,
         label: "EstaCoda workspace"
       });
     },
     isWorkspaceTrusted() {
-      return trustStore.isTrusted(workspaceRoot, { profileId });
+      return trustStore.isTrusted(workspaceRoot);
     },
     revokeWorkspaceTrust() {
-      return trustStore.revoke(workspaceRoot, { profileId });
+      return trustStore.revoke(workspaceRoot);
     },
     async dispose() {
       if (disposed) {
@@ -976,7 +971,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async getStartupReadiness() {
-      const workspaceTrusted = await trustStore.isTrusted(workspaceRoot, { profileId });
+      const workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
       const verificationReport = await collectSetupVerificationReport({
         workspaceRoot,
         homeDir: options.homeDir,
