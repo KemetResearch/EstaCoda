@@ -173,6 +173,10 @@ Configured, degraded, untrusted, and repair states use the guided setup editor. 
 
 Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
 
+Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in first-run guided onboarding. Guided onboarding copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
+
+`estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+
 Optional capabilities stay separate from the primary LLM route:
 
 | Optional capability | Setup behavior |

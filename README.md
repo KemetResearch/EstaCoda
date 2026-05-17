@@ -70,9 +70,12 @@ Advanced users can still use direct provider/model setup flags:
 ```bash
 estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
 estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+estacoda model setup codex
 ```
 
 These direct flags are advanced compatibility paths. Guided setup and repair use the shared provider/model flow and reviewed apply path.
+
+`estacoda model setup codex` is the implemented Codex OAuth setup path. It uses OAuth device-code authentication, stores tokens in `~/.estacoda/auth.json`, configures the `codex/o3` route, and does not print raw OAuth tokens. Route config remains separate from token storage. First-run guided onboarding does not complete Codex OAuth itself.
 
 ## Core Capabilities
 
