@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ThemeDefinition } from "../contracts/theme.js";
 import type { ToolsetName } from "../contracts/tool.js";
+import type { ResolvedTokens } from "../contracts/ui-tokens.js";
+import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { resolveTokens } from "../theme/token-resolver.js";
+
+type FingerprintOptions = Parameters<typeof computeRuntimeFingerprint>[1];
 
 function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): LoadedRuntimeConfig {
   return {
@@ -53,7 +59,10 @@ function fakeOptions(overrides?: Partial<{
   approvalControllerPresent: boolean;
   explicitSecurityPolicyPresent: boolean;
   currentPlatform: string;
-}>): Required<Omit<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath">> & Partial<Pick<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath">> {
+  theme?: ThemeDefinition;
+  tokens?: ResolvedTokens;
+}>): Required<Omit<FingerprintOptions, "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath" | "theme" | "tokens">> &
+  Partial<Pick<FingerprintOptions, "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath" | "theme" | "tokens">> {
   return {
     profileId: "default",
     workspaceRoot: "/workspace",
@@ -783,6 +792,42 @@ describe("computeRuntimeFingerprint", () => {
     expect("sessionId" in fp).toBe(false);
     expect("sessionMetadata" in fp).toBe(false);
     expect("theme" in fp).toBe(false);
+  });
+
+  it("captures token skin and theme identity when tokens are supplied", () => {
+    const fp = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig(),
+      fakeOptions({ tokens: resolveTokens("standard", "dark", "kemetBlue") })
+    );
+
+    expect(fp.runtimeUiIdentity).toBe("kemetBlue-dark");
+  });
+
+  it("prefers token identity over legacy theme name when both are supplied", () => {
+    const fp = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig(),
+      fakeOptions({
+        theme: kemetBlueTheme,
+        tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      })
+    );
+
+    expect(fp.runtimeUiIdentity).toBe("kemetBlue-dark");
+  });
+
+  it("preserves legacy theme fingerprint identity when only theme is supplied", () => {
+    const fp = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig(),
+      fakeOptions({ theme: kemetBlueTheme })
+    );
+
+    expect(fp.runtimeUiIdentity).toBe(kemetBlueTheme.name);
+  });
+
+  it("omits runtime UI identity when no theme or tokens are supplied", () => {
+    const fp = computeRuntimeFingerprint(fakeLoadedRuntimeConfig(), fakeOptions());
+
+    expect("runtimeUiIdentity" in fp).toBe(false);
   });
 
   it("trustStorePath change changes fingerprint", () => {
