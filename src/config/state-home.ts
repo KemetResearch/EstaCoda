@@ -17,6 +17,9 @@ export type StateHomePaths = {
   authJsonPath: string;
 };
 
+// Returns legacy default profile paths + global paths. Prefer
+// resolveProfileStateHome() for selected profile state. Kept temporarily for
+// staged-PR compatibility; will be removed in PR 3.
 export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths {
   const homeDir = options?.homeDir ?? process.env.HOME ?? homedir() ?? "";
   const stateRoot = join(homeDir, ".estacoda");
