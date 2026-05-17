@@ -68,6 +68,8 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 - Explicit `{ provider, model }` requests are supported by `ProviderExecutor`.
 - Chat-capable providers can be live inference routes.
 - Vision routing is implemented in code, but live success depends on actual provider capability plus working credentials.
+- `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+- Codex OAuth setup lives on the model setup surface, not in first-run guided onboarding. If guided onboarding later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
 
 ## Provider Hardening
 

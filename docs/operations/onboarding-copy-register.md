@@ -1,8 +1,8 @@
 # Onboarding Copy Register
 
-Status: PR12 audit/register only. Do not treat proposed copy as implemented until a later copy PR wires it into `setup-copy.ts`, view models, or renderers.
+Status: PR12 audit/register, updated by PR6 docs alignment. Do not treat proposed onboarding copy as implemented until a later copy PR wires it into `setup-copy.ts`, view models, or renderers.
 
-Baseline: `integration/v0.1.0` after PR14 OAuth token-store foundations.
+Baseline: `codex/pr6-copy-docs-alignment` after Codex model setup and OAuth device-code output landed.
 
 ## Summary
 
@@ -13,7 +13,8 @@ Counts in this register:
 - Total copy items logged: 30
 - Required: 24
 - Polish: 4
-- Future/deferred: 2
+- Current boundary note: 1
+- Future/deferred: 1
 
 Required implementation copy changes:
 
@@ -28,16 +29,19 @@ Polish-only copy changes:
 - Make first-run/local-provider copy less informal.
 - Normalize optional media capability wording so voice, vision, image generation, and browser remain separate from primary LLM routing.
 
+Current model-setup boundary copy:
+
+- Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in first-run guided onboarding. Guided onboarding copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
+
 Future/deferred copy:
 
-- OAuth/Codex setup copy must remain deferred until an onboarding PR explicitly implements those setup flows.
 - `/model` switching copy must remain outside onboarding copy until the model switcher surface is implemented.
 - Gateway model cards are not part of guided setup and should not be introduced here.
 - Runtime setup mutation tools are not exposed; copy must not imply that they exist.
 
 Unsupported feature claims found:
 
-- No onboarding source currently claims OAuth/Codex setup is implemented. PR14 added provider-owned OAuth storage foundations only.
+- No first-run guided onboarding source currently owns Codex OAuth setup. `estacoda model setup codex` is implemented on the model setup surface and owns the OAuth device-code flow.
 - Docs mention `/model` in non-onboarding architecture/manual QA contexts; this PR should not copy that into guided setup.
 - `config-editor/prompts.ts` includes "Use image gateway if configured?" for the vision/image-generation capability. That is an existing optional capability setting, not a gateway card. Keep wording narrow so it does not imply new gateway setup cards.
 
@@ -53,7 +57,7 @@ Recommended implementation order for a later copy PR:
 2. Replace hardcoded English in `config-editor/render.ts` and `config-editor/prompts.ts` with setup copy lookups.
 3. Add tests that Arabic copy isolates env vars, commands, paths, provider/model IDs, route/auth IDs, and optional capability IDs.
 4. Update snapshot/behavior tests only after copy keys are wired and reviewed.
-5. Leave future OAuth/Codex, `/model`, gateway cards, and runtime mutation-tool copy out of this implementation pass.
+5. Leave first-run guided Codex OAuth claims, `/model`, gateway cards, and runtime mutation-tool copy out of this implementation pass. If guided onboarding later offers Codex OAuth, it must delegate to the model setup/OAuth boundary rather than reimplementing token handling.
 
 ## Audit Searches Run
 
@@ -94,7 +98,7 @@ Recommended implementation order for a later copy PR:
 | 26 | `setupEditor.prompt.voice.*` | `src/onboarding/config-editor/prompts.ts` | `Choose a TTS provider.`, `TTS model:`, `TTS API key environment variable:` etc. | Hardcoded; could blur voice provider with LLM provider route. | Choose voice providers and env-var references. Voice setup is optional and separate from the primary LLM route. | اختر مزوّدي الصوت ومراجع متغيرات البيئة. إعداد الصوت اختياري ومنفصل عن مسار LLM الأساسي. | `TTS`, `STT`, provider IDs, model IDs, env vars | voice optional capability | required | Explicitly separate from core provider route. |
 | 27 | `setupEditor.prompt.vision.*` | `src/onboarding/config-editor/prompts.ts` | `Choose an image generation provider.`, `Use image gateway if configured?` | Hardcoded; "gateway" can sound like gateway cards. | Choose image-generation provider references. This does not change the primary LLM route. | اختر مراجع مزوّد توليد الصور. هذا لا يغيّر مسار LLM الأساسي. | image provider IDs, model IDs, `FAL_KEY`, `fal-ai/imagen4/preview` | vision/image optional capability | required | Keep gateway wording scoped to existing `useGateway` config. |
 | 28 | `setupEditor.prompt.browser.*` | `src/onboarding/config-editor/prompts.ts` | `Choose a browser backend. Browser setup will not launch a browser during planning.`, CDP/command prompts | Hardcoded; no Arabic; contains URL/command tokens. | Choose a browser backend. Setup records references only and will not launch a browser during planning. | اختر واجهة متصفح. يسجّل الإعداد المراجع فقط ولن يشغّل متصفحًا أثناء التخطيط. | backend IDs, `http://127.0.0.1:9222`, launch command | browser optional capability | required | Preserve PR9 no-auto-launch guarantee. |
-| 29 | `setupCopy.future.oauthCodex` | no onboarding implementation copy | none | Provider PR14 added OAuth storage foundations, but onboarding must not claim OAuth/Codex setup. | Future: OAuth/Codex setup copy is intentionally absent until onboarding implements that flow. | مستقبلي: نسخة إعداد OAuth/Codex غائبة عمدًا حتى يطبّق الإعداد هذا المسار. | `OAuth`, `Codex`, provider IDs | future provider setup | future | Register boundary; do not add UI copy yet. |
+| 29 | `setupCopy.boundary.oauthCodex` | no first-run onboarding implementation copy | none | Codex OAuth setup exists, but it belongs to `estacoda model setup codex`, not first-run guided onboarding. | Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in first-run guided onboarding. Guided onboarding copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow. | إعداد Codex OAuth مطبّق في واجهة إعداد النموذج (`estacoda model setup codex`) وليس في الإعداد الموجّه لأول تشغيل. يجب ألا توحي نسخة الإعداد الموجّه بأنها تستطيع إكمال Codex OAuth حتى تفوّض ذلك صراحة إلى هذا المسار. | `OAuth`, `Codex`, `estacoda model setup codex`, provider IDs | provider setup boundary | required | Register boundary; do not add first-run UI copy for OAuth. Token handling stays owned by model setup/OAuth storage. |
 | 30 | `setupCopy.future.modelSwitcherGatewayCards` | non-onboarding docs mention `/model` and gateway | none in onboarding setup copy | Avoid importing future `/model` or gateway card claims into setup. | Future: `/model` and gateway card copy belongs to those surfaces, not guided setup. | مستقبلي: نسخة `/model` وبطاقات gateway تخص تلك الواجهات، لا الإعداد الموجّه. | `/model`, `gateway`, route IDs | future model/gateway surfaces | future | Keep PR12 out of model switcher/gateway card work. |
 
 ## Additional Observations
@@ -103,4 +107,5 @@ Recommended implementation order for a later copy PR:
 - `src/onboarding/setup-modules.ts` has blocker strings such as "Hosted providers require a credential environment-variable reference." These should either become setup copy keys or remain internal diagnostics that are rendered through a copy-aware layer.
 - `src/onboarding/config-editor/runner.ts` contains diagnostic output strings for provider/model selection failures and active-route credential repair. These are behaviorally correct but should be registered as copy keys before Arabic guided repair is considered complete.
 - `src/onboarding/setup-state-renderer.ts` is deterministic and useful for tests, but its direct provider examples and command strings need explicit token-isolation metadata if rendered in Arabic later.
-- Existing `README.md` setup text reflects current implemented behavior after PR11. Do not add OAuth/Codex or `/model` claims to setup docs until those flows exist.
+- `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+- Existing first-run setup text reflects current implemented behavior. Do not add first-run guided OAuth/Codex claims unless guided onboarding deliberately delegates to `estacoda model setup codex`.
