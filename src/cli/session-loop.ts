@@ -1,4 +1,5 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import { homedir } from "node:os";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -33,6 +34,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -596,8 +598,9 @@ export async function handleSlashCommand(input: {
       }
       const { FileHandoffStore } = await import("../channels/handoff-store.js");
       const { join } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const store = new FileHandoffStore({ path: join(homedir(), ".estacoda", "handoff-codes.json") });
+      const profileId = await runtimeProfileId(input.runtime);
+      const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+      const store = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
       const handoff = await store.create({
         sessionId: input.runtime.sessionId,
         surfaceType: surface,

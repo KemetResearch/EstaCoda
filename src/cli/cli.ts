@@ -62,7 +62,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveStateHome } from "../config/state-home.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -1918,7 +1918,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Defaults:",
         "  TTS: edge, no API key",
         "  STT: local Whisper, model base",
-        "  CLI audio target: ~/.estacoda/audio-cache/ for generated speech and transcripts"
+        "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
     };
   }
@@ -1972,7 +1972,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Defaults:",
         "  Provider: fal",
         "  Model: fal-ai/flux-2/klein/9b",
-        "  Cache: ~/.estacoda/image-cache/"
+        "  Cache: selected profile image-cache/"
       ].join("\n")
     };
   }
@@ -1988,10 +1988,13 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
 
   if (subcommand === "verify") {
     const config = await loadRuntimeConfig(options);
+    const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+    const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
     const verification = await verifyImageGeneration({
       imageGen: config.imageGen,
       telegramReady: config.channels.telegram.ready,
       homeDir: options.homeDir,
+      imageCachePath: profilePaths.imageCachePath,
       workspaceRoot: options.workspaceRoot,
       fetch: options.imageGenerationFetch,
       checkProvider: !hasFlag(args, "--skip-provider-check")
@@ -2093,7 +2096,7 @@ function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     extra,
     `Gateway: ${config.imageGen.useGateway ? "yes" : "no"}`,
     `API key: ${key}`,
-    `Cache: ~/.estacoda/image-cache/`,
+    "Cache: selected profile image-cache/",
     "Agent tool: image.generate",
     "Telegram delivery: generated images upload as photos when available."
   ].filter((line) => line !== undefined).join("\n");
@@ -2824,32 +2827,37 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   const [subcommand, ...rest] = args;
 
   if (subcommand === "status") {
-    const result = await runGatewayStatus(options);
+    const result = await runGatewayStatus({ ...options, profileId: parseGatewayProfileFlag(rest) });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "diagnose") {
-    const result = await runGatewayDiagnose(options);
+    const result = await runGatewayDiagnose({ ...options, profileId: parseGatewayProfileFlag(rest) });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "stop") {
+    const profileId = parseGatewayProfileFlag(rest);
     const result = await runGatewayStop({
       ...options,
+      profileId,
       force: hasFlag(rest, "--force")
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "restart") {
+    const profileId = parseGatewayProfileFlag(rest);
     const result = await runGatewayRestart({
       ...options,
+      profileId,
       graceful: hasFlag(rest, "--graceful"),
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "start") {
+    const profileId = parseGatewayProfileFlag(rest);
     const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
     const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
     if (foundDeprecated !== undefined) {
@@ -2872,7 +2880,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     }
 
     if (hasFlag(rest, "--dry-run")) {
-      const result = await runGatewayStartDryRun(options);
+      const result = await runGatewayStartDryRun({ ...options, profileId });
       return {
         handled: true,
         exitCode: result.ok ? 0 : 1,
@@ -2881,7 +2889,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     }
 
     if (hasFlag(rest, "--background")) {
-      const result = await runGatewayStartBackground(options);
+      const result = await runGatewayStartBackground({ ...options, profileId });
       return {
         handled: true,
         exitCode: result.ok ? 0 : 1,
@@ -2891,6 +2899,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
 
     const result = await runGatewaySupervisor({
       ...options,
+      profileId,
       once: hasFlag(rest, "--once"),
       telegramFetch: options.telegramFetch,
     });
@@ -2917,6 +2926,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway start --dry-run",
       "  estacoda gateway start --background",
       "  estacoda gateway start --once",
+      "  estacoda gateway start --profile <id>",
     ].join("\n"),
   };
 }
@@ -3377,6 +3387,11 @@ function hasFlag(args: string[], ...flags: string[]): boolean {
 function valueAfter(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index < 0 ? undefined : args[index + 1];
+}
+
+function parseGatewayProfileFlag(args: string[]): string | undefined {
+  const raw = valueAfter(args, "--profile");
+  return raw === undefined ? undefined : normalizeProfileId(raw);
 }
 
 function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {

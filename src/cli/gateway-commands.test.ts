@@ -56,7 +56,7 @@ import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 
 function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
   return {
@@ -122,13 +122,13 @@ function defaultProfileConfigPath(homeDir: string): string {
 }
 
 async function writeRawAdapterRuntimeState(homeDir: string, content: string): Promise<void> {
-  const path = join(homeDir, ".estacoda", "gateway", RUNTIME_STATE_FILE);
+  const path = join(resolveProfileStateHome({ homeDir, profileId: "default" }).gatewayStatePath, RUNTIME_STATE_FILE);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
 }
 
 async function writeStaleLock(homeDir: string, kind: string, content: string): Promise<void> {
-  const locksDir = join(homeDir, ".estacoda", "gateway", "locks");
+  const locksDir = join(resolveProfileStateHome({ homeDir, profileId: "default" }).gatewayStatePath, "locks");
   await mkdir(locksDir, { recursive: true });
   await writeFile(join(locksDir, `identity-${kind}-deadbeef.lock`), content, "utf8");
 }
@@ -140,10 +140,12 @@ async function makeTempDir(): Promise<string> {
 describe("gateway commands", () => {
   let tmpDir: string;
   let stateRoot: string;
+  let profilePaths: ProfileStatePaths;
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
+    profilePaths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
     await mkdir(stateRoot, { recursive: true });
     fsPromisesMock.rename.mockClear();
     childProcessMock.spawn.mockReset();
@@ -167,7 +169,10 @@ describe("gateway commands", () => {
     });
 
     it("shows cron jobs", async () => {
-      const cronStore = new CronStore({ homeDir: tmpDir });
+      const cronStore = new CronStore({
+        path: join(profilePaths.cronPath, "jobs.json"),
+        outputRoot: join(profilePaths.cronPath, "output"),
+      });
       await cronStore.create({ schedule: "1h", prompt: "test job" });
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
@@ -224,7 +229,11 @@ describe("gateway commands", () => {
     });
 
     it("shows recent delivery errors", async () => {
-      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const router = new DeliveryRouter({
+        homeDir: tmpDir,
+        deliveryRoot: join(profilePaths.gatewayStatePath, "delivery"),
+        deliveryErrorLogPath: join(profilePaths.gatewayStatePath, "logs", "delivery-errors.jsonl"),
+      });
       await router.deliverText([{ kind: "channel", platform: "telegram", chatId: "123" }], "test");
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
@@ -234,7 +243,7 @@ describe("gateway commands", () => {
     });
 
     it("shows surface pointers", async () => {
-      const store = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const store = new FileSurfacePointerStore({ path: join(profilePaths.gatewayStatePath, "surface-pointers.json") });
       await store.setPointer("telegram", "chat-1", { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z", homeDelivery: "local" });
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
@@ -246,7 +255,7 @@ describe("gateway commands", () => {
     });
 
     it("shows approvals block with policy and granted count", async () => {
-      const store = new ChannelApprovalStore({ path: join(stateRoot, "channel-approvals.json") });
+      const store = new ChannelApprovalStore({ path: join(profilePaths.gatewayStatePath, "channel-approvals.json") });
       await store.grant({
         sessionKey: { platform: "telegram", chatId: "123", userId: "u1" },
         toolName: "terminal",
@@ -273,8 +282,8 @@ describe("gateway commands", () => {
     });
 
     it("shows Supervisor block with PID and lifecycle when state exists", async () => {
-      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.5" });
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -294,7 +303,7 @@ describe("gateway commands", () => {
 
     it("does not show identity lock block when only healthy locks exist", async () => {
       const hash = "a".repeat(64);
-      await acquireAdapterIdentityLock(tmpDir, "telegram", hash);
+      await acquireAdapterIdentityLock(profilePaths, "telegram", hash);
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -304,7 +313,7 @@ describe("gateway commands", () => {
 
     it("shows corrupt identity lock in status", async () => {
       const { writeFile, mkdir } = await import("node:fs/promises");
-      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      const locksDir = join(profilePaths.gatewayStatePath, "locks");
       await mkdir(locksDir, { recursive: true });
       await writeFile(
         join(locksDir, "identity-telegram-deadbeef.lock"),
@@ -322,7 +331,7 @@ describe("gateway commands", () => {
     });
     it("shows stale identity lock in status", async () => {
       const { writeFile, mkdir } = await import("node:fs/promises");
-      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      const locksDir = join(profilePaths.gatewayStatePath, "locks");
       await mkdir(locksDir, { recursive: true });
       await writeFile(
         join(locksDir, "identity-telegram-deadbeef.lock"),
@@ -339,8 +348,8 @@ describe("gateway commands", () => {
     });
 
     it("shows Runtime Cache and Active Turns blocks when state is trustworthy", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState());
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), fakeRuntimeCacheState());
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -351,9 +360,9 @@ describe("gateway commands", () => {
     });
 
     it("omits runtime-cache blocks when state is stale", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
       const staleState = fakeRuntimeCacheState({ writtenAt: new Date(Date.now() - 300_000).toISOString() });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), staleState);
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), staleState);
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -362,9 +371,9 @@ describe("gateway commands", () => {
     });
 
     it("omits runtime-cache blocks when PID mismatches", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
       const mismatchedState = fakeRuntimeCacheState({ supervisorPid: 99999 });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), mismatchedState);
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), mismatchedState);
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -373,8 +382,8 @@ describe("gateway commands", () => {
     });
 
     it("omits runtime-cache blocks when supervisor is not live", async () => {
-      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState({ supervisorPid: 99999 }));
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), fakeRuntimeCacheState({ supervisorPid: 99999 }));
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -417,7 +426,7 @@ describe("gateway commands", () => {
     });
 
     it("reports stale PID as unhealthy", async () => {
-      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Supervisor");
       expect(result.output).toContain("PID healthy: no");
@@ -425,7 +434,7 @@ describe("gateway commands", () => {
 
     it("reports stale identity lock in diagnose", async () => {
       const { writeFile, mkdir } = await import("node:fs/promises");
-      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      const locksDir = join(profilePaths.gatewayStatePath, "locks");
       await mkdir(locksDir, { recursive: true });
       await writeFile(
         join(locksDir, "identity-telegram-deadbeef.lock"),
@@ -445,7 +454,7 @@ describe("gateway commands", () => {
     it("diagnose output does not contain raw token from lock file", async () => {
       const rawToken = "super_secret_bot_token_xyz";
       const { writeFile, mkdir } = await import("node:fs/promises");
-      const locksDir = join(tmpDir, ".estacoda", "gateway", "locks");
+      const locksDir = join(profilePaths.gatewayStatePath, "locks");
       await mkdir(locksDir, { recursive: true });
       await writeFile(
         join(locksDir, "identity-discord-abc123de.lock"),
@@ -459,9 +468,9 @@ describe("gateway commands", () => {
     });
 
     it("reports stale runtime-cache-state warning", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
       const staleState = fakeRuntimeCacheState({ writtenAt: new Date(Date.now() - 300_000).toISOString() });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), staleState);
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), staleState);
 
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Runtime Cache");
@@ -470,9 +479,9 @@ describe("gateway commands", () => {
     });
 
     it("reports PID-mismatch runtime-cache-state warning", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
       const mismatchedState = fakeRuntimeCacheState({ supervisorPid: 99999 });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), mismatchedState);
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), mismatchedState);
 
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Runtime Cache");
@@ -480,8 +489,8 @@ describe("gateway commands", () => {
     });
 
     it("reports supervisor-not-live runtime-cache-state warning", async () => {
-      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), fakeRuntimeCacheState({ supervisorPid: 99999 }));
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), fakeRuntimeCacheState({ supervisorPid: 99999 }));
 
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Runtime Cache");
@@ -489,11 +498,11 @@ describe("gateway commands", () => {
     });
 
     it("reports suspended sessions warning in diagnose", async () => {
-      await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
       const state = fakeRuntimeCacheState({
         suspendedSummary: [{ sessionId: "sess-1", reason: "stuck-loop", suspendedAt: new Date().toISOString() }],
       });
-      await writeRuntimeCacheState(runtimeCacheStatePath(tmpDir), state);
+      await writeRuntimeCacheState(runtimeCacheStatePath(profilePaths), state);
 
       const result = await runGatewayDiagnose({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Suspended Sessions");
@@ -555,8 +564,8 @@ describe("gateway commands", () => {
 
     describe("telegram runtime extension", () => {
       it("shows adapter runtime state when supervisor is live and state is trustworthy", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram"));
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(profilePaths, fakeAdapterRuntimeState("telegram"));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("State: healthy");
@@ -566,7 +575,7 @@ describe("gateway commands", () => {
       });
 
       it("shows unavailable when supervisor is not live", async () => {
-        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram"));
+        await writeAdapterRuntimeState(profilePaths, fakeAdapterRuntimeState("telegram"));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("Runtime state: unavailable (supervisor not running)");
@@ -574,14 +583,14 @@ describe("gateway commands", () => {
       });
 
       it("shows unavailable when runtime state file is missing", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("Runtime state: unavailable (adapter runtime state not found)");
       });
 
       it("shows unavailable when runtime state file is corrupt", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
         await writeRawAdapterRuntimeState(tmpDir, "{ not json");
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
@@ -589,31 +598,31 @@ describe("gateway commands", () => {
       });
 
       it("shows stale warning when runtime state is old", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram", { updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString() }));
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(profilePaths, fakeAdapterRuntimeState("telegram", { updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString() }));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("Runtime state: stale (last update >5min ago)");
       });
 
       it("shows stale warning when runtime state PID mismatches", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram", { supervisorPid: 99999 }));
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(profilePaths, fakeAdapterRuntimeState("telegram", { supervisorPid: 99999 }));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("Runtime state: stale (supervisor restarted since last update)");
       });
 
       it("shows not-registered when adapter entry is missing", async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-        await writeAdapterRuntimeState(tmpDir, { ...fakeAdapterRuntimeState("discord"), adapters: [] });
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(profilePaths, { ...fakeAdapterRuntimeState("discord"), adapters: [] });
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain("Adapter: not registered in runtime state");
       });
 
       it("shows identity lock status when locked", async () => {
-        await acquireAdapterIdentityLock(tmpDir, "telegram", "a".repeat(64));
+        await acquireAdapterIdentityLock(profilePaths, "telegram", "a".repeat(64));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
         expect(result.output).toContain(`Identity lock: locked (pid ${process.pid})`);
@@ -665,9 +674,9 @@ describe("gateway commands", () => {
 
     for (const channel of ["discord", "email", "whatsapp"] as const) {
       it(`shows runtime state, identity lock, and busy policy for ${channel}`, async () => {
-        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
-        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState(channel));
-        await acquireAdapterIdentityLock(tmpDir, channel, "b".repeat(64));
+        await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(profilePaths, fakeAdapterRuntimeState(channel));
+        await acquireAdapterIdentityLock(profilePaths, channel, "b".repeat(64));
 
         const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel });
         expect(result.output).toContain("State: healthy");
@@ -680,7 +689,7 @@ describe("gateway commands", () => {
 
   describe("runGatewayStop", () => {
     it("reports was not running with stale PID", async () => {
-      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
       const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
       expect(result.output).toContain("was not running");
@@ -694,14 +703,14 @@ describe("gateway commands", () => {
     });
 
     it("reports live lock exists when no PID but live lock is held", async () => {
-      await acquireGatewayLock(tmpDir);
-      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.1" });
+      await acquireGatewayLock(profilePaths);
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.1" });
 
       const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
       expect(result.output).toBe("Gateway is not running (live operation lock exists)");
 
-      await releaseGatewayLock(tmpDir);
+      await releaseGatewayLock(profilePaths);
     });
   });
 
@@ -800,7 +809,7 @@ describe("gateway commands", () => {
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Gateway started (PID 12346)");
-      expect(result.output).toContain(join(tmpDir, ".estacoda", "logs", "gateway.log"));
+      expect(result.output).toContain(join(profilePaths.logsPath, "gateway.log"));
       expect(childProcessMock.spawn).toHaveBeenCalledWith(
         expect.any(String),
         expect.arrayContaining(["gateway", "start"]),
@@ -823,7 +832,7 @@ describe("gateway commands", () => {
         const childArgs = childProcessMock.spawn.mock.calls[0]?.[1] as string[];
         expect(childArgs.slice(0, 2)).toEqual(["--import", "tsx"]);
         expect(childArgs[2]).toBe(process.argv[1]);
-        expect(childArgs.slice(-2)).toEqual(["gateway", "start"]);
+        expect(childArgs.slice(-4)).toEqual(["gateway", "start", "--profile", "default"]);
         expect(childArgs).not.toContain("--background");
       } finally {
         process.execArgv.splice(0, process.execArgv.length, ...originalExecArgv);
@@ -838,7 +847,7 @@ describe("gateway commands", () => {
     });
 
     it("stops stale PID then background-starts", async () => {
-      await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
 
       const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Gateway was not running");
@@ -857,12 +866,12 @@ describe("gateway commands", () => {
 
     it("does not force-kill on plain restart", async () => {
       await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
-      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ force: false }));
+      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.objectContaining({ gatewayStatePath: profilePaths.gatewayStatePath }), expect.objectContaining({ force: false }));
     });
 
     it("does not force-kill on graceful restart", async () => {
       await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
-      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ force: false }));
+      expect(stopGatewaySpy).toHaveBeenCalledWith(expect.objectContaining({ gatewayStatePath: profilePaths.gatewayStatePath }), expect.objectContaining({ force: false }));
     });
   });
 

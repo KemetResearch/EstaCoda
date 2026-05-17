@@ -8,6 +8,7 @@ import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
 import { createConfigTools } from "../config/config-tools.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -220,13 +221,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const memoryStore = new MemoryStore();
   const artifactStore = new ArtifactStore();
   const profileId = options.profileId ?? "default";
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const localSkillsRoot = options.localSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
+  const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
-  const cronStore = options.cronStore ?? new CronStore({ homeDir: options.homeDir });
+  const cronStore = options.cronStore ?? new CronStore({
+    path: join(profilePaths.cronPath, "jobs.json"),
+    outputRoot: join(profilePaths.cronPath, "output"),
+  });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
   const providerModels = await providerRegistry.listModels();
   const mainRoute: ResolvedModelRoute = options.primaryModelRoute ?? {
@@ -250,9 +255,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerModels
     });
   const processManager = new ProcessManager({ workspaceRoot });
-  const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
-  const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
-  const imageCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "image-cache");
+  const channelMediaRoot = profilePaths.channelMediaPath;
+  const audioCacheRoot = profilePaths.audioCachePath;
+  const imageCacheRoot = profilePaths.imageCachePath;
   let activeTrustedWorkspace = false;
   let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
@@ -724,7 +729,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db });
+      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db, profileId });
       const lockService = new FlowLockService({ store: taskflowStore });
       const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
       const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
@@ -849,6 +854,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         imageGen: options.imageGen ?? defaultImageGenerationConfig(),
         telegramReady: options.telegramReady,
         homeDir: options.homeDir,
+        imageCachePath: profilePaths.imageCachePath,
         workspaceRoot,
         fetch: options.imageGenerationFetch,
         checkProvider: input.checkProvider

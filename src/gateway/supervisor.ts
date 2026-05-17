@@ -2,8 +2,8 @@ import { mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
-import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
@@ -141,6 +141,7 @@ type AcquiredIdentityLock = {
 
 export type SupervisorInternalState = {
   homeDir: string;
+  stateHome: ProfileStatePaths;
   gatewayLockAcquired: boolean;
   acquiredIdentityLocks: AcquiredIdentityLock[];
   channelGateway: ChannelGateway | undefined;
@@ -201,9 +202,15 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function createInitialState(homeDir: string, exitFn: (code: number) => void, supervisorStartedAt: string): SupervisorInternalState {
+function createInitialState(
+  homeDir: string,
+  stateHome: ProfileStatePaths,
+  exitFn: (code: number) => void,
+  supervisorStartedAt: string
+): SupervisorInternalState {
   return {
     homeDir,
+    stateHome,
     gatewayLockAcquired: false,
     acquiredIdentityLocks: [],
     channelGateway: undefined,
@@ -220,7 +227,7 @@ function createInitialState(homeDir: string, exitFn: (code: number) => void, sup
     pruneTimer: undefined,
     stuckScanTimer: undefined,
     lastRuntimeCacheStateWrite: 0,
-    runtimeCacheStatePath: runtimeCacheStatePath(homeDir),
+    runtimeCacheStatePath: runtimeCacheStatePath(stateHome),
     supervisorStartedAt,
     stuckAbortSent: new Set(),
     stuckEventRecorded: new Set(),
@@ -284,7 +291,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   for (let i = state.acquiredIdentityLocks.length - 1; i >= 0; i--) {
     const { kind, hash } = state.acquiredIdentityLocks[i];
     try {
-      const result = await releaseAdapterIdentityLock(state.homeDir, kind, hash, process.pid);
+      const result = await releaseAdapterIdentityLock(state.stateHome, kind, hash, process.pid);
       if (!result.released && result.reason === "not_owner") {
         logWarning(`Cannot release ${kind} identity lock: not owner`);
       }
@@ -292,16 +299,16 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   }
 
   // 7. Remove PID, state, and adapter runtime state files (runtime-cache-state.json is KEPT)
-  try { await removeGatewayPid(state.homeDir); } catch { /* ignore */ }
-  try { await removeGatewayState(state.homeDir); } catch { /* ignore */ }
+  try { await removeGatewayPid(state.stateHome); } catch { /* ignore */ }
+  try { await removeGatewayState(state.stateHome); } catch { /* ignore */ }
   try {
-    const adapterRuntimeStatePath = join(state.homeDir, ".estacoda", "gateway", "adapter-runtime-state.json");
+    const adapterRuntimeStatePath = join(state.stateHome.gatewayStatePath, "adapter-runtime-state.json");
     await unlink(adapterRuntimeStatePath);
   } catch { /* ignore */ }
 
   // 8. Release gateway lock ONLY if we acquired it
   if (state.gatewayLockAcquired) {
-    try { await releaseGatewayLock(state.homeDir); } catch { /* ignore */ }
+    try { await releaseGatewayLock(state.stateHome); } catch { /* ignore */ }
   }
 
   // 9. Remove signal handlers so they do not accumulate across tests or invocations
@@ -318,7 +325,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   const homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
-  const stateRoot = join(homeDir, ".estacoda");
+  const globalStateRoot = join(homeDir, ".estacoda");
   const trustStorePath = join(homeDir, ".estacoda", "trust.json");
 
   const loadConfig = () => loadRuntimeConfig({
@@ -343,33 +350,33 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     currentPlatform: process.platform,
   });
 
-  const state = createInitialState(homeDir, options.factories?.exit ?? ((code: number) => process.exit(code)), startedAt);
+  const state = createInitialState(homeDir, profilePaths, options.factories?.exit ?? ((code: number) => process.exit(code)), startedAt);
 
   // 1. Clean-shutdown marker consumption (before stale cleanup)
-  const cleanMarker = await readCleanShutdownMarker(homeDir);
+  const cleanMarker = await readCleanShutdownMarker(profilePaths);
   if (cleanMarker !== undefined) {
-    const trustworthy = await isCleanShutdownTrustworthy(homeDir, cleanMarker);
+    const trustworthy = await isCleanShutdownTrustworthy(profilePaths, cleanMarker);
     if (trustworthy) {
       logInfo(`Previous shutdown was clean (drain at ${cleanMarker.stoppedAt})`);
-      await removeCleanShutdownMarker(homeDir);
+      await removeCleanShutdownMarker(profilePaths);
     } else {
       logInfo("Ignoring suspicious clean-shutdown marker (remaining PID/state/lock evidence)");
-      await removeCleanShutdownMarker(homeDir);
-      const staleCleanup = await cleanupStaleGatewayState(homeDir);
+      await removeCleanShutdownMarker(profilePaths);
+      const staleCleanup = await cleanupStaleGatewayState(profilePaths);
       if (staleCleanup.cleaned && staleCleanup.reason !== undefined) {
         logInfo(`Cleaned up stale state: ${staleCleanup.reason}`);
       }
     }
   } else {
     // 1a. Stale state cleanup (normal path when no marker)
-    const staleCleanup = await cleanupStaleGatewayState(homeDir);
+    const staleCleanup = await cleanupStaleGatewayState(profilePaths);
     if (staleCleanup.cleaned && staleCleanup.reason !== undefined) {
       logInfo(`Cleaned up stale state: ${staleCleanup.reason}`);
     }
   }
 
   // 2. Gateway lock acquisition
-  const lockResult = await acquireGatewayLock(homeDir);
+  const lockResult = await acquireGatewayLock(profilePaths);
   if (!lockResult.acquired) {
     return {
       ok: false,
@@ -381,8 +388,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   state.gatewayLockAcquired = true;
 
   // 3. PID / state write
-  await writeGatewayPid(homeDir, { pid: process.pid, startedAt, version });
-  await writeGatewayState(homeDir, { lifecycle: "running", startedAt, pid: process.pid, version });
+  await writeGatewayPid(profilePaths, { pid: process.pid, startedAt, version, profileId });
+  await writeGatewayState(profilePaths, { lifecycle: "running", startedAt, pid: process.pid, version, profileId });
 
   // 4. Signal handlers (installed EARLY)
   const shutdown = (signalName?: string) => {
@@ -402,7 +409,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     logInfo(`Shutting down${signalName ? ` (${signalName})` : ""}...`);
 
     (async () => {
-      await writeGatewayState(homeDir, { lifecycle: "draining", startedAt, pid: process.pid, version });
+      await writeGatewayState(profilePaths, { lifecycle: "draining", startedAt, pid: process.pid, version, profileId });
       logInfo("Draining, waiting for active turns...");
 
       emitSupervisorHook(state.hookRegistry, "supervisor:drain:start", {
@@ -430,7 +437,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       let abortedTurnCount = 0;
       if (drained) {
         logInfo("Drain complete");
-        await writeCleanShutdownMarker(homeDir, {
+        await writeCleanShutdownMarker(profilePaths, {
           stoppedAt: new Date().toISOString(),
           pid: process.pid,
           version,
@@ -529,16 +536,16 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       let hash: string | undefined;
       switch (cap.kind) {
         case "telegram":
-          hash = await deriveTelegramIdentityHash(homeDir, config.channels.telegram);
+          hash = await deriveTelegramIdentityHash(profilePaths, config.channels.telegram);
           break;
         case "discord":
-          hash = await deriveDiscordIdentityHash(homeDir, config.channels.discord);
+          hash = await deriveDiscordIdentityHash(profilePaths, config.channels.discord);
           break;
         case "email":
-          hash = await deriveEmailIdentityHash(homeDir, config.channels.email);
+          hash = await deriveEmailIdentityHash(profilePaths, config.channels.email);
           break;
         case "whatsapp":
-          hash = await deriveWhatsAppIdentityHash(homeDir, config.channels.whatsapp);
+          hash = await deriveWhatsAppIdentityHash(profilePaths, config.channels.whatsapp);
           break;
         default:
           break;
@@ -554,7 +561,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         };
       }
 
-      const identityResult = await acquireAdapterIdentityLock(homeDir, cap.kind, hash);
+      const identityResult = await acquireAdapterIdentityLock(profilePaths, cap.kind, hash);
       if (!identityResult.acquired) {
         await cleanupSupervisorStartupResources(state);
         return {
@@ -569,10 +576,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     }
 
     // 7. Shared infrastructure
-    const sessionDbPath = join(stateRoot, "sessions.sqlite");
-    const mediaRoot = join(stateRoot, "channel-media");
-    const approvalStorePath = join(stateRoot, "channel-approvals.json");
-    const sessionContextPath = join(stateRoot, "channel-sessions.json");
+    const sessionDbPath = join(globalStateRoot, "sessions.sqlite");
+    const mediaRoot = profilePaths.channelMediaPath;
+    const approvalStorePath = join(profilePaths.gatewayStatePath, "channel-approvals.json");
+    const sessionContextPath = join(profilePaths.gatewayStatePath, "channel-sessions.json");
     await mkdir(dirname(sessionDbPath), { recursive: true });
     const sessionDb = await createSQLiteSessionDB({ path: sessionDbPath });
     state.sessionDb = sessionDb;
@@ -599,22 +606,35 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     state.runtimeCache = runtimeCache;
     state.runtimeFingerprint = runtimeFingerprint;
 
-    const cronStore = new CronStore({ homeDir });
+    const cronStore = new CronStore({
+      path: join(profilePaths.cronPath, "jobs.json"),
+      outputRoot: join(profilePaths.cronPath, "output"),
+    });
     const cronExecutionStore = new CronExecutionStore({ db: sessionDb.db });
     const cronJobLock = createFileCronJobLock({
-      lockDir: join(stateRoot, "cron", "locks"),
+      lockDir: join(profilePaths.cronPath, "locks"),
       staleTimeoutMs: 600_000,
     });
 
     const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
-    const handoffStore = new FileHandoffStore({ path: join(stateRoot, "handoff-codes.json") });
-    const surfacePointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+    const handoffStore = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
+    const surfacePointerStore = new FileSurfacePointerStore({ path: join(profilePaths.gatewayStatePath, "surface-pointers.json") });
 
     // 8. Adapter instantiation
     const adapters: ChannelAdapter[] = [];
     const router = options.factories?.createDeliveryRouter
-      ? options.factories.createDeliveryRouter({ homeDir, hookRegistry })
-      : new DeliveryRouter({ homeDir, hookRegistry });
+      ? options.factories.createDeliveryRouter({
+          homeDir,
+          deliveryRoot: join(profilePaths.gatewayStatePath, "delivery"),
+          deliveryErrorLogPath: join(profilePaths.gatewayStatePath, "logs", "delivery-errors.jsonl"),
+          hookRegistry,
+        })
+      : new DeliveryRouter({
+          homeDir,
+          deliveryRoot: join(profilePaths.gatewayStatePath, "delivery"),
+          deliveryErrorLogPath: join(profilePaths.gatewayStatePath, "logs", "delivery-errors.jsonl"),
+          hookRegistry,
+        });
 
     for (const cap of configured) {
       let adapter: ChannelAdapter;
@@ -711,7 +731,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         }
         case "whatsapp": {
           const whatsapp = config.channels.whatsapp;
-          const authDir = join(stateRoot, "whatsapp-auth");
+          const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
           adapter = options.factories?.createWhatsAppAdapter
             ? options.factories.createWhatsAppAdapter({
                 authDir,
@@ -751,7 +771,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     let lastRuntimeStateWrite = Date.now();
     const wrappers = adapters.map((adapter) => {
       return new AdapterResilienceSupervisor(adapter, undefined, () => {
-        writeAdapterRuntimeState(homeDir, {
+        writeAdapterRuntimeState(profilePaths, {
           supervisorPid: process.pid,
           supervisorStartedAt: startedAt,
           updatedAt: new Date().toISOString(),
@@ -762,7 +782,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     async function writeRuntimeState(): Promise<void> {
       lastRuntimeStateWrite = Date.now();
-      await writeAdapterRuntimeState(homeDir, {
+      await writeAdapterRuntimeState(profilePaths, {
         supervisorPid: process.pid,
         supervisorStartedAt: startedAt,
         updatedAt: new Date().toISOString(),
@@ -877,6 +897,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             });
           },
           hookRegistry,
+          profileId,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -931,6 +952,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             });
           },
           hookRegistry,
+          profileId,
         });
 
     state.channelGateway = gateway;

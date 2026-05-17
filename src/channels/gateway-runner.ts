@@ -63,8 +63,8 @@ export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions):
   const stateRoot = globalPaths.stateRoot;
   const sessionDbPath = globalPaths.sessionsSqlitePath;
   const mediaRoot = profilePaths.channelMediaPath;
-  const approvalStorePath = `${stateRoot}/channel-approvals.json`;
-  const sessionContextPath = `${stateRoot}/channel-sessions.json`;
+  const approvalStorePath = `${profilePaths.gatewayStatePath}/channel-approvals.json`;
+  const sessionContextPath = `${profilePaths.gatewayStatePath}/channel-sessions.json`;
   const authPolicy = telegramAuthPolicy(telegram.allowedUserIds ?? [], telegram.allowedChatIds ?? []);
   const botTokenEnv = telegram.botTokenEnv;
   const botTokenPresent = botTokenEnv !== undefined && process.env[botTokenEnv] !== undefined;

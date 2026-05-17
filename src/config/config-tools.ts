@@ -16,6 +16,7 @@ import {
   type TelegramSetupInput,
   type WebSetupInput
 } from "./runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
 
 export type ConfigToolsOptions = {
@@ -420,6 +421,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       isAvailable: () => true,
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
+        const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+        const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
         const key = loaded.imageGen.apiKeyEnv;
         return {
           ok: true,
@@ -430,7 +433,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Gateway: ${loaded.imageGen.useGateway ? "yes" : "no"}`,
             `API key env: ${key}`,
             `Base URL: ${loaded.imageGen.baseUrl}`,
-            "Cache: ~/.estacoda/image-cache/"
+            `Cache: ${profilePaths.imageCachePath}`
           ].join("\n"),
           metadata: {
             imageGen: loaded.imageGen,
