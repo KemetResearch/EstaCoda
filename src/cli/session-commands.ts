@@ -3,6 +3,7 @@ import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { SessionRecord } from "../contracts/session.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import {
   buildSessionsHelpViewModel,
@@ -34,13 +35,14 @@ export async function runSessionsCommand(
   const [subcommand, ...rest] = input.args;
   const homeDir = input.homeDir;
   const stateHome = resolveStateHome({ homeDir });
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
 
   if (subcommand === "list" || subcommand === undefined) {
     const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
     const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     try {
-      const sessions = await db.listSessions("default");
+      const sessions = await db.listSessions(profileId);
       const pointers = await pointerStore.listPointers();
       const entries = sessions.slice(0, 20).map((s) => ({
         id: s.id,
@@ -69,12 +71,12 @@ export async function runSessionsCommand(
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
     const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
     try {
-      const session = await db.getSession(sessionId);
+      const session = await db.getSessionForProfile(sessionId, profileId);
       if (session === undefined) {
         const viewModel = buildSessionNotFoundViewModel({ sessionId });
         return { ok: false, output: renderer(viewModel) };
       }
-      const messages = await db.listMessages(sessionId);
+      const messages = await db.listMessagesForProfile(sessionId, profileId);
       const sessionPointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === sessionId);
       const viewModel = buildSessionShowViewModel({
         session,
@@ -131,6 +133,16 @@ export async function runSessionsCommand(
     }
     const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
     const pointerStore = new FileSurfacePointerStore({ path: join(stateHome.stateRoot, "surface-pointers.json") });
+    const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+    try {
+      const session = await db.getSessionForProfile(sessionId, profileId);
+      if (session === undefined) {
+        const viewModel = buildSessionNotFoundViewModel({ sessionId });
+        return { ok: false, output: renderer(viewModel) };
+      }
+    } finally {
+      await db.close();
+    }
     await pointerStore.setPointer(surface as typeof VALID_SURFACES[number], surfaceId, {
       sessionId,
       attachedAt: new Date().toISOString(),

@@ -552,6 +552,11 @@ export async function handleSlashCommand(input: {
         input.output.write(`Session not found: ${target}\n\n`);
         return false;
       }
+      const activeProfileId = await runtimeProfileId(input.runtime);
+      if (targetSession.profileId !== activeProfileId) {
+        input.output.write(`Session not found in active profile: ${target}\n\n`);
+        return false;
+      }
       return {
         runtime: await input.switchRuntime(target),
         notice: (runtime) => [
@@ -1188,7 +1193,8 @@ async function renderLatestResume(runtime: Runtime): Promise<string> {
 }
 
 async function renderSessionList(runtime: Runtime): Promise<string> {
-  const sessions = (await runtime.sessionDb.listSessions("default")).slice(0, 10);
+  const profileId = await runtimeProfileId(runtime);
+  const sessions = (await runtime.sessionDb.listSessions(profileId)).slice(0, 10);
   if (sessions.length === 0) {
     return "No sessions found.";
   }
@@ -1207,8 +1213,9 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
     return "Usage: /search <query>";
   }
 
+  const profileId = await runtimeProfileId(runtime);
   const matches = await runtime.sessionDb.search(normalizedQuery, {
-    profileId: "default",
+    profileId,
     limit: 5
   });
   if (matches.length === 0) {
@@ -1221,6 +1228,10 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
       `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
     )
   ].join("\n");
+}
+
+async function runtimeProfileId(runtime: Runtime): Promise<string> {
+  return (await runtime.sessionDb.getSession(runtime.sessionId))?.profileId ?? "default";
 }
 
 async function renderMemoryPromotions(runtime: Runtime): Promise<string> {

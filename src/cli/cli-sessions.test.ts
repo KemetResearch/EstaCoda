@@ -194,6 +194,11 @@ describe("CLI session commands", () => {
 
   describe("sessions attach", () => {
     it("attaches surface to session", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
+      db.close();
+
       const result = await runCliCommand({
         argv: ["sessions", "attach", "telegram", "chat-1", "sess-1"],
         workspaceRoot: tmpDir,

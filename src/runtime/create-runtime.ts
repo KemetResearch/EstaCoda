@@ -257,6 +257,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
 
+  if (existingSession !== undefined && existingSession.profileId !== profileId) {
+    throw new Error(`Session ${sessionId} belongs to profile ${existingSession.profileId}, not ${profileId}.`);
+  }
+
   if (existingSession === undefined) {
     await sessionDb.createSession({
       id: sessionId,
