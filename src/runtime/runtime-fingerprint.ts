@@ -2,7 +2,9 @@ import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
+import type { ThemeDefinition } from "../contracts/theme.js";
 import type { ToolsetName } from "../contracts/tool.js";
+import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 
 export type RuntimeFingerprint = {
   // ── Identity / model ──
@@ -47,6 +49,7 @@ export type RuntimeFingerprint = {
   uiLanguage: string;
   uiFlavor: string;
   activityLabels: string;
+  runtimeUiIdentity?: string;
   agentProfileMode: string;
   agentResponseLanguage: string;
 
@@ -74,8 +77,11 @@ export function computeRuntimeFingerprint(
     approvalControllerPresent: boolean;
     explicitSecurityPolicyPresent: boolean;
     currentPlatform: string;
+    theme?: ThemeDefinition;
+    tokens?: ResolvedTokens;
   }
 ): RuntimeFingerprint {
+  const runtimeUiIdentity = fingerprintRuntimeUiIdentity(options);
   return {
     modelProvider: config.model.provider,
     modelId: config.model.id,
@@ -112,6 +118,7 @@ export function computeRuntimeFingerprint(
     uiLanguage: config.ui.language,
     uiFlavor: config.ui.flavor,
     activityLabels: config.ui.activityLabels,
+    ...(runtimeUiIdentity !== undefined ? { runtimeUiIdentity } : {}),
     agentProfileMode: config.profile.mode,
     agentResponseLanguage: config.profile.responseLanguage,
     auxiliaryModelsHash: config.auxiliaryModels
@@ -123,6 +130,16 @@ export function computeRuntimeFingerprint(
     telegramReady: config.channels.telegram.ready,
     currentPlatform: options.currentPlatform
   };
+}
+
+function fingerprintRuntimeUiIdentity(options: {
+  theme?: ThemeDefinition;
+  tokens?: ResolvedTokens;
+}): string | undefined {
+  if (options.tokens !== undefined) {
+    return `${options.tokens.skin}-${options.tokens.theme}`;
+  }
+  return options.theme?.name;
 }
 
 function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {

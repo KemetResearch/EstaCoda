@@ -7,6 +7,7 @@ import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
+import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
 import { createConfigTools } from "../config/config-tools.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
@@ -90,7 +91,9 @@ import { collectSetupVerificationReport } from "../onboarding/verification.js";
 import { readCachedUpdateStatus } from "../lifecycle/update-engine.js";
 
 export type RuntimeOptions = {
-  theme: ThemeDefinition;
+  /** @deprecated Legacy runtime branding path. Prefer tokens. */
+  theme?: ThemeDefinition;
+  tokens?: ResolvedTokens;
   model: ModelProfile;
   primaryModelRoute?: ResolvedModelRoute;
   modelFallbackRoutes?: ResolvedModelRoute[];
@@ -151,6 +154,31 @@ export type RuntimeOptions = {
   workspaceFsAdapter?: WorkspaceFsAdapter;
   sessionMetadata?: Record<string, unknown>;
 };
+
+type RuntimeBranding = Pick<
+  TokenBranding,
+  "agentName" | "responseLabel" | "taglinePrimary" | "taglineSecondary"
+>;
+
+function resolveRuntimeBranding(options: RuntimeOptions): RuntimeBranding {
+  if (options.tokens !== undefined) {
+    return options.tokens.contract.branding;
+  }
+  if (options.theme !== undefined) {
+    return options.theme.branding;
+  }
+  throw new TypeError("createRuntime requires either tokens or legacy theme.");
+}
+
+function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
+  if (options.tokens !== undefined) {
+    return `${options.tokens.skin}-${options.tokens.theme}`;
+  }
+  if (options.theme !== undefined) {
+    return options.theme.name;
+  }
+  throw new TypeError("createRuntime requires either tokens or legacy theme.");
+}
 
 export type Runtime = {
   describe(): string;
@@ -217,6 +245,8 @@ export type Runtime = {
 };
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
+  const runtimeBranding = resolveRuntimeBranding(options);
+  const runtimeUiIdentity = resolveRuntimeUiIdentity(options);
   const toolRegistry = new ToolRegistry();
   const skillRegistry = new SkillRegistry();
   const memoryStore = new MemoryStore();
@@ -525,7 +555,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const renderedProjectContext = renderProjectContext(projectContext);
 
   trajectoryRecorder.record("session-start", {
-    theme: options.theme.name,
+    theme: runtimeUiIdentity,
     model: options.model.id,
     profile: profileId,
     projectContextFiles: projectContext.files.map((file) => file.source)
@@ -700,7 +730,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     providerTurnLoop,
     skillWorkflowExecutor,
     nativeToolExecutor,
-    responseLabel: options.theme.branding.responseLabel,
+    responseLabel: runtimeBranding.responseLabel,
     intentRouter,
     securityPolicy,
     trajectoryRecorder,
@@ -936,7 +966,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     describe() {
       return [
-        `${options.theme.branding.responseLabel} is ready`,
+        `${runtimeBranding.responseLabel} is ready`,
         `model: ${options.model.provider}/${options.model.id}`,
         `profile: ${options.profileId}`,
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
@@ -950,7 +980,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     getStatus() {
       return buildStatusViewModel({
-        agentName: options.theme.branding.responseLabel,
+        agentName: runtimeBranding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
         profileId: options.profileId,
         securityMode: `${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
@@ -978,10 +1008,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     getStartup() {
       return buildStartupViewModel({
-        agentName: options.theme.branding.agentName,
+        agentName: runtimeBranding.agentName,
         taglines: [
-          options.theme.branding.taglinePrimary,
-          options.theme.branding.taglineSecondary,
+          runtimeBranding.taglinePrimary,
+          runtimeBranding.taglineSecondary,
         ].filter((t) => t.length > 0),
         model: { provider: options.model.provider, id: options.model.id },
         readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => !s.snapshot.available)
