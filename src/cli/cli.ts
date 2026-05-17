@@ -1468,7 +1468,8 @@ function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
     `Vision: ${config.model.supportsVision ? "yes" : "no"}`,
     `Structured output: ${config.model.supportsStructuredOutput ? "yes" : "no"}`,
-    `Network: ${config.web.enableNetwork ? "enabled" : "disabled"}`
+    `Provider network: ${formatProviderNetworkStatus(config, route.provider)}`,
+    `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`
   ];
 
   if (route.baseUrl !== undefined) {
@@ -1493,6 +1494,26 @@ function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
   }
 
   return lines.join("\n");
+}
+
+function formatProviderNetworkStatus(
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+  provider: string
+): "enabled" | "disabled" | "not applicable" | "unknown" {
+  if (provider === "unconfigured" || provider === "local") {
+    return "not applicable";
+  }
+
+  const providerConfig = config.config.providers?.[provider];
+  if (providerConfig === undefined) {
+    return "unknown";
+  }
+
+  if (providerConfig.kind === "catalog") {
+    return "not applicable";
+  }
+
+  return providerConfig.enableNetwork === true ? "enabled" : "disabled";
 }
 
 function renderAuxiliaryStatus(routes: ResolvedAuxiliaryRoute[]): string {
