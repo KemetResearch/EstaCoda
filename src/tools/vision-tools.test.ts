@@ -14,7 +14,7 @@ function createMockExecutor(ok = true, content = "vision result") {
       provider: "openai",
       model: "gpt-4o"
     } : undefined,
-    attempts: ok ? [] : [{ errorClass: "network" }]
+    attempts: [{ provider: "openai", model: "gpt-4o", ok, content: ok ? "ok" : "failed", errorClass: ok ? undefined : "network" }]
   });
   return {
     complete: fn as unknown as ProviderExecutor["complete"]
@@ -89,7 +89,15 @@ describe("vision tools", () => {
         const result = await analyzeImageWithVision(
           {
             workspaceRoot: tmp.dir,
-            resolvedVisionRoute: baseRoute,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              timeoutMs: 123,
+              maxConcurrency: 2,
+              diagnostics: []
+            },
             providerExecutor: executor
           },
           { path: "test.png" }
@@ -98,7 +106,34 @@ describe("vision tools", () => {
         expect(executor.complete).toHaveBeenCalledTimes(1);
         const [, , executionOptions] = (executor.complete as any).mock.calls[0];
         expect(executionOptions!.primaryRoute).toEqual(baseRoute);
+        expect(executionOptions!.signal).toBeDefined();
         expect(result.ok).toBe(true);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("passes task vision through the full auxiliary route", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        await analyzeImageWithVision(
+          {
+            workspaceRoot: tmp.dir,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
+            providerExecutor: executor
+          },
+          { path: "test.png" }
+        );
+
+        expect(executor.complete).toHaveBeenCalledTimes(1);
+        expect((executor.complete as any).mock.calls[0][2].primaryRoute).toEqual(baseRoute);
       } finally {
         tmp.cleanup();
       }
@@ -146,7 +181,7 @@ describe("vision tools", () => {
           if (callCount === 1) {
             return Promise.resolve({
               ok: false,
-              attempts: [{ errorClass: "network" }]
+              attempts: [{ provider: "openai", model: "gpt-4o", ok: false, content: "failed", errorClass: "network" }]
             });
           }
           return Promise.resolve({
@@ -155,7 +190,8 @@ describe("vision tools", () => {
               content: "fallback result",
               provider: "anthropic",
               model: "claude-3"
-            }
+            },
+            attempts: [{ provider: "anthropic", model: "claude-3", ok: true, content: "ok" }]
           });
         })
       } as unknown as ProviderExecutor;
@@ -165,9 +201,14 @@ describe("vision tools", () => {
         const result = await analyzeImageWithVision(
           {
             workspaceRoot: tmp.dir,
-            resolvedVisionRoute: baseRoute,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: true,
+              diagnostics: []
+            },
             mainRoute,
-            fallbackToMain: true,
             providerExecutor: failingThenOkExecutor
           },
           { path: "test.png" }
@@ -205,9 +246,14 @@ describe("vision tools", () => {
         const result = await analyzeImageWithVision(
           {
             workspaceRoot: tmp.dir,
-            resolvedVisionRoute: baseRoute,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
             mainRoute,
-            fallbackToMain: true,
             providerExecutor: executor
           },
           { path: "test.png" }
@@ -240,9 +286,14 @@ describe("vision tools", () => {
         const result = await analyzeImageWithVision(
           {
             workspaceRoot: tmp.dir,
-            resolvedVisionRoute: baseRoute,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
             mainRoute,
-            fallbackToMain: false,
             providerExecutor: executor
           },
           { path: "test.png" }

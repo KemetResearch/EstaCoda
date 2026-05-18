@@ -104,7 +104,7 @@ Two layers:
 - `ProviderExecutor` — streaming token collection, tool-call fragment assembly, fallback handling
 - `OpenAICompatibleProvider` — primary inference adapter
 
-Auxiliary routes exist for: `main`, `vision`, `compression`, `approval`, `web_extract`, `session_search`, `skills_hub`, `mcp`, `memory_flush`, `delegation`.
+Auxiliary routes exist for: `main`, `vision`, `compression`, `assessor`, `profile_context`, `web_extract`, `session_search`, `skills_hub`, `mcp`, `memory_flush`, `delegation`.
 
 These are preferences/routing constructs, not separate runtimes.
 

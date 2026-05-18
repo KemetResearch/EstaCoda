@@ -6,7 +6,7 @@ import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } fro
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import type { ModelProfile, ProviderAdapter } from "../contracts/provider.js";
+import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 
@@ -249,6 +249,156 @@ describe("createRuntime getStartupReadiness trust threading", () => {
       const readiness = await runtime.getStartupReadiness();
       expect(readiness.providerReadiness).toBe("missing-config");
       expect(readiness.workspaceVerification).toBe("unverified");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+});
+
+describe("createRuntime auxiliary consumer wiring", () => {
+  it("passes visionAuxiliaryRoute into the vision tool", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-vision-"));
+    const imagePath = join(workspaceRoot, "image.png");
+    await writeFile(imagePath, Buffer.from("fake-png"));
+    const visionModel: ModelProfile = {
+      id: "vision-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    };
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    let observedRequest: ProviderRequest | undefined;
+    let observedRouteId: string | undefined;
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      endpoint: { baseUrl: "http://localhost:11434/v1" },
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, visionModel],
+      complete: async (request, _options) => {
+        observedRequest = request;
+        observedRouteId = request.model;
+        return {
+          ok: true,
+          content: "vision ok",
+          provider: "local",
+          model: request.model
+        };
+      }
+    });
+    const trustStorePath = join(workspaceRoot, "trust.json");
+    const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
+    await trustStore.grant(workspaceRoot);
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      trustStore,
+      trustStorePath,
+      auxiliaryModels: {
+        vision: { provider: "local", id: "vision-model", timeoutMs: 1000, maxConcurrency: 1 }
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "vision.analyze",
+        toolInput: { path: "image.png" }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      expect(observedRouteId).toBe("vision-model");
+      expect(observedRequest?.model).toBe("vision-model");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("passes assessor fallbackToMain and mainRoute into effective security assessor", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-assessor-"));
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const assessorModel: ModelProfile = {
+      id: "assessor-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const observedModels: string[] = [];
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      endpoint: { baseUrl: "http://localhost:11434/v1" },
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, assessorModel],
+      complete: async (request) => {
+        observedModels.push(request.model);
+        if (request.model === "assessor-model") {
+          return {
+            ok: false,
+            content: "primary failed",
+            provider: "local",
+            model: request.model,
+            errorClass: "server"
+          };
+        }
+        return {
+          ok: true,
+          content: JSON.stringify({ decision: "ask", risk: "medium", reason: "fallback assessor", confidence: 0.8 }),
+          provider: "local",
+          model: request.model
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      securityMode: "adaptive",
+      securityAssessor: { enabled: true },
+      auxiliaryModels: {
+        assessor: {
+          provider: "local",
+          id: "assessor-model",
+          fallbackToMain: true,
+          timeoutMs: 1000
+        }
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "terminal.run",
+        toolInput: { command: "sudo true" }
+      });
+
+      expect(result?.decision).toBe("ask");
+      expect(observedModels).toEqual(["assessor-model", "main-model"]);
     } finally {
       await runtime.dispose();
     }

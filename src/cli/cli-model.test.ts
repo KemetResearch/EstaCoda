@@ -103,6 +103,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          vision: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 2500,
+            maxConcurrency: 2
+          }
         }
       });
 
@@ -373,6 +381,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          assessor: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 3000,
+            maxConcurrency: 1
+          }
         }
       });
 
@@ -486,6 +502,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          assessor: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 3000,
+            maxConcurrency: 1
+          }
         }
       });
 
@@ -584,6 +608,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          vision: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 2500,
+            maxConcurrency: 2
+          }
         }
       });
 
@@ -694,6 +726,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          assessor: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 3000,
+            maxConcurrency: 1
+          }
         }
       });
 
@@ -707,6 +747,12 @@ describe("cli model", () => {
       expect(result.output).toContain("Auxiliary models:");
       expect(result.output).toContain("vision:");
       expect(result.output).toContain("assessor:");
+      expect(result.output).toContain("Source:");
+      expect(result.output).toContain("Timeout: 3000ms");
+      expect(result.output).toContain("Max concurrency: 1");
+      expect(result.output).toContain("Scope: global");
+      expect(result.output).toContain("In flight: 0");
+      expect(result.output).toContain("Queued: 0");
     });
   });
 
@@ -724,6 +770,14 @@ describe("cli model", () => {
         model: {
           provider: "local",
           id: "qwen2.5:3b"
+        },
+        auxiliaryModels: {
+          vision: {
+            provider: "local",
+            id: "qwen2.5:3b",
+            timeoutMs: 2500,
+            maxConcurrency: 2
+          }
         }
       });
 
@@ -738,6 +792,12 @@ describe("cli model", () => {
       expect(result.output).toContain("Auxiliary model status:");
       expect(result.output).toContain("vision:");
       expect(result.output).toContain("assessor:");
+      expect(result.output).toContain("Source:");
+      expect(result.output).toContain("Timeout: 2500ms");
+      expect(result.output).toContain("Max concurrency: 2");
+      expect(result.output).toContain("Scope: global");
+      expect(result.output).toContain("In flight: 0");
+      expect(result.output).toContain("Queued: 0");
     });
 
     it("shows command guide when no subcommand given", async () => {

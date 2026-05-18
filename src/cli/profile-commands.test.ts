@@ -203,29 +203,96 @@ describe("profileCommand", () => {
     await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("source soul");
   });
 
-  it("fails contextualization clearly when no provider/model contextualizer is available", async () => {
-    await seedProfile("default", { user: "active user", memory: "active memory", soul: "active soul" });
-
+  it("removes --contextualize as a profile creation option", async () => {
     const result = await run(["create", "focused", "--contextualize", "writing"]);
 
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("requires an available provider/model");
+    expect(result.output).toContain("Unknown option: --contextualize");
+    expect(result.output).toContain("--profile-context");
   });
 
-  it("writes contextualized SOUL.md through the injected contextualizer", async () => {
+  it("fails profile context generation clearly when no provider/model route is available", async () => {
     await seedProfile("default", { user: "active user", memory: "active memory", soul: "active soul" });
-    const contextualizer = vi.fn(async () => "focused soul");
 
-    const result = await run(["create", "focused", "--contextualize", "writing"], { profileContextualizer: contextualizer });
+    const result = await run(["create", "focused", "--profile-context", "writing"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Profile context generation route is unavailable");
+  });
+
+  it("writes SOUL.md through the injected ProfileContextGenerator", async () => {
+    await seedProfile("default", { user: "active user", memory: "active memory", soul: "active soul" });
+    const profileContextGenerator = vi.fn(async () => "focused soul");
+
+    const result = await run(["create", "focused", "--profile-context", "writing"], { profileContextGenerator });
     const paths = resolveProfileStateHome({ homeDir: tempDir, profileId: "focused" });
 
     expect(result.exitCode).toBe(0);
-    expect(contextualizer).toHaveBeenCalledWith(expect.objectContaining({
+    expect(profileContextGenerator).toHaveBeenCalledWith(expect.objectContaining({
       profileId: "focused",
       sourceProfileId: "default",
-      focus: "writing",
+      profileContextFocus: "writing",
     }));
-    await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("focused soul");
+    await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("focused soul\n");
+  });
+
+  it("uses profile_context route in production profile context wiring", async () => {
+    await seedProfile("default", { user: "active user", memory: "active memory", soul: "active soul" });
+    const defaultPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await writeFile(defaultPaths.configPath, JSON.stringify({
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["main", "context-model"],
+          enableNetwork: true
+        }
+      },
+      model: {
+        provider: "local",
+        id: "main"
+      },
+      auxiliaryModels: {
+        profile_context: {
+          provider: "local",
+          id: "context-model",
+          timeoutMs: 1000,
+          maxConcurrency: 1
+        }
+      }
+    }, null, 2), "utf8");
+    let requestBody: { model?: string; messages?: Array<{ content?: unknown }> } | undefined;
+    const providerFetch = vi.fn(async (_url: string, init: { body: string }) => {
+      requestBody = JSON.parse(init.body) as typeof requestBody;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            choices: [
+              {
+                message: {
+                  content: "Generated profile soul"
+                }
+              }
+            ]
+          };
+        },
+        async text() {
+          return "";
+        }
+      };
+    });
+
+    const result = await run(["create", "focused", "--profile-context", "writing"], { providerFetch });
+    const paths = resolveProfileStateHome({ homeDir: tempDir, profileId: "focused" });
+
+    expect(result.exitCode).toBe(0);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(requestBody?.model).toBe("context-model");
+    expect(JSON.stringify(requestBody?.messages)).toContain("profileContextFocus");
+    await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("Generated profile soul\n");
   });
 
   it("parses --profile as a global command option", () => {

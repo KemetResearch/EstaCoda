@@ -11,7 +11,16 @@ function createMockExecutor(ok = true, content = JSON.stringify({ decision: "all
       content,
       provider: "openai",
       model: "gpt-4"
-    } : undefined
+    } : undefined,
+    attempts: [
+      {
+        provider: "openai",
+        model: "gpt-4",
+        ok,
+        content: ok ? "ok" : "failed",
+        errorClass: ok ? undefined : "server"
+      }
+    ]
   });
   return {
     complete: fn as unknown as ProviderExecutor["complete"]
@@ -139,6 +148,155 @@ describe("security policy factory", () => {
       expect(executionOptions!.primaryRoute).toEqual(resolvedRoute);
       expect(executionOptions!.primaryRoute!.baseUrl).toBe("https://custom.internal/v1");
       expect(executionOptions!.primaryRoute!.apiKeyEnv).toBe("CUSTOM_KEY");
+    });
+
+    it("honors fallbackToMain through auxiliary executor", async () => {
+      const assessorRoute: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-4.1-mini",
+        profile: {
+          id: "gpt-4.1-mini",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        }
+      };
+      const mainRoute: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      };
+      const complete = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          attempts: [{ provider: "openai", model: "gpt-4.1-mini", ok: false, content: "failed", errorClass: "server" }]
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          response: {
+            content: JSON.stringify({ decision: "allow", risk: "low", reason: "fallback", confidence: 0.9 }),
+            provider: "openai",
+            model: "gpt-4o"
+          },
+          attempts: [{ provider: "openai", model: "gpt-4o", ok: true, content: "ok" }]
+        });
+
+      const policy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          providerExecutor: { complete } as unknown as ProviderExecutor,
+          route: assessorRoute,
+          mainRoute,
+          fallbackToMain: true
+        }
+      });
+      const result = await policy.assess!(baseRequest);
+
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect((complete as any).mock.calls[1][2].primaryRoute).toEqual(mainRoute);
+      expect(result.assessor?.status).toBe("ok");
+      expect(result.assessor?.model).toBe("gpt-4o");
+    });
+
+    it("does not fallback when fallbackToMain is false", async () => {
+      const assessorRoute: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-4.1-mini",
+        profile: {
+          id: "gpt-4.1-mini",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        }
+      };
+      const mainRoute: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      };
+      const complete = vi.fn().mockResolvedValue({
+        ok: false,
+        attempts: [{ provider: "openai", model: "gpt-4.1-mini", ok: false, content: "failed", errorClass: "server" }]
+      });
+
+      const policy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          providerExecutor: { complete } as unknown as ProviderExecutor,
+          route: assessorRoute,
+          mainRoute,
+          fallbackToMain: false
+        }
+      });
+      const result = await policy.assess!(baseRequest);
+
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(result.assessor?.status).toBe("unavailable");
+    });
+
+    it("passes assessor timeoutMs into auxiliary execution", async () => {
+      const route: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-4.1-mini",
+        profile: {
+          id: "gpt-4.1-mini",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        }
+      };
+      let observedSignal: AbortSignal | undefined;
+      const complete = vi.fn((_request, _preferences, options) => {
+        observedSignal = options.signal;
+        return new Promise(() => {});
+      });
+
+      const policy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          providerExecutor: { complete } as unknown as ProviderExecutor,
+          auxiliaryRoute: {
+            task: "assessor",
+            route,
+            source: "explicit",
+            fallbackToMain: false,
+            timeoutMs: 5,
+            diagnostics: []
+          },
+          mainRoute: route
+        }
+      });
+      const result = await policy.assess!(baseRequest);
+
+      expect(result.assessor?.status).toBe("timeout");
+      expect(observedSignal?.aborted).toBe(true);
     });
 
     it("remains disabled when enabled !== true", async () => {
