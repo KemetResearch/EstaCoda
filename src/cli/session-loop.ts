@@ -871,20 +871,22 @@ async function maybeHandleApprovalGate(input: {
 
   while (true) {
     const allowPersistentApproval = input.runtime.revokeApproval !== undefined;
-    const answer = (await input.prompt(await renderApprovalPrompt(execution, input.renderer, input.chrome, input.output, allowPersistentApproval))).trim().toLowerCase();
-    if (answer === "deny" || answer === "reject" || answer === "no" || answer === "n") {
+    const answer = normalizeApprovalPromptAnswer(
+      await input.prompt(await renderApprovalPrompt(execution, input.renderer, input.chrome, input.output, allowPersistentApproval))
+    );
+    if (answer?.kind === "deny") {
       return {
         retry: false,
         message: "Permission denied."
       };
     }
 
-    const scope = normalizeApprovalScope(answer);
-    if (scope === undefined) {
+    if (answer?.kind !== "approve") {
       input.output.write("Enter one of: once, session, always, deny.\n\n");
       continue;
     }
 
+    const scope = answer.scope;
     await input.runtime.grantApproval({
       toolName: execution.tool.name,
       riskClass: execution.riskClass,
@@ -1060,6 +1062,25 @@ async function renderApprovalPrompt(
     output.write(`${cardText}\n`);
   }
   return "approval > ";
+}
+
+function normalizeApprovalPromptAnswer(value: string):
+  | { kind: "approve"; scope: "once" | "session" | "always" }
+  | { kind: "deny" }
+  | undefined {
+  const answer = value.trim().toLowerCase().replace(/\s+/gu, " ");
+  if (answer === "deny" || answer === "reject" || answer === "no" || answer === "n" || answer === "/deny") {
+    return { kind: "deny" };
+  }
+
+  const slashApprove = answer.match(/^\/approve(?: (.+))?$/u);
+  if (slashApprove !== null) {
+    const scope = normalizeApprovalScope(slashApprove[1] ?? "");
+    return scope === undefined ? undefined : { kind: "approve", scope };
+  }
+
+  const scope = normalizeApprovalScope(answer);
+  return scope === undefined ? undefined : { kind: "approve", scope };
 }
 
 function normalizeApprovalScope(value: string): "once" | "session" | "always" | undefined {

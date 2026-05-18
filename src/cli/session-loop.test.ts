@@ -100,6 +100,130 @@ function createMockRuntime(): Runtime {
   };
 }
 
+type ApprovalGrantInput = Parameters<NonNullable<Runtime["grantApproval"]>>[0];
+
+function approvalAskResponse(): AgentLoopResponse {
+  return {
+    label: "EstaCoda",
+    text: "I need permission before writing.",
+    matchedSkills: [],
+    intent: {
+      nativeIntent: "general",
+      labels: ["chat"],
+      confidence: 1,
+      suggestedToolsets: [],
+      suggestedSkills: [],
+      evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+      confirmationRequired: false,
+      rationale: "mock",
+    },
+    securityDecision: "ask",
+    toolExecutions: [
+      {
+        tool: {
+          name: "workspace.write",
+          description: "Write a workspace file",
+          inputSchema: {},
+          riskClass: "workspace-write",
+          toolsets: ["files"],
+          progressLabel: "writing",
+          maxResultSizeChars: 1000,
+        },
+        decision: "ask",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+      },
+    ],
+    toolPlans: [],
+    skillOutcomes: [],
+    artifacts: [],
+    context: undefined,
+    projectContext: undefined,
+    progress: [],
+  };
+}
+
+function approvalAllowResponse(): AgentLoopResponse {
+  return {
+    label: "EstaCoda",
+    text: "Write completed.",
+    matchedSkills: [],
+    intent: {
+      nativeIntent: "general",
+      labels: ["chat"],
+      confidence: 1,
+      suggestedToolsets: [],
+      suggestedSkills: [],
+      evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+      confirmationRequired: false,
+      rationale: "mock",
+    },
+    securityDecision: "allow",
+    toolExecutions: [],
+    toolPlans: [],
+    skillOutcomes: [],
+    artifacts: [],
+    context: undefined,
+    projectContext: undefined,
+    progress: [],
+  };
+}
+
+async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
+  grants: ApprovalGrantInput[];
+  handleInputs: string[];
+  rendered: string;
+}> {
+  const outputChunks: string[] = [];
+  const grants: ApprovalGrantInput[] = [];
+  const handleInputs: string[] = [];
+  let handleCalls = 0;
+  const runtime = {
+    ...createMockRuntime(),
+    revokeApproval: async () => true,
+    grantApproval: async (input) => {
+      grants.push(input);
+    },
+    handle: async (input): Promise<AgentLoopResponse> => {
+      handleCalls += 1;
+      handleInputs.push(input.text);
+      return handleCalls === 1 ? approvalAskResponse() : approvalAllowResponse();
+    },
+  } as Runtime;
+
+  let promptIndex = 0;
+  await runSessionLoop({
+    runtime,
+    output: {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: false,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream,
+    capabilities: interactiveCaps({
+      isTTY: false,
+      supportsAnimation: false,
+    }),
+    prompt: Object.assign(
+      async () => {
+        const values = ["write file", ...approvalAnswers, "/exit"];
+        return values[promptIndex++] ?? "/exit";
+      },
+      { close: () => {} }
+    ),
+    close: () => {},
+  });
+
+  return {
+    grants,
+    handleInputs,
+    rendered: outputChunks.join(""),
+  };
+}
+
 describe("runSessionLoop — user prompt rail behavior", () => {
   it("defaults startup and session chrome to English when no locale is provided", async () => {
     const outputChunks: string[] = [];
@@ -807,6 +931,75 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("src/app.ts");
     expect(rendered).toContain("Permission denied.");
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
+  });
+
+  it("/approve once grants one-time approval and retries", async () => {
+    const result = await runApprovalPromptScenario(["/approve once"]);
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      riskClass: "workspace-write",
+      targetKey: "src/app.ts",
+      targetSummary: "src/app.ts",
+      scope: "once",
+    });
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+  });
+
+  it("/approve session grants session approval and retries", async () => {
+    const result = await runApprovalPromptScenario(["/approve session"]);
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]?.scope).toBe("session");
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (session). Retrying now.");
+  });
+
+  it("/approve always grants persistent workspace approval and retries", async () => {
+    const result = await runApprovalPromptScenario(["/approve always"]);
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]?.scope).toBe("always");
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
+  });
+
+  it("/deny denies and does not retry", async () => {
+    const result = await runApprovalPromptScenario(["/deny"]);
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("Permission denied.");
+    expect(result.rendered).not.toContain("Write completed.");
+  });
+
+  it("keeps existing bare approval answers unchanged", async () => {
+    for (const [answer, scope] of [
+      ["once", "once"],
+      ["session", "session"],
+      ["always", "always"],
+    ] as const) {
+      const result = await runApprovalPromptScenario([answer]);
+      expect(result.grants).toHaveLength(1);
+      expect(result.grants[0]?.scope).toBe(scope);
+      expect(result.handleInputs).toEqual(["write file", "write file"]);
+    }
+
+    const deny = await runApprovalPromptScenario(["deny"]);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+  });
+
+  it("invalid /approve input does not grant approval and asks for a valid choice", async () => {
+    const result = await runApprovalPromptScenario(["/approve banana", "session"]);
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]?.scope).toBe("session");
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
   });
 
   it("renders agent-cancelled as durable message in chrome mode", async () => {
