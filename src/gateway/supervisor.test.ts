@@ -611,6 +611,32 @@ describe("runGatewaySupervisor", () => {
   it("ChannelGateway receives runtimeCache, activeTurnRegistry, runtimeFingerprint, securityMode, securityAssessor", async () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "custom-corp", id: "main-model" },
+      providers: {
+        "custom-corp": {
+          baseUrl: "https://custom.example/v1",
+          apiKeyEnv: "CUSTOM_API_KEY",
+          models: ["main-model", "assessor-model"]
+        }
+      },
+      auxiliaryModels: {
+        assessor: {
+          provider: "custom-corp",
+          id: "assessor-model",
+          baseUrl: "https://custom.example/v1",
+          apiKeyEnv: "CUSTOM_API_KEY",
+          fallbackToMain: true,
+          timeoutMs: 1234
+        }
+      },
+      security: {
+        approvalMode: "adaptive",
+        assessor: { enabled: true }
+      }
+    }));
 
     await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -633,6 +659,23 @@ describe("runGatewaySupervisor", () => {
     expect(capturedOpts.securityMode).toBe("adaptive");
     expect(capturedOpts.securityAssessor).toBeDefined();
     expect(capturedOpts.securityAssessor.providerExecutor).toBeDefined();
+    expect(capturedOpts.securityAssessor.auxiliaryRoute).toMatchObject({
+      task: "assessor",
+      fallbackToMain: true,
+      timeoutMs: 1234,
+      route: {
+        provider: "openai-compatible",
+        id: "assessor-model",
+        baseUrl: "https://custom.example/v1",
+        apiKeyEnv: "CUSTOM_API_KEY"
+      }
+    });
+    expect(capturedOpts.securityAssessor.mainRoute).toMatchObject({
+      provider: "custom-corp",
+      id: "main-model",
+      baseUrl: "https://custom.example/v1",
+      apiKeyEnv: "CUSTOM_API_KEY"
+    });
   });
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {

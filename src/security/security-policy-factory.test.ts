@@ -5,10 +5,10 @@ import { describe, it, expect, vi } from "vitest";
 import { createSecurityPolicyForMode } from "./security-policy-factory.js";
 import type { SecurityAssessorRuntimeConfig } from "./security-policy-factory.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
-import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./workspace-approval-controller.js";
 
-function createMockExecutor(ok = true, content = JSON.stringify({ decision: "allow", risk: "low", reason: "test", confidence: 0.9 })) {
+function createMockExecutor(ok = true, content = JSON.stringify({ risk_score: 10, reasoning: "Test assessor response.", confidence: "high" })) {
   const fn = vi.fn().mockResolvedValue({
     ok,
     response: ok ? {
@@ -41,6 +41,41 @@ const baseRequest = {
     targetChannel: "cli" as const,
     targetConversationIsActive: true
   }
+};
+
+const localAssessorRoute: ResolvedModelRoute = {
+  provider: "local",
+  id: "assessor-model",
+  profile: {
+    id: "assessor-model",
+    provider: "local",
+    contextWindowTokens: 32_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+};
+
+const localMainRoute: ResolvedModelRoute = {
+  provider: "local",
+  id: "main-model",
+  profile: {
+    id: "main-model",
+    provider: "local",
+    contextWindowTokens: 32_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+};
+
+const localAuxiliaryAssessorRoute: ResolvedAuxiliaryRoute = {
+  task: "assessor",
+  route: localAssessorRoute,
+  source: "explicit",
+  fallbackToMain: false,
+  timeoutMs: 1000,
+  diagnostics: []
 };
 
 describe("security policy factory", () => {
@@ -166,7 +201,7 @@ describe("security policy factory", () => {
   });
 
   describe("assessor routing", () => {
-    it("uses security.assessor.provider/model override when set", async () => {
+    it("does not execute legacy provider/model assessor construction without a resolved route", async () => {
       const executor = createMockExecutor();
       const assessor: SecurityAssessorRuntimeConfig = {
         enabled: true,
@@ -177,28 +212,26 @@ describe("security policy factory", () => {
       };
 
       const policy = createSecurityPolicyForMode("adaptive", { assessor });
-      await policy.assess!(baseRequest);
+      const result = await policy.assess!(baseRequest);
 
-      expect(executor.complete).toHaveBeenCalledTimes(1);
-      const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
-      expect(request.model).toBe("gpt-4o");
-      expect(preferences!.providerOrder).toBeUndefined();
-      expect(executionOptions!.primaryRoute).toBeDefined();
-      expect(executionOptions!.primaryRoute.provider).toBe("openai");
-      expect(executionOptions!.primaryRoute.id).toBe("gpt-4o");
-      expect(executionOptions!.primaryRoute.apiMode).toBe("openai_chat_completions");
-      expect(executionOptions!.primaryRoute.baseUrl).toBe("https://api.openai.com/v1");
-      expect(executionOptions!.primaryRoute.apiKeyEnv).toBe("OPENAI_API_KEY");
+      expect(executor.complete).not.toHaveBeenCalled();
+      expect(result.decision).toBe("ask");
+      expect(result.assessor).toEqual({ used: false, status: "unavailable" });
     });
 
-    it("does not synthesize a placeholder route for provider/model overrides without real defaults", async () => {
+    it("fails safe to manual approval when the resolved assessor route is missing", async () => {
       const executor = createMockExecutor();
       const assessor: SecurityAssessorRuntimeConfig = {
         enabled: true,
-        provider: "nous",
-        model: "hermes-4",
-        timeoutMs: 5000,
-        providerExecutor: executor
+        providerExecutor: executor,
+        auxiliaryRoute: {
+          task: "assessor",
+          route: undefined,
+          source: "disabled",
+          fallbackToMain: false,
+          diagnostics: ["No assessor route configured"]
+        },
+        mainRoute: localMainRoute
       };
 
       const policy = createSecurityPolicyForMode("adaptive", { assessor });
@@ -208,7 +241,7 @@ describe("security policy factory", () => {
       expect(result.assessor).toEqual({ used: false, status: "unavailable" });
     });
 
-    it("uses full auxiliaryModels.assessor resolved route when override absent", async () => {
+    it("uses full auxiliaryModels.assessor resolved route when present", async () => {
       const executor = createMockExecutor();
       const resolvedRoute: ResolvedModelRoute = {
         provider: "anthropic",
@@ -229,7 +262,14 @@ describe("security policy factory", () => {
         enabled: true,
         timeoutMs: 5000,
         providerExecutor: executor,
-        route: resolvedRoute
+        auxiliaryRoute: {
+          task: "assessor",
+          route: resolvedRoute,
+          source: "explicit",
+          fallbackToMain: false,
+          diagnostics: []
+        },
+        mainRoute: localMainRoute
       };
 
       const policy = createSecurityPolicyForMode("adaptive", { assessor });
@@ -239,6 +279,7 @@ describe("security policy factory", () => {
       const [, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
       expect(executionOptions!.primaryRoute).toEqual(resolvedRoute);
       expect(preferences!.providerOrder).toBeUndefined();
+      expect((executor.complete as any).mock.calls[0][0].tools).toEqual([]);
     });
 
     it("preserves route-level baseUrl and apiKeyEnv", async () => {
@@ -262,7 +303,14 @@ describe("security policy factory", () => {
         enabled: true,
         timeoutMs: 5000,
         providerExecutor: executor,
-        route: resolvedRoute
+        auxiliaryRoute: {
+          task: "assessor",
+          route: resolvedRoute,
+          source: "explicit",
+          fallbackToMain: false,
+          diagnostics: []
+        },
+        mainRoute: localMainRoute
       };
 
       const policy = createSecurityPolicyForMode("adaptive", { assessor });
@@ -309,7 +357,7 @@ describe("security policy factory", () => {
         .mockResolvedValueOnce({
           ok: true,
           response: {
-            content: JSON.stringify({ decision: "allow", risk: "low", reason: "fallback", confidence: 0.9 }),
+            content: JSON.stringify({ risk_score: 10, reasoning: "Fallback assessor response.", confidence: "high" }),
             provider: "openai",
             model: "gpt-4o"
           },
@@ -319,12 +367,15 @@ describe("security policy factory", () => {
       const policy = createSecurityPolicyForMode("adaptive", {
         assessor: {
           enabled: true,
-          provider: "openai",
-          model: "gpt-4.1-mini",
           providerExecutor: { complete } as unknown as ProviderExecutor,
-          route: assessorRoute,
-          mainRoute,
-          fallbackToMain: true
+          auxiliaryRoute: {
+            task: "assessor",
+            route: assessorRoute,
+            source: "explicit",
+            fallbackToMain: true,
+            diagnostics: []
+          },
+          mainRoute
         }
       });
       const result = await policy.assess!(baseRequest);
@@ -333,6 +384,7 @@ describe("security policy factory", () => {
       expect((complete as any).mock.calls[1][2].primaryRoute).toEqual(mainRoute);
       expect(result.assessor?.status).toBe("ok");
       expect(result.assessor?.model).toBe("gpt-4o");
+      expect(result.decision).toBe("allow");
     });
 
     it("does not fallback when fallbackToMain is false", async () => {
@@ -368,18 +420,167 @@ describe("security policy factory", () => {
       const policy = createSecurityPolicyForMode("adaptive", {
         assessor: {
           enabled: true,
-          provider: "openai",
-          model: "gpt-4.1-mini",
           providerExecutor: { complete } as unknown as ProviderExecutor,
-          route: assessorRoute,
-          mainRoute,
-          fallbackToMain: false
+          auxiliaryRoute: {
+            task: "assessor",
+            route: assessorRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          mainRoute
         }
       });
       const result = await policy.assess!(baseRequest);
 
       expect(complete).toHaveBeenCalledTimes(1);
       expect(result.assessor?.status).toBe("unavailable");
+    });
+
+    it("uses the shared risk_score assessor schema for allow, deny, and malformed output", async () => {
+      const lowRiskPolicy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          providerExecutor: createMockExecutor(true, JSON.stringify({
+            risk_score: 30,
+            reasoning: "Low risk command.",
+            confidence: "high"
+          })),
+          auxiliaryRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute
+        }
+      });
+      const highRiskPolicy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          providerExecutor: createMockExecutor(true, JSON.stringify({
+            risk_score: 61,
+            reasoning: "High risk command.",
+            confidence: "high"
+          })),
+          auxiliaryRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute
+        }
+      });
+      const malformedPolicy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          providerExecutor: createMockExecutor(true, JSON.stringify({
+            decision: "allow",
+            risk: "low",
+            reason: "obsolete schema",
+            confidence: 0.9
+          })),
+          auxiliaryRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute
+        }
+      });
+
+      await expect(lowRiskPolicy.assess!(baseRequest)).resolves.toMatchObject({
+        decision: "allow",
+        assessor: { status: "ok", decision: "allow", risk: "low" }
+      });
+      await expect(highRiskPolicy.assess!(baseRequest)).resolves.toMatchObject({
+        decision: "deny",
+        assessor: { status: "ok", decision: "deny", risk: "high" }
+      });
+      await expect(malformedPolicy.assess!(baseRequest)).resolves.toMatchObject({
+        decision: "ask",
+        assessor: { status: "malformed" }
+      });
+    });
+
+    it.each([
+      [JSON.stringify({ risk_score: 10, reasoning: "Low risk command.", confidence: "high" }), "allow"],
+      [JSON.stringify({ risk_score: 90, reasoning: "High risk command.", confidence: "high" }), "deny"],
+      ["not-json", "ask"]
+    ] as const)("keeps base policy and controller assessor decisions aligned for %s", async (content, expectedDecision) => {
+      const destructiveRequest = {
+        ...baseRequest,
+        targetKey: "terminal.run:cmd=rm -rf ./local-dir",
+        targetSummary: "rm -rf ./local-dir",
+        command: "rm -rf ./local-dir"
+      };
+      const baseExecutor = createMockExecutor(true, content);
+      const controllerExecutor = createMockExecutor(true, content);
+      const basePolicy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          providerExecutor: baseExecutor,
+          auxiliaryRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute
+        }
+      });
+      const approvals = new WorkspaceApprovalController({
+        store: new WorkspaceApprovalStore({ path: join(await mkdtemp(join(tmpdir(), "estacoda-policy-parity-")), "workspace-approvals.json") })
+      });
+
+      const [baseResult, controllerResult] = await Promise.all([
+        basePolicy.assess!(destructiveRequest),
+        approvals.assess(createSecurityPolicyForMode("adaptive"), destructiveRequest, {
+          workspaceRoot: process.cwd(),
+          sessionId: "session",
+          mode: "adaptive",
+          smartApproval: {
+            enabled: true,
+            assessorRoute: localAuxiliaryAssessorRoute,
+            mainRoute: localMainRoute,
+            providerExecutor: controllerExecutor,
+            scopeKey: "profile-test"
+          }
+        })
+      ]);
+
+      expect(baseResult.decision).toBe(expectedDecision);
+      expect(controllerResult.decision).toBe(expectedDecision);
+      expect(baseExecutor.complete).toHaveBeenCalledTimes(1);
+      expect(controllerExecutor.complete).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not call the auxiliary assessor twice when a controller handles an adaptive assessment", async () => {
+      const destructiveRequest = {
+        ...baseRequest,
+        targetKey: "terminal.run:cmd=rm -rf ./local-dir",
+        targetSummary: "rm -rf ./local-dir",
+        command: "rm -rf ./local-dir"
+      };
+      const complete = vi.fn().mockResolvedValue({
+        ok: true,
+        response: {
+          content: JSON.stringify({ risk_score: 10, reasoning: "Low risk command.", confidence: "high" }),
+          provider: "local",
+          model: "assessor-model"
+        },
+        attempts: [{ provider: "local", model: "assessor-model", ok: true, content: "ok" }]
+      });
+      const executor = { complete } as unknown as ProviderExecutor;
+      const basePolicy = createSecurityPolicyForMode("adaptive", {
+        assessor: {
+          enabled: true,
+          providerExecutor: executor,
+          auxiliaryRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute
+        }
+      });
+      const approvals = new WorkspaceApprovalController({
+        store: new WorkspaceApprovalStore({ path: join(await mkdtemp(join(tmpdir(), "estacoda-policy-single-call-")), "workspace-approvals.json") })
+      });
+
+      const result = await approvals.assess(basePolicy, destructiveRequest, {
+        workspaceRoot: process.cwd(),
+        sessionId: "session",
+        mode: "adaptive",
+        smartApproval: {
+          enabled: true,
+          assessorRoute: localAuxiliaryAssessorRoute,
+          mainRoute: localMainRoute,
+          providerExecutor: executor,
+          scopeKey: "profile-test"
+        }
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(complete).toHaveBeenCalledTimes(1);
     });
 
     it("passes assessor timeoutMs into auxiliary execution", async () => {
@@ -404,8 +605,6 @@ describe("security policy factory", () => {
       const policy = createSecurityPolicyForMode("adaptive", {
         assessor: {
           enabled: true,
-          provider: "openai",
-          model: "gpt-4.1-mini",
           providerExecutor: { complete } as unknown as ProviderExecutor,
           auxiliaryRoute: {
             task: "assessor",
