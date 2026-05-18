@@ -7,7 +7,8 @@ import {
   type SecurityPolicy,
   type SecurityRequest
 } from "../contracts/security.js";
-import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import { buildResolvedModelRoute, getProviderMetadata } from "../providers/provider-metadata.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
@@ -71,6 +72,9 @@ export type SecurityAssessorRuntimeConfig = SecurityAssessorConfig & {
   providerExecutor?: ProviderExecutor;
   sessionId?: string;
   route?: ResolvedModelRoute;
+  auxiliaryRoute?: ResolvedAuxiliaryRoute;
+  fallbackToMain?: boolean;
+  mainRoute?: ResolvedModelRoute;
 };
 
 function assessStrict(request: SecurityRequest): SecurityAssessment {
@@ -106,6 +110,7 @@ async function assessAdaptive(
   }
 
   const hasExecutableRoute =
+    assessor?.auxiliaryRoute?.route !== undefined ||
     assessor?.route !== undefined ||
     buildSecurityAssessorRoute(assessor) !== undefined;
 
@@ -226,61 +231,62 @@ async function assessWithAuxiliaryProvider(
     SecurityAssessorRuntimeConfig,
   deterministic: SecurityAssessment
 ): Promise<SecurityAssessment> {
-  const controller = new AbortController();
-  const timeoutMs = assessor.timeoutMs ?? 8_000;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const executionOptions: {
-      sessionId?: string;
-      signal?: AbortSignal;
-      primaryRoute?: ResolvedModelRoute;
-    } = {
-      sessionId: assessor.sessionId === undefined ? undefined : `${assessor.sessionId}:security-assessor`,
-      signal: controller.signal
-    };
-
-    if (assessor.route !== undefined) {
-      executionOptions.primaryRoute = assessor.route;
-    } else if (assessor.provider !== undefined && assessor.model !== undefined) {
-      executionOptions.primaryRoute = buildSecurityAssessorRoute(assessor);
+    const route = buildSecurityAssessorAuxiliaryRoute(assessor);
+    const mainRoute = assessor.mainRoute ?? route.route ?? buildSecurityAssessorRoute(assessor);
+    if (route.route === undefined || mainRoute === undefined) {
+      return {
+        ...deterministic,
+        assessor: {
+          used: true,
+          provider: assessor.provider,
+          model: assessor.model,
+          status: "unavailable"
+        }
+      };
     }
 
-    const execution = await assessor.providerExecutor.complete({
-      model: assessor.model,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "You are EstaCoda's security assessor.",
-            "Return JSON only.",
-            "Schema:",
-            "{\"decision\":\"allow|ask|deny\",\"risk\":\"low|medium|high\",\"reason\":\"...\",\"confidence\":0.0}",
-            "Never override a hard destructive-command floor."
-          ].join("\n")
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            riskClass: request.riskClass,
-            toolName: request.toolName,
-            targetKey: request.targetKey,
-            targetSummary: request.targetSummary,
-            command: request.command,
-            trustedWorkspace: request.context.trustedWorkspace,
-            activeChannel: request.context.activeChannel,
-            targetChannel: request.context.targetChannel,
-            targetConversationIsActive: request.context.targetConversationIsActive
-          })
-        }
-      ],
-      temperature: 0,
-      maxTokens: 200,
-      responseFormat: { type: "json_object" }
-    }, {
-      requireStructuredOutput: true,
-      providerOrder: undefined
-    }, executionOptions);
+    const execution = await executeAuxiliaryTask({
+      route,
+      mainRoute,
+      providerExecutor: assessor.providerExecutor,
+      preferences: {
+        requireStructuredOutput: true,
+        providerOrder: undefined
+      },
+      request: {
+        model: route.route.id,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are EstaCoda's security assessor.",
+              "Return JSON only.",
+              "Schema:",
+              "{\"decision\":\"allow|ask|deny\",\"risk\":\"low|medium|high\",\"reason\":\"...\",\"confidence\":0.0}",
+              "Never override a hard destructive-command floor."
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              riskClass: request.riskClass,
+              toolName: request.toolName,
+              targetKey: request.targetKey,
+              targetSummary: request.targetSummary,
+              command: request.command,
+              trustedWorkspace: request.context.trustedWorkspace,
+              activeChannel: request.context.activeChannel,
+              targetChannel: request.context.targetChannel,
+              targetConversationIsActive: request.context.targetConversationIsActive
+            })
+          }
+        ],
+        temperature: 0,
+        maxTokens: 200,
+        responseFormat: { type: "json_object" }
+      }
+    });
 
     if (!execution.ok || execution.response === undefined) {
       return {
@@ -289,7 +295,7 @@ async function assessWithAuxiliaryProvider(
           used: true,
           provider: assessor.provider,
           model: assessor.model,
-          status: "unavailable"
+          status: execution.status === "timeout" ? "timeout" : "unavailable"
         }
       };
     }
@@ -352,12 +358,26 @@ async function assessWithAuxiliaryProvider(
         used: true,
         provider: assessor.provider,
         model: assessor.model,
-        status: "timeout"
+        status: "unavailable"
       }
     };
-  } finally {
-    clearTimeout(timeout);
   }
+}
+
+function buildSecurityAssessorAuxiliaryRoute(assessor: SecurityAssessorRuntimeConfig): ResolvedAuxiliaryRoute {
+  if (assessor.auxiliaryRoute !== undefined) {
+    return assessor.auxiliaryRoute;
+  }
+
+  const route = buildSecurityAssessorRoute(assessor);
+  return {
+    task: "assessor",
+    route,
+    source: route === undefined ? "disabled" : assessor.route !== undefined ? "explicit" : "custom",
+    fallbackToMain: assessor.fallbackToMain === true,
+    timeoutMs: assessor.timeoutMs,
+    diagnostics: route === undefined ? ["No security assessor route configured"] : []
+  };
 }
 
 function buildSecurityAssessorRoute(

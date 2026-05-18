@@ -16,10 +16,10 @@ export type ProfileMemoryFile = "user" | "memory" | "soul";
 
 export const PROFILE_MEMORY_FILES: readonly ProfileMemoryFile[] = ["user", "memory", "soul"];
 
-export type ProfileContextualizer = (input: {
+export type ProfileContextGenerator = (input: {
   profileId: string;
   sourceProfileId: string;
-  focus: string;
+  profileContextFocus: string;
   user: string;
   memory: string;
   soul: string;
@@ -31,8 +31,8 @@ export type CreateProfileSkeletonOptions = {
   sourceProfileId?: string;
   blank?: boolean;
   copyFiles?: readonly ProfileMemoryFile[];
-  contextualize?: string;
-  contextualizer?: ProfileContextualizer;
+  profileContextFocus?: string;
+  profileContextGenerator?: ProfileContextGenerator;
   failIfExists?: boolean;
 };
 
@@ -110,18 +110,18 @@ export async function ensureProfileSkeleton(options: CreateProfileSkeletonOption
     soul: copyFiles.includes("soul") ? sourceMemory.soul : ""
   };
 
-  if (options.contextualize !== undefined) {
-    if (options.contextualizer === undefined) {
-      throw new Error("Profile contextualization requires an available provider/model; no contextualizer was provided.");
+  if (options.profileContextFocus !== undefined) {
+    if (options.profileContextGenerator === undefined) {
+      throw new Error("Profile context generation requires an available profile_context provider/model route; no generator was provided.");
     }
-    memoryContents.soul = await options.contextualizer({
+    memoryContents.soul = validateProfileContextOutput(await options.profileContextGenerator({
       profileId,
       sourceProfileId,
-      focus: options.contextualize,
+      profileContextFocus: options.profileContextFocus,
       user: memoryContents.user ?? "",
       memory: memoryContents.memory ?? "",
       soul: sourceMemory.soul ?? ""
-    });
+    }));
   }
 
   await writeFileIfAbsent(profilePaths.userMdPath, memoryContents.user ?? "");
@@ -129,6 +129,17 @@ export async function ensureProfileSkeleton(options: CreateProfileSkeletonOption
   await writeFileIfAbsent(profilePaths.memoryMdPath, memoryContents.memory ?? "");
 
   return profilePaths;
+}
+
+export function validateProfileContextOutput(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Profile context generation returned empty output.");
+  }
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(trimmed) || /\b(?:sk-[A-Za-z0-9_-]{16,}|[A-Z0-9_]*(?:TOKEN|SECRET|API_KEY)[A-Z0-9_]*\s*=)/u.test(trimmed)) {
+    throw new Error("Profile context generation output failed secret-safety scan.");
+  }
+  return `${trimmed}\n`;
 }
 
 export async function createProfileDirectories(profilePaths: ProfileStatePaths): Promise<void> {

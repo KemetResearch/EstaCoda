@@ -10,14 +10,18 @@ import {
   resolveProfileStateHome,
   writeActiveProfile
 } from "../config/profile-home.js";
-import { readConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, readConfig } from "../config/runtime-config.js";
 import {
   ensureProfileSkeleton,
   parseProfileMemoryFiles,
+  type ProfileContextGenerator,
   profileExists,
   removeProfileDirectory,
   renameProfileDirectory
 } from "./profile-state.js";
+import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
+import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 
 export async function profileCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
@@ -45,9 +49,12 @@ export async function profileCommand(options: CliOptions, args: string[]): Promi
 }
 
 async function createProfile(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  if (hasFlag(args, "--contextualize")) {
+    return usage("Unknown option: --contextualize. Use --profile-context <focus>.");
+  }
   const name = firstPositional(args);
   if (name === undefined) {
-    return usage("Usage: estacoda profile create <name> [--blank] [--from <profile>] [--files user,memory,soul] [--contextualize <focus>]");
+    return usage("Usage: estacoda profile create <name> [--blank] [--from <profile>] [--files user,memory,soul] [--profile-context <focus>]");
   }
 
   const profileId = normalizeProfileId(name);
@@ -71,7 +78,10 @@ async function createProfile(options: CliOptions, args: string[]): Promise<CliCo
     };
   }
 
-  const focus = valueAfter(args, "--contextualize");
+  const profileContextFocus = valueAfter(args, "--profile-context");
+  const profileContextGenerator = profileContextFocus === undefined
+    ? undefined
+    : options.profileContextGenerator ?? await createProductionProfileContextGenerator(options);
   try {
     const profilePaths = await ensureProfileSkeleton({
       homeDir: options.homeDir,
@@ -79,8 +89,8 @@ async function createProfile(options: CliOptions, args: string[]): Promise<CliCo
       sourceProfileId,
       blank: hasFlag(args, "--blank"),
       copyFiles,
-      contextualize: focus,
-      contextualizer: options.profileContextualizer,
+      profileContextFocus,
+      profileContextGenerator,
       failIfExists: true
     });
     return {
@@ -91,7 +101,7 @@ async function createProfile(options: CliOptions, args: string[]): Promise<CliCo
         `Config: ${profilePaths.configPath}`,
         `Secrets: ${profilePaths.envPath}`,
         `Skills: ${profilePaths.skillsPath}`,
-        focus === undefined ? undefined : `Contextualized: ${focus}`
+        profileContextFocus === undefined ? undefined : `Profile context: ${profileContextFocus}`
       ].filter((line): line is string => line !== undefined).join("\n")
     };
   } catch (error) {
@@ -101,6 +111,63 @@ async function createProfile(options: CliOptions, args: string[]): Promise<CliCo
       output: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+async function createProductionProfileContextGenerator(options: CliOptions): Promise<ProfileContextGenerator> {
+  return async (input) => {
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: options.workspaceRoot,
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      providerFetch: options.providerFetch,
+      modelsDevOptions: options.modelsDevOptions
+    });
+    const route = await resolveAuxiliaryModelRoute("profile_context", loaded.auxiliaryModels, {
+      mainRoute: loaded.primaryModelRoute,
+      providerRegistry: loaded.providerRegistry
+    });
+    if (route.route === undefined) {
+      throw new Error(`Profile context generation route is unavailable: ${route.diagnostics.join("; ") || "no profile_context route"}`);
+    }
+
+    const result = await executeAuxiliaryTask({
+      route,
+      mainRoute: loaded.primaryModelRoute,
+      providerExecutor: new ProviderExecutor({ registry: loaded.providerRegistry }),
+      scopeKey: input.profileId,
+      request: {
+        model: route.route.id,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are EstaCoda's profile context generator.",
+              "Write a concise SOUL.md profile context for the new profile.",
+              "Do not include secrets, credentials, private keys, or raw environment values."
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              profileId: input.profileId,
+              sourceProfileId: input.sourceProfileId,
+              profileContextFocus: input.profileContextFocus,
+              user: input.user,
+              memory: input.memory,
+              soul: input.soul
+            })
+          }
+        ],
+        temperature: 0.2,
+        maxTokens: 700
+      }
+    });
+
+    if (!result.ok || result.response === undefined) {
+      throw new Error(`Profile context generation failed: ${result.status}`);
+    }
+    return result.response.content;
+  };
 }
 
 async function listProfiles(options: CliOptions): Promise<CliCommandResult> {
@@ -307,7 +374,7 @@ function hasFlag(args: readonly string[], ...flags: string[]): boolean {
 }
 
 function flagTakesValue(flag: string | undefined): boolean {
-  return flag === "--from" || flag === "--files" || flag === "--contextualize";
+  return flag === "--from" || flag === "--files" || flag === "--profile-context";
 }
 
 async function isNonEmptyDirectory(path: string): Promise<boolean> {

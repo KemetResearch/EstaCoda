@@ -92,6 +92,13 @@ export type ModelStatusReport = {
   primary: ModelRouteDiagnostic;
   fallbacks: ModelRouteDiagnostic[];
   auxiliary: Record<string, ModelRouteDiagnostic>;
+  auxiliaryRoutes: Array<{
+    diagnostic: ModelRouteDiagnostic;
+    route: ResolvedAuxiliaryRoute;
+    scope: string;
+    inFlight: number;
+    queued: number;
+  }>;
   overallReady: boolean;
   warnings: string[];
 };

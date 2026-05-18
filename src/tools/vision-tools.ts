@@ -1,17 +1,23 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
   allowedRoots?: string[];
-  resolvedVisionRoute?: ResolvedModelRoute;
+  visionAuxiliaryRoute?: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
-  fallbackToMain?: boolean;
   providerExecutor?: ProviderExecutor;
   maxImageBytes?: number;
+  /** @deprecated Use visionAuxiliaryRoute. */
+  resolvedVisionRoute?: ResolvedModelRoute;
+  /** @deprecated Use visionAuxiliaryRoute.fallbackToMain. */
+  fallbackToMain?: boolean;
+  /** @deprecated Route preferences are now owned by executeAuxiliaryTask callers. */
+  routePreferences?: Parameters<typeof executeAuxiliaryTask>[0]["preferences"];
 };
 
 const DEFAULT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -40,7 +46,7 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       toolsets: ["media", "research", "telegram", "core"],
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
-      isAvailable: async () => options.resolvedVisionRoute !== undefined,
+      isAvailable: async () => resolveVisionAuxiliaryRoute(options).route !== undefined,
       run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(options, input, context?.signal)
     }
   ];
@@ -82,7 +88,8 @@ export async function analyzeImageWithVision(
     };
   }
 
-  if (options.resolvedVisionRoute === undefined) {
+  const visionAuxiliaryRoute = resolveVisionAuxiliaryRoute(options);
+  if (visionAuxiliaryRoute.route === undefined) {
     return {
       ok: false,
       content: "No vision-capable provider route is configured and available in this runtime yet."
@@ -93,70 +100,75 @@ export async function analyzeImageWithVision(
   const dataUrl = `data:${mimeType};base64,${imageBytes.toString("base64")}`;
   const displayRoot = resolved.root ?? workspaceRoot;
   const relativePath = makeRelativePath(displayRoot, resolved.path);
-  const attempts: string[] = [];
 
-  const visionResult = await executeVisionRequest({
-    route: options.resolvedVisionRoute,
-    dataUrl,
-    prompt: input.prompt,
+  if (options.providerExecutor === undefined) {
+    return {
+      ok: false,
+      content: `Vision analysis is unavailable right now. Attempts: ${visionAuxiliaryRoute.route.provider}/${visionAuxiliaryRoute.route.id}:no-executor`,
+      metadata: {
+        path: relativePath,
+        bytes: fileStat.size,
+        mimeType,
+        attempts: [`${visionAuxiliaryRoute.route.provider}/${visionAuxiliaryRoute.route.id}:no-executor`]
+      }
+    };
+  }
+
+  const auxiliaryResult = await executeAuxiliaryTask({
+    route: visionAuxiliaryRoute,
+    mainRoute: options.mainRoute ?? visionAuxiliaryRoute.route,
     providerExecutor: options.providerExecutor,
+    preferences: options.routePreferences,
+    request: {
+      model: visionAuxiliaryRoute.route.id,
+      messages: [
+        {
+          role: "system",
+          content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: input.prompt?.trim().length
+                ? input.prompt.trim()
+                : "Describe this image so EstaCoda can help the user."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: dataUrl
+              }
+            }
+          ]
+        }
+      ] as any,
+      maxTokens: 500
+    },
     signal
   });
 
-  attempts.push(visionResult.attempt);
+  const attempts = auxiliaryResult.attempts.map((attempt) =>
+    `${attempt.provider}/${attempt.model}:${attempt.ok ? "ok" : attempt.errorClass ?? "error"}`
+  );
 
-  if (visionResult.ok) {
+  if (auxiliaryResult.ok && auxiliaryResult.response !== undefined) {
     return {
       ok: true,
       content: [
         `Vision analysis: ${relativePath}`,
-        visionResult.content.trim()
+        auxiliaryResult.response.content.trim()
       ].filter((line) => line.length > 0).join("\n\n"),
       metadata: {
         path: relativePath,
         bytes: fileStat.size,
         mimeType,
-        provider: visionResult.provider,
-        model: visionResult.model,
+        provider: auxiliaryResult.response.provider,
+        model: auxiliaryResult.response.model,
         attempts
       }
     };
-  }
-
-  // Fallback to main if allowed and main supports vision
-  if (
-    options.fallbackToMain === true &&
-    options.mainRoute !== undefined &&
-    options.mainRoute.profile.supportsVision &&
-    options.providerExecutor !== undefined
-  ) {
-    const fallbackResult = await executeVisionRequest({
-      route: options.mainRoute,
-      dataUrl,
-      prompt: input.prompt,
-      providerExecutor: options.providerExecutor,
-      signal
-    });
-
-    attempts.push(fallbackResult.attempt);
-
-    if (fallbackResult.ok) {
-      return {
-        ok: true,
-        content: [
-          `Vision analysis: ${relativePath}`,
-          fallbackResult.content.trim()
-        ].filter((line) => line.length > 0).join("\n\n"),
-        metadata: {
-          path: relativePath,
-          bytes: fileStat.size,
-          mimeType,
-          provider: fallbackResult.provider,
-          model: fallbackResult.model,
-          attempts
-        }
-      };
-    }
   }
 
   return {
@@ -171,77 +183,22 @@ export async function analyzeImageWithVision(
   };
 }
 
-async function executeVisionRequest(options: {
-  route: ResolvedModelRoute;
-  dataUrl: string;
-  prompt?: string;
-  providerExecutor?: ProviderExecutor;
-  signal?: AbortSignal;
-}): Promise<{
-  ok: boolean;
-  content: string;
-  provider: string;
-  model: string;
-  attempt: string;
-}> {
-  if (options.providerExecutor === undefined) {
-    return {
-      ok: false,
-      content: "",
-      provider: options.route.provider,
-      model: options.route.id,
-      attempt: `${options.route.provider}/${options.route.id}:no-executor`
-    };
+function resolveVisionAuxiliaryRoute(options: VisionToolOptions): ResolvedAuxiliaryRoute {
+  if (options.visionAuxiliaryRoute !== undefined) {
+    return options.visionAuxiliaryRoute;
   }
+  return synthesizeLegacyRoute(options);
+}
 
-  const result = await options.providerExecutor.complete({
-    model: options.route.id,
-    messages: [
-      {
-        role: "system",
-        content: "You are EstaCoda's vision analysis lane. Describe the image directly and concretely. Mention visible text if present. Stay concise but useful."
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: options.prompt?.trim().length
-              ? options.prompt.trim()
-              : "Describe this image so EstaCoda can help the user."
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: options.dataUrl
-            }
-          }
-        ]
-      }
-    ] as any,
-    maxTokens: 500
-  }, {}, {
-    primaryRoute: options.route,
-    signal: options.signal
-  });
-
-  if (result.ok && result.response !== undefined) {
-    return {
-      ok: true,
-      content: result.response.content,
-      provider: result.response.provider,
-      model: result.response.model,
-      attempt: `${result.response.provider}/${result.response.model}:ok`
-    };
-  }
-
-  const lastAttempt = result.attempts[result.attempts.length - 1];
+function synthesizeLegacyRoute(options: VisionToolOptions): ResolvedAuxiliaryRoute {
   return {
-    ok: false,
-    content: "",
-    provider: options.route.provider,
-    model: options.route.id,
-    attempt: `${options.route.provider}/${options.route.id}:${lastAttempt?.errorClass ?? "error"}`
+    task: "vision",
+    route: options.resolvedVisionRoute,
+    source: options.resolvedVisionRoute === undefined ? "disabled" : "explicit",
+    fallbackToMain: options.fallbackToMain === true &&
+      options.mainRoute !== undefined &&
+      options.mainRoute.profile.supportsVision,
+    diagnostics: options.resolvedVisionRoute === undefined ? ["No legacy vision route configured"] : []
   };
 }
 

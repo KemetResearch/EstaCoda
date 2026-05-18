@@ -55,6 +55,7 @@ import {
 } from "../contracts/image-generation.js";
 import type { ModelProfile, ResolvedAuxiliaryRoute, ProviderId } from "../contracts/provider.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
+import { getAuxiliaryInFlight, getAuxiliaryQueued } from "../providers/auxiliary-executor.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -156,7 +157,7 @@ import {
 } from "./model-setup.js";
 import { runModelSetupCodex } from "./model-setup-codex.js";
 import { profileCommand } from "./profile-commands.js";
-import type { ProfileContextualizer } from "./profile-state.js";
+import type { ProfileContextGenerator } from "./profile-state.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -177,7 +178,7 @@ export type CliOptions = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
-  profileContextualizer?: ProfileContextualizer;
+  profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
 };
 
@@ -840,10 +841,16 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     if (Object.keys(report.auxiliary).length > 0) {
       lines.push("");
       lines.push("Auxiliary models:");
-      for (const [task, aux] of Object.entries(report.auxiliary)) {
-        lines.push(`  ${task}: ${aux.route.provider}/${aux.route.id} (${aux.executable ? "executable" : "catalog-only"})`);
-        if (aux.warnings.length > 0) {
-          for (const warning of aux.warnings) lines.push(`    Warning: ${warning}`);
+      for (const aux of report.auxiliaryRoutes) {
+        lines.push(`  ${aux.route.task}: ${aux.diagnostic.route.provider}/${aux.diagnostic.route.id} (${aux.diagnostic.executable ? "executable" : "catalog-only"})`);
+        lines.push(`    Source: ${aux.route.source}`);
+        lines.push(`    Timeout: ${formatOptionalNumber(aux.route.timeoutMs, "ms")}`);
+        lines.push(`    Max concurrency: ${formatOptionalNumber(aux.route.maxConcurrency)}`);
+        lines.push(`    Scope: ${aux.scope}`);
+        lines.push(`    In flight: ${aux.inFlight}`);
+        lines.push(`    Queued: ${aux.queued}`);
+        if (aux.diagnostic.warnings.length > 0) {
+          for (const warning of aux.diagnostic.warnings) lines.push(`    Warning: ${warning}`);
         }
       }
     }
@@ -1525,9 +1532,20 @@ function renderAuxiliaryStatus(routes: ResolvedAuxiliaryRoute[]): string {
     const readiness = route.route === undefined
       ? "unavailable"
       : "ready";
+    const scope = "global";
     lines.push(`  ${route.task}: ${status} [${readiness}]`);
+    lines.push(`    Source: ${route.source}`);
+    lines.push(`    Timeout: ${formatOptionalNumber(route.timeoutMs, "ms")}`);
+    lines.push(`    Max concurrency: ${formatOptionalNumber(route.maxConcurrency)}`);
+    lines.push(`    Scope: ${scope}`);
+    lines.push(`    In flight: ${getAuxiliaryInFlight(route.task)}`);
+    lines.push(`    Queued: ${getAuxiliaryQueued(route.task)}`);
   }
   return lines.join("\n");
+}
+
+function formatOptionalNumber(value: number | undefined, suffix = ""): string {
+  return value === undefined ? "unset" : `${value}${suffix}`;
 }
 
 async function modelFallback(

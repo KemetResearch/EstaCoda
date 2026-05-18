@@ -2,6 +2,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { ModelRouteDiagnostic, ModelStatusReport } from "../reports/model-reports.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
+import { getAuxiliaryInFlight, getAuxiliaryQueued } from "../providers/auxiliary-executor.js";
 
 export async function produceModelStatusReport(config: LoadedRuntimeConfig): Promise<ModelStatusReport> {
   const primary = produceModelRouteDiagnostic(config.primaryModelRoute, config);
@@ -11,11 +12,13 @@ export async function produceModelStatusReport(config: LoadedRuntimeConfig): Pro
     providerRegistry: config.providerRegistry
   });
   const auxiliary: Record<string, ModelRouteDiagnostic> = {};
+  const auxiliaryRouteDiagnostics: ModelStatusReport["auxiliaryRoutes"] = [];
   for (const route of auxiliaryRoutes) {
+    let diagnostic: ModelRouteDiagnostic;
     if (route.route) {
-      auxiliary[route.task] = produceModelRouteDiagnostic(route.route, config);
+      diagnostic = produceModelRouteDiagnostic(route.route, config);
     } else {
-      auxiliary[route.task] = {
+      diagnostic = {
         route: {
           provider: "unconfigured",
           id: "unconfigured",
@@ -36,6 +39,14 @@ export async function produceModelStatusReport(config: LoadedRuntimeConfig): Pro
         warnings: route.diagnostics
       };
     }
+    auxiliary[route.task] = diagnostic;
+    auxiliaryRouteDiagnostics.push({
+      diagnostic,
+      route,
+      scope: "global",
+      inFlight: getAuxiliaryInFlight(route.task),
+      queued: getAuxiliaryQueued(route.task)
+    });
   }
 
   const warnings: string[] = [];
@@ -53,6 +64,7 @@ export async function produceModelStatusReport(config: LoadedRuntimeConfig): Pro
     primary,
     fallbacks,
     auxiliary,
+    auxiliaryRoutes: auxiliaryRouteDiagnostics,
     overallReady: primary.executable && primary.credentialReady && primary.endpointReady,
     warnings
   };

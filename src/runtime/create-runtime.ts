@@ -390,9 +390,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     visionAnalyzer: (input, signal) => analyzeImageWithVision({
       workspaceRoot,
       allowedRoots: [channelMediaRoot],
-      resolvedVisionRoute: visionRoute?.route,
+      visionAuxiliaryRoute: visionRoute,
       mainRoute,
-      fallbackToMain: visionRoute?.fallbackToMain,
       providerExecutor: new ProviderExecutor({
         registry: providerRegistry
       })
@@ -435,9 +434,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createVisionTools({
     workspaceRoot,
     allowedRoots: [channelMediaRoot],
-    resolvedVisionRoute: visionRoute?.route,
+    visionAuxiliaryRoute: visionRoute,
     mainRoute,
-    fallbackToMain: visionRoute?.fallbackToMain,
     providerExecutor: new ProviderExecutor({
       registry: providerRegistry
     })
@@ -571,7 +569,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...options.securityAssessor,
       provider: options.securityAssessor.provider ?? assessorRoute?.route?.provider,
       model: options.securityAssessor.model ?? assessorRoute?.route?.id,
-      route: options.securityAssessor.route ?? assessorRoute?.route
+      route: options.securityAssessor.route ?? assessorRoute?.route,
+      auxiliaryRoute: options.securityAssessor.auxiliaryRoute ?? assessorRoute,
+      fallbackToMain: options.securityAssessor.fallbackToMain ?? assessorRoute?.fallbackToMain,
+      mainRoute: options.securityAssessor.mainRoute ?? mainRoute
     };
   const baseSecurityPolicyForActiveMode = () => options.securityPolicy ?? createSecurityPolicyForMode(activeSecurityMode, {
     assessor: effectiveSecurityAssessor === undefined
