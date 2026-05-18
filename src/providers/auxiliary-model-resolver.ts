@@ -1,6 +1,7 @@
 import type {
   AuxiliaryModelConfig,
   AuxiliaryModelSlotConfig,
+  AuxiliaryModelSlotInput,
   AuxiliaryModelTask,
   ModelProfile,
   ProviderId,
@@ -15,7 +16,7 @@ import { inferModelProfile, resolveModelProfileFromCatalog } from "./model-catal
 const taskCapabilityRequirements: Record<AuxiliaryModelTask, ProviderRoutePreferences> = {
   vision: { requireVision: true },
   compression: { requireStructuredOutput: true },
-  approval: { requireStructuredOutput: true },
+  assessor: { requireStructuredOutput: true },
   web_extract: { requireStructuredOutput: true },
   session_search: { requireStructuredOutput: true },
   mcp: { requireTools: true, requireStructuredOutput: true },
@@ -24,27 +25,13 @@ const taskCapabilityRequirements: Record<AuxiliaryModelTask, ProviderRoutePrefer
   skills_library: { requireTools: true, requireStructuredOutput: true },
   title_generation: { requireStructuredOutput: true },
   curator: { requireStructuredOutput: true },
-  memory_compaction: { requireStructuredOutput: true }
+  memory_compaction: { requireStructuredOutput: true },
+  profile_context: { requireStructuredOutput: true }
 };
-
-const textOnlyStructuredTasks: ReadonlySet<AuxiliaryModelTask> = new Set([
-  "compression",
-  "approval",
-  "title_generation",
-  "curator",
-  "memory_flush",
-  "memory_compaction"
-]);
-
-const toolReasoningTasks: ReadonlySet<AuxiliaryModelTask> = new Set([
-  "mcp",
-  "skills_library",
-  "delegation"
-]);
 
 export function resolveAuxiliaryModelRoute(
   task: AuxiliaryModelTask,
-  slot: AuxiliaryModelSlotConfig,
+  slotOrConfig: AuxiliaryModelSlotInput | AuxiliaryModelConfig | undefined,
   context: {
     mainRoute: ResolvedModelRoute;
     providerRegistry: ProviderRegistry;
@@ -53,6 +40,10 @@ export function resolveAuxiliaryModelRoute(
 ): ResolvedAuxiliaryRoute {
   const diagnostics: string[] = [];
   const requirements = taskCapabilityRequirements[task];
+  if (requirements === undefined) {
+    throw new Error(`Unsupported auxiliary model task '${String(task)}'`);
+  }
+  const slot = resolveEffectiveSlot(task, slotOrConfig);
 
   // 1. Disabled
   if (slot.enabled === false) {
@@ -236,16 +227,7 @@ function computeFallbackToMain(options: {
     return options.mainRoute.profile.supportsVision;
   }
 
-  if (toolReasoningTasks.has(options.task)) {
-    return options.mainRoute.profile.supportsTools;
-  }
-
-  if (textOnlyStructuredTasks.has(options.task)) {
-    return true;
-  }
-
-  // Default: web_extract, session_search, memory_flush, title_generation, curator, memory_compaction, compression, approval
-  return true;
+  return false;
 }
 
 export async function resolveAllAuxiliaryRoutes(
@@ -256,12 +238,71 @@ export async function resolveAllAuxiliaryRoutes(
   }
 ): Promise<ResolvedAuxiliaryRoute[]> {
   const providerModels = await context.providerRegistry.listModels();
-  const tasks = Object.keys(config) as AuxiliaryModelTask[];
+  const tasks = Object.keys(config).filter((task) => task !== "default") as AuxiliaryModelTask[];
   return tasks.map((task) =>
-    resolveAuxiliaryModelRoute(task, config[task] ?? { provider: "auto", enabled: true }, {
+    resolveAuxiliaryModelRoute(task, config, {
       mainRoute: context.mainRoute,
       providerRegistry: context.providerRegistry,
       providerModels
     })
   );
+}
+
+function resolveEffectiveSlot(
+  task: AuxiliaryModelTask,
+  slotOrConfig: AuxiliaryModelSlotInput | AuxiliaryModelConfig | undefined
+): AuxiliaryModelSlotConfig {
+  if (isAuxiliaryModelConfigInput(slotOrConfig)) {
+    const defaultSlot = normalizeAuxiliarySlotInput(slotOrConfig.default, "auxiliaryModels.default");
+    const taskSlot = normalizeAuxiliarySlotInput(slotOrConfig[task], `auxiliaryModels.${task}`);
+    return {
+      ...(defaultSlot ?? {}),
+      ...(taskSlot ?? {}),
+      provider: taskSlot?.provider ?? defaultSlot?.provider ?? "auto",
+      enabled: taskSlot?.enabled ?? defaultSlot?.enabled ?? true
+    };
+  }
+
+  const slot = normalizeAuxiliarySlotInput(slotOrConfig, "auxiliaryModels.slot");
+  return {
+    ...(slot ?? {}),
+    provider: slot?.provider ?? "auto",
+    enabled: slot?.enabled ?? true
+  };
+}
+
+function isAuxiliaryModelConfigInput(
+  value: AuxiliaryModelSlotInput | AuxiliaryModelConfig | undefined
+): value is AuxiliaryModelConfig {
+  if (value === undefined || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return "default" in value || Object.keys(value).some((key) => key in taskCapabilityRequirements);
+}
+
+function normalizeAuxiliarySlotInput(
+  slot: AuxiliaryModelSlotInput | undefined,
+  path: string
+): AuxiliaryModelSlotConfig | undefined {
+  if (slot === undefined) return undefined;
+  if (typeof slot === "string") {
+    return parseAuxiliaryModelShorthand(slot, path);
+  }
+  return slot;
+}
+
+function parseAuxiliaryModelShorthand(value: string, path: string): AuxiliaryModelSlotConfig {
+  const slashIndex = value.indexOf("/");
+  if (slashIndex < 0) {
+    throw new Error(`${path} shorthand must be provider/model`);
+  }
+  const provider = value.slice(0, slashIndex);
+  const id = value.slice(slashIndex + 1);
+  if (provider.length === 0) {
+    throw new Error(`${path} shorthand is missing provider before /`);
+  }
+  if (id.length === 0) {
+    throw new Error(`${path} shorthand is missing model id after /`);
+  }
+  return { provider: provider as ProviderId, id };
 }

@@ -130,10 +130,12 @@ export type AuxiliaryModelSlotConfig = {
   enabled?: boolean;
 };
 
+export type AuxiliaryModelSlotInput = AuxiliaryModelSlotConfig | string;
+
 export type AuxiliaryModelTask =
   | "vision"
   | "compression"
-  | "approval"
+  | "assessor"
   | "web_extract"
   | "session_search"
   | "mcp"
@@ -142,9 +144,12 @@ export type AuxiliaryModelTask =
   | "skills_library"
   | "title_generation"
   | "curator"
-  | "memory_compaction";
+  | "memory_compaction"
+  | "profile_context";
 
-export type AuxiliaryModelConfig = Partial<Record<AuxiliaryModelTask, AuxiliaryModelSlotConfig>>;
+export type AuxiliaryModelConfig = {
+  default?: AuxiliaryModelSlotInput;
+} & Partial<Record<AuxiliaryModelTask, AuxiliaryModelSlotInput>>;
 
 export type ResolvedAuxiliaryRoute = {
   task: AuxiliaryModelTask;
