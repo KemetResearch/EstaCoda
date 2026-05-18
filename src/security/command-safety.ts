@@ -507,7 +507,14 @@ function matchesHostDiskDestructive(command: string): boolean {
 
 function matchesForkBomb(command: string): boolean {
   const compact = command.replace(/\s+/gu, "");
-  return compact.includes(":(){:|:&};:");
+  return compact.includes(":(){:|:&};:") ||
+    splitShellSegments(command).some(segment => {
+      const tokens = unwrappedCommandTokens(tokenizeCommand(segment));
+      const commandName = firstCommandName(tokens);
+      return (commandName === "kill" && tokens[1] === "-1") ||
+        (commandName === "pkill" && tokens[1] === "-9" && tokens[2] === "-u") ||
+        (commandName === "killall" && tokens[1] === "-u");
+    });
 }
 
 function matchesHardlinePermissionDestruction(command: string): boolean {
@@ -545,7 +552,7 @@ function matchesSudoWithoutWhitelist(command: string): boolean {
   const segments = splitShellSegments(command);
   for (const segment of segments) {
     const tokens = tokenizeCommand(segment);
-    const sudoIndex = tokens.findIndex(token => getBasename(token).toLowerCase() === "sudo");
+    const sudoIndex = sudoCommandIndex(tokens);
     if (sudoIndex === -1) {
       continue;
     }
@@ -577,6 +584,28 @@ function matchesSudoWithoutWhitelist(command: string): boolean {
   return false;
 }
 
+function sudoCommandIndex(tokens: string[]): number {
+  let index = 0;
+
+  while (index < tokens.length) {
+    const commandName = getBasename(tokens[index]!).toLowerCase();
+    if (commandName === "sudo") {
+      return index;
+    }
+
+    if (!WRAPPER_COMMANDS.has(commandName)) {
+      return -1;
+    }
+
+    index++;
+    while (index < tokens.length && tokens[index]!.startsWith("-")) {
+      index++;
+    }
+  }
+
+  return -1;
+}
+
 function isWhitelistedSudoTarget(token: string): boolean {
   return token === "-v" || token === "-l" || token === "true" || token === "--version";
 }
@@ -584,6 +613,24 @@ function isWhitelistedSudoTarget(token: string): boolean {
 function firstCommandName(tokens: string[]): string | undefined {
   const first = tokens[0];
   return first === undefined ? undefined : getBasename(first).toLowerCase();
+}
+
+function unwrappedCommandTokens(tokens: string[]): string[] {
+  let index = 0;
+
+  while (index < tokens.length) {
+    const commandName = getBasename(tokens[index]!).toLowerCase();
+    if (!WRAPPER_COMMANDS.has(commandName)) {
+      break;
+    }
+
+    index++;
+    while (index < tokens.length && tokens[index]!.startsWith("-")) {
+      index++;
+    }
+  }
+
+  return tokens.slice(index);
 }
 
 function matchesPackageRemoval(command: string): boolean {
@@ -639,13 +686,14 @@ function matchesSqlDestructive(command: string): boolean {
 
 function matchesSelfTermination(command: string): boolean {
   return splitShellSegments(command).some(segment => {
-    const tokens = tokenizeCommand(segment);
+    const tokens = unwrappedCommandTokens(tokenizeCommand(segment));
     const commandName = firstCommandName(tokens);
     return commandName === "shutdown" ||
       commandName === "reboot" ||
       commandName === "halt" ||
       commandName === "poweroff" ||
-      ((commandName === "init" || commandName === "telinit") && tokens[1] === "0") ||
+      (commandName === "systemctl" && (tokens[1] === "poweroff" || tokens[1] === "reboot")) ||
+      ((commandName === "init" || commandName === "telinit") && (tokens[1] === "0" || tokens[1] === "6")) ||
       (commandName === "kill" && tokens[1] === "-9" && (tokens[2] === "-1" || tokens[2] === "1")) ||
       (commandName === "mv" && tokens[1] === "/" && tokens[2] === "/dev/null") ||
       (commandName === "echo" && />\s*\/proc\/sysrq-trigger\b/iu.test(segment));

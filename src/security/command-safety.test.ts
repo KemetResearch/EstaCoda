@@ -138,6 +138,32 @@ describe("command-safety", () => {
     });
   });
 
+  describe("sudo command-position matching", () => {
+    const sudoCommands = [
+      "sudo apt update",
+      "cd app && sudo rm file",
+      "npm test; sudo reboot"
+    ];
+
+    for (const command of sudoCommands) {
+      it(`hard-blocks sudo in command position for ${command}`, () => {
+        expect(assessCommandSafety(command).hardBlock).toBeDefined();
+      });
+    }
+
+    const dataOnlyCommands = [
+      "echo sudo apt update",
+      "printf \"sudo apt update\"",
+      "python -c \"print('sudo apt update')\""
+    ];
+
+    for (const command of dataOnlyCommands) {
+      it(`does not hard-block sudo as data for ${command}`, () => {
+        expect(assessCommandSafety(command).hardBlock).toBeUndefined();
+      });
+    }
+  });
+
   describe("hardline patterns in every environment", () => {
     const cases: Array<{
       name: string;
@@ -237,6 +263,48 @@ describe("command-safety", () => {
     it("hard-blocks iptables -F shorthand", () => {
       expect(assessCommandSafety("iptables -F", { environmentType: "docker" }).hardBlock?.code).toBe("firewall-flush");
     });
+
+    const legacyHardBlocks = [
+      {
+        command: "systemctl poweroff",
+        code: "self-termination"
+      },
+      {
+        command: "systemctl reboot",
+        code: "self-termination"
+      },
+      {
+        command: "init 6",
+        code: "self-termination"
+      },
+      {
+        command: "kill -1",
+        code: "fork-bomb-or-killall"
+      },
+      {
+        command: "pkill -9 -u developer",
+        code: "fork-bomb-or-killall"
+      },
+      {
+        command: "killall -u developer",
+        code: "fork-bomb-or-killall"
+      }
+    ] as const;
+
+    for (const testCase of legacyHardBlocks) {
+      it(`preserves legacy hard-block for ${testCase.command} on host`, () => {
+        expect(assessCommandSafety(testCase.command).hardBlock?.code).toBe(testCase.code);
+      });
+
+      it(`preserves legacy hard-block for ${testCase.command} in docker`, () => {
+        expect(assessCommandSafety(testCase.command, { environmentType: "docker" }).hardBlock?.code).toBe(testCase.code);
+      });
+    }
+
+    it("preserves legacy hard-blocks through sudo wrappers", () => {
+      expect(assessCommandSafety("sudo systemctl reboot", { environmentType: "docker" }).hardBlock?.code).toBe("self-termination");
+      expect(assessCommandSafety("sudo -n killall -u developer", { environmentType: "docker" }).hardBlock?.code).toBe("fork-bomb-or-killall");
+    });
   });
 
   describe("normalization defenses", () => {
@@ -256,6 +324,27 @@ describe("command-safety", () => {
 
     it("exposes normalization as a standalone helper", () => {
       expect(normalizeCommandForSafety("  ｇｉｔ   push   --force  ")).toBe("git push --force");
+    });
+  });
+
+  describe("severity", () => {
+    it("returns critical severity for hardline results", () => {
+      const assessment = assessCommandSafety("rm -rf /", { environmentType: "docker" });
+      expect(assessment.severity).toBe("critical");
+      expect(assessment.hardBlock?.severity).toBe("critical");
+    });
+
+    it("returns high severity for host-only hard-block results", () => {
+      const assessment = assessCommandSafety("sudo apt update");
+      expect(assessment.severity).toBe("high");
+      expect(assessment.hardBlock?.severity).toBe("high");
+    });
+
+    it("returns medium severity for risk-only host destructive commands", () => {
+      const assessment = assessCommandSafety("rm -rf ./local-dir");
+      expect(assessment.hardBlock).toBeUndefined();
+      expect(assessment.riskClass).toBe("destructive-local");
+      expect(assessment.severity).toBe("medium");
     });
   });
 
