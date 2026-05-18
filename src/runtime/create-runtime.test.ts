@@ -368,7 +368,7 @@ describe("createRuntime auxiliary consumer wiring", () => {
         }
         return {
           ok: true,
-          content: JSON.stringify({ decision: "ask", risk: "medium", reason: "fallback assessor", confidence: 0.8 }),
+          content: JSON.stringify({ risk_score: 45, reasoning: "Fallback assessor response.", confidence: "medium" }),
           provider: "local",
           model: request.model
         };

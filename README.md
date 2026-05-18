@@ -80,13 +80,13 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 ## Core Capabilities
 
 - Provider-backed CLI agent loop with real tool execution.
-- Capability-first security with approval modes, hard safety floor, `/yolo`, and audit/debug views.
+- Capability-first security with approval modes, non-overridable hardline command floor, smart approval assessor, `/yolo`, and audit/debug views.
 - Profile-first configuration with local secret storage; the selected profile config defines the agent.
 - Bounded memory through profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, global shared memory, and workspace `AGENTS.md`.
 - Skill system with visibility, usage telemetry, evolution overlays, gated proposals, snapshots, rollback, and scored eval fixtures.
 - **Multi-channel gateway (v0.9):**
-  - **Telegram** — live-proven: allowlists, approvals, sessions, attachments, voice transcription hooks, generated-image delivery, pairing codes.
-  - **Discord** — implemented: DM/channel/thread support, allowlists, attachments, text delivery. Slash commands deferred to v0.9.1.
+  - **Telegram** — live-proven gateway support for allowlists, durable approvals, sessions, attachments, voice transcription hooks, generated-image delivery, and pairing codes; inline approval actions are implemented and smoke-tested locally.
+  - **Discord** — implemented: DM/channel/thread support, allowlists, attachments, text delivery, and inline approval action routing. Slash commands deferred to v0.9.1.
   - **Email** — implemented: IMAP receive, SMTP send, reply-in-thread, attachments, allowed senders, home address. Uses global security policy; no email-specific approval friction.
   - **WhatsApp** — experimental: Baileys linked-device adapter, QR/pairing-code login, DM-first, media, chunking. Gated behind `experimental: true`. See security docs for unofficial-API risk.
 - **DeliveryRouter** — normalized delivery path for all channels: local, origin, Telegram, Discord, WhatsApp, Email, silent.
@@ -102,6 +102,14 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
 - **Gateway startup and restart:** `estacoda gateway start` runs the supervisor in the foreground; `estacoda gateway start --dry-run` performs local readiness checks without acquiring the gateway lock or writing PID/lock state; `estacoda gateway start --background` starts the gateway in the background and writes stdout/stderr to the selected profile `logs/gateway.log`. `estacoda gateway start --profile <id>` starts a gateway bound to that profile. `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination. `estacoda gateway restart` stops the old gateway, background-starts a new gateway, and returns; `estacoda gateway restart --graceful` is an alias for `restart` in v0.1.0.
 - **Per-channel busy policy:** configure `busyPolicy` (`reject`, `queue`, `interrupt`) and `queueDepth` (clamped to `[1, 10]`, default `3`) independently per channel.
+
+## Security And Approvals
+
+Security modes are `strict`, `adaptive`, and `open`. `open` mode is not security off: any `assessCommandSafety(...).hardBlock` result is a non-overridable hardline denial. Severity is metadata; the existence of `hardBlock` decides overrideability. The hardline floor runs before session grants, persisted approvals, smart assessment, gateway queue approvals, and Telegram/Discord inline actions.
+
+Adaptive smart approval uses the Providers Pass D `auxiliaryModels.assessor` route through `resolveAuxiliaryModelRoute("assessor", ...)` and `executeAuxiliaryTask(...)`. The classifier request passes `tools: []` and expects JSON with `risk_score`, `reasoning`, and `confidence`. Timeout, abort, provider failure, missing route, malformed output, or ambiguous output fails safe to manual approval. There is no `auxiliaryModels.approval` route and no legacy provider/model smart-assessor fallback.
+
+Gateway approvals are durable in the `pending_approvals` table inside `~/.estacoda/sessions.sqlite` and are scoped by `profile_id` plus session where applicable. `estacoda gateway approvals list|approve|deny` operates on the same durable rows that block live gateway executions. Channel adapters render or normalize actions only; `ChannelGateway` owns authorization, queue resolution, persistent grants, continuation resume/termination, and runtime-cache invalidation.
 
 ## UI / CLI Rendering (v0.95)
 

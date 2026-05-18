@@ -6,14 +6,17 @@ import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "..
 import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
+import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
+import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
@@ -133,6 +136,45 @@ export function buildGatewayCronRuntimeOptions(input: {
     webMaxContentChars: latestConfig.web.maxContentChars,
     disableCronTools: true,
     disabledToolsets: ["cron", "messaging", "clarify"],
+  };
+}
+
+async function buildGatewaySecurityAssessorConfig(
+  config: LoadedRuntimeConfig
+): Promise<SecurityAssessorRuntimeConfig> {
+  const mainRoute: ResolvedModelRoute = config.primaryModelRoute ?? {
+    provider: config.model.provider,
+    id: config.model.id,
+    profile: config.model
+  };
+  if (config.security.assessor.enabled !== true) {
+    return {
+      ...config.security.assessor,
+      mainRoute,
+      providerExecutor: new ProviderExecutor({
+        registry: config.providerRegistry,
+      }),
+    };
+  }
+
+  const providerModels = await config.providerRegistry.listModels();
+  const assessorRoute = config.model.provider === "unconfigured"
+    ? undefined
+    : resolveAuxiliaryModelRoute("assessor", config.auxiliaryModels, {
+      mainRoute,
+      providerRegistry: config.providerRegistry,
+      providerModels
+    });
+
+  return {
+    ...config.security.assessor,
+    provider: config.security.assessor.provider ?? assessorRoute?.route?.provider,
+    model: config.security.assessor.model ?? assessorRoute?.route?.id,
+    auxiliaryRoute: assessorRoute,
+    mainRoute,
+    providerExecutor: new ProviderExecutor({
+      registry: config.providerRegistry,
+    }),
   };
 }
 
@@ -855,6 +897,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       idleResetMinutes: telegram.sessionIdleResetMinutes,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
+    const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
@@ -883,12 +926,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return "Telegram paired. This chat can now talk to EstaCoda.";
           },
           securityMode: config.security.approvalMode,
-          securityAssessor: {
-            ...config.security.assessor,
-            providerExecutor: new ProviderExecutor({
-              registry: config.providerRegistry,
-            }),
-          },
+          securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
           runtimeCache,
           runtimeFingerprint,
@@ -939,12 +977,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return "Telegram paired. This chat can now talk to EstaCoda.";
           },
           securityMode: config.security.approvalMode,
-          securityAssessor: {
-            ...config.security.assessor,
-            providerExecutor: new ProviderExecutor({
-              registry: config.providerRegistry,
-            }),
-          },
+          securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
           runtimeCache,
           runtimeFingerprint,

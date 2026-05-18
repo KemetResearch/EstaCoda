@@ -72,6 +72,25 @@ State ownership after the C2 profile overhaul:
 - Workspace trust and workspace approvals are global directory-owned state in `trust.json` and `workspace-approvals.json`.
 - Global shared memory lives only under `~/.estacoda/memory/shared/`.
 
+Trust is orthogonal to profiles: a profile selects configuration, credentials, memory, skills, cron state, and gateway state, while workspace trust gates local behavior for a directory.
+
+### Security And Approval Wiring
+
+`createRuntime` composes the active `SecurityPolicy` and optional `WorkspaceApprovalController`. The security policy produces deterministic `allow` / `ask` / `deny` assessments; the controller layers one-time, session, and persistent approval grants around that policy without overriding the hardline command floor.
+
+CLI runtime and gateway runtime use the same smart approval configuration shape:
+
+- resolved Providers Pass D assessor auxiliary route
+- main route
+- provider executor
+- fallback metadata carried on the resolved auxiliary route
+- timeout metadata carried on the resolved auxiliary route
+- profile/scope key where needed
+
+The route key is `assessor`. Runtime route construction uses `resolveAuxiliaryModelRoute("assessor", ...)`; there is no `approval` auxiliary route and no legacy provider/model smart-assessor fallback. The smart assessor uses `executeAuxiliaryTask(...)` with `tools: []` and fails safe to manual approval on missing route, timeout, provider failure, malformed output, or ambiguous output.
+
+Gateway runtime construction receives the gateway-owned security policy and approval controller context. `ChannelGateway` remains the orchestrator for remote approval resolution and runtime-cache invalidation; adapters do not mutate approval state.
+
 ### Created subsystems
 
 1. `WorkspaceTrustStore`

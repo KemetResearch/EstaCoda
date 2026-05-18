@@ -569,9 +569,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...options.securityAssessor,
       provider: options.securityAssessor.provider ?? assessorRoute?.route?.provider,
       model: options.securityAssessor.model ?? assessorRoute?.route?.id,
-      route: options.securityAssessor.route ?? assessorRoute?.route,
       auxiliaryRoute: options.securityAssessor.auxiliaryRoute ?? assessorRoute,
-      fallbackToMain: options.securityAssessor.fallbackToMain ?? assessorRoute?.fallbackToMain,
       mainRoute: options.securityAssessor.mainRoute ?? mainRoute
     };
   const baseSecurityPolicyForActiveMode = () => options.securityPolicy ?? createSecurityPolicyForMode(activeSecurityMode, {

@@ -19,6 +19,7 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 ## Cron Store
 
 - Persistent storage at `~/.estacoda/profiles/<id>/cron/jobs.json`
+- Local cron outputs are written under `~/.estacoda/profiles/<id>/cron/`.
 - Atomic writes
 - Schedule parsing: relative delays, intervals, cron expressions, ISO timestamps
 - Prompt safety scanning
@@ -28,6 +29,7 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 ## Cron Execution Store
 
 - SQLite table `cron_executions` in `~/.estacoda/sessions.sqlite`
+- Execution rows are global DB state and carry session/profile context through the sessions they create.
 - Records: job ID, session ID, trajectory ID, scheduled/start/completed timestamps, status, output summary, delivery results, failure class, failure message
 - Queryable by job ID or across all jobs
 - Used by `estacoda cron history` and `estacoda cron show`

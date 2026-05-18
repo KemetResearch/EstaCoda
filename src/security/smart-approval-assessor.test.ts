@@ -296,7 +296,7 @@ describe("assessCommandRisk", () => {
     expect(request.tools).toEqual([]);
   });
 
-  it("uses the auxiliary execution lane with the assessor route and no main fallback", async () => {
+  it("uses the auxiliary execution lane with the assessor route and tools disabled", async () => {
     const { complete } = await classify(JSON.stringify({
       risk_score: 10,
       reasoning: "Route check.",
@@ -305,9 +305,46 @@ describe("assessCommandRisk", () => {
 
     const [request, preferences, executionOptions] = complete.mock.calls[0]!;
     expect(request.model).toBe("assessor-model");
+    expect(request.tools).toEqual([]);
     expect(preferences).toMatchObject({ requireStructuredOutput: true });
     expect(executionOptions.primaryRoute).toEqual(route);
     expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors explicit fallbackToMain through the auxiliary execution contract", async () => {
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        attempts: [{ provider: "local", model: "assessor-model", ok: false, content: "failed", errorClass: "server" }]
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        response: {
+          ok: true,
+          content: JSON.stringify({
+            risk_score: 10,
+            reasoning: "Main fallback classified safely.",
+            confidence: "high"
+          }),
+          provider: "local",
+          model: "main-model"
+        },
+        fallbackUsed: true,
+        attempts: [{ provider: "local", model: "main-model", ok: true, content: "ok" }],
+        toolCalls: []
+      });
+
+    const result = await assessCommandRisk("pnpm test", {
+      assessorRoute: assessorRoute({ fallbackToMain: true }),
+      mainRoute,
+      providerExecutor: { complete } as unknown as ProviderExecutor,
+      scopeKey: "profile-test"
+    });
+
+    expect(result).toBe("APPROVE");
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1]?.[2].primaryRoute).toEqual(mainRoute);
   });
 
   it("does not persist raw command, prompts, provider output, or reasoning", async () => {

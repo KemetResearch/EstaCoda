@@ -3,6 +3,14 @@ import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 
 export type SmartApprovalDecision = "APPROVE" | "DENY" | "ESCALATE";
+export type SmartApprovalStatus = "ok" | "timeout" | "malformed" | "unavailable";
+
+export type SmartApprovalAssessment = {
+  decision: SmartApprovalDecision;
+  status: SmartApprovalStatus;
+  provider?: string;
+  model?: string;
+};
 
 export async function assessCommandRisk(
   command: string,
@@ -14,17 +22,26 @@ export async function assessCommandRisk(
     signal?: AbortSignal;
   }
 ): Promise<SmartApprovalDecision> {
+  return (await assessCommandRiskDetailed(command, options)).decision;
+}
+
+export async function assessCommandRiskDetailed(
+  command: string,
+  options: {
+    assessorRoute: ResolvedAuxiliaryRoute;
+    mainRoute: ResolvedModelRoute;
+    providerExecutor: ProviderExecutor;
+    scopeKey: string;
+    signal?: AbortSignal;
+  }
+): Promise<SmartApprovalAssessment> {
   try {
     if (options.assessorRoute.task !== "assessor") {
-      return "ESCALATE";
+      return escalate("unavailable");
     }
 
-    const route: ResolvedAuxiliaryRoute = {
-      ...options.assessorRoute,
-      fallbackToMain: false
-    };
     const execution = await executeAuxiliaryTask({
-      route,
+      route: options.assessorRoute,
       mainRoute: options.mainRoute,
       providerExecutor: options.providerExecutor,
       scopeKey: options.scopeKey,
@@ -34,7 +51,7 @@ export async function assessCommandRisk(
       },
       signal: options.signal,
       request: {
-        model: route.route?.id,
+        model: options.assessorRoute.route?.id,
         messages: [
           {
             role: "system",
@@ -62,39 +79,58 @@ export async function assessCommandRisk(
     });
 
     if (!execution.ok || execution.response === undefined) {
-      return "ESCALATE";
+      return escalate(execution.status === "timeout" ? "timeout" : "unavailable");
     }
 
-    return parseClassifierDecision(execution.response.content);
+    const decision = parseClassifierDecision(execution.response.content);
+    if (decision === undefined) {
+      return escalate("malformed", execution.response.provider, execution.response.model);
+    }
+
+    return {
+      decision,
+      status: "ok",
+      provider: execution.response.provider,
+      model: execution.response.model
+    };
   } catch {
-    return "ESCALATE";
+    return escalate("unavailable");
   }
 }
 
-function parseClassifierDecision(content: string): SmartApprovalDecision {
+function escalate(status: SmartApprovalStatus, provider?: string, model?: string): SmartApprovalAssessment {
+  return {
+    decision: "ESCALATE",
+    status,
+    provider,
+    model
+  };
+}
+
+function parseClassifierDecision(content: string): SmartApprovalDecision | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    return "ESCALATE";
+    return undefined;
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return "ESCALATE";
+    return undefined;
   }
 
   const record = parsed as Record<string, unknown>;
   const riskScore = record.risk_score;
   if (typeof riskScore !== "number" || !Number.isFinite(riskScore) || riskScore < 0 || riskScore > 100) {
-    return "ESCALATE";
+    return undefined;
   }
 
   if (typeof record.reasoning !== "string" || record.reasoning.trim().length === 0 || /[\r\n]/u.test(record.reasoning)) {
-    return "ESCALATE";
+    return undefined;
   }
 
   if (record.confidence !== "high" && record.confidence !== "medium" && record.confidence !== "low") {
-    return "ESCALATE";
+    return undefined;
   }
 
   const mapped = decisionForScore(riskScore);
@@ -108,7 +144,7 @@ function parseClassifierDecision(content: string): SmartApprovalDecision {
       (normalized !== "APPROVE" && normalized !== "DENY" && normalized !== "ESCALATE") ||
       normalized !== mapped
     ) {
-      return "ESCALATE";
+      return undefined;
     }
   }
 

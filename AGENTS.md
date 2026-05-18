@@ -462,6 +462,10 @@ Rules:
 6. Shell metacharacters require careful handling.
 7. Commands created by provider output are not trusted just because they look simple.
 8. Commands embedded inside `python -c`, `node -e`, `bun -e`, `sh -c`, or similar wrappers must be treated carefully.
+9. Any `assessCommandSafety(...).hardBlock` is non-overridable. Severity is metadata, not overrideability.
+10. Hardline checks must run before grants, persisted approvals, smart assessors, gateway queue approvals, inline actions, and final tool execution.
+11. Container or non-host environment types may bypass only non-hardline `destructive-local` detections. Never add heuristic container detection from `/proc/1/cgroup` or `/.dockerenv`.
+12. Smart approval must use the shared assessor path and Providers Pass D `auxiliaryModels.assessor` route. Do not reintroduce an `approval` auxiliary route or provider/model fallback assessor builder.
 
 Do not add broad patterns like this without strong tests:
 
@@ -486,6 +490,10 @@ When touching gateway or messaging code:
 7. Do not expose local files through messaging attachments unless explicitly allowed.
 8. Keep outbound media directories constrained.
 9. Do not assume Telegram, Discord, or other adapters share the same semantics.
+10. Keep `ChannelGateway` as the approval orchestrator: auth, chat/session scope, remote `/approve` and `/deny`, inline action routing, durable queue resolution, continuation resume/termination, persistent grants, and runtime-cache invalidation.
+11. Do not mutate `GatewayApprovalQueue` from adapters.
+12. Do not authorize approvals, persist grants, or call `RuntimeCache.invalidate(...)` from adapters.
+13. Pending gateway approvals are ask-only. Deterministic deny and hardline decisions must never become durable approval rows.
 
 Voice notes, text messages, slash commands, and file attachments are different input classes. Handle them separately.
 
@@ -535,6 +543,8 @@ Rules:
 5. Keep model display names separate from model IDs.
 6. Validate required API keys before claiming setup success.
 7. Avoid hardcoded provider assumptions in unrelated code.
+8. Use Providers Pass D auxiliary route names as implemented. Security assessment uses `auxiliaryModels.assessor`; do not add or document `auxiliaryModels.approval`, `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize` as supported routes.
+9. Profile context wording should use `--profile-context`, not `--contextualize`.
 
 Provider failures should degrade clearly, not silently route to unsafe defaults.
 

@@ -10,10 +10,9 @@ import {
   type SecurityRequest
 } from "../contracts/security.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
-import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
-import { buildResolvedModelRoute, getProviderMetadata } from "../providers/provider-metadata.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, assessHardlineFloor, normalizeCommandForSafety } from "./command-safety.js";
+import { assessCommandRiskDetailed, type SmartApprovalAssessment } from "./smart-approval-assessor.js";
 
 export function normalizeSecurityApprovalMode(mode: string | undefined): SecurityApprovalMode {
   switch (mode) {
@@ -73,9 +72,7 @@ export function createSecurityPolicyForMode(
 export type SecurityAssessorRuntimeConfig = SecurityAssessorConfig & {
   providerExecutor?: ProviderExecutor;
   sessionId?: string;
-  route?: ResolvedModelRoute;
   auxiliaryRoute?: ResolvedAuxiliaryRoute;
-  fallbackToMain?: boolean;
   mainRoute?: ResolvedModelRoute;
 };
 
@@ -116,15 +113,11 @@ async function assessAdaptive(
     return deterministic;
   }
 
-  const hasExecutableRoute =
-    assessor?.auxiliaryRoute?.route !== undefined ||
-    assessor?.route !== undefined ||
-    buildSecurityAssessorRoute(assessor) !== undefined;
-
   if (
     assessor?.enabled !== true ||
     assessor.providerExecutor === undefined ||
-    !hasExecutableRoute
+    assessor.auxiliaryRoute?.route === undefined ||
+    assessor.mainRoute === undefined
   ) {
     return {
       ...deterministic,
@@ -136,7 +129,7 @@ async function assessAdaptive(
   }
 
   const assessed = await assessWithAuxiliaryProvider(request, assessor as Required<
-    Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "providerExecutor">
+    Pick<SecurityAssessorRuntimeConfig, "providerExecutor" | "auxiliaryRoute" | "mainRoute">
   > & SecurityAssessorRuntimeConfig, deterministic);
   return assessed;
 }
@@ -280,13 +273,13 @@ function environmentTypeFor(request: SecurityRequest): EnvironmentType {
 
 async function assessWithAuxiliaryProvider(
   request: SecurityRequest,
-  assessor: Required<Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "providerExecutor">> &
+  assessor: Required<Pick<SecurityAssessorRuntimeConfig, "providerExecutor" | "auxiliaryRoute" | "mainRoute">> &
     SecurityAssessorRuntimeConfig,
   deterministic: SecurityAssessment
 ): Promise<SecurityAssessment> {
   try {
-    const route = buildSecurityAssessorAuxiliaryRoute(assessor);
-    const mainRoute = assessor.mainRoute ?? route.route ?? buildSecurityAssessorRoute(assessor);
+    const route = assessor.auxiliaryRoute;
+    const mainRoute = assessor.mainRoute;
     if (route.route === undefined || mainRoute === undefined) {
       return {
         ...deterministic,
@@ -299,70 +292,21 @@ async function assessWithAuxiliaryProvider(
       };
     }
 
-    const execution = await executeAuxiliaryTask({
-      route,
+    const assessment = await assessCommandRiskDetailed(request.command ?? request.targetSummary ?? request.description, {
+      assessorRoute: route,
       mainRoute,
       providerExecutor: assessor.providerExecutor,
-      preferences: {
-        requireStructuredOutput: true,
-        providerOrder: undefined
-      },
-      request: {
-        model: route.route.id,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You are EstaCoda's security assessor.",
-              "Return JSON only.",
-              "Schema:",
-              "{\"decision\":\"allow|ask|deny\",\"risk\":\"low|medium|high\",\"reason\":\"...\",\"confidence\":0.0}",
-              "Never override a hard destructive-command floor."
-            ].join("\n")
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              riskClass: request.riskClass,
-              toolName: request.toolName,
-              targetKey: request.targetKey,
-              targetSummary: request.targetSummary,
-              command: request.command,
-              environmentType: request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE,
-              trustedWorkspace: request.context.trustedWorkspace,
-              activeChannel: request.context.activeChannel,
-              targetChannel: request.context.targetChannel,
-              targetConversationIsActive: request.context.targetConversationIsActive
-            })
-          }
-        ],
-        temperature: 0,
-        maxTokens: 200,
-        responseFormat: { type: "json_object" }
-      }
+      scopeKey: assessor.sessionId ?? "security-policy"
     });
 
-    if (!execution.ok || execution.response === undefined) {
+    if (assessment.status !== "ok") {
       return {
         ...deterministic,
         assessor: {
           used: true,
-          provider: assessor.provider,
-          model: assessor.model,
-          status: execution.status === "timeout" ? "timeout" : "unavailable"
-        }
-      };
-    }
-
-    const parsed = parseAssessorResponse(execution.response.content);
-    if (parsed === undefined) {
-      return {
-        ...deterministic,
-        assessor: {
-          used: true,
-          provider: execution.response.provider,
-          model: execution.response.model,
-          status: "malformed"
+          provider: assessment.provider ?? assessor.provider,
+          model: assessment.model ?? assessor.model,
+          status: assessment.status
         }
       };
     }
@@ -377,34 +321,13 @@ async function assessWithAuxiliaryProvider(
         deterministicRule: postAssessorHardBlock.code,
         assessor: {
           used: true,
-          decision: parsed.decision,
-          risk: parsed.risk,
-          reason: parsed.reason,
-          confidence: parsed.confidence,
-          provider: execution.response.provider,
-          model: execution.response.model,
+          ...assessorMetadataFor(assessment),
           status: "hard-block-overrode-assessor"
         }
       };
     }
 
-    return {
-      decision: parsed.decision,
-      mode: "adaptive",
-      reason: parsed.reason,
-      risk: parsed.risk,
-      deterministicRule: deterministic.deterministicRule,
-      assessor: {
-        used: true,
-        decision: parsed.decision,
-        risk: parsed.risk,
-        reason: parsed.reason,
-        confidence: parsed.confidence,
-        provider: execution.response.provider,
-        model: execution.response.model,
-        status: "ok"
-      }
-    };
+    return smartAssessmentToSecurityAssessment(assessment, deterministic);
   } catch {
     return {
       ...deterministic,
@@ -418,88 +341,83 @@ async function assessWithAuxiliaryProvider(
   }
 }
 
-function buildSecurityAssessorAuxiliaryRoute(assessor: SecurityAssessorRuntimeConfig): ResolvedAuxiliaryRoute {
-  if (assessor.auxiliaryRoute !== undefined) {
-    return assessor.auxiliaryRoute;
+function smartAssessmentToSecurityAssessment(
+  assessment: SmartApprovalAssessment,
+  deterministic: SecurityAssessment
+): SecurityAssessment {
+  if (assessment.decision === "APPROVE") {
+    return {
+      decision: "allow",
+      mode: "adaptive",
+      reason: "Smart approval classified this command as safe to run automatically.",
+      risk: "low",
+      deterministicRule: deterministic.deterministicRule,
+      assessor: {
+        used: true,
+        ...assessorMetadataFor(assessment),
+        status: "ok"
+      }
+    };
   }
 
-  const route = buildSecurityAssessorRoute(assessor);
+  if (assessment.decision === "DENY") {
+    return {
+      decision: "deny",
+      mode: "adaptive",
+      reason: "Smart approval classified this command as too risky to run.",
+      risk: "high",
+      deterministicRule: deterministic.deterministicRule,
+      assessor: {
+        used: true,
+        ...assessorMetadataFor(assessment),
+        status: "ok"
+      }
+    };
+  }
+
   return {
-    task: "assessor",
-    route,
-    source: route === undefined ? "disabled" : assessor.route !== undefined ? "explicit" : "custom",
-    fallbackToMain: assessor.fallbackToMain === true,
-    timeoutMs: assessor.timeoutMs,
-    diagnostics: route === undefined ? ["No security assessor route configured"] : []
+    ...deterministic,
+    assessor: {
+      used: true,
+      decision: "ask",
+      risk: deterministic.risk,
+      provider: assessment.provider,
+      model: assessment.model,
+      status: assessment.status
+    }
   };
 }
 
-function buildSecurityAssessorRoute(
-  assessor: Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "route"> | undefined
-): ResolvedModelRoute | undefined {
-  if (assessor?.route !== undefined) {
-    return assessor.route;
-  }
-  if (assessor?.provider === undefined || assessor.model === undefined) {
-    return undefined;
-  }
-
-  const metadata = getProviderMetadata(assessor.provider);
-  if (!metadata.runnable || metadata.defaultBaseUrl === undefined) {
-    return undefined;
-  }
-
-  return buildResolvedModelRoute({
-    provider: assessor.provider,
-    model: assessor.model,
-    profile: {
-      id: assessor.model,
-      provider: assessor.provider,
-      contextWindowTokens: 128_000,
-      supportsTools: true,
-      supportsVision: false,
-      supportsStructuredOutput: true
-    },
-    baseUrl: metadata.defaultBaseUrl,
-    apiKeyEnv: metadata.defaultApiKeyEnv
-  });
-}
-
-function parseAssessorResponse(content: string): {
-  decision: SecurityDecision;
+function assessorMetadataFor(assessment: SmartApprovalAssessment): {
+  decision: "allow" | "ask" | "deny";
   risk: "low" | "medium" | "high";
-  reason: string;
-  confidence?: number;
-} | undefined {
-  const match = content.match(/\{[\s\S]*\}/u);
-  if (match === null) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
-    const decision = parsed.decision;
-    const risk = parsed.risk;
-    const reason = parsed.reason;
-    const confidence = parsed.confidence;
-
-    if (
-      (decision !== "allow" && decision !== "ask" && decision !== "deny") ||
-      (risk !== "low" && risk !== "medium" && risk !== "high") ||
-      typeof reason !== "string"
-    ) {
-      return undefined;
-    }
-
+  provider?: string;
+  model?: string;
+} {
+  if (assessment.decision === "APPROVE") {
     return {
-      decision,
-      risk,
-      reason,
-      confidence: typeof confidence === "number" ? confidence : undefined
+      decision: "allow",
+      risk: "low",
+      provider: assessment.provider,
+      model: assessment.model
     };
-  } catch {
-    return undefined;
   }
+
+  if (assessment.decision === "DENY") {
+    return {
+      decision: "deny",
+      risk: "high",
+      provider: assessment.provider,
+      model: assessment.model
+    };
+  }
+
+  return {
+    decision: "ask",
+    risk: "high",
+    provider: assessment.provider,
+    model: assessment.model
+  };
 }
 
 function inferRiskLevel(request: SecurityRequest): "low" | "medium" | "high" {

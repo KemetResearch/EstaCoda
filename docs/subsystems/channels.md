@@ -19,8 +19,10 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 | `src/channels/delivery-router.ts` | ~200 | Normalized delivery path |
 | `src/channels/channel-session-store.ts` | ~240 | Persisted session mapping |
 | `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
+| `src/gateway/approval-queue.ts` | ~320 | Durable pending gateway approvals |
 | `src/channels/surface-pointer-store.ts` | ~120 | Cross-surface session pointers |
 | `src/channels/handoff-store.ts` | ~150 | Short-lived handoff codes |
+| `src/channels/approval-actions.ts` | ~80 | Generic inline approval action values |
 | `src/channels/telegram-format.ts` | ~200 | Telegram-safe HTML formatting |
 | `src/channels/activity-labels.ts` | ~80 | Localized activity labels |
 
@@ -35,7 +37,14 @@ Responsibilities:
 - Runtime construction from fresh config snapshot per turn
 - Progress delivery
 - Approval prompt delivery
+- Durable pending approval row creation and resolution
+- Inline approval action parsing/routing
+- Persistent grant handling and runtime-cache invalidation
 - Command handling
+
+`ChannelGateway` is the approval orchestrator. It owns auth, chat/session scope, busy/drain behavior, remote `/approve` and `/deny`, inline approval routing, durable queue resolution, continuation resume/termination, persistent grant handling, and runtime-cache invalidation.
+
+Adapters only render or normalize channel-specific transport events. They must not mutate `GatewayApprovalQueue`, authorize approvals, persist grants, or call `RuntimeCache.invalidate(...)`.
 
 ## Telegram Adapter
 
@@ -85,10 +94,11 @@ estacoda gateway start
 | Attachment download | `implemented but not live-proven` |
 | Allowlists (users/guilds/channels) | `implemented but not live-proven` |
 | Progress delivery | `implemented but not live-proven` |
+| Inline approval buttons | `smoke-tested` |
 
 **Limitations:**
 
-- Slash commands are deferred to v0.9.1. Prefix-style text commands work.
+- Slash commands are deferred to v0.9.1. Prefix-style text commands and tested button interactions work.
 - Live credential smoke is optional/manual.
 
 **Setup:**
@@ -222,11 +232,36 @@ See [Channel Configuration](../operations/channel-configuration.md) for config s
 Gateway processes are bound to the profile selected at gateway start time. Changing `active-profile.json` does not mutate an already-running gateway. Runtime state is profile-local:
 
 - channel approvals, channel sessions, surface pointers, and handoff codes live under the bound profile `gateway/` state
+- durable pending gateway approvals live in the global session DB table `pending_approvals`, scoped by `profile_id`
 - delivery logs live under the bound profile log state
 - channel media and WhatsApp auth state live under the bound profile state paths
 - gateway process registry entries are profile-tagged
 
 Gateway turns rebuild runtimes from fresh selected-profile config snapshots. This helps MCP reload semantics, but the supervisor remains bound to the profile chosen at start.
+
+## Gateway Approvals
+
+Gateway approval prompts create durable rows in `pending_approvals`. Rows include `profile_id`, `session_id`, command preview/hash, transient command payload, tool name, status, expiry, channel, and optional chat id.
+
+Approval invariants:
+
+- Pending approvals are ask-only. Deterministic `deny` results and hardline command blocks never create approval rows.
+- Profile A cannot list or resolve Profile B approvals.
+- Session-scoped operations cannot resolve another session's approval.
+- Expired or already resolved approvals cannot be approved later.
+- Approved, denied, and expired rows redact `command_payload` where practical.
+- List/history output uses preview/hash, not raw command payload.
+
+Operator surfaces:
+
+```bash
+estacoda gateway approvals
+estacoda gateway approvals list --profile work
+estacoda gateway approvals approve <id> [--session <session-id>] [--profile <profile-id>]
+estacoda gateway approvals deny <id> [--session <session-id>] [--profile <profile-id>]
+```
+
+Remote `/approve` and `/deny`, Telegram inline buttons, Discord buttons, and CLI/operator approval all route through `ChannelGateway` and the same durable queue resolution path. Future inline approval actions must reuse those same `ChannelGateway` approve/deny paths so persistent grant handling and runtime-cache refresh stay centralized. Adapters must not duplicate cache invalidation.
 
 ```bash
 # Enable channels before starting
@@ -259,6 +294,9 @@ Channel-specific commands available in gateway:
 - `/reset` — reset current session
 - `/cron` — list cron jobs
 - `/approvals` — show pending approvals
+- `/approve once|session|always` — resolve the current pending approval for this chat
+- `/deny` — deny the current pending approval for this chat
+- `/revoke <approval-id>` — revoke a persistent channel approval
 - `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
 
 ## Limitations
@@ -269,4 +307,4 @@ Channel-specific commands available in gateway:
 - Email live smoke is optional/manual.
 - Gateway status reports readiness, not background-process liveness.
 - Channel-specific safety rules are partial — general safety policy applies to all channels equally.
-- Gateway approval queue hardening and richer inline button flows are planned for Part 2; do not treat them as complete beyond the currently implemented channel approval prompts.
+- Inline approval actions are transport/UI sugar over `ChannelGateway`; adapters do not own approval authorization.
