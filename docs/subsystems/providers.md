@@ -14,7 +14,7 @@ EstaCoda supports multiple LLM providers with capability-based routing, direct `
 | `src/providers/provider-executor.ts` | ~340 | Streaming execution and tool-call assembly |
 | `src/providers/openai-compatible-provider.ts` | 838 | Primary inference adapter |
 | `src/providers/provider-registry.ts` | ~180 | Provider registration and discovery |
-| `src/providers/auxiliary-provider-router.ts` | ~160 | Route auxiliary tasks |
+| `src/providers/auxiliary-model-resolver.ts` | ~160 | Resolve auxiliary model routes |
 | `src/providers/model-catalog.ts` | ~180 | Model profile resolution |
 | `src/model-catalog/models-dev-registry.ts` | 695 | models.dev metadata registry |
 
@@ -61,6 +61,12 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 | `delegation` | Subagent delegation |
 | `profile_context` | Profile context generation |
 
+Security smart approval uses `auxiliaryModels.assessor`. The route key is exactly `assessor`; there is no `auxiliaryModels.approval` route. The assessor route is resolved with `resolveAuxiliaryModelRoute("assessor", ...)` and consumed through `executeAuxiliaryTask(...)`.
+
+Config should not use legacy auxiliary names such as `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize`. Profile-context CLI/documentation should use `--profile-context`, not `--contextualize`.
+
+Config Part 2 consumes the Providers Pass D auxiliary route contract. It does not add a second auxiliary resolver architecture.
+
 ## Important Distinctions
 
 - The model catalog is enriched from models.dev when cached/bundled data is available, with local fallback profiles as a safety net.
@@ -69,6 +75,7 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 - Explicit `{ provider, model }` requests are supported by `ProviderExecutor`.
 - Chat-capable providers can be live inference routes.
 - Vision routing is implemented in code, but live success depends on actual provider capability plus working credentials.
+- Smart approval does not build a legacy provider/model assessor fallback. It requires the resolved `auxiliaryModels.assessor` route, the main route, and a provider executor; missing route/config fails safe to manual approval.
 - `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 - Codex OAuth setup lives on the model setup surface, not in first-run guided onboarding. If guided onboarding later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
 

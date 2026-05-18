@@ -15,17 +15,19 @@ EstaCoda uses a capability-first security model where tool risk classes, approva
 | `src/security/workspace-trust-store.ts` | ~160 | Persist workspace trust grants |
 | `src/security/workspace-approval-controller.ts` | ~240 | Manage approval grants and scopes |
 | `src/security/command-safety.ts` | ~200 | Command classification and hard floor |
+| `src/security/smart-approval-assessor.ts` | ~150 | Shared smart approval classifier path |
 | `src/contracts/security.ts` | ~120 | Security types and defaults |
 | `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
+| `src/gateway/approval-queue.ts` | ~320 | Durable gateway pending approval queue |
 | `src/channels/handoff-store.ts` | ~150 | Short-lived handoff codes |
 
 ## Approval Modes
 
 | Mode | Behavior | Evidence |
 |------|----------|----------|
-| `strict` | Ask for approval on almost all tool executions | `smoke-tested` |
-| `adaptive` | Deterministic triage first, then optional auxiliary assessor for ambiguous cases | `smoke-tested` |
-| `open` | Minimal gating, but hard floor still applies | `smoke-tested` |
+| `strict` | Ask for approval on almost all tool executions, after the hardline floor | `smoke-tested` |
+| `adaptive` | Deterministic triage first, then optional shared smart assessor for destructive-local ambiguous cases | `smoke-tested` |
+| `open` | Minimal gating for non-hardline actions, but the hardline floor still applies | `smoke-tested` |
 
 Default: `adaptive`
 
@@ -40,7 +42,18 @@ Default: `adaptive`
 
 ## Hard Floor
 
-The unconditional hard floor covers:
+The unconditional hardline floor is based on `assessCommandSafety(...).hardBlock`. Any `hardBlock` is non-overridable. Severity is metadata and must not be used to decide whether a command can be approved.
+
+The hardline floor runs before:
+
+- one-time, session, and persistent approvals
+- `/yolo` and `open` mode
+- the smart approval assessor
+- gateway durable queue approvals
+- Telegram/Discord inline approval actions
+- final terminal/process tool execution
+
+The hard-block detector covers:
 
 - Broad/root-like recursive deletes
 - Destructive disk operations
@@ -49,8 +62,37 @@ The unconditional hard floor covers:
 - Explicit secret reads
 - Pipe-to-interpreter installs
 - Git force-pushes
+- Permission destruction such as recursive `chmod 777 /` or `chmod 000 /`
+- Device overwrites, firewall flushes, self-termination, Terraform destroy, destructive package removals, and destructive Git resets
 
 `/yolo` is a session-scoped toggle for `open` mode but **cannot bypass the hard floor**.
+
+## Command Safety Detector
+
+`src/security/command-safety.ts` normalizes commands before matching:
+
+- ANSI escape sequences are stripped.
+- Unicode fullwidth characters are normalized with NFKC.
+- Existing token-aware `rm` parsing is preserved.
+
+The detector accepts an explicit `environmentType`: `host`, `docker`, `singularity`, `modal`, `daytona`, or `vercel_sandbox`. The default is `host`. EstaCoda does not guess container state from `/proc/1/cgroup`, `/.dockerenv`, or filesystem heuristics.
+
+Core dangerous host patterns include:
+
+- `rm -rf /` and broad root-like variants
+- `mkfs.*`
+- `dd if=/dev/zero of=/dev/...`
+- redirects into block devices such as `/dev/sda` or `/dev/nvme...`
+- shell fork bombs
+- broad `chmod` or `chown -R` on system paths
+- `curl ... | bash`, `curl ... | sh`, `wget ... | bash`, and `wget ... | sh`
+- inline `eval(...)` or `exec(...)` forms
+- `sudo`, `su -`, `passwd`, and `usermod` command-position uses
+- system package removal and global package uninstall commands
+- `git push --force`, `git push -f`, and `git reset --hard`
+- Docker prune, Kubernetes delete, and Terraform destroy commands
+
+Hardline patterns are never bypassed by environment type. Non-host/container execution may bypass only non-hardline `destructive-local` command-safety detections.
 
 ## Approval Scopes
 
@@ -61,6 +103,8 @@ The unconditional hard floor covers:
 | `always` | Persisted until revoked |
 
 Persistent approvals match on normalized `targetKey` values, including operation type and normalized targets.
+
+Persistent approvals do not override hardline command blocks. The hardline check is evaluated before grants are considered.
 
 ## Workspace Trust
 
@@ -74,6 +118,8 @@ Persistent approvals match on normalized `targetKey` values, including operation
 ### Global Policy
 
 All channels share the **same runtime security policy**. There is no channel-specific approval escalation. Email does not add email-specific approval friction; Discord does not add Discord-specific friction; WhatsApp does not add WhatsApp-specific friction. The configured `strict`/`adaptive`/`open` mode applies uniformly.
+
+Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped by `profile_id`; list and resolve operations are also scoped by profile and may be scoped by session. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are transient and are redacted after approval, denial, or expiry; list and history surfaces use command preview/hash rather than raw payload.
 
 ### Channel Allowlists
 
@@ -118,5 +164,14 @@ Gateway diagnostics (`estacoda gateway diagnose`) surface missing credentials an
 
 ## Adaptive Assessor
 
-- Defaults to auxiliary `assessor` route when enabled without explicit provider/model override.
-- Assessor failures, malformed output, or timeouts fall back to `ask`.
+- Uses one shared implementation in `src/security/smart-approval-assessor.ts`.
+- Uses the Providers Pass D `auxiliaryModels.assessor` route key.
+- Route construction happens through `resolveAuxiliaryModelRoute("assessor", ...)`.
+- Execution uses `executeAuxiliaryTask(...)`.
+- Provider requests pass `tools: []`; the assessor is a classifier, not an agent.
+- The JSON schema is `risk_score` (`0`-`100`), `reasoning` (one line), and `confidence` (`high`, `medium`, or `low`).
+- Scores map as `0`-`30` to approve, `31`-`60` to escalate/manual ask, and `61`-`100` to deny.
+- Timeout, abort, provider failure, missing route, malformed output, inconsistent output, or ambiguous output fails safe to `ESCALATE` / manual `ask`.
+- The base policy and `WorkspaceApprovalController` both use this shared path.
+- There is no `auxiliaryModels.approval` route and no legacy provider/model fallback assessor architecture.
+- Hardline commands deny before assessor invocation; a post-assessor hardline check remains as defense in depth.

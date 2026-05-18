@@ -113,8 +113,33 @@ In-session commands:
 | `/security` | Show recent security decisions |
 | `/security debug` | Detailed security audit |
 | `/cron` | List scheduled tasks |
+| `/approvals` | Show current one-time, session, and persistent approvals |
+| `/revoke <approval-id>` | Revoke a persistent approval by id |
 | `/reload-mcp` | Reload MCP servers |
 | `/exit` | Exit session |
+
+## Interactive Approval Prompt
+
+When a CLI tool execution reaches an active approval prompt, these bare answers are accepted:
+
+- `once` — grant this exact action one time and retry.
+- `session` — grant matching actions for the current session and retry.
+- `always` — persist a workspace approval for matching actions and retry.
+- `deny`, `reject`, `no`, `n` — deny the gated action without retrying.
+
+The prompt also accepts slash-style aliases inside the same active approval prompt:
+
+- `/approve once`
+- `/approve session`
+- `/approve always`
+- `/deny`
+
+These aliases normalize into the same choices as the bare answers and use the same `runtime.grantApproval()` path. Invalid slash approval input such as `/approve banana` follows the existing invalid-answer guidance path and does not grant approval. No delayed CLI approval queue was added; these aliases are not a durable out-of-band approval system.
+
+Approval inspection commands are normal interactive slash commands:
+
+- `/approvals` lists current one-time, session, and persistent approvals for the active CLI runtime.
+- `/revoke <approval-id>` removes a persistent approval by id when the runtime exposes revocation.
 
 ## Session Resume
 
