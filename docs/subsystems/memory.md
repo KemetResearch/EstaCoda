@@ -85,6 +85,12 @@ Workflow learning is separated from memory files:
 | Reusable procedures | Built-in skills plus profile-local `skills/` |
 | Promotion metadata | Profile-local `promotions.json` |
 
+## Session Compression Boundary
+
+Semantic session compression is documented separately in [Semantic Session Compression](./semantic-compression.md). It rewrites older session history into reference-only summaries; it does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata.
+
+Memory File Compaction is also a separate path. It can compact `USER.md` and `MEMORY.md` only, uses the `memory_compaction` auxiliary route, and remains distinct from semantic session compression and TaskFlow compaction.
+
 ## Limitations
 
 - Memory rendering is selective but not ranked. All entries in budget are included.

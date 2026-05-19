@@ -1,6 +1,15 @@
 import type { SessionMessage } from "../contracts/session.js";
 import { estimateTextTokensRough } from "./token-estimator.js";
 
+type PackableSessionMessage = {
+  id?: string;
+  sessionId?: string;
+  role: SessionMessage["role"];
+  content: string;
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type PackedHistoryMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -24,7 +33,7 @@ export type HistoryPackerOptions = {
 };
 
 export function packSessionHistory(
-  messages: SessionMessage[],
+  messages: PackableSessionMessage[],
   options: HistoryPackerOptions = {}
 ): PackedHistory {
   const maxProtectedMessages = options.maxProtectedMessages ?? 6;
@@ -34,11 +43,18 @@ export function packSessionHistory(
   const conversational = messages.filter((message) =>
     message.role === "user" || message.role === "agent" || message.role === "tool"
   );
+  const semanticSummary = latestSemanticCompressionSummary(messages);
   const protectedStart = findProtectedStart(conversational, maxProtectedMessages);
   const older = conversational.slice(0, protectedStart);
   const recent = conversational.slice(protectedStart);
   const summary = summarizeOlderTurns(older, maxSummaryChars);
   let packedMessages: PackedHistoryMessage[] = [
+    ...(semanticSummary === undefined
+      ? []
+      : [{
+          role: "system" as const,
+          content: truncate(semanticSummary.content, maxSummaryChars * 2)
+        }]),
     ...(summary === undefined
       ? []
       : [{
@@ -63,7 +79,13 @@ export function packSessionHistory(
   };
 }
 
-function summarizeOlderTurns(messages: SessionMessage[], maxChars: number): string | undefined {
+function latestSemanticCompressionSummary(messages: PackableSessionMessage[]): PackableSessionMessage | undefined {
+  return [...messages].reverse().find((message) =>
+    message.role === "system" && message.metadata?.semanticCompression === true
+  );
+}
+
+function summarizeOlderTurns(messages: PackableSessionMessage[], maxChars: number): string | undefined {
   if (messages.length === 0) {
     return undefined;
   }
@@ -90,7 +112,7 @@ function summarizeOlderTurns(messages: SessionMessage[], maxChars: number): stri
   return truncate(summary, maxChars);
 }
 
-function findProtectedStart(messages: SessionMessage[], maxProtectedMessages: number): number {
+function findProtectedStart(messages: PackableSessionMessage[], maxProtectedMessages: number): number {
   let start = Math.max(0, messages.length - maxProtectedMessages);
 
   while (start > 0 && messages[start]?.role === "tool") {
@@ -100,7 +122,7 @@ function findProtectedStart(messages: SessionMessage[], maxProtectedMessages: nu
   return start;
 }
 
-function countProtectedToolPairs(messages: SessionMessage[]): number {
+function countProtectedToolPairs(messages: PackableSessionMessage[]): number {
   let pairs = 0;
 
   for (let index = 1; index < messages.length; index += 1) {

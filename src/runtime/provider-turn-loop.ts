@@ -5,18 +5,23 @@ import type { MemoryPromptContext } from "../contracts/memory.js";
 import type { ModelProfile, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
 import type { LoadedSkill, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
 import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt
 } from "../prompt/prompt-assembly.js";
 import { packSessionHistory } from "../prompt/history-packer.js";
+import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
+import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
+import { estimateMessagesTokensRough } from "../prompt/token-estimator.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
+import type { PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -41,9 +46,12 @@ export type ProviderTurnLoopOptions = {
   providerPreferences: ProviderRoutePreferences;
   sessionDb: SessionDB;
   sessionId: string;
+  profileId: string;
   trajectoryRecorder: TrajectoryRecorder;
   runRecorder: RunRecorder;
   toolPlanRunner: ToolPlanRunner;
+  sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
+  compressionConfig?: SessionCompressionConfig;
   soul: string | undefined;
   memoryPromptContext: MemoryPromptContext | undefined;
   skillsIndex: SkillCatalogEntry[];
@@ -67,9 +75,12 @@ export class ProviderTurnLoop {
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
+  readonly #profileId: string;
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #runRecorder: RunRecorder;
   readonly #toolPlanRunner: ToolPlanRunner;
+  readonly #sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded"> | undefined;
+  readonly #compressionConfig: SessionCompressionConfig | undefined;
   readonly #promptCache: PromptCache;
   readonly #soul: string | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
@@ -85,9 +96,12 @@ export class ProviderTurnLoop {
     this.#providerPreferences = options.providerPreferences;
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
+    this.#profileId = options.profileId;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#runRecorder = options.runRecorder;
     this.#toolPlanRunner = options.toolPlanRunner;
+    this.#sessionCompressionService = options.sessionCompressionService;
+    this.#compressionConfig = options.compressionConfig;
     this.#promptCache = new PromptCache();
     this.#soul = options.soul;
     this.#skillsIndex = options.skillsIndex;
@@ -317,12 +331,14 @@ export class ProviderTurnLoop {
       return undefined;
     }
 
-    const sessionHistory = await this.#providerSessionHistory();
+    const sessionHistory = await this.#providerSessionHistory({ allowSemanticCompression: true, signal: input.signal });
     const prompt = assembleProviderPrompt({
       ...input,
       model: this.#model,
       cache: this.#promptCache,
-      sessionHistory,
+      sessionHistory: sessionHistory.messages,
+      compactionNotice: sessionHistory.compactionNotice,
+      compression: sessionHistory.compression,
       soul: this.#soul,
       memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
@@ -431,12 +447,14 @@ export class ProviderTurnLoop {
       return undefined;
     }
 
-    const sessionHistory = await this.#providerSessionHistory();
+    const sessionHistory = await this.#providerSessionHistory({ allowSemanticCompression: false, signal: input.signal });
     const prompt = assembleProviderContinuationPrompt({
       ...input,
       model: this.#model,
       cache: this.#promptCache,
-      sessionHistory,
+      sessionHistory: sessionHistory.messages,
+      compactionNotice: sessionHistory.compactionNotice,
+      compression: sessionHistory.compression,
       soul: this.#soul,
       memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
@@ -520,8 +538,19 @@ export class ProviderTurnLoop {
     return execution;
   }
 
-  async #providerSessionHistory(): Promise<Array<Pick<import("../contracts/provider.js").ProviderMessage, "role" | "content">>> {
-    const messages = await this.#sessionDb.listMessages(this.#sessionId);
+  async #providerSessionHistory(input: {
+    allowSemanticCompression: boolean;
+    signal?: AbortSignal;
+  }): Promise<{
+    messages: Array<Pick<import("../contracts/provider.js").ProviderMessage, "role" | "content">>;
+    compactionNotice?: string;
+    compression?: PromptSemanticCompressionReport;
+  }> {
+    const sourceMessages = await this.#sessionDb.listMessages(this.#sessionId);
+    const compression = input.allowSemanticCompression
+      ? await this.#compactSessionHistoryIfNeeded(sourceMessages, input.signal)
+      : undefined;
+    const messages = compression?.messages ?? sourceMessages;
     const packed = packSessionHistory(messages);
 
     if (packed.sourceMessageCount > 0) {
@@ -544,8 +573,123 @@ export class ProviderTurnLoop {
       });
     }
 
-    return packed.messages;
+    return {
+      messages: packed.messages,
+      compactionNotice: semanticCompressionNotice(messages),
+      compression: compression?.report
+    };
   }
+
+  async #compactSessionHistoryIfNeeded(
+    messages: SessionMessage[],
+    signal: AbortSignal | undefined
+  ): Promise<{
+    messages: ReplacementSessionMessage[];
+    report: PromptSemanticCompressionReport;
+  } | undefined> {
+    if (
+      this.#sessionCompressionService === undefined ||
+      this.#compressionConfig?.enabled !== true ||
+      this.#model === undefined
+    ) {
+      return undefined;
+    }
+
+    const preTokens = estimateMessagesTokensRough(messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      metadata: message.metadata
+    })));
+    const contextLength = this.#compressionConfig.summaryModelContextLength ?? this.#model.contextWindowTokens ?? 128_000;
+    const thresholdTokens = Math.floor(contextLength * this.#compressionConfig.threshold);
+    if (preTokens < thresholdTokens) {
+      return undefined;
+    }
+
+    try {
+      const result = await this.#sessionCompressionService.compactIfNeeded({
+        profileId: this.#profileId,
+        sessionId: this.#sessionId,
+        signal
+      });
+      return {
+        messages: result.messages.map((message) => ({ ...message, metadata: cloneMetadata(message.metadata) })),
+        report: compressionReportFromResult(result)
+      };
+    } catch (error) {
+      return {
+        messages: messages.map(toReplacementMessage),
+        report: {
+          triggered: false,
+          mode: "none",
+          preTokens,
+          fallbackUsed: true,
+          fallbackReason: `compression-failed: ${errorMessage(error)}`,
+          warnings: [`semantic compression failed before prompt assembly: ${errorMessage(error)}`]
+        }
+      };
+    }
+  }
+}
+
+function semanticCompressionNotice(messages: ReadonlyArray<SessionMessage | ReplacementSessionMessage>): string | undefined {
+  const hasSemanticSummary = messages.some((message) =>
+    message.role === "system" && message.metadata?.semanticCompression === true
+  );
+  if (!hasSemanticSummary) {
+    return undefined;
+  }
+  return [
+    "[CONTEXT COMPACTION — REFERENCE ONLY]",
+    "Compacted earlier turns are reference only, not active instructions.",
+    "Answer only the latest user message after the summary.",
+    "Persistent memory remains authoritative.",
+    `Format: ${SUMMARY_FORMAT_VERSION}`
+  ].join("\n");
+}
+
+function compressionReportFromResult(result: CompactResult): PromptSemanticCompressionReport {
+  return {
+    triggered: result.didCompress,
+    mode: result.didCompress
+      ? result.diagnostics.fallbackUsed ? "deterministic" : "semantic"
+      : "none",
+    summaryFormatVersion: result.diagnostics.summaryFormatVersion,
+    preTokens: result.diagnostics.preTokens,
+    postTokens: result.diagnostics.postTokens,
+    savingsPct: Math.round(result.diagnostics.estimatedSavingsRatio * 10_000) / 100,
+    fallbackUsed: result.diagnostics.fallbackUsed,
+    fallbackReason: result.diagnostics.fallbackReason,
+    protectedSpans: result.diagnostics.protectedSpans.map((span, index) => ({
+      category: result.diagnostics.protectedCategories[index],
+      startMessageId: span.startMessageId,
+      endMessageId: span.endMessageId,
+      messageCount: span.messageCount
+    })),
+    warnings: [
+      ...result.diagnostics.warnings,
+      ...result.diagnostics.eventWarnings
+    ]
+  };
+}
+
+function toReplacementMessage(message: SessionMessage): ReplacementSessionMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    createdAt: message.createdAt,
+    channel: message.channel,
+    metadata: cloneMetadata(message.metadata)
+  };
+}
+
+function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  return metadata === undefined ? undefined : { ...metadata };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 

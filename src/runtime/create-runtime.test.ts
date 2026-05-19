@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -116,6 +117,90 @@ describe("createRuntime MCP trust gating", () => {
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");
+  });
+});
+
+describe("createRuntime semantic compression construction", () => {
+  it("uses the compression auxiliary route and not memory_compaction for semantic compression", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-compression-"));
+    const requests: ProviderRequest[] = [];
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 128_000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const compressionModel: ModelProfile = {
+      ...mainModel,
+      id: "compression-model"
+    };
+    const memoryCompactionModel: ModelProfile = {
+      ...mainModel,
+      id: "memory-compaction-model"
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, compressionModel, memoryCompactionModel],
+      complete: async (request: ProviderRequest) => {
+        requests.push(request);
+        return {
+          ok: true,
+          content: request.model === "compression-model" ? "Compressed summary" : "Final response",
+          model: request.model,
+          provider: "local"
+        };
+      }
+    });
+    const sessionDb = new InMemorySessionDB();
+    const sessionId = "compression-runtime-session";
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      sessionDb,
+      sessionId,
+      compression: {
+        enabled: true,
+        experimental: true,
+        threshold: 0.10,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50
+      },
+      auxiliaryModels: {
+        compression: { provider: "local", id: "compression-model" },
+        memory_compaction: { provider: "local", id: "memory-compaction-model" }
+      }
+    });
+
+    try {
+      await sessionDb.appendMessage({
+        id: "old-history",
+        sessionId,
+        role: "user",
+        content: "older history ".repeat(200)
+      });
+
+      await runtime.handle({
+        text: "continue",
+        channel: "cli"
+      });
+
+      expect(requests.map((request) => request.model)).toContain("compression-model");
+      expect(requests.map((request) => request.model)).not.toContain("memory-compaction-model");
+    } finally {
+      await runtime.dispose();
+    }
   });
 });
 

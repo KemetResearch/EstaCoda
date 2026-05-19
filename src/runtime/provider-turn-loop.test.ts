@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
+import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -102,6 +105,7 @@ async function createProviderTurnLoopForTest(
     },
     sessionDb,
     sessionId,
+    profileId: "default",
     trajectoryRecorder,
     runRecorder,
     toolPlanRunner,
@@ -118,6 +122,173 @@ async function createProviderTurnLoopForTest(
     },
     ...overrides
   });
+}
+
+async function createCompressionHarness() {
+  const registry = new ProviderRegistry();
+  registry.register(createMockAdapter());
+  const providerExecutor = new ProviderExecutor({ registry });
+  const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
+    ok: true,
+    response: {
+      ok: true,
+      content: "mock-response",
+      model: "test-model",
+      provider: "test-provider",
+      usage: {
+        inputTokens: 123,
+        outputTokens: 12,
+        totalTokens: 135
+      }
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "test-provider",
+        model: "test-model",
+        ok: true,
+        content: "mock-response"
+      }
+    ],
+    toolCalls: []
+  });
+  const sessionDb = new InMemorySessionDB();
+  const sessionId = `compression-session-${Date.now()}-${Math.random()}`;
+  await sessionDb.createSession({ id: sessionId, profileId: "default", title: "compression" });
+  const trajectoryRecorder = new TrajectoryRecorder({
+    profileId: "default",
+    sessionId,
+    modelId: "test-model"
+  });
+  const runRecorder = new RunRecorder({
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    profileId: "default"
+  });
+  const toolPlanRunner = new ToolPlanRunner({
+    toolCallPlanner: undefined,
+    toolExecutor: {} as any,
+    runRecorder,
+    sessionId,
+    maxConcurrentSafeTools: 4
+  });
+  const loop = (overrides: Partial<ProviderTurnLoopOptions> = {}) => new ProviderTurnLoop({
+    providerExecutor,
+    model: mockModel,
+    primaryModelRoute: primaryRoute,
+    modelFallbackRoutes: [fallbackRoute],
+    providerPreferences: {
+      providerOrder: ["test-provider"]
+    },
+    sessionDb,
+    sessionId,
+    profileId: "default",
+    trajectoryRecorder,
+    runRecorder,
+    toolPlanRunner,
+    soul: undefined,
+    memoryPromptContext: undefined,
+    skillsIndex: [],
+    ui: undefined,
+    agentProfile: undefined,
+    budgets: {
+      maxProviderIterations: 2,
+      maxProviderToolCalls: 4,
+      maxRepeatedToolFailures: 2,
+      maxProviderWallClockMs: 10_000
+    },
+    ...overrides
+  });
+
+  return {
+    sessionDb,
+    sessionId,
+    providerExecutor,
+    completeSpy,
+    loop
+  };
+}
+
+async function appendHistory(db: InMemorySessionDB, sessionId: string, content: string): Promise<void> {
+  await db.appendMessage({
+    id: `${sessionId}-history`,
+    sessionId,
+    role: "user",
+    content
+  });
+  await db.appendMessage({
+    id: `${sessionId}-latest`,
+    sessionId,
+    role: "user",
+    content: "current user request"
+  });
+}
+
+async function runBasicProviderTurn(loop: ProviderTurnLoop): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
+  return await loop.run({
+    userText: "current user request",
+    routedText: "current user request",
+    selectedSkill: undefined,
+    selectedSkillInstructions: undefined,
+    selectedSkillResources: undefined,
+    selectedSkillSetup: undefined,
+    intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
+    securityDecision: "allow",
+    toolExecutions: [],
+    context: undefined,
+    projectContext: undefined,
+    attachments: undefined,
+    memoryPromptContext: undefined,
+    providerTools: [],
+    fallbackText: "",
+    toolPlans: [],
+    trustedWorkspace: false,
+    initialRiskClass: "read-only-local"
+  });
+}
+
+function compressionDiagnostics(
+  overrides: Partial<CompactResult["diagnostics"]> = {}
+): CompactResult["diagnostics"] {
+  return {
+    shouldCompress: true,
+    reason: "above-threshold",
+    preTokens: 100,
+    postTokens: 40,
+    estimatedSavingsTokens: 60,
+    estimatedSavingsRatio: 0.6,
+    sourceMessageCount: 2,
+    summarizedMessageCount: 1,
+    protectedMessageCount: 1,
+    protectedFirstN: 0,
+    protectedLastN: 1,
+    protectedSpans: [{ startMessageId: "current-user", endMessageId: "current-user", messageCount: 1 }],
+    protectedCategories: ["current_user_request" as const],
+    summaryFormatVersion: "v1",
+    summaryChars: 40,
+    fallbackUsed: false,
+    warnings: [],
+    prunedToolResults: 0,
+    scopeKey: "default:test",
+    eventWarnings: [],
+    ...overrides
+  };
+}
+
+function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB>): SessionDB {
+  return {
+    createSession: overrides.createSession ?? db.createSession.bind(db),
+    getSession: overrides.getSession ?? db.getSession.bind(db),
+    listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
+    replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
+    appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
+    listMessages: overrides.listMessages ?? db.listMessages.bind(db),
+    listEvents: overrides.listEvents ?? db.listEvents.bind(db),
+    search: overrides.search ?? db.search.bind(db),
+    saveFailure: overrides.saveFailure ?? db.saveFailure.bind(db)
+  };
 }
 
 describe("ProviderTurnLoop provider availability", () => {
@@ -148,6 +319,182 @@ describe("ProviderTurnLoop provider availability", () => {
     });
 
     expect(loop.canRunProvider()).toBe(false);
+  });
+});
+
+describe("ProviderTurnLoop semantic session compression", () => {
+  it("does not call semantic compression when config is disabled", async () => {
+    const harness = await createCompressionHarness();
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: false,
+      messages: [],
+      diagnostics: compressionDiagnostics(),
+      userFacingMessage: undefined
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: false,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await appendHistory(harness.sessionDb, harness.sessionId, "disabled compression history");
+
+    await runBasicProviderTurn(loop);
+
+    expect(compactIfNeeded).not.toHaveBeenCalled();
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    expect(promptEvent).toEqual(expect.objectContaining({
+      kind: "prompt-assembled",
+      budget: expect.not.objectContaining({ compression: expect.anything() })
+    }));
+  });
+
+  it("does not call semantic compression below the configured threshold", async () => {
+    const harness = await createCompressionHarness();
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: false,
+      messages: [],
+      diagnostics: compressionDiagnostics({ reason: "below-threshold" }),
+      userFacingMessage: undefined
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 100_000,
+        threshold: 0.95
+      })
+    });
+    await appendHistory(harness.sessionDb, harness.sessionId, "small history");
+
+    await runBasicProviderTurn(loop);
+
+    expect(compactIfNeeded).not.toHaveBeenCalled();
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    expect(promptEvent).toEqual(expect.objectContaining({
+      kind: "prompt-assembled",
+      budget: expect.not.objectContaining({ compression: expect.anything() })
+    }));
+  });
+
+  it("calls semantic compression above threshold and uses returned compressed messages", async () => {
+    const harness = await createCompressionHarness();
+    const compressedMessages: ReplacementSessionMessage[] = [
+      {
+        id: "summary-1",
+        role: "system",
+        content: "[CONTEXT COMPACTION — REFERENCE ONLY]\nSemantic summary marker",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        metadata: { semanticCompression: true, summaryFormatVersion: "v1" }
+      },
+      {
+        id: "current-user",
+        role: "user",
+        content: "latest user survives",
+        createdAt: "2030-01-01T00:00:01.000Z"
+      }
+    ];
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: true,
+      messages: compressedMessages,
+      diagnostics: compressionDiagnostics({
+        preTokens: 500,
+        postTokens: 100,
+        estimatedSavingsRatio: 0.8
+      }),
+      userFacingMessage: "Session history compacted"
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await appendHistory(harness.sessionDb, harness.sessionId, "large history ".repeat(200));
+
+    await runBasicProviderTurn(loop);
+
+    expect(compactIfNeeded).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "default",
+      sessionId: harness.sessionId
+    }));
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const rendered = JSON.stringify(request.messages);
+    expect(rendered).toContain("Semantic summary marker");
+    expect(rendered).toContain("Compaction notice:");
+    expect(rendered).toContain("latest user survives");
+    expect(rendered).not.toContain("large history");
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    expect(promptEvent).toEqual(expect.objectContaining({
+      kind: "prompt-assembled",
+      budget: expect.objectContaining({
+        compression: expect.objectContaining({
+          triggered: true,
+          mode: "semantic",
+          summaryFormatVersion: "v1"
+        })
+      })
+    }));
+    const providerEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "provider-completion");
+    expect(providerEvent).toEqual(expect.objectContaining({
+      kind: "provider-completion",
+      usage: expect.objectContaining({
+        inputTokens: 123
+      })
+    }));
+  });
+
+  it("provider turn succeeds when compression event recording fails", async () => {
+    const base = await createCompressionHarness();
+    await appendHistory(base.sessionDb, base.sessionId, "history requiring compression ".repeat(200));
+    const sessionDb = forwardingSessionDb(base.sessionDb, {
+      appendEvent: async (sessionId, event) => {
+        if (event.kind === "session-history-compressed" || event.kind === "session-compression-state") {
+          throw new Error("compression event down");
+        }
+        return base.sessionDb.appendEvent(sessionId, event);
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    const loop = base.loop({
+      sessionDb,
+      sessionCompressionService: service,
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+
+    const result = await runBasicProviderTurn(loop);
+
+    expect(result.providerExecution?.ok).toBe(true);
+    const promptEvent = (await base.sessionDb.listEvents(base.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    expect(JSON.stringify(promptEvent)).toContain("compression event down");
   });
 });
 
@@ -287,6 +634,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       },
       sessionDb,
       sessionId,
+      profileId: "default",
       trajectoryRecorder,
       runRecorder,
       toolPlanRunner,
@@ -409,6 +757,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       },
       sessionDb,
       sessionId,
+      profileId: "default",
       trajectoryRecorder,
       runRecorder,
       toolPlanRunner,
@@ -491,6 +840,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       },
       sessionDb,
       sessionId,
+      profileId: "default",
       trajectoryRecorder,
       runRecorder,
       toolPlanRunner,

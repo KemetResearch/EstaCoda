@@ -6,6 +6,7 @@ import { loadRuntimeConfig, type LoadRuntimeConfigOptions } from "../config/runt
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { renderSessionRecallResult, SessionRecallService } from "../session/session-recall-service.js";
+import { renderSessionCompactionResult, type CompactResult } from "../prompt/session-compression-service.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import {
@@ -29,7 +30,14 @@ export type SessionCommandInput = {
   workspaceRoot?: string;
   providerFetch?: LoadRuntimeConfigOptions["providerFetch"];
   modelsDevOptions?: LoadRuntimeConfigOptions["modelsDevOptions"];
-  runtime?: { sessionId: string };
+  runtime?: {
+    sessionId: string;
+    compactSession?: (input?: {
+      sessionId?: string;
+      focusTopic?: string;
+      signal?: AbortSignal;
+    }) => Promise<CompactResult>;
+  };
 };
 
 const VALID_SURFACES = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
@@ -103,6 +111,37 @@ export async function runSessionsCommand(
       return { ok: true, output: renderSessionRecallResult(result) };
     } finally {
       await db.close();
+    }
+  }
+
+  if (subcommand === "compact") {
+    const parsed = parseCompactArgs(rest);
+    if (!parsed.ok) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: parsed.message,
+      });
+      return { ok: false, output: renderer(viewModel) };
+    }
+    if (input.runtime?.compactSession === undefined) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: "Session compaction is not available in this runtime.",
+      });
+      return { ok: false, output: renderer(viewModel) };
+    }
+    try {
+      const result = await input.runtime.compactSession({
+        sessionId: parsed.sessionId,
+        focusTopic: parsed.topic
+      });
+      return {
+        ok: true,
+        output: renderSessionCompactionResult(result, { focusTopic: parsed.topic })
+      };
+    } catch (error) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return { ok: false, output: renderer(viewModel) };
     }
   }
 
@@ -221,4 +260,36 @@ export async function runSessionsCommand(
   }
 
   return { ok: true, output: renderer(buildSessionsHelpViewModel()) };
+}
+
+function parseCompactArgs(args: readonly string[]): { ok: true; sessionId: string; topic?: string } | { ok: false; message: string } {
+  const sessionId = args[0];
+  if (sessionId === undefined || sessionId.startsWith("-")) {
+    return { ok: false, message: "Usage: estacoda sessions compact <session-id> [--topic <topic>]" };
+  }
+
+  let topic: string | undefined;
+  const rest = args.slice(1);
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index]!;
+    if (arg === "--topic") {
+      const value = rest.slice(index + 1).join(" ").trim();
+      if (value.length === 0) {
+        return { ok: false, message: "--topic requires a value." };
+      }
+      topic = value;
+      break;
+    }
+    if (arg.startsWith("--topic=")) {
+      const value = arg.slice("--topic=".length).trim();
+      if (value.length === 0) {
+        return { ok: false, message: "--topic requires a value." };
+      }
+      topic = value;
+      continue;
+    }
+    return { ok: false, message: `Unknown option for sessions compact: ${arg}` };
+  }
+
+  return topic === undefined ? { ok: true, sessionId } : { ok: true, sessionId, topic };
 }

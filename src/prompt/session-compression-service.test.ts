@@ -90,6 +90,12 @@ describe("SessionCompressionService", () => {
 
   it("compactNow bypasses threshold", async () => {
     const { db, sessionId } = await sessionDbWithMessages(4);
+    let observedPrompt = "";
+    const harness = auxiliaryHarness("forced summary");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedPrompt = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("forced summary");
+    });
     const service = new SessionCompressionService({
       sessionDb: db,
       config: normalizeSessionCompressionConfig({
@@ -99,13 +105,48 @@ describe("SessionCompressionService", () => {
         summaryModelContextLength: 100_000,
         threshold: 0.95
       }),
-      ...auxiliaryHarness("forced summary")
+      ...harness
     });
 
-    const result = await service.compactNow({ profileId: "profile", sessionId });
+    const result = await service.compactNow({ profileId: "profile", sessionId, focusTopic: "manual focus" });
+    const events = await db.listEvents(sessionId);
 
     expect(result.didCompress).toBe(true);
     expect(result.diagnostics.reason).toBe("forced");
+    expect(observedPrompt).toContain("Manual focus topic: manual focus");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "session-history-compressed",
+      trigger: "manual"
+    }));
+  });
+
+  it("records explicit hygiene trigger for gateway hygiene compression", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("hygiene summary")
+    });
+
+    const result = await service.compactIfNeeded({ profileId: "profile", sessionId, trigger: "hygiene" });
+    const events = await db.listEvents(sessionId);
+
+    expect(result.didCompress).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "session-history-compressed",
+      trigger: "hygiene"
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "session-compression-state",
+      state: expect.objectContaining({ trigger: "hygiene" })
+    }));
   });
 
   it("hydrates latest state event before compression", async () => {

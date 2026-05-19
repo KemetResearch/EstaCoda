@@ -298,6 +298,76 @@ describe("CLI session commands", () => {
     });
   });
 
+  describe("sessions compact", () => {
+    it("compacts a session through the shared runtime service path", async () => {
+      const calls: Array<{ sessionId?: string; focusTopic?: string }> = [];
+      const result = await runCliCommand({
+        argv: ["sessions", "compact", "sess-compact", "--topic", "handoff notes"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        runtime: {
+          sessionId: "active-session",
+          compactSession: async (input?: { sessionId?: string; focusTopic?: string }) => {
+            calls.push(input ?? {});
+            return compactResult();
+          }
+        } as any
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(calls).toEqual([{ sessionId: "sess-compact", focusTopic: "handoff notes" }]);
+      expect(result.output).toContain("Compacted 8 messages -> 4 messages");
+      expect(result.output).toContain("Token estimate: 2000 -> 900");
+      expect(result.output).toContain("Focus topic: handoff notes");
+    });
+
+    it("fails clearly for missing or invalid session ids", async () => {
+      const missing = await runCliCommand({
+        argv: ["sessions", "compact"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        runtime: { sessionId: "active-session", compactSession: async () => compactResult() } as any
+      });
+      expect(missing.exitCode).toBe(1);
+      expect(missing.output).toContain("Usage: estacoda sessions compact <session-id>");
+
+      const invalid = await runCliCommand({
+        argv: ["sessions", "compact", "missing-session"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        runtime: {
+          sessionId: "active-session",
+          compactSession: async () => {
+            throw new Error("Session not found: missing-session");
+          }
+        } as any
+      });
+      expect(invalid.exitCode).toBe(1);
+      expect(invalid.output).toContain("Session compaction failed: Session not found: missing-session");
+    });
+
+    it("surfaces deterministic fallback warnings", async () => {
+      const result = await runCliCommand({
+        argv: ["sessions", "compact", "sess-fallback"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        runtime: {
+          sessionId: "active-session",
+          compactSession: async () => compactResult({
+            fallbackUsed: true,
+            fallbackReason: "failed",
+            warnings: ["auxiliary compression failed; used deterministic fallback"]
+          })
+        } as any
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Warning: fallback summary used (failed)");
+      expect(result.output).toContain("Warning: auxiliary compression failed; used deterministic fallback");
+    });
+  });
+
   describe("sessions attach", () => {
     it("attaches surface to session", async () => {
       const db = openDefaultSQLiteDatabase({ path: dbPath });
@@ -393,3 +463,43 @@ describe("CLI session commands", () => {
     });
   });
 });
+
+function compactResult(overrides: {
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  warnings?: string[];
+} = {}) {
+  return {
+    didCompress: true,
+    messages: [
+      { id: "m1", role: "user", content: "head" },
+      { id: "summary", role: "system", content: "summary", metadata: { semanticCompression: true } },
+      { id: "m7", role: "agent", content: "tail" },
+      { id: "m8", role: "user", content: "latest" }
+    ],
+    diagnostics: {
+      shouldCompress: true,
+      reason: "forced",
+      preTokens: 2000,
+      postTokens: 900,
+      estimatedSavingsTokens: 1100,
+      estimatedSavingsRatio: 0.55,
+      sourceMessageCount: 8,
+      summarizedMessageCount: 4,
+      protectedMessageCount: 4,
+      protectedFirstN: 1,
+      protectedLastN: 1,
+      protectedSpans: [],
+      protectedCategories: [],
+      summaryFormatVersion: "v1",
+      summaryChars: 100,
+      fallbackUsed: overrides.fallbackUsed ?? false,
+      fallbackReason: overrides.fallbackReason,
+      warnings: overrides.warnings ?? [],
+      eventWarnings: [],
+      prunedToolResults: 0,
+      scopeKey: "profile:session"
+    },
+    userFacingMessage: "Session history compacted"
+  };
+}

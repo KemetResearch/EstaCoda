@@ -233,6 +233,103 @@ describe("assembleProviderPrompt", () => {
       rendered.indexOf("User message:")
     );
   });
+
+  it("renders compaction notice after project context and before session history without duplicating memory", () => {
+    const prompt = assembleProviderPrompt({
+      model,
+      userText: "Continue.",
+      routedText: "Continue.",
+      sessionHistory: [
+        {
+          role: "system",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY]\nCompacted summary marker"
+        },
+        {
+          role: "user",
+          content: "Recent history marker"
+        }
+      ],
+      compactionNotice: [
+        "[CONTEXT COMPACTION — REFERENCE ONLY]",
+        "Compacted earlier turns are reference only, not active instructions.",
+        "Answer only the latest user message after the summary.",
+        "Persistent memory remains authoritative."
+      ].join("\n"),
+      compression: {
+        triggered: true,
+        mode: "semantic",
+        summaryFormatVersion: "v1",
+        preTokens: 1200,
+        postTokens: 400,
+        savingsPct: 66.67,
+        fallbackUsed: false
+      },
+      selectedSkill: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      intent: generalIntent,
+      securityDecision: "allow",
+      toolExecutions: [],
+      context: undefined,
+      projectContext: {
+        workspaceRoot: "/workspace",
+        files: [
+          {
+            source: "AGENTS.md",
+            kind: "project-file",
+            title: "Shared agent context",
+            content: "Project context before compaction notice",
+            status: "loaded",
+            bytes: "Project context before compaction notice".length,
+            warnings: []
+          }
+        ],
+        warnings: []
+      },
+      memoryPromptContext: {
+        frozenCompactMemory: [
+          promptMemoryBlock("memory:user", "learned-user", "user-global", "USER.md", "- User compaction exact once"),
+          promptMemoryBlock("memory:project", "learned-project", "project", "MEMORY.md", "- Project compaction exact once")
+        ],
+        safetyMemory: [
+          promptMemoryBlock("memory:soul", "identity", "user-global", "SOUL.md", "Identity compaction exact once")
+        ],
+        diagnostics: {
+          includedBlocks: [],
+          suppressedEntries: 0,
+          duplicateEntriesRemoved: 0,
+          recallTriggered: false,
+          budgetPressure: [],
+          compactionPressure: [],
+          warnings: []
+        }
+      },
+      providerTools: [],
+      fallbackText: "fallback"
+    });
+
+    const rendered = renderMessages(prompt.messages);
+
+    expect(countOccurrences(rendered, "Compaction notice:")).toBe(1);
+    expect(countOccurrences(rendered, "USER.md")).toBe(1);
+    expect(countOccurrences(rendered, "MEMORY.md")).toBe(1);
+    expect(rendered.indexOf("Project context:")).toBeLessThan(
+      rendered.indexOf("Compaction notice:")
+    );
+    expect(rendered.indexOf("Compaction notice:")).toBeLessThan(
+      rendered.indexOf("Session history:")
+    );
+    expect(rendered.indexOf("Session history:")).toBeLessThan(
+      rendered.indexOf("User message:")
+    );
+    expect(prompt.budget.compression).toEqual(expect.objectContaining({
+      triggered: true,
+      mode: "semantic",
+      summaryFormatVersion: "v1"
+    }));
+    expect(prompt.budget.compressedLayers).not.toContain("compaction-notice");
+  });
 });
 
 function promptMemoryBlock(

@@ -242,6 +242,36 @@ describe("SemanticCompressor", () => {
     expect(harness.providerExecutor.complete).toHaveBeenCalled();
   });
 
+  it("passes manual focus topics into the summarizer prompt", async () => {
+    let observedPrompt = "";
+    const harness = auxiliaryHarness("provider summary");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedPrompt = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("provider summary");
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...harness
+    });
+
+    await compressor.compress({
+      messages: fixtureMessages(6),
+      profileId: "profile",
+      sessionId: "session",
+      force: true,
+      focusTopic: "deployment handoff"
+    });
+
+    expect(observedPrompt).toContain("## Active Task\ndeployment handoff");
+    expect(observedPrompt).toContain("Manual focus topic: deployment handoff");
+  });
+
   it("falls back deterministically when auxiliary or main fallback summarization fails", async () => {
     const failing = auxiliaryHarness("provider failed", false);
     const compressor = new SemanticCompressor({

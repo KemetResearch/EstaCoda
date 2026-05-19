@@ -81,6 +81,7 @@ export type SemanticCompressInput = {
   profileId: string;
   sessionId: string;
   previousState?: SessionCompressionState;
+  focusTopic?: string;
   force?: boolean;
   signal?: AbortSignal;
 };
@@ -144,7 +145,8 @@ export class SemanticCompressor {
     const serialized = serializeMessagesForSummary(plan.source);
     const previousSummary = previousSummaryText(input.messages, input.previousState);
     const summary = await this.#summarize({
-      activeTask: redactSensitiveText(latestUserText(input.messages)),
+      activeTask: redactSensitiveText(input.focusTopic?.trim() || latestUserText(input.messages)),
+      focusTopic: input.focusTopic === undefined ? undefined : redactSensitiveText(input.focusTopic),
       transcript: serialized.text,
       previousSummary: previousSummary === undefined ? undefined : redactSensitiveText(previousSummary),
       scopeKey,
@@ -252,6 +254,7 @@ export class SemanticCompressor {
 
   async #summarize(input: {
     activeTask: string;
+    focusTopic?: string;
     transcript: string;
     previousSummary?: string;
     scopeKey: string;
@@ -285,6 +288,7 @@ export class SemanticCompressor {
       request: summarizerRequest({
         model: this.#route.route.id,
         activeTask: input.activeTask,
+        focusTopic: input.focusTopic,
         transcript: input.transcript,
         previousSummary: input.previousSummary
       }),
@@ -407,6 +411,7 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
 function summarizerRequest(input: {
   model: string;
   activeTask: string;
+  focusTopic?: string;
   transcript: string;
   previousSummary?: string;
 }) {
@@ -428,6 +433,9 @@ function summarizerRequest(input: {
         content: [
           "## Active Task",
           input.activeTask || "Unknown current user task.",
+          input.focusTopic === undefined || input.focusTopic.trim().length === 0
+            ? ""
+            : `Manual focus topic: ${input.focusTopic.trim()}`,
           "",
           "## Goal",
           "Create a concise reference summary of earlier turns.",

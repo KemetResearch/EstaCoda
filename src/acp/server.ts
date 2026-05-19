@@ -769,6 +769,7 @@ export class AcpServer {
       agentProfile: config.profile,
       providerRegistry: config.providerRegistry,
       auxiliaryModels: config.auxiliaryModels,
+      compression: config.compression,
       mcpServers: config.mcp.servers,
       browser: config.browser,
       imageGen: config.imageGen,
