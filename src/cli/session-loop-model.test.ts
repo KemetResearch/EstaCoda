@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { handleSlashCommand } from "./session-loop.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -243,5 +245,111 @@ describe("session-loop /model", () => {
 
     expect(result).toBe(false);
     expect(outputChunks.join("")).toContain("Session-scoped model switching is not supported");
+  });
+});
+
+describe("session-loop session recall", () => {
+  let tempHome: string;
+  let outputChunks: string[];
+  let output: NodeJS.WritableStream;
+
+  beforeEach(() => {
+    tempHome = mkdtempSync(join(tmpdir(), "estacoda-session-recall-test-"));
+    outputChunks = [];
+    output = {
+      write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); },
+      end: () => {}
+    } as NodeJS.WritableStream;
+  });
+
+  afterEach(() => {
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it("/session recall uses the manual recall surface", async () => {
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      recallSession: async (query: string) => ({
+        query,
+        blocks: [
+          {
+            sessionId: "historical-session",
+            sourceSessionIds: ["historical-session"],
+            summary: "Source session historical-session: recalled alpha detail",
+            hitMessageIds: ["message-1"],
+            usedFallback: false,
+            untrustedNotice: SESSION_RECALL_UNTRUSTED_NOTICE
+          }
+        ],
+        diagnostics: {
+          rawHitCount: 1,
+          groupedSessionCount: 1,
+          returnedSessionCount: 1,
+          fallbackCount: 0,
+          warnings: []
+        }
+      })
+    };
+
+    const result = await handleSlashCommand({
+      text: "/session recall alpha detail",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    const text = outputChunks.join("");
+    expect(text).toContain("Session recall for \"alpha detail\"");
+    expect(text).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+    expect(text).toContain("Source session historical-session");
+  });
+
+  it("/search remains a raw session search surface", async () => {
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "active-session", profileId: "default" });
+    await sessionDb.createSession({ id: "historical-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      id: "message-1",
+      sessionId: "historical-session",
+      role: "user",
+      content: "alpha raw search detail"
+    });
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      sessionId: "active-session",
+      sessionDb
+    };
+
+    const result = await handleSlashCommand({
+      text: "/search alpha",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    const text = outputChunks.join("");
+    expect(text).toContain("Search results for \"alpha\"");
+    expect(text).toContain("[historical-session] user: alpha raw search detail");
+    expect(text).not.toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
   });
 });

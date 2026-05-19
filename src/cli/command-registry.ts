@@ -133,7 +133,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "sessions",
-    aliases: [],
+    aliases: ["session"],
     category: "Session",
     description: "List recent sessions",
     visibility: "public",
@@ -519,7 +519,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "sessions",
-    aliases: [],
+    aliases: ["session"],
     category: "Session",
     description: "List and manage sessions",
     visibility: "public",

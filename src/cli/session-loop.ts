@@ -4,6 +4,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
+import { renderSessionRecallResult } from "../session/session-recall-service.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -534,6 +535,10 @@ export async function handleSlashCommand(input: {
       return false;
     }
     case "sessions":
+      if (args[0] === "recall") {
+        input.output.write(`${await renderSessionRecall(input.runtime, args.slice(1).join(" "))}\n\n`);
+        return false;
+      }
       input.output.write(`${await renderSessionList(input.runtime)}\n\n`);
       return false;
     case "search":
@@ -1252,6 +1257,18 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
       `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
     )
   ].join("\n");
+}
+
+async function renderSessionRecall(runtime: Runtime, query: string): Promise<string> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length === 0) {
+    return "Usage: /session recall <query>";
+  }
+  if (runtime.recallSession === undefined) {
+    return "Session recall is not available in this runtime.";
+  }
+
+  return renderSessionRecallResult(await runtime.recallSession(normalizedQuery));
 }
 
 async function runtimeProfileId(runtime: Runtime): Promise<string> {

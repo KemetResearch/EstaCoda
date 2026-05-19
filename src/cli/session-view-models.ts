@@ -25,6 +25,7 @@ export function buildSessionsHelpViewModel(): ViewModel {
       buildListViewModel({
         items: [
           listItem("estacoda sessions list                      List recent sessions"),
+          listItem("estacoda sessions recall <query>            Summarize historical session matches"),
           listItem("estacoda sessions show <session-id>         Show session details"),
           listItem("estacoda sessions current                   Show current session"),
           listItem("estacoda sessions attach <surface> <id> <session-id>  Attach surface to session"),

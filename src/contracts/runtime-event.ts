@@ -95,6 +95,12 @@ export type RuntimeEvent =
       reason?: string;
     }
   | {
+      kind: "session-recall-decision";
+      triggered: boolean;
+      reason: string;
+      sourceSessionIds: string[];
+    }
+  | {
       kind: "agent-cancelled";
       reason: string;
       resumeNote?: string;

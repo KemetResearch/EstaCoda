@@ -4,6 +4,7 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -151,6 +152,81 @@ describe("ProviderTurnLoop provider availability", () => {
 });
 
 describe("ProviderTurnLoop explicit route propagation", () => {
+  it("uses the per-turn memory prompt context when assembling provider prompts", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(createMockAdapter());
+    const providerExecutor = new ProviderExecutor({ registry });
+    const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
+      ok: true,
+      response: {
+        ok: true,
+        content: "mock-response",
+        model: "test-model",
+        provider: "test-provider"
+      },
+      fallbackUsed: false,
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: true,
+          content: "mock-response"
+        }
+      ],
+      toolCalls: []
+    });
+    const loop = await createProviderTurnLoopForTest({ providerExecutor });
+
+    await loop.run({
+      userText: "What did we decide last time?",
+      routedText: "What did we decide last time?",
+      selectedSkill: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
+      securityDecision: "allow",
+      toolExecutions: [],
+      context: undefined,
+      projectContext: undefined,
+      attachments: undefined,
+      memoryPromptContext: {
+        frozenCompactMemory: [],
+        safetyMemory: [],
+        sessionRecall: [
+          {
+            id: "session-recall:sess-1",
+            kind: "session-recall",
+            scope: "session",
+            source: "session:sess-1",
+            content: `${SESSION_RECALL_UNTRUSTED_NOTICE}\nRuntime recall marker`,
+            chars: `${SESSION_RECALL_UNTRUSTED_NOTICE}\nRuntime recall marker`.length,
+            entryIds: ["sess-1"],
+            trusted: false
+          }
+        ],
+        diagnostics: {
+          includedBlocks: [],
+          suppressedEntries: 0,
+          duplicateEntriesRemoved: 0,
+          recallTriggered: true,
+          budgetPressure: [],
+          compactionPressure: [],
+          warnings: []
+        }
+      },
+      providerTools: [],
+      fallbackText: "",
+      toolPlans: [],
+      trustedWorkspace: false,
+      initialRiskClass: "read-only-local"
+    });
+
+    const request = completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(JSON.stringify(request.messages)).toContain("Runtime recall marker");
+    expect(JSON.stringify(request.messages)).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+  });
+
   it("always passes primaryRoute and fallbackChain to ProviderExecutor.complete", async () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());

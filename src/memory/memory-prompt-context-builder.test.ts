@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MemoryPromotionRecord } from "../contracts/memory.js";
-import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
+import { attachSessionRecallToMemoryPromptContext, MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryStore } from "./memory-store.js";
 
@@ -110,6 +110,66 @@ describe("MemoryPromptContextBuilder", () => {
       "USER.md memory budget pressure is warning: 8/10 chars",
       "MEMORY.md memory budget pressure is critical: 19/20 chars"
     ]);
+  });
+
+  it("attaches session recall as untrusted prompt context with source diagnostics", async () => {
+    const store = new MemoryStore();
+    store.write("USER.md", "- Prefers terse summaries.");
+
+    const context = await new MemoryPromptContextBuilder({ store }).build({
+      recallTriggered: true,
+      sessionRecall: [
+        {
+          id: "session-recall:sess-1",
+          kind: "session-recall",
+          scope: "session",
+          source: "session:sess-1",
+          content: "Session recall is historical context.",
+          chars: "Session recall is historical context.".length,
+          entryIds: ["sess-1"],
+          trusted: false
+        }
+      ]
+    });
+
+    expect(context.sessionRecall).toHaveLength(1);
+    expect(context.sessionRecall?.[0]).toMatchObject({
+      kind: "session-recall",
+      trusted: false,
+      entryIds: ["sess-1"]
+    });
+    expect(context.diagnostics.recallTriggered).toBe(true);
+    expect(context.diagnostics.includedBlocks).toContainEqual(expect.objectContaining({
+      kind: "session-recall",
+      source: "session:sess-1",
+      entryIds: ["sess-1"]
+    }));
+  });
+
+  it("can attach recall to an already prepared memory prompt context for one turn", async () => {
+    const store = new MemoryStore();
+    store.write("MEMORY.md", "- Project uses pnpm.");
+    const base = await new MemoryPromptContextBuilder({ store }).build();
+
+    const context = attachSessionRecallToMemoryPromptContext(base, {
+      triggered: true,
+      blocks: [
+        {
+          id: "session-recall:sess-2",
+          kind: "session-recall",
+          scope: "session",
+          source: "session:sess-2",
+          content: "Session recall is historical context.",
+          chars: "Session recall is historical context.".length,
+          entryIds: ["sess-2"],
+          trusted: false
+        }
+      ]
+    });
+
+    expect(context?.frozenCompactMemory.map((block) => block.source)).toEqual(["MEMORY.md"]);
+    expect(context?.sessionRecall?.map((block) => block.source)).toEqual(["session:sess-2"]);
+    expect(context?.diagnostics.includedBlocks.map((block) => block.kind)).toEqual(["learned-project", "session-recall"]);
   });
 });
 

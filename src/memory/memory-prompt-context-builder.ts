@@ -29,7 +29,12 @@ export class MemoryPromptContextBuilder {
     this.#scope = options.scope ?? {};
   }
 
-  async build(options: { dryRun?: boolean } = {}): Promise<MemoryPromptContext> {
+  async build(options: {
+    dryRun?: boolean;
+    sessionRecall?: PromptMemoryBlock[];
+    recallTriggered?: boolean;
+    recallWarnings?: string[];
+  } = {}): Promise<MemoryPromptContext> {
     const snapshot = this.#store.snapshot();
     const records = this.#promotionStore === undefined ? [] : await this.#promotionStore.list();
     const inactive = inactiveContentSet(records);
@@ -38,11 +43,12 @@ export class MemoryPromptContextBuilder {
       includedBlocks: [],
       suppressedEntries: 0,
       duplicateEntriesRemoved: 0,
-      recallTriggered: false,
+      recallTriggered: options.recallTriggered ?? false,
       budgetPressure,
       compactionPressure: budgetPressure,
       warnings: [
         ...(options.dryRun === true ? ["dry-run: no memory files were written"] : []),
+        ...(options.recallWarnings ?? []),
         ...budgetPressure
           .filter((pressure) => pressure.state !== "ok")
           .map((pressure) =>
@@ -105,12 +111,84 @@ export class MemoryPromptContextBuilder {
       }, diagnostics));
     }
 
+    const sessionRecall = (options.sessionRecall ?? []).map((recall) => block({
+      id: recall.id,
+      kind: "session-recall",
+      scope: recall.scope,
+      source: recall.source,
+      content: recall.content,
+      entryIds: recall.entryIds,
+      trusted: false
+    }, diagnostics));
+
     return {
       frozenCompactMemory,
       safetyMemory,
+      ...(sessionRecall.length > 0 ? { sessionRecall } : {}),
       diagnostics
     };
   }
+}
+
+export function attachSessionRecallToMemoryPromptContext(
+  context: MemoryPromptContext | undefined,
+  input: {
+    blocks: PromptMemoryBlock[];
+    triggered: boolean;
+    warnings?: string[];
+  }
+): MemoryPromptContext | undefined {
+  if (context === undefined) {
+    if (input.blocks.length === 0 && !input.triggered && (input.warnings ?? []).length === 0) {
+      return undefined;
+    }
+    return {
+      frozenCompactMemory: [],
+      safetyMemory: [],
+      ...(input.blocks.length > 0 ? { sessionRecall: input.blocks } : {}),
+      diagnostics: {
+        includedBlocks: input.blocks.map((block) => ({
+          id: block.id,
+          kind: block.kind,
+          source: block.source,
+          chars: block.chars,
+          entryIds: block.entryIds
+        })),
+        suppressedEntries: 0,
+        duplicateEntriesRemoved: 0,
+        recallTriggered: input.triggered,
+        budgetPressure: [],
+        compactionPressure: [],
+        warnings: input.warnings ?? []
+      }
+    };
+  }
+
+  const { sessionRecall: _previousSessionRecall, ...contextWithoutRecall } = context;
+  void _previousSessionRecall;
+
+  return {
+    ...contextWithoutRecall,
+    ...(input.blocks.length > 0 ? { sessionRecall: input.blocks } : {}),
+    diagnostics: {
+      ...context.diagnostics,
+      recallTriggered: input.triggered,
+      includedBlocks: [
+        ...context.diagnostics.includedBlocks.filter((block) => block.kind !== "session-recall"),
+        ...input.blocks.map((block) => ({
+          id: block.id,
+          kind: block.kind,
+          source: block.source,
+          chars: block.chars,
+          entryIds: block.entryIds
+        }))
+      ],
+      warnings: [
+        ...context.diagnostics.warnings,
+        ...(input.warnings ?? [])
+      ]
+    }
+  };
 }
 
 function block(
@@ -125,7 +203,8 @@ function block(
     id: result.id,
     kind: result.kind,
     source: result.source,
-    chars: result.chars
+    chars: result.chars,
+    entryIds: result.entryIds
   });
   return result;
 }

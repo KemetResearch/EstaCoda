@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
+import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { assembleProviderPrompt } from "./prompt-assembly.js";
 
 const model: ModelProfile = {
@@ -134,6 +135,8 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).toContain("Canonical memory prompt context:");
     expect(rendered).not.toContain("Frozen memory snapshot:");
     expect(rendered).not.toContain("Memory provider context:");
+    expect(rendered).not.toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+    expect(rendered).not.toContain("Session recall:");
 
     expect(rendered.indexOf("Safety and identity memory:")).toBeLessThan(
       rendered.indexOf("Canonical memory prompt context:")
@@ -145,14 +148,101 @@ describe("assembleProviderPrompt", () => {
       rendered.indexOf("Session history:")
     );
   });
+
+  it("renders session recall after learned memory and project context without duplicating learned memory", () => {
+    const prompt = assembleProviderPrompt({
+      model,
+      userText: "What did we decide last time?",
+      routedText: "What did we decide last time?",
+      sessionHistory: [
+        {
+          role: "user",
+          content: "Current session history marker"
+        }
+      ],
+      selectedSkill: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      intent: generalIntent,
+      securityDecision: "allow",
+      toolExecutions: [],
+      context: undefined,
+      projectContext: {
+        workspaceRoot: "/workspace",
+        files: [
+          {
+            source: "AGENTS.md",
+            kind: "project-file",
+            title: "Shared agent context",
+            content: "Project context ordering marker",
+            status: "loaded",
+            bytes: "Project context ordering marker".length,
+            warnings: []
+          }
+        ],
+        warnings: []
+      },
+      memoryPromptContext: {
+        frozenCompactMemory: [
+          promptMemoryBlock("memory:user", "learned-user", "user-global", "USER.md", "- User exact once marker"),
+          promptMemoryBlock("memory:project", "learned-project", "project", "MEMORY.md", "- Project exact once marker")
+        ],
+        safetyMemory: [
+          promptMemoryBlock("memory:soul", "identity", "user-global", "SOUL.md", "Identity exact once marker")
+        ],
+        sessionRecall: [
+          promptMemoryBlock(
+            "session-recall:sess-1",
+            "session-recall",
+            "session",
+            "session:sess-1",
+            `${SESSION_RECALL_UNTRUSTED_NOTICE}\nSource session IDs: sess-1\n\nSource session sess-1: Recall ordering marker`,
+            false,
+            ["sess-1"]
+          )
+        ],
+        diagnostics: {
+          includedBlocks: [],
+          suppressedEntries: 0,
+          duplicateEntriesRemoved: 0,
+          recallTriggered: true,
+          budgetPressure: [],
+          compactionPressure: [],
+          warnings: []
+        }
+      },
+      providerTools: [],
+      fallbackText: "fallback"
+    });
+
+    const rendered = renderMessages(prompt.messages);
+
+    expect(countOccurrences(rendered, "USER.md")).toBe(1);
+    expect(countOccurrences(rendered, "MEMORY.md")).toBe(1);
+    expect(countOccurrences(rendered, "SOUL.md")).toBe(1);
+    expect(countOccurrences(rendered, "session:sess-1")).toBe(1);
+    expect(rendered).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+    expect(rendered.indexOf("Canonical memory prompt context:")).toBeLessThan(
+      rendered.indexOf("Project context:")
+    );
+    expect(rendered.indexOf("Project context:")).toBeLessThan(
+      rendered.indexOf("Session recall:")
+    );
+    expect(rendered.indexOf("Session recall:")).toBeLessThan(
+      rendered.indexOf("User message:")
+    );
+  });
 });
 
 function promptMemoryBlock(
   id: string,
-  kind: "learned-user" | "learned-project" | "identity",
-  scope: "user-global" | "project",
+  kind: "learned-user" | "learned-project" | "identity" | "session-recall",
+  scope: "user-global" | "project" | "session",
   source: string,
-  content: string
+  content: string,
+  trusted = true,
+  entryIds?: string[]
 ) {
   return {
     id,
@@ -161,7 +251,8 @@ function promptMemoryBlock(
     source,
     content,
     chars: content.length,
-    trusted: true
+    entryIds,
+    trusted
   };
 }
 

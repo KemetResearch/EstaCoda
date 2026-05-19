@@ -25,6 +25,12 @@ import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
+import { attachSessionRecallToMemoryPromptContext } from "../memory/memory-prompt-context-builder.js";
+import {
+  detectSessionRecallIntent,
+  sessionRecallResultToPromptBlocks,
+  type SessionRecallService
+} from "../session/session-recall-service.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
@@ -87,6 +93,7 @@ export type AgentLoopOptions = {
   toolCallPlanner?: ToolCallPlanner;
   memoryProvider?: MemoryProvider;
   memoryPromptContext?: MemoryPromptContext;
+  sessionRecallService?: Pick<SessionRecallService, "recall">;
   model?: ModelProfile;
   providerPreferences?: ProviderRoutePreferences;
   contextReferenceExpander?: ContextReferenceExpander;
@@ -152,6 +159,7 @@ export class AgentLoop {
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
   readonly #memoryPromptContext: MemoryPromptContext | undefined;
+  readonly #sessionRecallService: Pick<SessionRecallService, "recall"> | undefined;
   readonly #model: ModelProfile | undefined;
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
@@ -184,6 +192,7 @@ export class AgentLoop {
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
     this.#memoryPromptContext = options.memoryPromptContext;
+    this.#sessionRecallService = options.sessionRecallService;
     this.#model = options.model;
     this.#providerPreferences = options.providerPreferences ?? {};
     this.#contextReferenceExpander = options.contextReferenceExpander;
@@ -422,6 +431,10 @@ export class AgentLoop {
       userText: effectiveText,
       onEvent: input.onEvent
     });
+    const turnMemoryPromptContext = await this.#memoryPromptContextForTurn({
+      text: routedText,
+      onEvent: input.onEvent
+    });
 
     if (selectedSkill !== undefined) {
       await emit(input.onEvent, {
@@ -526,7 +539,7 @@ export class AgentLoop {
       context,
       projectContext: this.#projectContext,
       attachments,
-      memoryPromptContext: this.#memoryPromptContext,
+      memoryPromptContext: turnMemoryPromptContext,
       providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
@@ -708,6 +721,49 @@ export class AgentLoop {
 
 
 
+
+  async #memoryPromptContextForTurn(input: {
+    text: string;
+    onEvent?: RuntimeEventSink;
+  }): Promise<MemoryPromptContext | undefined> {
+    const decision = detectSessionRecallIntent(input.text);
+    if (!decision.triggered || this.#sessionRecallService === undefined) {
+      const warnings = await this.#runRecorder.recordSessionRecallDecision({
+        triggered: false,
+        reason: decision.triggered ? "session recall service unavailable" : decision.reason,
+        query: decision.query,
+        sourceSessionIds: [],
+        warningCount: 0,
+        onEvent: input.onEvent
+      });
+      return attachSessionRecallToMemoryPromptContext(this.#memoryPromptContext, {
+        blocks: [],
+        triggered: false,
+        warnings
+      });
+    }
+
+    const recall = await this.#sessionRecallService.recall(decision.query);
+    const blocks = sessionRecallResultToPromptBlocks(recall);
+    const sourceSessionIds = [...new Set(recall.blocks.flatMap((block) => block.sourceSessionIds))];
+    const eventWarnings = await this.#runRecorder.recordSessionRecallDecision({
+      triggered: true,
+      reason: decision.reason,
+      query: decision.query,
+      sourceSessionIds,
+      warningCount: recall.diagnostics.warnings.length,
+      onEvent: input.onEvent
+    });
+
+    return attachSessionRecallToMemoryPromptContext(this.#memoryPromptContext, {
+      blocks,
+      triggered: true,
+      warnings: [
+        ...recall.diagnostics.warnings,
+        ...eventWarnings
+      ]
+    });
+  }
 
   async #promoteRepeatedPreferences(userText: string, userInputEventId: string): Promise<void> {
     if (this.#memoryProvider === undefined) {

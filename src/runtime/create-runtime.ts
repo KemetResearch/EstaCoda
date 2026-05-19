@@ -42,6 +42,7 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
@@ -187,6 +188,7 @@ export type Runtime = {
   skills(): SkillCatalogEntry[];
   latestResumeNote(): Promise<string | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
+  recallSession?(query: string): Promise<SessionRecallResult>;
   inspectMcpServers(): MCPServerSnapshot[];
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   executeTool?(input: {
@@ -290,6 +292,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerRegistry,
       providerModels
     });
+  const sessionSearchRoute = options.model.provider === "unconfigured"
+    ? undefined
+    : resolveAuxiliaryModelRoute("session_search", auxiliaryModels, {
+      mainRoute,
+      providerRegistry,
+      providerModels
+    });
   const providerExecutor = new ProviderExecutor({
     registry: providerRegistry
   });
@@ -310,7 +319,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       id: sessionId,
       profileId,
       title: "EstaCoda v2 scaffold",
-      metadata: options.sessionMetadata
+      metadata: {
+        workspaceRoot,
+        ...(options.sessionMetadata ?? {})
+      }
     });
   }
 
@@ -569,6 +581,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     store: memoryStore,
     promotionStore: memoryPromotionStore
   }).build();
+  const sessionRecallService = new SessionRecallService({
+    sessionDb,
+    profileId,
+    workspaceRoot,
+    route: sessionSearchRoute,
+    mainRoute,
+    providerExecutor
+  });
   const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
   const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();
   const renderedProjectContext = renderProjectContext(projectContext);
@@ -764,6 +784,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolCallPlanner,
     memoryProvider,
     memoryPromptContext,
+    sessionRecallService,
     model: options.model,
     providerPreferences: {
       providerOrder: [options.model.provider]
@@ -864,6 +885,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];
+    },
+    async recallSession(query) {
+      return await sessionRecallService.recall(query);
     },
     inspectMcpServers() {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
