@@ -3821,6 +3821,8 @@ async function sessions(options: CliOptions, args: string[]): Promise<CliCommand
     args,
     homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
     workspaceRoot: options.workspaceRoot,
+    providerFetch: options.providerFetch,
+    modelsDevOptions: options.modelsDevOptions,
     runtime: options.runtime,
   });
   return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };

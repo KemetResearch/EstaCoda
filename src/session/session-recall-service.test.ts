@@ -65,6 +65,7 @@ describe("SessionRecallService", () => {
     const db = new InMemorySessionDB();
     await seedSession(db, "session-workspace-a", "default", ["alpha in workspace a"], { workspaceRoot: "/workspace/a" });
     await seedSession(db, "session-workspace-b", "default", ["alpha in workspace b"], { workspaceRoot: "/workspace/b" });
+    await seedSession(db, "session-legacy", "default", ["alpha in legacy metadata-less session"]);
 
     const result = await new SessionRecallService({
       sessionDb: db,
@@ -74,6 +75,19 @@ describe("SessionRecallService", () => {
     }).recall("alpha");
 
     expect(result.blocks.map((block) => block.sessionId)).toEqual(["session-workspace-a"]);
+  });
+
+  it("includes metadata-less same-profile sessions only when recall is not workspace-scoped", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-legacy", "default", ["alpha in legacy metadata-less session"]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      ...auxiliaryOptions()
+    }).recall("alpha");
+
+    expect(result.blocks.map((block) => block.sessionId)).toEqual(["session-legacy"]);
   });
 
   it("labels malicious historical content as untrusted context", async () => {

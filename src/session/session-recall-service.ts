@@ -403,7 +403,7 @@ function sessionMatchesWorkspace(session: SessionRecord, workspaceRoot: string |
     return true;
   }
   const value = workspaceFromMetadata(session.metadata);
-  return value === undefined || value === workspaceRoot;
+  return value === workspaceRoot;
 }
 
 function workspaceFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
