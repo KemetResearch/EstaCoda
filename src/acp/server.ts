@@ -770,6 +770,7 @@ export class AcpServer {
       providerRegistry: config.providerRegistry,
       auxiliaryModels: config.auxiliaryModels,
       compression: config.compression,
+      externalMemory: config.externalMemory,
       mcpServers: config.mcp.servers,
       browser: config.browser,
       imageGen: config.imageGen,

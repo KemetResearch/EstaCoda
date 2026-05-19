@@ -162,6 +162,34 @@ Interactive CLI sessions expose `/security` and `/security debug` for inspecting
 
 Gateway diagnostics (`estacoda gateway diagnose`) surface missing credentials and configuration warnings per channel.
 
+## Memory Security Boundaries
+
+Memory is durable prompt context, not policy. Local memory, recalled history, compressed summaries, and external provider output are all subordinate to system, developer, repo, `AGENTS.md`, security, and current user instructions.
+
+Important memory trust rules:
+
+- `AGENTS.md` is project context, not memory. It is not curated, compacted, promoted, mirrored, or recalled as learned memory.
+- `SOUL.md` is protected safety/identity memory. Learned-memory deactivation and compaction paths must not suppress or rewrite it.
+- Session recall is untrusted historical context. Recalled content is labeled and cannot override current instructions.
+- Semantic compression summaries are reference-only historical context. They are redacted and prefixed, but they are not trusted as active instructions.
+- External memory recall is untrusted historical context. It cannot replace local memory or session recall.
+- Memory File Compaction can target only `USER.md` and `MEMORY.md`; it must never compact `SOUL.md`, `AGENTS.md`, session history, shared memory, or promotion metadata.
+
+Workspace/profile scoping matters:
+
+- Session recall is profile-scoped.
+- When a workspace root is supplied, recall includes only sessions with matching workspace metadata.
+- Metadata-less legacy sessions are excluded from workspace-scoped recall, but may appear in same-profile recall when no workspace root is supplied.
+
+Secret handling:
+
+- Transcript-grade redaction is used for semantic compression and external memory recall/mirroring paths.
+- External memory credentials and provider diagnostics are redacted before display.
+- Mirrored memory writes are opt-in and should not include secrets.
+- Provider failures, mirror-write failures, and event-recording failures surface as warnings rather than weakening local memory or security policy.
+
+Prompt injection from historical or external memory is expected input. Retrieved text must be treated as data about prior context, not executable instruction.
+
 ## Adaptive Assessor
 
 - Uses one shared implementation in `src/security/smart-approval-assessor.ts`.

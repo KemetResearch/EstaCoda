@@ -67,6 +67,64 @@ Config should not use legacy auxiliary names such as `models.auxiliary`, `auxili
 
 Config Part 2 consumes the Providers Pass D auxiliary route contract. It does not add a second auxiliary resolver architecture.
 
+## Memory-Related Routes
+
+Memory Hardening uses distinct auxiliary route names:
+
+| Route | Used By | Must Not Be Confused With |
+|-------|---------|---------------------------|
+| `session_search` | `SessionRecallService` manual/runtime recall summaries | raw SQLite FTS search |
+| `memory_compaction` | Memory File Compaction for `USER.md` / `MEMORY.md` | semantic session compression |
+| `compression` | Semantic session compression for session history | Memory File Compaction |
+
+All three routes resolve through `resolveAuxiliaryModelRoute(...)` and execute through provider infrastructure. Missing routes fail closed or fall back as documented by the calling subsystem.
+
+## External Memory Provider
+
+External memory providers are not LLM providers. They implement a memory lifecycle contract and are wired from runtime config under `externalMemory`.
+
+Implemented provider:
+
+| Provider | Status | Storage | Notes |
+|----------|--------|---------|-------|
+| `file` | Implemented, disabled by default | `~/.estacoda/profiles/<id>/external-memory/*.jsonl` | Local file-backed external memory for lifecycle proof |
+
+Config shape:
+
+```json
+{
+  "externalMemory": {
+    "enabled": true,
+    "provider": "file",
+    "timeoutMs": 750,
+    "maxResults": 3,
+    "maxChars": 2500,
+    "mirrorWrites": false,
+    "file": {
+      "path": "external-memory.jsonl",
+      "maxEntries": 1000
+    }
+  }
+}
+```
+
+Defaults:
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `externalMemory.enabled` | `false` | Also requires a non-empty `provider` id |
+| `externalMemory.provider` | unset | Only `file` constructs a built-in provider |
+| `externalMemory.timeoutMs` | `750` | Clamped to a positive value, max `5000` |
+| `externalMemory.maxResults` | `3` | Clamped to a positive value, max `10` |
+| `externalMemory.maxChars` | `2500` | Clamped to a positive value, max `20000` |
+| `externalMemory.mirrorWrites` | `false` | Opt-in mirroring for `memory.curate` writes |
+| `externalMemory.file.path` | `external-memory.jsonl` | Relative to the profile `external-memory/` directory |
+| `externalMemory.file.maxEntries` | `1000` | Clamped to a positive value, max `10000` |
+
+Absolute file paths are rejected. Relative paths must stay under the selected profile's `external-memory/` directory. External memory failures are isolated as warnings and must not block local memory, session recall, provider turns, semantic compression, or memory-file compaction.
+
+Provider status diagnostics are redacted by helper functions in `src/memory/external-memory-provider.ts`. There is no standalone user-facing external memory status CLI command in this implementation.
+
 ## Important Distinctions
 
 - The model catalog is enriched from models.dev when cached/bundled data is available, with local fallback profiles as a safety net.

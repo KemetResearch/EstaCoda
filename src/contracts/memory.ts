@@ -50,6 +50,7 @@ export type MemoryScope =
   | "user-global"
   | "project"
   | "workspace"
+  | "external"
   | "session";
 
 export type PromptMemoryBlock = {
@@ -59,7 +60,8 @@ export type PromptMemoryBlock = {
     | "learned-project"
     | "safety"
     | "identity"
-    | "session-recall";
+    | "session-recall"
+    | "external-recall";
   scope: MemoryScope;
   source: string;
   content: string;
@@ -104,6 +106,7 @@ export type MemoryPromptDiagnostics = {
   suppressedEntries: number;
   duplicateEntriesRemoved: number;
   recallTriggered: boolean;
+  recallDecisions?: MemoryRecallDecision[];
   budgetPressure: MemoryBudgetPressure[];
   compactionPressure: MemoryBudgetPressure[];
   warnings: string[];
@@ -113,13 +116,87 @@ export type MemoryPromptContext = {
   frozenCompactMemory: PromptMemoryBlock[];
   safetyMemory: PromptMemoryBlock[];
   sessionRecall?: PromptMemoryBlock[];
+  externalRecall?: PromptMemoryBlock[];
   diagnostics: MemoryPromptDiagnostics;
+};
+
+export type MemoryRecallDecision = {
+  included: boolean;
+  reason: string;
+  query?: string;
+  scopesConsidered: MemoryScope[];
+  sourceSessions?: string[];
+  warnings?: string[];
 };
 
 export type MemorySearchResult = {
   source: MemoryFileKind | "session" | "trajectory";
   content: string;
   score: number;
+};
+
+export type ExternalMemoryProviderStatus = {
+  id: string;
+  enabled: boolean;
+  healthy?: boolean;
+  message?: string;
+  diagnostics?: Record<string, unknown>;
+};
+
+export type ExternalMemoryRecallResult = {
+  id: string;
+  source: string;
+  content: string;
+  score?: number;
+  entryIds?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalMemoryProviderContext = {
+  profileId: string;
+  sessionId?: string;
+  workspaceRoot?: string;
+  maxResults: number;
+  maxChars: number;
+};
+
+export type ExternalMemoryTurn = {
+  profileId: string;
+  sessionId?: string;
+  userText?: string;
+  assistantText?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalMemorySessionSummary = {
+  profileId: string;
+  sessionId?: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalMemoryWriteEntry = {
+  profileId: string;
+  sessionId?: string;
+  operation: MemoryOperation;
+  source: "memory.curate" | "promotion" | "skill-outcome" | "unknown";
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalMemoryProvider = {
+  id: string;
+  prefetch?(
+    query: string,
+    context: ExternalMemoryProviderContext
+  ): Promise<ExternalMemoryRecallResult[]> | ExternalMemoryRecallResult[];
+  afterTurn?(turn: ExternalMemoryTurn): Promise<void> | void;
+  flushSession?(summary: ExternalMemorySessionSummary): Promise<void> | void;
+  mirrorMemoryWrite?(entry: ExternalMemoryWriteEntry): Promise<void> | void;
+  search?(
+    query: string,
+    context: ExternalMemoryProviderContext
+  ): Promise<ExternalMemoryRecallResult[]> | ExternalMemoryRecallResult[];
+  status?(): Promise<ExternalMemoryProviderStatus> | ExternalMemoryProviderStatus;
 };
 
 export type MemoryConclusion = {

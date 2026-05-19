@@ -82,7 +82,7 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - Provider-backed CLI agent loop with real tool execution.
 - Capability-first security with approval modes, non-overridable hardline command floor, smart approval assessor, `/yolo`, and audit/debug views.
 - Profile-first configuration with local secret storage; the selected profile config defines the agent.
-- Bounded memory through profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, global shared memory, and workspace `AGENTS.md`.
+- Bounded memory through profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, global shared memory, and project-context `AGENTS.md` (not a memory file), with explicit session recall, manual memory-file compaction tools, experimental semantic session compression, and disabled-by-default file-backed external memory.
 - Skill system with visibility, usage telemetry, evolution overlays, gated proposals, snapshots, rollback, and scored eval fixtures.
 - **Multi-channel gateway (v0.9):**
   - **Telegram** — live-proven gateway support for allowlists, durable approvals, sessions, attachments, voice transcription hooks, generated-image delivery, and pairing codes; inline approval actions are implemented and smoke-tested locally.

@@ -1,10 +1,19 @@
-import type { MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
+import type { ExternalMemoryProvider, MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { ExternalMemoryRuntimeConfig } from "./external-memory-provider.js";
+import { mirrorMemoryWriteToExternalProviders } from "./external-memory-provider.js";
 import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
-export function createMemoryTool(memoryStore: MemoryStore): RegisteredTool<MemoryToolInput> {
+export type MemoryToolOptions = {
+  externalMemory?: ExternalMemoryRuntimeConfig;
+  externalMemoryProviders?: ExternalMemoryProvider[];
+  profileId?: string;
+  sessionId?: string;
+};
+
+export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOptions = {}): RegisteredTool<MemoryToolInput> {
   return {
     name: "memory.curate",
     description:
@@ -25,7 +34,7 @@ export function createMemoryTool(memoryStore: MemoryStore): RegisteredTool<Memor
     progressLabel: "curating memory",
     maxResultSizeChars: 2000,
     isAvailable: () => true,
-    run: async (input) => applyMemoryToolInput(memoryStore, input)
+    run: async (input) => applyMemoryToolInput(memoryStore, input, options)
   };
 }
 
@@ -37,7 +46,11 @@ type MemoryToolInput = {
   replacement?: string;
 };
 
-function applyMemoryToolInput(memoryStore: MemoryStore, input: MemoryToolInput): ToolResult {
+async function applyMemoryToolInput(
+  memoryStore: MemoryStore,
+  input: MemoryToolInput,
+  options: MemoryToolOptions
+): Promise<ToolResult> {
   const operation = toOperation(input);
   try {
     memoryStore.apply(operation);
@@ -59,9 +72,32 @@ function applyMemoryToolInput(memoryStore: MemoryStore, input: MemoryToolInput):
     throw error;
   }
 
+  const mirror = await mirrorMemoryWriteToExternalProviders({
+    entry: {
+      profileId: options.profileId ?? "default",
+      sessionId: options.sessionId,
+      operation,
+      source: "memory.curate"
+    },
+    providers: options.externalMemoryProviders ?? [],
+    config: options.externalMemory ?? {
+      enabled: false,
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2_500,
+      mirrorWrites: false
+    }
+  });
+
   return {
     ok: true,
-    content: `${input.file} updated with ${input.kind}`
+    content: [
+      `${input.file} updated with ${input.kind}`,
+      ...mirror.warnings
+    ].join("\n"),
+    metadata: mirror.warnings.length === 0 ? undefined : {
+      warnings: mirror.warnings
+    }
   };
 }
 

@@ -7,6 +7,9 @@ import type { ToolDefinition } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
+import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
+import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
+import { MemoryStore } from "../memory/memory-store.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
@@ -114,6 +117,11 @@ async function createAgentLoop(input: {
     trajectoryRecorder,
     profileId: "default"
   });
+  const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
+    builder: new MemoryPromptContextBuilder({ store: new MemoryStore() }),
+    sessionRecallService: input.sessionRecallService,
+    recorder: runRecorder
+  });
 
   const runtimeRouter = {
     route: vi.fn(() => ({
@@ -163,7 +171,7 @@ async function createAgentLoop(input: {
     toolExecutor: {} as any,
     model,
     providerTools: [],
-    sessionRecallService: input.sessionRecallService
+    memoryRecallOrchestrator
   });
 
   return {

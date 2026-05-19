@@ -11,6 +11,7 @@ description: "How to set up, test, maintain, and hand off work on EstaCoda."
 | [Environment](./environment.md) | Development environment setup |
 | [Known Issues](./known-issues.md) | Blunt accounting of current limitations |
 | [Maintenance](./maintenance.md) | Documentation governance rules |
+| [Memory Operator Readiness](./memory-operator-readiness.md) | Operator guide for Memory Hardening phases 0-10 |
 | [Prelaunch Milestones](./prelaunch-milestones.md) | What landed in v0.4–v0.7 and baseline before v0.8 |
 | [Agent Handoff](./agent-handoff.md) | Short operational note for incoming coding agents |
 | [Operator Controls](./operator-controls.md) | Slash commands and CLI commands for TaskFlow |

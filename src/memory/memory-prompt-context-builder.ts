@@ -3,6 +3,7 @@ import type {
   MemoryPromptContext,
   MemoryPromptDiagnostics,
   MemoryPromotionRecord,
+  MemoryRecallDecision,
   MemoryScope,
   PromptMemoryBlock
 } from "../contracts/memory.js";
@@ -32,8 +33,10 @@ export class MemoryPromptContextBuilder {
   async build(options: {
     dryRun?: boolean;
     sessionRecall?: PromptMemoryBlock[];
+    externalRecall?: PromptMemoryBlock[];
     recallTriggered?: boolean;
     recallWarnings?: string[];
+    recallDecisions?: MemoryRecallDecision[];
   } = {}): Promise<MemoryPromptContext> {
     const snapshot = this.#store.snapshot();
     const records = this.#promotionStore === undefined ? [] : await this.#promotionStore.list();
@@ -44,6 +47,7 @@ export class MemoryPromptContextBuilder {
       suppressedEntries: 0,
       duplicateEntriesRemoved: 0,
       recallTriggered: options.recallTriggered ?? false,
+      ...(options.recallDecisions !== undefined ? { recallDecisions: options.recallDecisions } : {}),
       budgetPressure,
       compactionPressure: budgetPressure,
       warnings: [
@@ -120,11 +124,21 @@ export class MemoryPromptContextBuilder {
       entryIds: recall.entryIds,
       trusted: false
     }, diagnostics));
+    const externalRecall = (options.externalRecall ?? []).map((recall) => block({
+      id: recall.id,
+      kind: "external-recall",
+      scope: recall.scope,
+      source: recall.source,
+      content: recall.content,
+      entryIds: recall.entryIds,
+      trusted: false
+    }, diagnostics));
 
     return {
       frozenCompactMemory,
       safetyMemory,
       ...(sessionRecall.length > 0 ? { sessionRecall } : {}),
+      ...(externalRecall.length > 0 ? { externalRecall } : {}),
       diagnostics
     };
   }
@@ -157,6 +171,7 @@ export function attachSessionRecallToMemoryPromptContext(
         suppressedEntries: 0,
         duplicateEntriesRemoved: 0,
         recallTriggered: input.triggered,
+        recallDecisions: [],
         budgetPressure: [],
         compactionPressure: [],
         warnings: input.warnings ?? []
@@ -173,6 +188,9 @@ export function attachSessionRecallToMemoryPromptContext(
     diagnostics: {
       ...context.diagnostics,
       recallTriggered: input.triggered,
+      ...(context.diagnostics.recallDecisions !== undefined
+        ? { recallDecisions: context.diagnostics.recallDecisions }
+        : {}),
       includedBlocks: [
         ...context.diagnostics.includedBlocks.filter((block) => block.kind !== "session-recall"),
         ...input.blocks.map((block) => ({

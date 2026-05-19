@@ -44,6 +44,7 @@ import {
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
+import { redactObject } from "../utils/redaction.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -64,6 +65,20 @@ export type SessionCompressionConfig = {
   protectLastN: number;
   summaryModelContextLength?: number;
   experimental?: boolean;
+};
+
+export type ExternalMemoryConfig = {
+  enabled: boolean;
+  provider?: string;
+  timeoutMs: number;
+  maxResults: number;
+  maxChars: number;
+  mirrorWrites: boolean;
+  credentials?: Record<string, unknown>;
+  file?: {
+    path?: string;
+    maxEntries: number;
+  };
 };
 
 export type TtsConfig = {
@@ -263,6 +278,8 @@ export type EstaCodaConfig = {
     maxContentChars?: number;
   };
   compression?: Partial<SessionCompressionConfig>;
+  externalMemory?: Partial<ExternalMemoryConfig>;
+  external_memory?: Partial<ExternalMemoryConfig>;
   browser?: {
     backend?: BrowserBackendKind;
     cdpUrl?: string;
@@ -378,6 +395,7 @@ export type LoadedRuntimeConfig = {
     maxContentChars?: number;
   };
   compression: SessionCompressionConfig;
+  externalMemory: ExternalMemoryConfig;
   browser: {
     backend: BrowserBackendKind;
     cdpUrl?: string;
@@ -656,6 +674,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       maxContentChars: config.web?.maxContentChars
     },
     compression: normalizeSessionCompressionConfig(config.compression),
+    externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
     browser: {
       backend: config.browser?.backend ?? "unconfigured",
       cdpUrl: config.browser?.cdpUrl,
@@ -736,6 +755,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     compression: {
       ...(merged.compression ?? {}),
       ...(config.compression ?? {})
+    },
+    externalMemory: {
+      ...(merged.externalMemory ?? merged.external_memory ?? {}),
+      ...(config.externalMemory ?? config.external_memory ?? {})
     },
     browser: {
       ...(merged.browser ?? {}),
@@ -1052,6 +1075,47 @@ export function normalizeSessionCompressionConfig(
     protectLastN: coercePositiveInteger(value?.protectLastN, { default: 20 }),
     ...(summaryModelContextLength === undefined ? {} : { summaryModelContextLength }),
     experimental
+  };
+}
+
+export function normalizeExternalMemoryConfig(
+  value: Partial<ExternalMemoryConfig> | undefined
+): ExternalMemoryConfig {
+  const provider = typeof value?.provider === "string" && value.provider.trim().length > 0
+    ? value.provider.trim()
+    : undefined;
+  const credentials = value?.credentials !== undefined && isPlainRecord(value.credentials)
+    ? value.credentials
+    : undefined;
+  const fileConfig = normalizeExternalMemoryFileConfig(value?.file);
+  return {
+    enabled: value?.enabled === true && provider !== undefined,
+    ...(provider === undefined ? {} : { provider }),
+    timeoutMs: coercePositiveInteger(value?.timeoutMs, { default: 750, max: 5_000 }),
+    maxResults: coercePositiveInteger(value?.maxResults, { default: 3, max: 10 }),
+    maxChars: coercePositiveInteger(value?.maxChars, { default: 2_500, max: 20_000 }),
+    mirrorWrites: value?.mirrorWrites === true,
+    ...(credentials === undefined ? {} : { credentials }),
+    ...(provider === "file" || value?.file !== undefined ? { file: fileConfig } : {})
+  };
+}
+
+function normalizeExternalMemoryFileConfig(value: unknown): ExternalMemoryConfig["file"] {
+  const record = isPlainRecord(value) ? value : {};
+  const path = typeof record.path === "string" && record.path.trim().length > 0
+    ? record.path.trim()
+    : undefined;
+  return {
+    ...(path === undefined ? {} : { path }),
+    maxEntries: coercePositiveInteger(record.maxEntries, { default: 1_000, max: 10_000 })
+  };
+}
+
+export function redactExternalMemoryConfig(config: ExternalMemoryConfig): ExternalMemoryConfig {
+  const redacted = redactObject(config, { strict: true }) as ExternalMemoryConfig;
+  return {
+    ...redacted,
+    ...(config.credentials === undefined ? {} : { credentials: redacted.credentials })
   };
 }
 

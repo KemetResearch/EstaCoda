@@ -38,6 +38,7 @@ export type RuntimeFingerprint = {
   enableWebNetwork: boolean;
   webMaxContentChars: number;
   compressionConfigHash: string;
+  externalMemoryConfigHash: string;
   disableCronTools: boolean;
 
   // ── Skills ──
@@ -111,6 +112,7 @@ export function computeRuntimeFingerprint(
     enableWebNetwork: config.web.enableNetwork,
     webMaxContentChars: config.web.maxContentChars ?? 0,
     compressionConfigHash: stableJsonHash(config.compression),
+    externalMemoryConfigHash: stableJsonHash(config.externalMemory),
     disableCronTools: options.disableCronTools,
     skillAutonomy: config.skills.autonomy,
     skillConfigHash: stableJsonHash(config.skills.config),

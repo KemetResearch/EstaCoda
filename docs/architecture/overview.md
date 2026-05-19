@@ -115,23 +115,33 @@ Important distinction:
 
 ## Prompt Architecture
 
-Prompt assembly is layered and partly cacheable. Key layers:
+Prompt assembly is layered and partly cacheable. Key context groups:
 
-1. Identity / SOUL
-2. Frozen memory snapshot
-3. Compact skills index
+1. Canonical memory prompt context from `MemoryPromptContextBuilder`
+2. Project context, including `AGENTS.md`
+3. Optional compaction notice for semantic session compression
 4. Session history
-5. User message
-6. Channel attachments
-7. Intent
-8. Skill instructions
-9. Skill setup
-10. Skill resources
-11. Workflow plan
-12. Tool menu
-13. Project context
+5. Optional session recall and external recall from `MemoryRecallOrchestrator`
+6. Live user message
+7. Channel attachments
+8. Intent
+9. Skill instructions
+10. Skill setup
+11. Skill resources
+12. Workflow plan
+13. Tool menu
 14. Explicit reference context
 15. Tool results / continuation feedback
+
+The implemented non-cacheable sequence renders compaction notice, session history, session recall, external recall, then the live user message. This render order is separate from trust and authority: recall, external recall, and compression summaries remain reference-only/untrusted context.
+
+Other cacheable context includes:
+
+1. Identity / profile guidance
+2. Safety and learned memory
+3. Project context
+4. Skill resources
+5. Compact skills index
 
 Semantic rules:
 
@@ -139,6 +149,8 @@ Semantic rules:
 - Skills are progressively disclosed.
 - Attachments are structured context, not fake user text.
 - Channel-facing formatting is handled after model generation, not by mutating the core runtime.
+- `AGENTS.md` is project context, not memory.
+- Session recall, external recall, and compression summaries are untrusted historical context.
 
 ## Skill Model
 
