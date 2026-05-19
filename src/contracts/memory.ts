@@ -104,6 +104,7 @@ export type MemoryPromptDiagnostics = {
   suppressedEntries: number;
   duplicateEntriesRemoved: number;
   recallTriggered: boolean;
+  recallDecisions?: MemoryRecallDecision[];
   budgetPressure: MemoryBudgetPressure[];
   compactionPressure: MemoryBudgetPressure[];
   warnings: string[];
@@ -114,6 +115,15 @@ export type MemoryPromptContext = {
   safetyMemory: PromptMemoryBlock[];
   sessionRecall?: PromptMemoryBlock[];
   diagnostics: MemoryPromptDiagnostics;
+};
+
+export type MemoryRecallDecision = {
+  included: boolean;
+  reason: string;
+  query?: string;
+  scopesConsidered: MemoryScope[];
+  sourceSessions?: string[];
+  warnings?: string[];
 };
 
 export type MemorySearchResult = {

@@ -25,6 +25,7 @@ import { loadIdentityContext } from "../memory/identity-loader.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
+import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
@@ -591,10 +592,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     storePath: skillLearningStorePath,
     sessionDb
   });
-  const memoryPromptContext = await new MemoryPromptContextBuilder({
+  const memoryPromptContextBuilder = new MemoryPromptContextBuilder({
     store: memoryStore,
     promotionStore: memoryPromotionStore
-  }).build();
+  });
+  const memoryPromptContext = await memoryPromptContextBuilder.build();
   const sessionRecallService = new SessionRecallService({
     sessionDb,
     profileId,
@@ -738,6 +740,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillEvolutionStore,
     memoryProvider
   });
+  const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
+    builder: memoryPromptContextBuilder,
+    sessionRecallService,
+    recorder: runRecorder
+  });
 
   const toolPlanRunner = new ToolPlanRunner({
     toolCallPlanner,
@@ -809,7 +816,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolCallPlanner,
     memoryProvider,
     memoryPromptContext,
-    sessionRecallService,
+    memoryRecallOrchestrator,
     model: options.model,
     providerPreferences: {
       providerOrder: [options.model.provider]
