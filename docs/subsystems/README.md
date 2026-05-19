@@ -9,7 +9,7 @@ description: "Per-subsystem deep dives for the EstaCoda agent runtime."
 |-----|-------|
 | [CLI & Onboarding](./cli.md) | Commands, interactive session, trace/eval inspection, first-run setup |
 | [Skills](./skills.md) | Skill loading, registry, tools, learning, evolution, proposals |
-| [Memory](./memory.md) | Stores, promotion, rendering, persistence |
+| [Memory](./memory.md) | Stores, prompt builder, recall orchestration, compaction, external memory |
 | [Semantic Session Compression](./semantic-compression.md) | Gated session-history compression, manual compaction, gateway hygiene, safety boundaries |
 | [Tools](./tools.md) | Tool schemas, registry, executor, planners |
 | [Traces](./traces.md) | Trajectory recording, event kinds, persistence |

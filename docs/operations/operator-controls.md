@@ -170,11 +170,18 @@ estacoda sessions show <session-id>                   # Session detail + surface
 estacoda sessions current                             # Current runtime session
 estacoda sessions attach <surface> <id> <session-id>  # Attach surface to session
 estacoda sessions detach <surface> <id>               # Detach surface from session
+estacoda sessions recall <query>                      # Summarize historical session matches
+estacoda session recall <query>                       # Alias for sessions recall
+estacoda sessions compact <session-id> [--topic <topic>] # Compact session history manually
 ```
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
 Sessions are **separate by default**. A CLI session and a channel session for the same user do not share context automatically. Explicit attach/detach is required.
+
+`sessions recall` is bounded historical recall. It is profile-scoped, workspace-scoped when workspace metadata is available, and labeled as untrusted context. It uses auxiliary `session_search` summarization when configured and deterministic snippets as fallback.
+
+`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from TaskFlow compaction and Memory File Compaction.
 
 ## Channel Slash Commands
 
@@ -182,6 +189,7 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 
 - `/status` — show current session and channel status
 - `/sessions` — list recent sessions
+- `/compact [topic]` — compact this in-session context through semantic session compression
 - `/switch <session-id>` — switch to a different session
 - `/attach <code>` — attach to a CLI session via handoff code
 - `/detach` — detach from current session and create a new one
@@ -211,7 +219,7 @@ On the next adapter turn:
 
 Steer is rejected for flows in terminal states.
 
-## /compact and Automatic Compaction
+## TaskFlow /flow compact and Automatic TaskFlow Compaction
 
 **Manual:** `/flow compact <flowId>` or `estacoda flow compact <flowId>` triggers compaction immediately if at a safe boundary.
 
@@ -234,6 +242,17 @@ Auto-compaction checks the boundary at the end of each adapter turn. It only run
 - completed steps ≥ minTurnsBeforeCompact.
 
 Compaction creates a `CompactSummary` and appends `compacted` / `operator-compacted` events. Original events are preserved.
+
+TaskFlow compaction is unrelated to bare `/compact`. Bare `/compact [topic]` is semantic session compression for the current in-session context; `/flow compact <flowId>` and `estacoda flow compact <flowId>` compact TaskFlow events.
+
+## Memory File Compaction
+
+Memory File Compaction is not a top-level CLI command in this implementation. It is exposed as runtime tools:
+
+- `memory.file_compact` — compact `USER.md` or `MEMORY.md`; supports dry-run.
+- `memory.file_compaction_restore` — restore `USER.md` or `MEMORY.md` from a compaction backup.
+
+Memory File Compaction uses the auxiliary `memory_compaction` route, scans generated output before writes, creates backups before applied writes, and never targets `SOUL.md` or `AGENTS.md`.
 
 ## Process Ownership
 

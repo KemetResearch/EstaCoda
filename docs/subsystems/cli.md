@@ -81,6 +81,34 @@ estacoda trace failures <trajectory-id>
 
 **Evidence:** `smoke-tested`
 
+## Memory And Session Recall Commands
+
+Top-level session recall commands:
+
+```bash
+estacoda session recall <query>
+estacoda sessions recall <query>
+```
+
+Both command forms summarize historical session matches. They use the selected profile, apply workspace scoping when a workspace root is available, resolve the auxiliary `session_search` route when configured, and fall back to deterministic snippets if auxiliary summarization is unavailable or fails.
+
+Top-level semantic session compaction:
+
+```bash
+estacoda sessions compact <session-id> [--topic <topic>]
+```
+
+This calls the active runtime's session compaction service. It is semantic session compression for a session transcript, not TaskFlow compaction and not Memory File Compaction.
+
+Memory-file compaction is exposed as runtime tools, not as a top-level CLI command in this implementation:
+
+| Tool | Purpose |
+|------|---------|
+| `memory.file_compact` | Manually compact `USER.md` or `MEMORY.md`; supports dry-run |
+| `memory.file_compaction_restore` | Restore `USER.md` or `MEMORY.md` from a compaction backup |
+
+No top-level memory prompt, memory compact, or memory restore-backup CLI command is available in this implementation.
+
 ## Eval Commands
 
 ```bash
@@ -104,6 +132,9 @@ In-session commands:
 |---------|---------|
 | `/sessions` | List active sessions |
 | `/search <query>` | Search session history |
+| `/session recall <query>` | Summarize historical session matches |
+| `/sessions recall <query>` | Alias for session recall where supported |
+| `/compact [topic]` | Compact this in-session context through semantic session compression |
 | `/switch <session-id>` | Switch to another session |
 | `/reset` | Start fresh session |
 | `/trust` | Show workspace trust status |
