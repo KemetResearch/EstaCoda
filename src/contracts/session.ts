@@ -174,6 +174,14 @@ export type SessionEvent =
       budget: PromptBudgetReport;
     }
   | {
+      kind: "session-recall-decision";
+      triggered: boolean;
+      reason: string;
+      query?: string;
+      sourceSessionIds: string[];
+      warningCount: number;
+    }
+  | {
       kind: "session-history-packed";
       sourceMessageCount: number;
       summarizedMessageCount: number;

@@ -72,7 +72,6 @@ export class ProviderTurnLoop {
   readonly #toolPlanRunner: ToolPlanRunner;
   readonly #promptCache: PromptCache;
   readonly #soul: string | undefined;
-  readonly #memoryPromptContext: MemoryPromptContext | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
@@ -91,7 +90,6 @@ export class ProviderTurnLoop {
     this.#toolPlanRunner = options.toolPlanRunner;
     this.#promptCache = new PromptCache();
     this.#soul = options.soul;
-    this.#memoryPromptContext = options.memoryPromptContext;
     this.#skillsIndex = options.skillsIndex;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
@@ -326,7 +324,7 @@ export class ProviderTurnLoop {
       cache: this.#promptCache,
       sessionHistory,
       soul: this.#soul,
-      memoryPromptContext: this.#memoryPromptContext,
+      memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,
@@ -440,7 +438,7 @@ export class ProviderTurnLoop {
       cache: this.#promptCache,
       sessionHistory,
       soul: this.#soul,
-      memoryPromptContext: this.#memoryPromptContext,
+      memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,

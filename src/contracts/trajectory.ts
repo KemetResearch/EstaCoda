@@ -26,6 +26,7 @@ export type TrajectoryEventKind =
   | "security-risk-escalated"
   | "agent-cancelled"
   | "prompt-assembled"
+  | "session-recall-decision"
   | "session-history-packed"
   | "progress"
   | "fallback"

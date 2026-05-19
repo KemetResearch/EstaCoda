@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ModelProfile, ProviderResponse, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
 import {
+  detectSessionRecallIntent,
   renderSessionRecallResult,
   SESSION_RECALL_UNTRUSTED_NOTICE,
+  sessionRecallResultToPromptBlocks,
   SessionRecallService
 } from "./session-recall-service.js";
 
@@ -107,6 +109,49 @@ describe("SessionRecallService", () => {
     expect(result.diagnostics.warnings).toEqual([
       "session session-fallback: auxiliary session_search failed; used deterministic snippets"
     ]);
+  });
+
+  it("detects explicit recall intent conservatively", () => {
+    expect(detectSessionRecallIntent("What did we decide about deploys?").triggered).toBe(true);
+    expect(detectSessionRecallIntent("continue from the last API plan").triggered).toBe(true);
+    expect(detectSessionRecallIntent("please remember to use pnpm").triggered).toBe(false);
+    expect(detectSessionRecallIntent("build the API plan").triggered).toBe(false);
+  });
+
+  it("converts recall results into untrusted bounded prompt blocks with source session IDs", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-prompt-block", "default", ["alpha prompt block detail"]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default"
+    }).recall("alpha");
+    const blocks = sessionRecallResultToPromptBlocks(result);
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.kind).toBe("session-recall");
+    expect(blocks[0]?.trusted).toBe(false);
+    expect(blocks[0]?.source).toBe("session:session-prompt-block");
+    expect(blocks[0]?.entryIds).toEqual(["session-prompt-block"]);
+    expect(blocks[0]?.content).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+  });
+
+  it("bounds recall blocks by configured session and summary limits", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-bound-a", "default", ["alpha " + "a".repeat(200)]);
+    await seedSession(db, "session-bound-b", "default", ["alpha " + "b".repeat(200)]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      maxSessions: 1,
+      maxSummaryChars: 80
+    }).recall("alpha");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]?.summary.length).toBeLessThanOrEqual(80);
+    expect(result.diagnostics.groupedSessionCount).toBe(2);
+    expect(result.diagnostics.returnedSessionCount).toBe(1);
   });
 });
 

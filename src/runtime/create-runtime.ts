@@ -784,6 +784,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolCallPlanner,
     memoryProvider,
     memoryPromptContext,
+    sessionRecallService,
     model: options.model,
     providerPreferences: {
       providerOrder: [options.model.provider]

@@ -99,6 +99,7 @@ export type MemoryPromptDiagnostics = {
     kind: PromptMemoryBlock["kind"];
     source: string;
     chars: number;
+    entryIds?: string[];
   }>;
   suppressedEntries: number;
   duplicateEntriesRemoved: number;

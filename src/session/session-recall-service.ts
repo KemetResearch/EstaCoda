@@ -3,6 +3,7 @@ import type {
   ResolvedAuxiliaryRoute,
   ResolvedModelRoute
 } from "../contracts/provider.js";
+import type { PromptMemoryBlock } from "../contracts/memory.js";
 import type { SessionDB, SessionMessage, SessionRecord, SessionSearchResult } from "../contracts/session.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
@@ -44,6 +45,12 @@ export type SessionRecallServiceOptions = {
   surroundingMessages?: number;
   maxContextChars?: number;
   maxSummaryChars?: number;
+};
+
+export type SessionRecallIntentDecision = {
+  triggered: boolean;
+  reason: string;
+  query: string;
 };
 
 type SessionHitGroup = {
@@ -230,6 +237,64 @@ export function renderSessionRecallResult(result: SessionRecallResult): string {
 
   return lines.join("\n").trimEnd();
 }
+
+export function detectSessionRecallIntent(text: string): SessionRecallIntentDecision {
+  const query = text.trim();
+  const normalized = query.toLowerCase().replace(/\s+/gu, " ");
+
+  if (query.length === 0) {
+    return {
+      triggered: false,
+      reason: "empty input",
+      query
+    };
+  }
+
+  const trigger = HIGH_CONFIDENCE_RECALL_TRIGGERS.find((candidate) => candidate.pattern.test(normalized));
+  if (trigger === undefined) {
+    return {
+      triggered: false,
+      reason: "no explicit recall trigger",
+      query
+    };
+  }
+
+  return {
+    triggered: true,
+    reason: trigger.reason,
+    query
+  };
+}
+
+export function sessionRecallResultToPromptBlocks(result: SessionRecallResult): PromptMemoryBlock[] {
+  return result.blocks.map((block) => {
+    const content = [
+      SESSION_RECALL_UNTRUSTED_NOTICE,
+      `Source session IDs: ${block.sourceSessionIds.join(", ")}`,
+      "",
+      block.summary
+    ].join("\n");
+    return {
+      id: `session-recall:${block.sessionId}`,
+      kind: "session-recall",
+      scope: "session",
+      source: `session:${block.sessionId}`,
+      content,
+      chars: content.length,
+      entryIds: block.sourceSessionIds,
+      trusted: false
+    };
+  });
+}
+
+const HIGH_CONFIDENCE_RECALL_TRIGGERS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\b(?:do you )?remember (?!to\b)(?:when|what|how|where|last|we|i|the|that|our|my)\b/u, reason: "explicit remember recall phrase" },
+  { pattern: /\blast time\b/u, reason: "explicit last-time recall phrase" },
+  { pattern: /\bwhat did we decide\b/u, reason: "explicit decision recall phrase" },
+  { pattern: /\bwhat did i say about\b/u, reason: "explicit user-statement recall phrase" },
+  { pattern: /\bcontinue from\b/u, reason: "explicit continuation recall phrase" },
+  { pattern: /\bwe discussed\b/u, reason: "explicit prior-discussion recall phrase" }
+];
 
 function groupHitsBySession(hits: SessionSearchResult[]): SessionHitGroup[] {
   const groups = new Map<string, SessionHitGroup>();

@@ -312,6 +312,54 @@ export class RunRecorder {
     });
   }
 
+  async recordSessionRecallDecision(input: {
+    triggered: boolean;
+    reason: string;
+    query?: string;
+    sourceSessionIds: string[];
+    warningCount: number;
+    onEvent?: RuntimeEventSink;
+  }): Promise<string[]> {
+    const warnings: string[] = [];
+    try {
+      await this.#sessionDb.appendEvent(this.#sessionId, {
+        kind: "session-recall-decision",
+        triggered: input.triggered,
+        reason: input.reason,
+        query: input.query,
+        sourceSessionIds: input.sourceSessionIds,
+        warningCount: input.warningCount
+      });
+    } catch (error) {
+      warnings.push(`session recall decision session event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      this.#trajectoryRecorder.record("session-recall-decision", {
+        triggered: input.triggered,
+        reason: input.reason,
+        query: input.query,
+        sourceSessionIds: input.sourceSessionIds,
+        warningCount: input.warningCount
+      });
+    } catch (error) {
+      warnings.push(`session recall decision trajectory event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      await emit(input.onEvent, {
+        kind: "session-recall-decision",
+        triggered: input.triggered,
+        reason: input.reason,
+        sourceSessionIds: input.sourceSessionIds
+      });
+    } catch (error) {
+      warnings.push(`session recall decision runtime event failed: ${errorMessage(error)}`);
+    }
+
+    return warnings;
+  }
+
   async recordSkillOutcomes(input: {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     userText: string;
@@ -492,6 +540,10 @@ function isArtifactRecord(value: unknown): value is ArtifactRecord {
     typeof candidate.createdAt === "string";
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function summarizeSkillOutcome(
   skill: string,
   executions: ToolExecutionRecord[],
@@ -520,5 +572,3 @@ function summarizeSkillOutcome(
     failed.length === 0 ? undefined : `Failed: ${failed.join(", ")}.`
   ].filter((line) => line !== undefined).join(" ");
 }
-
-
