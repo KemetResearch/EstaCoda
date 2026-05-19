@@ -32,6 +32,29 @@ describe("redactSensitiveText", () => {
     expect(redactSensitiveText("client_secret=abcdefghijklmnopqrstuvwxyz")).toBe("client_secret=[REDACTED]");
   });
 
+  it("redacts mixed transcript-grade secret categories while preserving context", () => {
+    const redacted = redactSensitiveText([
+      "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456'",
+      "token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sgn_abcdefghijklmnop",
+      "OPENAI_API_KEY=super-secret-value",
+      "DATABASE_URL=https://alice:secret@example.com/path",
+      "password: hunter2",
+      "tool output: client_secret=abcdefghijklmnopqrstuvwxyz",
+      "tool output: x-api-key: abcdefghijklmnopqrstuvwxyz",
+      "deploy target remains staging"
+    ].join("\n"));
+
+    expect(redacted).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(redacted).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+    expect(redacted).not.toContain("super-secret-value");
+    expect(redacted).not.toContain("alice:secret@example.com");
+    expect(redacted).not.toContain("hunter2");
+    expect(redacted).toContain("Authorization: Bearer [REDACTED]");
+    expect(redacted).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(redacted).toContain("https://[REDACTED]:[REDACTED]@example.com/path");
+    expect(redacted).toContain("deploy target remains staging");
+  });
+
   it("preserves non-secret text", () => {
     const text = "Build succeeded with 12 warnings and no token usage details.";
     expect(redactSensitiveText(text)).toBe(text);
