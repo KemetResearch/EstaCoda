@@ -1,6 +1,7 @@
 import type {
   AppendMessageInput,
   CreateSessionInput,
+  ReplacementSessionMessage,
   SessionDB,
   SessionEvent,
   SessionMessage,
@@ -79,6 +80,25 @@ export class InMemorySessionDB implements SessionDB {
     this.#touch(input.sessionId);
 
     return cloneMessage(message);
+  }
+
+  async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+    const session = this.#sessions.get(input.sessionId);
+
+    if (session === undefined) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    const replacement = buildReplacementMessages({
+      sessionId: input.sessionId,
+      messages: input.messages,
+      now: this.#now,
+      id: this.#id
+    });
+    this.#messages.set(input.sessionId, replacement);
+    this.#touch(input.sessionId);
+
+    return replacement.map(cloneMessage);
   }
 
   async appendEvent(sessionId: string, event: SessionEvent): Promise<void> {
@@ -160,3 +180,22 @@ function cloneMessage(message: SessionMessage): SessionMessage {
   };
 }
 
+function buildReplacementMessages(input: {
+  sessionId: string;
+  messages: ReplacementSessionMessage[];
+  now: () => Date;
+  id: () => string;
+}): SessionMessage[] {
+  const baseTime = input.now().getTime();
+  let generated = 0;
+
+  return input.messages.map((message) => ({
+    id: message.id ?? input.id(),
+    sessionId: input.sessionId,
+    role: message.role,
+    content: message.content,
+    createdAt: message.createdAt ?? new Date(baseTime + generated++).toISOString(),
+    channel: message.channel,
+    metadata: message.metadata
+  }));
+}

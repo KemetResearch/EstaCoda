@@ -33,6 +33,70 @@ export type SessionMessage = {
   metadata?: Record<string, unknown>;
 };
 
+export type SessionCompressionTrigger = "auto" | "manual" | "hygiene";
+
+export type SessionCompressionSourceRange = {
+  startMessageId?: string;
+  endMessageId?: string;
+  messageCount: number;
+  estimatedTokens?: number;
+};
+
+export type SessionCompressionProtectedSpan = {
+  startMessageId?: string;
+  endMessageId?: string;
+  messageCount: number;
+};
+
+export type SessionCompressionFailure = {
+  code: string;
+  message: string;
+  recoverable?: boolean;
+};
+
+export type SessionCompressionState = {
+  status: "idle" | "compressed" | "failed";
+  trigger?: SessionCompressionTrigger;
+  lastCompressedAt?: string;
+  source?: SessionCompressionSourceRange;
+  protectedFirstN: number;
+  protectedLastN: number;
+  protectedSpans: SessionCompressionProtectedSpan[];
+  summaryFormatVersion?: string;
+  summaryMessageId?: string;
+  summaryChars?: number;
+  summaryEstimatedTokens?: number;
+  estimatedSavingsTokens?: number;
+  fallbackUsed: boolean;
+  model?: string;
+  warnings: string[];
+  failure?: SessionCompressionFailure;
+};
+
+export type SessionHistoryCompressedEvent = {
+  kind: "session-history-compressed";
+  trigger: SessionCompressionTrigger;
+  source: SessionCompressionSourceRange;
+  protectedFirstN: number;
+  protectedLastN: number;
+  protectedSpans?: SessionCompressionProtectedSpan[];
+  summaryFormatVersion: string;
+  summaryChars: number;
+  summaryEstimatedTokens?: number;
+  estimatedSavingsTokens?: number;
+  estimatedSavingsRatio?: number;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  model?: string;
+  warnings?: string[];
+  failure?: SessionCompressionFailure;
+};
+
+export type SessionCompressionStateEvent = {
+  kind: "session-compression-state";
+  state: Partial<SessionCompressionState>;
+};
+
 export type SessionEvent =
   | {
       kind: "intent-routed";
@@ -103,6 +167,9 @@ export type SessionEvent =
       kind: "tool-called";
       tool: string;
       input: Record<string, unknown>;
+      toolCallId?: string;
+      toolCallName?: string;
+      providerNativeToolCall?: unknown;
     }
   | {
       kind: "tool-gated";
@@ -114,6 +181,9 @@ export type SessionEvent =
       kind: "tool-result";
       tool: string;
       result: ToolResult;
+      toolCallId?: string;
+      toolCallName?: string;
+      providerNativeToolCall?: unknown;
     }
   | {
       kind: "artifact-created";
@@ -190,6 +260,8 @@ export type SessionEvent =
       estimatedTokens: number;
       summary?: string;
     }
+  | SessionHistoryCompressedEvent
+  | SessionCompressionStateEvent
   | {
       kind: "provider-budget-exhausted";
       budget: string;
@@ -319,11 +391,21 @@ export type AppendMessageInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type ReplacementSessionMessage = {
+  id?: string;
+  role: SessionRole;
+  content: string;
+  createdAt?: string;
+  channel?: ChannelKind;
+  metadata?: Record<string, unknown>;
+};
+
 export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
   appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
+  replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;

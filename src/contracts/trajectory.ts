@@ -28,6 +28,8 @@ export type TrajectoryEventKind =
   | "prompt-assembled"
   | "session-recall-decision"
   | "session-history-packed"
+  | "session-history-compressed"
+  | "session-compression-state"
   | "progress"
   | "fallback"
   | "assistant-output"

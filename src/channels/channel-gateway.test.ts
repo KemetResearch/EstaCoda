@@ -349,6 +349,7 @@ function createMinimalRuntime(): Runtime {
         channel: input.channel,
         metadata: input.metadata
       }),
+      replaceMessages: async () => [],
       appendEvent: async () => {},
       listMessages: async () => [],
       listEvents: async () => [],

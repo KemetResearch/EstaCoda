@@ -1,6 +1,7 @@
 import type {
   AppendMessageInput,
   CreateSessionInput,
+  ReplacementSessionMessage,
   SessionDB,
   SessionEvent,
   SessionMessage,
@@ -220,6 +221,54 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return message;
   }
 
+  async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+    const replacements = this.#buildReplacementMessages(input);
+
+    this.#withWriteTransaction(() => {
+      const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(input.sessionId);
+      if (session === null) {
+        throw new Error(`Session not found: ${input.sessionId}`);
+      }
+
+      this.#db
+        .query("delete from messages_fts where rowid in (select rowid from messages where session_id = ?)")
+        .run(input.sessionId);
+      this.#db.query("delete from messages where session_id = ?").run(input.sessionId);
+
+      for (const message of replacements) {
+        this.#db
+          .query(
+            `insert into messages (
+              id,
+              session_id,
+              role,
+              content,
+              created_at,
+              channel,
+              metadata_json
+            ) values (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            message.id,
+            message.sessionId,
+            message.role,
+            message.content,
+            message.createdAt,
+            message.channel ?? null,
+            stringifyJson(message.metadata)
+          );
+
+        this.#db
+          .query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
+          .run(message.id, message.id, message.content);
+      }
+
+      this.#touch(input.sessionId);
+    });
+
+    return replacements;
+  }
+
   async appendEvent(sessionId: string, event: SessionEvent): Promise<void> {
     const session = await this.getSession(sessionId);
 
@@ -236,7 +285,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
   async listMessages(sessionId: string): Promise<SessionMessage[]> {
     return this.#db
-      .query<MessageRow>("select * from messages where session_id = ? order by created_at asc")
+      .query<MessageRow>("select * from messages where session_id = ? order by created_at asc, rowid asc")
       .all(sessionId)
       .map(rowToMessage);
   }
@@ -248,7 +297,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         from messages m
         join sessions s on s.id = m.session_id
         where s.profile_id = ? and m.session_id = ?
-        order by m.created_at asc`
+        order by m.created_at asc, m.rowid asc`
       )
       .all(profileId, sessionId)
       .map(rowToMessage);
@@ -572,6 +621,39 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       }
       throw error;
     }
+  }
+
+  #withWriteTransaction(write: () => void): void {
+    this.#db.exec("begin immediate");
+    try {
+      write();
+      this.#db.exec("commit");
+    } catch (error) {
+      try {
+        this.#db.exec("rollback");
+      } catch {
+        // Preserve the original write failure.
+      }
+      throw error;
+    }
+  }
+
+  #buildReplacementMessages(input: {
+    sessionId: string;
+    messages: ReplacementSessionMessage[];
+  }): SessionMessage[] {
+    const baseTime = this.#now().getTime();
+    let generated = 0;
+
+    return input.messages.map((message) => ({
+      id: message.id ?? this.#id(),
+      sessionId: input.sessionId,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt ?? new Date(baseTime + generated++).toISOString(),
+      channel: message.channel,
+      metadata: message.metadata
+    }));
   }
 
   #execMigrationControlSql(sql: string): void {
