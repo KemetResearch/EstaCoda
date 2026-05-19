@@ -5,6 +5,7 @@ export type PromptLayerName =
   | "skills-index"
   | "project-context"
   | "session-history"
+  | "compaction-notice"
   | "user-message"
   | "channel-attachments"
   | "intent"
@@ -19,6 +20,24 @@ export type PromptLayerName =
   | "artifacts"
   | "fallback"
   | "provider-continuation";
+
+export type PromptSemanticCompressionReport = {
+  triggered: boolean;
+  mode: "semantic" | "deterministic" | "none";
+  summaryFormatVersion?: string;
+  preTokens?: number;
+  postTokens?: number;
+  savingsPct?: number;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  protectedSpans?: Array<{
+    category?: string;
+    startMessageId?: string;
+    endMessageId?: string;
+    messageCount?: number;
+  }>;
+  warnings?: string[];
+};
 
 export type PromptLayerReport = {
   name: PromptLayerName;
@@ -47,4 +66,5 @@ export type PromptBudgetReport = {
     uncacheable: number;
   };
   warnings: string[];
+  compression?: PromptSemanticCompressionReport;
 };

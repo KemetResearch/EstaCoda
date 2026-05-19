@@ -26,7 +26,7 @@ import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memor
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
-import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import { normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
@@ -44,6 +44,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -116,6 +117,7 @@ export type RuntimeOptions = {
   userMemoryRoot?: string;
   projectMemoryRoot?: string;
   auxiliaryModels?: AuxiliaryModelConfig;
+  compression?: LoadedRuntimeConfig["compression"];
   homeDir?: string;
   workspaceTrusted?: boolean;
   webFetch?: WebFetchLike;
@@ -295,6 +297,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sessionSearchRoute = options.model.provider === "unconfigured"
     ? undefined
     : resolveAuxiliaryModelRoute("session_search", auxiliaryModels, {
+      mainRoute,
+      providerRegistry,
+      providerModels
+    });
+  const compressionRoute = options.model.provider === "unconfigured"
+    ? undefined
+    : resolveAuxiliaryModelRoute("compression", auxiliaryModels, {
       mainRoute,
       providerRegistry,
       providerModels
@@ -589,6 +598,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     mainRoute,
     providerExecutor
   });
+  const compressionConfig = normalizeSessionCompressionConfig(options.compression);
+  const sessionCompressionService = new SessionCompressionService({
+    sessionDb,
+    config: compressionConfig,
+    route: compressionRoute,
+    mainRoute,
+    providerExecutor
+  });
   const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
   const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();
   const renderedProjectContext = renderProjectContext(projectContext);
@@ -735,9 +752,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     sessionDb,
     sessionId,
+    profileId,
     trajectoryRecorder,
     runRecorder,
     toolPlanRunner,
+    sessionCompressionService,
+    compressionConfig,
     soul: undefined,
     memoryPromptContext,
     skillsIndex: sessionSkillCatalog,

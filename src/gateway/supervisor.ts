@@ -119,6 +119,7 @@ export function buildGatewayCronRuntimeOptions(input: {
     agentProfile: latestConfig.profile,
     providerRegistry: latestConfig.providerRegistry,
     auxiliaryModels: latestConfig.auxiliaryModels,
+    compression: latestConfig.compression,
     mcpServers: latestConfig.mcp.servers,
     imageGen: latestConfig.imageGen,
     tts: latestConfig.tts,

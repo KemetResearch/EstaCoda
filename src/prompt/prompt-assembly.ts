@@ -4,7 +4,7 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
-import type { PromptBudgetReport, PromptLayerName, PromptLayerReport } from "../contracts/prompt.js";
+import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderMessageContentPart } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
@@ -28,6 +28,8 @@ export type ProviderPromptInput = {
   model?: ModelProfile;
   cache?: PromptCache;
   sessionHistory?: Array<Pick<ProviderMessage, "role" | "content">>;
+  compactionNotice?: string;
+  compression?: PromptSemanticCompressionReport;
   soul?: string;
   memoryPromptContext?: MemoryPromptContext;
   skillsIndex?: SkillCatalogEntry[];
@@ -81,7 +83,8 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
     targetTokens: budgetTarget,
-    layers
+    layers,
+    compression: input.compression
   });
 
   return {
@@ -99,7 +102,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
     targetTokens: budgetTarget,
-    layers: baseLayers
+    layers: baseLayers,
+    compression: input.compression
   });
   const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
   const unresolvedPlans = input.toolPlans.filter((plan) =>
@@ -164,7 +168,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
     targetTokens: budgetTarget,
-    layers: fittedLayers
+    layers: fittedLayers,
+    compression: input.compression
   });
 
   return {
@@ -249,6 +254,17 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       priority: 1,
       content: renderSkillsIndex(input.skillsIndex)
     }),
+    ...(input.compactionNotice === undefined
+      ? []
+      : [
+          layer({
+            name: "compaction-notice",
+            cacheable: false,
+            protectedLayer: true,
+            priority: 1,
+            content: renderCompactionNotice(input.compactionNotice)
+          })
+        ]),
     layer({
       name: "session-history",
       cacheable: false,
@@ -381,6 +397,15 @@ function renderResponseGuidance(input: ProviderPromptInput): string {
     `Use the selected ${input.selectedSkill.name} skill and available context to answer the user.`,
     "Do not mention internal fallback handling unless a provider or tool failure is directly relevant to the user."
   ].join("\n");
+}
+
+function renderCompactionNotice(notice: string): string {
+  const trimmed = notice.trim();
+  if (trimmed.length === 0) {
+    return "Compaction notice: no semantic compression notice was produced.";
+  }
+  const withoutDuplicateHeading = trimmed.replace(/^(Compaction notice:\s*)+/iu, "").trim();
+  return `Compaction notice:\n${withoutDuplicateHeading}`;
 }
 
 function renderChannelAttachments(attachments: ChannelAttachment[] | undefined): string {
@@ -716,6 +741,7 @@ function buildBudgetReport(input: {
   contextWindowTokens: number;
   targetTokens: number;
   layers: Array<PromptLayerReport | InternalPromptLayer>;
+  compression?: PromptSemanticCompressionReport;
 }): PromptBudgetReport {
   const estimatedTokens = input.layers.reduce((sum, layer) => sum + layer.estimatedTokens, 0);
   const remainingTokens = Math.max(0, input.targetTokens - estimatedTokens);
@@ -754,7 +780,8 @@ function buildBudgetReport(input: {
       misses: input.layers.filter((layer) => layer.cacheStatus === "miss").length,
       uncacheable: input.layers.filter((layer) => layer.cacheStatus === "uncacheable").length
     },
-    warnings
+    warnings,
+    ...(input.compression === undefined ? {} : { compression: input.compression })
   };
 }
 
