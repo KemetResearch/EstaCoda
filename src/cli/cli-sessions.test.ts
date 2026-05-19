@@ -6,6 +6,7 @@ import { runCliCommand } from "./cli.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -47,10 +48,10 @@ describe("CLI session commands", () => {
       )
     `);
     db.exec(`
-      create table if not exists messages_fts (
-        rowid integer primary key,
-        message_id text,
-        content text
+      create virtual table if not exists messages_fts using fts5(
+        message_id unindexed,
+        content,
+        tokenize = 'unicode61'
       )
     `);
     db.exec(`
@@ -192,6 +193,40 @@ describe("CLI session commands", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(1);
       expect(result.output).toContain("No active session");
+    });
+  });
+
+  describe("sessions recall", () => {
+    it("returns bounded historical recall through the manual CLI surface", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run(
+          "sess-recall",
+          "default",
+          "Recall Session",
+          "2024-01-01T00:00:00Z",
+          "2024-01-02T00:00:00Z",
+          JSON.stringify({ workspaceRoot: tmpDir })
+        );
+      db.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
+        .run("msg-recall", "sess-recall", "user", "alpha durable recall detail", "2024-01-01T00:00:00Z");
+      db.query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
+        .run("msg-recall", "msg-recall", "alpha durable recall detail");
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["session", "recall", "alpha"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Session recall for \"alpha\"");
+      expect(result.output).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+      expect(result.output).toContain("Source session sess-recall");
+      expect(result.output).toContain("alpha durable recall detail");
+      expect(result.output).toContain("Summary mode: deterministic snippets");
     });
   });
 

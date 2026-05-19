@@ -298,6 +298,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return skillsCommand(options, args);
     case "handoff":
       return handoff(options, args);
+    case "session":
     case "sessions":
       return sessions(options, args);
     case "channels":
@@ -3819,6 +3820,7 @@ async function sessions(options: CliOptions, args: string[]): Promise<CliCommand
   const result = await runSessionsCommand({
     args,
     homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
+    workspaceRoot: options.workspaceRoot,
     runtime: options.runtime,
   });
   return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };

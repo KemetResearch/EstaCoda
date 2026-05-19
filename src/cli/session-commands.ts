@@ -4,6 +4,7 @@ import type { ViewModel } from "../contracts/view-model.js";
 import type { SessionRecord } from "../contracts/session.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { renderSessionRecallResult, SessionRecallService } from "../session/session-recall-service.js";
 import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
@@ -22,6 +23,7 @@ export type SessionRenderer = (viewModel: ViewModel) => string;
 export type SessionCommandInput = {
   args: string[];
   homeDir: string;
+  workspaceRoot?: string;
   runtime?: { sessionId: string };
 };
 
@@ -55,6 +57,27 @@ export async function runSessionsCommand(
       }));
       const viewModel = buildSessionsListViewModel({ sessions: entries });
       return { ok: true, output: renderer(viewModel) };
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (subcommand === "recall") {
+    const query = rest.join(" ").trim();
+    if (query.length === 0) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: "Usage: estacoda sessions recall <query>",
+      });
+      return { ok: false, output: renderer(viewModel) };
+    }
+    const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+    try {
+      const result = await new SessionRecallService({
+        sessionDb: db,
+        profileId,
+        workspaceRoot: input.workspaceRoot
+      }).recall(query);
+      return { ok: true, output: renderSessionRecallResult(result) };
     } finally {
       await db.close();
     }

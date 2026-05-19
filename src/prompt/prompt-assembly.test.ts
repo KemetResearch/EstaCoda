@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
+import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { assembleProviderPrompt } from "./prompt-assembly.js";
 
 const model: ModelProfile = {
@@ -134,6 +135,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).toContain("Canonical memory prompt context:");
     expect(rendered).not.toContain("Frozen memory snapshot:");
     expect(rendered).not.toContain("Memory provider context:");
+    expect(rendered).not.toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
 
     expect(rendered.indexOf("Safety and identity memory:")).toBeLessThan(
       rendered.indexOf("Canonical memory prompt context:")
