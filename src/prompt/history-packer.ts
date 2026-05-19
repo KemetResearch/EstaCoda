@@ -1,4 +1,5 @@
 import type { SessionMessage } from "../contracts/session.js";
+import { estimateTextTokensRough } from "./token-estimator.js";
 
 export type PackedHistoryMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -130,5 +131,5 @@ function truncate(value: string, maxChars: number): string {
 }
 
 function estimateTokens(value: string): number {
-  return Math.ceil(value.length / 4);
+  return estimateTextTokensRough(value);
 }

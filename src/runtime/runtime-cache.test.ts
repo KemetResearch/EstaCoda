@@ -66,6 +66,7 @@ function fakeFingerprint(overrides?: Partial<RuntimeFingerprint>): RuntimeFinger
     browserHash: "0000000000000000",
     enableWebNetwork: true,
     webMaxContentChars: 5000,
+    compressionConfigHash: "0000000000000000",
     disableCronTools: false,
     skillAutonomy: "suggest",
     skillConfigHash: "0000000000000000",

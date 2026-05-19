@@ -43,7 +43,7 @@ import {
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
-import { coerceFiniteNumber, coercePositiveInteger } from "./numeric-coercion.js";
+import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -55,6 +55,16 @@ export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral";
 export type ImageGenerationProvider = "fal" | "byteplus";
+
+export type SessionCompressionConfig = {
+  enabled: boolean;
+  threshold: number;
+  targetRatio: number;
+  protectFirstN: number;
+  protectLastN: number;
+  summaryModelContextLength?: number;
+  experimental?: boolean;
+};
 
 export type TtsConfig = {
   provider?: TtsProvider;
@@ -252,6 +262,7 @@ export type EstaCodaConfig = {
     enableNetwork?: boolean;
     maxContentChars?: number;
   };
+  compression?: Partial<SessionCompressionConfig>;
   browser?: {
     backend?: BrowserBackendKind;
     cdpUrl?: string;
@@ -366,6 +377,7 @@ export type LoadedRuntimeConfig = {
     enableNetwork: boolean;
     maxContentChars?: number;
   };
+  compression: SessionCompressionConfig;
   browser: {
     backend: BrowserBackendKind;
     cdpUrl?: string;
@@ -643,6 +655,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       enableNetwork: config.web?.enableNetwork ?? false,
       maxContentChars: config.web?.maxContentChars
     },
+    compression: normalizeSessionCompressionConfig(config.compression),
     browser: {
       backend: config.browser?.backend ?? "unconfigured",
       cdpUrl: config.browser?.cdpUrl,
@@ -719,6 +732,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     web: {
       ...(merged.web ?? {}),
       ...(config.web ?? {})
+    },
+    compression: {
+      ...(merged.compression ?? {}),
+      ...(config.compression ?? {})
     },
     browser: {
       ...(merged.browser ?? {}),
@@ -1020,6 +1037,35 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
       ? value.responseLanguage
       : "match-user"
   };
+}
+
+export function normalizeSessionCompressionConfig(
+  value: Partial<SessionCompressionConfig> | undefined
+): SessionCompressionConfig {
+  const experimental = value?.experimental === true;
+  const summaryModelContextLength = normalizeOptionalPositiveInteger(value?.summaryModelContextLength);
+  return {
+    enabled: value?.enabled === true && experimental,
+    threshold: coerceFiniteNumber(value?.threshold, { default: 0.50, min: 0.10, max: 0.95 }),
+    targetRatio: coerceFiniteNumber(value?.targetRatio, { default: 0.20, min: 0.10, max: 0.80 }),
+    protectFirstN: coerceNonNegativeInteger(value?.protectFirstN, { default: 3 }),
+    protectLastN: coercePositiveInteger(value?.protectLastN, { default: 20 }),
+    ...(summaryModelContextLength === undefined ? {} : { summaryModelContextLength }),
+    experimental
+  };
+}
+
+function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" && typeof value !== "string") {
+    return undefined;
+  }
+  if (typeof value === "string" && value.trim().length === 0) {
+    return undefined;
+  }
+  return coercePositiveInteger(value, { default: 1 });
 }
 
 function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
