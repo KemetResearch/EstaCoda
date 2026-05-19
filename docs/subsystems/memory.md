@@ -76,11 +76,11 @@ Duplicate `USER.md` / `MEMORY.md` injection is prevented by using one prepared `
 
 Ordinary turns do not trigger broad recall. Intent routing can request recall, but it does not bypass security gates or memory precedence.
 
-## Frozen Snapshot Pattern
+## Runtime Memory Refresh
 
-Memory content is loaded from disk and rendered into the system prompt as a **frozen snapshot** at session start. The snapshot does not change mid-session. This preserves the LLM's prefix cache.
+Startup memory initializes the runtime `MemoryStore` from profile files and shared memory. For each user turn, `MemoryRecallOrchestrator` asks `MemoryPromptContextBuilder` to prepare the memory prompt context from that current in-memory store plus any eligible session or external recall.
 
-When the agent adds/removes memory entries during a session, changes are persisted to disk immediately but only appear in the system prompt on the next session start.
+When `memory.curate` changes memory during a session, the mutation updates the runtime memory store and persists to disk. Those changes can affect later turns in the same runtime, and the durable file changes remain available to future sessions.
 
 ## Promotion
 
@@ -104,13 +104,13 @@ When the agent adds/removes memory entries during a session, changes are persist
 
 ## Memory Tool
 
-The agent uses the `memory` tool with these actions:
+The agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
 
-| Action | Description |
-|--------|-------------|
-| `add` | Add a new memory entry |
-| `replace` | Replace an existing entry via substring matching (`old_text`) |
-| `remove` | Remove an entry via substring matching (`old_text`) |
+| Kind | Description |
+|------|-------------|
+| `append` | Append a new memory entry |
+| `replace` | Replace an existing entry via substring matching (`match`) |
+| `remove` | Remove an entry via substring matching (`match`) |
 
 There is no `read` action — memory content is automatically injected into the system prompt.
 
@@ -194,6 +194,8 @@ External memory can:
 - return bounded untrusted external recall for explicit recall turns
 - mirror `memory.curate` writes when `mirrorWrites: true`
 - expose provider status through internal provider status helpers
+
+The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. The current runtime orchestration does not actively call those hooks; implemented runtime paths are external recall and opt-in `memory.curate` mirror writes.
 
 External memory cannot:
 

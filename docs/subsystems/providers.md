@@ -83,6 +83,8 @@ All three routes resolve through `resolveAuxiliaryModelRoute(...)` and execute t
 
 External memory providers are not LLM providers. They implement a memory lifecycle contract and are wired from runtime config under `externalMemory`.
 
+In this implementation, active runtime orchestration uses external providers for bounded recall and opt-in `memory.curate` mirror writes. The contract and file-backed provider also define `afterTurn` and `flushSession` hooks, but the runtime does not actively call those hooks yet.
+
 Implemented provider:
 
 | Provider | Status | Storage | Notes |

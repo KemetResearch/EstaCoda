@@ -11,6 +11,7 @@ export type MemoryToolOptions = {
   externalMemoryProviders?: ExternalMemoryProvider[];
   profileId?: string;
   sessionId?: string;
+  workspaceRoot?: string;
 };
 
 export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOptions = {}): RegisteredTool<MemoryToolInput> {
@@ -76,6 +77,7 @@ async function applyMemoryToolInput(
     entry: {
       profileId: options.profileId ?? "default",
       sessionId: options.sessionId,
+      workspaceRoot: options.workspaceRoot,
       operation,
       source: "memory.curate"
     },

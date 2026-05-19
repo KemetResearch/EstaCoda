@@ -452,6 +452,50 @@ describe("ChannelGateway commands", () => {
     expect(result.replyText).toContain("Warning: auxiliary compression failed; used deterministic fallback");
   });
 
+  it("/compact is rejected while the same chat has an active turn", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const registry = new ActiveTurnRegistry({ busyAckCooldownMs: 30_000 });
+    const compactSession = vi.fn(async () => compactResult());
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId,
+        compactSession,
+        handle: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return {
+            label: "ok",
+            text: "ok",
+            matchedSkills: [],
+            intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+            securityDecision: "allow",
+            toolExecutions: [],
+            toolPlans: [],
+            skillOutcomes: [],
+            artifacts: [],
+            context: undefined,
+            projectContext: undefined,
+            progress: []
+          } as Awaited<ReturnType<Runtime["handle"]>>;
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      activeTurnRegistry: registry
+    });
+
+    const first = gateway.receive(makeMessage("hello"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const compact = await gateway.receive(makeMessage("/compact deploy handoff"));
+    const normal = await first;
+
+    expect(normal.replyText).toBe("ok");
+    expect(compact.replyText).toContain("Please wait before compacting");
+    expect(compactSession).not.toHaveBeenCalled();
+    expect(registry.stats().totalStarted).toBe(1);
+  });
+
   it("runs gateway hygiene before runtime acquisition for normal turns", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
     const order: string[] = [];

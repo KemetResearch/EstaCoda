@@ -110,6 +110,7 @@ export function createFileExternalMemoryProvider(options: FileExternalMemoryProv
         kind: "memory-write",
         profileId: entry.profileId,
         ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+        ...(entry.workspaceRoot === undefined ? {} : { workspaceRoot: entry.workspaceRoot }),
         source: entry.source,
         content: renderMemoryWriteEntry(entry),
         metadata: {
@@ -130,6 +131,7 @@ export function createFileExternalMemoryProvider(options: FileExternalMemoryProv
         kind: "turn",
         profileId: turn.profileId,
         ...(turn.sessionId === undefined ? {} : { sessionId: turn.sessionId }),
+        ...(turn.workspaceRoot === undefined ? {} : { workspaceRoot: turn.workspaceRoot }),
         source: "afterTurn",
         content,
         metadata: turn.metadata === undefined ? undefined : redactObject(turn.metadata, { strict: true }) as Record<string, unknown>
@@ -140,6 +142,7 @@ export function createFileExternalMemoryProvider(options: FileExternalMemoryProv
         kind: "session-summary",
         profileId: summary.profileId,
         ...(summary.sessionId === undefined ? {} : { sessionId: summary.sessionId }),
+        ...(summary.workspaceRoot === undefined ? {} : { workspaceRoot: summary.workspaceRoot }),
         source: "flushSession",
         content: redactSensitiveText(summary.summary),
         metadata: summary.metadata === undefined ? undefined : redactObject(summary.metadata, { strict: true }) as Record<string, unknown>
@@ -319,7 +322,7 @@ async function searchFileRecords(
   const terms = tokenize(query);
   return records
     .filter((record) => record.profileId === context.profileId)
-    .filter((record) => context.workspaceRoot === undefined || record.workspaceRoot === undefined || record.workspaceRoot === context.workspaceRoot)
+    .filter((record) => context.workspaceRoot === undefined || record.workspaceRoot === context.workspaceRoot)
     .map((record) => ({ record, score: scoreRecord(record, terms) }))
     .filter(({ score }) => score > 0)
     .sort((left, right) => {

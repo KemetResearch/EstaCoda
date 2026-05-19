@@ -29,7 +29,7 @@ Canonical docs updated for Memory Hardening:
 | 6 | High-confidence runtime recall | Ordinary turns do not trigger broad recall. |
 | 7 | Semantic session compression | Experimental/default-off; `/compact`, `sessions compact`, gateway hygiene. |
 | 8 | `MemoryRecallOrchestrator` | Owns per-turn local/session/external recall decisions and diagnostics. |
-| 9 | External provider lifecycle hooks | Disabled by default and failure-isolated. |
+| 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. |
 | 10 | File-backed external memory provider | Profile-local JSONL storage beneath `external-memory/`. |
 
 ## Enabling And Disabling

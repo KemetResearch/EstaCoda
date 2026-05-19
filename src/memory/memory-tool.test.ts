@@ -51,6 +51,7 @@ describe("memory.curate", () => {
     const tool = createMemoryTool(store, {
       profileId: "default",
       sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
       externalMemoryProviders: [provider],
       externalMemory: {
         enabled: true,
@@ -72,6 +73,7 @@ describe("memory.curate", () => {
     expect(provider.mirrorMemoryWrite).toHaveBeenCalledWith(expect.objectContaining({
       profileId: "default",
       sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
       source: "memory.curate",
       operation: expect.objectContaining({
         kind: "append",
@@ -93,6 +95,7 @@ describe("memory.curate", () => {
     const tool = createMemoryTool(store, {
       profileId: "default",
       sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
       externalMemoryProviders: [provider],
       externalMemory: {
         enabled: true,
@@ -114,5 +117,6 @@ describe("memory.curate", () => {
     expect(store.read("USER.md")).toContain("Likes external-memory tests");
     const mirrored = await readFile(join(profileRoot, "external-memory", "memory.jsonl"), "utf8");
     expect(mirrored).toContain("Likes external-memory tests");
+    expect(mirrored).toContain("\"workspaceRoot\":\"/workspace/a\"");
   });
 });

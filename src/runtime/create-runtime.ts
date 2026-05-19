@@ -512,7 +512,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     externalMemory: externalMemoryConfig,
     externalMemoryProviders,
     profileId,
-    sessionId
+    sessionId,
+    workspaceRoot
   }));
   const memoryFileCompactionService = new MemoryFileCompactionService({
     store: memoryStore,

@@ -265,6 +265,7 @@ describe("MemoryRecallOrchestrator", () => {
     await provider.mirrorMemoryWrite?.({
       profileId: "default",
       sessionId: "session-1",
+      workspaceRoot: "/workspace",
       source: "memory.curate",
       operation: {
         kind: "append",
@@ -292,6 +293,41 @@ describe("MemoryRecallOrchestrator", () => {
     expect(first.context.externalRecall?.[0]?.content).toContain(EXTERNAL_RECALL_UNTRUSTED_NOTICE);
     expect(first.context.externalRecall?.[0]?.content).toContain("Parser errors stay structured");
     expect(first.context.frozenCompactMemory.map((block) => block.source)).toEqual(["USER.md", "MEMORY.md"]);
+  });
+
+  it("keeps local memory when workspace-scoped external recall excludes metadata-less records", async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-orchestrator-file-provider-"));
+    const provider = createFileExternalMemoryProvider({
+      profileRoot,
+      path: "memory.jsonl",
+      now: () => new Date("2026-05-20T00:00:00.000Z")
+    });
+    await provider.mirrorMemoryWrite?.({
+      profileId: "default",
+      sessionId: "session-legacy",
+      source: "memory.curate",
+      operation: {
+        kind: "append",
+        file: "MEMORY.md",
+        content: "- Parser errors in a legacy metadata-less external record."
+      }
+    });
+
+    const fixture = orchestratorFixture({
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 2,
+        maxChars: 500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await fixture.orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+
+    expect(result.context.externalRecall).toBeUndefined();
+    expect(result.context.frozenCompactMemory.map((block) => block.source)).toEqual(["USER.md", "MEMORY.md"]);
   });
 });
 

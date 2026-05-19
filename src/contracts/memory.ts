@@ -163,6 +163,7 @@ export type ExternalMemoryProviderContext = {
 export type ExternalMemoryTurn = {
   profileId: string;
   sessionId?: string;
+  workspaceRoot?: string;
   userText?: string;
   assistantText?: string;
   metadata?: Record<string, unknown>;
@@ -171,6 +172,7 @@ export type ExternalMemoryTurn = {
 export type ExternalMemorySessionSummary = {
   profileId: string;
   sessionId?: string;
+  workspaceRoot?: string;
   summary: string;
   metadata?: Record<string, unknown>;
 };
@@ -178,6 +180,7 @@ export type ExternalMemorySessionSummary = {
 export type ExternalMemoryWriteEntry = {
   profileId: string;
   sessionId?: string;
+  workspaceRoot?: string;
   operation: MemoryOperation;
   source: "memory.curate" | "promotion" | "skill-outcome" | "unknown";
   metadata?: Record<string, unknown>;

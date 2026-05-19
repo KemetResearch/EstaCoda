@@ -1598,6 +1598,10 @@ export class ChannelGateway {
     }
 
     if (command === "/compact") {
+      const busyResult = await this.#rejectCompactIfSessionBusy(message, adapter);
+      if (busyResult !== undefined) {
+        return busyResult;
+      }
       const focusTopic = message.text.replace(/^\/compact\s*/u, "").trim();
       const normalizedTopic = focusTopic.length === 0 ? undefined : focusTopic;
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
@@ -1701,6 +1705,31 @@ export class ChannelGateway {
     }
 
     return undefined;
+  }
+
+  async #rejectCompactIfSessionBusy(
+    message: ChannelMessage,
+    adapter: ChannelAdapter
+  ): Promise<ChannelGatewayResult | undefined> {
+    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const isBusy = this.#activeTurnRegistry !== undefined
+      ? this.#activeTurnRegistry.isBusy(activeTurnKey)
+      : this.#activeTurns.has(activeTurnKey);
+    const hasQueued = this.#sessionMessageQueue.size(activeTurnKey) > 0;
+    const isDrainingQueued = this.#drainingQueue.has(activeTurnKey);
+
+    if (!isBusy && !hasQueued && !isDrainingQueued) {
+      return undefined;
+    }
+
+    const text = "EstaCoda is busy with another request in this chat. Please wait before compacting.";
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return {
+      sessionId: "",
+      replyText: text,
+      artifactCount: 0,
+      progressCount: 0
+    };
   }
 
   async #approvePending(

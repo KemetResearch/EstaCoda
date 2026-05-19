@@ -233,6 +233,91 @@ describe("external memory provider hooks", () => {
     expect(recall?.[0]?.content).not.toContain("sk-secret");
   });
 
+  it("file-backed provider excludes metadata-less records during workspace-scoped recall", async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-file-memory-provider-"));
+    const provider = createFileExternalMemoryProvider({
+      profileRoot,
+      path: "memory.jsonl",
+      maxEntries: 10,
+      maxChars: 2500,
+      now: () => new Date("2026-05-20T00:00:00.000Z")
+    });
+
+    await provider.mirrorMemoryWrite?.({
+      profileId: "default",
+      sessionId: "session-1",
+      source: "memory.curate",
+      operation: {
+        kind: "append",
+        file: "MEMORY.md",
+        content: "- Parser decision: keep legacy records profile-scoped only."
+      }
+    });
+
+    const workspaceScoped = await provider.prefetch?.("parser decision legacy records", {
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      maxResults: 3,
+      maxChars: 500
+    });
+    const profileScoped = await provider.prefetch?.("parser decision legacy records", {
+      profileId: "default",
+      sessionId: "session-1",
+      maxResults: 3,
+      maxChars: 500
+    });
+
+    expect(workspaceScoped).toEqual([]);
+    expect(profileScoped).toHaveLength(1);
+  });
+
+  it("file-backed provider includes matching workspace records and excludes non-matching workspace records", async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-file-memory-provider-"));
+    const provider = createFileExternalMemoryProvider({
+      profileRoot,
+      path: "memory.jsonl",
+      maxEntries: 10,
+      maxChars: 2500,
+      now: () => new Date("2026-05-20T00:00:00.000Z")
+    });
+
+    await provider.mirrorMemoryWrite?.({
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      source: "memory.curate",
+      operation: {
+        kind: "append",
+        file: "MEMORY.md",
+        content: "- Parser decision: workspace a keeps strict errors."
+      }
+    });
+    await provider.mirrorMemoryWrite?.({
+      profileId: "default",
+      sessionId: "session-2",
+      workspaceRoot: "/workspace/b",
+      source: "memory.curate",
+      operation: {
+        kind: "append",
+        file: "MEMORY.md",
+        content: "- Parser decision: workspace b uses loose errors."
+      }
+    });
+
+    const recall = await provider.prefetch?.("parser decision workspace errors", {
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      maxResults: 3,
+      maxChars: 500
+    });
+
+    expect(recall).toHaveLength(1);
+    expect(recall?.[0]?.content).toContain("workspace a keeps strict errors");
+    expect(recall?.[0]?.content).not.toContain("workspace b uses loose errors");
+  });
+
   it("file-backed provider status reports invalid paths without throwing or leaking secrets", async () => {
     const provider = createFileExternalMemoryProvider({
       profileRoot: "/tmp/profile",

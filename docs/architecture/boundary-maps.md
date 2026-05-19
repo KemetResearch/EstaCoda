@@ -12,23 +12,24 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 │  MemoryStore (bounded files)                          │
 │  ───────────────────────────────────────────────────────  │
 │  USER.md  ←──── LocalMemoryProvider ────→  AgentLoop  │
-│  MEMORY.md ←─── (read/write/promote)   (frozen snapshot)   │
+│  MEMORY.md ←─── (read/write/promote)   (per-turn context)  │
 │  SOUL.md   ←─────────────────────────────────────────  │
 └───────────────────────────────────────────────────────┘
 ```
 
 **Inbound boundaries:**
-- `AgentLoop` injects a frozen memory snapshot into the system prompt at session start.
+- Startup loads profile memory into the runtime `MemoryStore`.
+- `MemoryRecallOrchestrator` prepares prompt memory context per turn.
 - `LocalMemoryProvider` reads `USER.md`, `MEMORY.md`, `SOUL.md` from disk.
 - `memory-promotion.ts` promotes repeated preferences and facts after the response path.
 
 **Outbound boundaries:**
-- `memory-tool.ts` lets the agent add/replace/remove entries.
+- `memory-tool.ts` exposes `memory.curate` with `append`/`replace`/`remove`.
 - `memory-promotion.ts` writes promoted content back to disk.
-- Changes during a session are persisted immediately but do not appear in the system prompt until the next session (frozen snapshot pattern).
+- Changes during a session are persisted immediately and can affect later turns in the same runtime because prompt memory context is rebuilt per turn.
 
 **Crosses:**
-- AgentLoop → LocalMemoryProvider (reads frozen snapshot)
+- AgentLoop → MemoryRecallOrchestrator → MemoryPromptContextBuilder
 - AgentLoop → memory-promotion (triggers post-run promotion)
 - SkillLearningManager → MemoryStore (workflow learning state)
 
