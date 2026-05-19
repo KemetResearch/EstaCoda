@@ -120,6 +120,35 @@ describe("SessionCompressionService", () => {
     }));
   });
 
+  it("records explicit hygiene trigger for gateway hygiene compression", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("hygiene summary")
+    });
+
+    const result = await service.compactIfNeeded({ profileId: "profile", sessionId, trigger: "hygiene" });
+    const events = await db.listEvents(sessionId);
+
+    expect(result.didCompress).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "session-history-compressed",
+      trigger: "hygiene"
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "session-compression-state",
+      state: expect.objectContaining({ trigger: "hygiene" })
+    }));
+  });
+
   it("hydrates latest state event before compression", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     await db.appendEvent(sessionId, {

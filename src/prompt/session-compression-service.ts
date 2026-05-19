@@ -2,6 +2,7 @@ import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type {
   ReplacementSessionMessage,
+  SessionCompressionTrigger,
   SessionCompressionState,
   SessionDB,
   SessionEvent,
@@ -32,6 +33,7 @@ export type SessionCompressionRequest = {
   profileId: string;
   sessionId: string;
   focusTopic?: string;
+  trigger?: SessionCompressionTrigger;
   signal?: AbortSignal;
 };
 
@@ -104,6 +106,7 @@ export class SessionCompressionService {
       });
       const eventWarnings = await this.#recordEventsBestEffort({
         sessionId: input.sessionId,
+        trigger: input.trigger ?? (force ? "manual" : "auto"),
         messagesBefore: messages,
         messagesAfter: written,
         previousState,
@@ -124,6 +127,7 @@ export class SessionCompressionService {
 
   async #recordEventsBestEffort(input: {
     sessionId: string;
+    trigger: SessionCompressionTrigger;
     messagesBefore: SessionMessage[];
     messagesAfter: SessionMessage[];
     previousState: SessionCompressionState;
@@ -144,7 +148,7 @@ export class SessionCompressionService {
     });
     const compressedEvent: SessionEvent = {
       kind: "session-history-compressed",
-      trigger: input.diagnostics.reason === "forced" ? "manual" : "auto",
+      trigger: input.trigger,
       source: {
         startMessageId: firstSource?.id,
         endMessageId: lastSource?.id,

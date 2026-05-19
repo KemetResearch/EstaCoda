@@ -17,6 +17,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
+import { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
@@ -27,6 +28,7 @@ import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
 import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
+import { GATEWAY_HYGIENE_THRESHOLD, SessionHygieneService } from "../channels/session-hygiene-service.js";
 import { FileHandoffStore } from "../channels/handoff-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { TelegramAdapter, type TelegramFetch } from "../channels/telegram-adapter.js";
@@ -559,6 +561,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       agentProfile: latestConfig.profile,
       providerRegistry: latestConfig.providerRegistry,
       auxiliaryModels: latestConfig.auxiliaryModels,
+      compression: latestConfig.compression,
       mcpServers: latestConfig.mcp.servers,
       securityPolicy: input.securityPolicy,
       browser: latestConfig.browser,
@@ -661,6 +664,43 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     });
     state.runtimeCache = runtimeCache;
     state.runtimeFingerprint = runtimeFingerprint;
+    const mainRoute: ResolvedModelRoute = config.primaryModelRoute ?? {
+      provider: config.model.provider,
+      id: config.model.id,
+      profile: config.model
+    };
+    const hygieneEnabled = config.compression.enabled === true;
+    const providerModels = !hygieneEnabled || config.model.provider === "unconfigured"
+      ? []
+      : await config.providerRegistry.listModels();
+    const compressionRoute = !hygieneEnabled || config.model.provider === "unconfigured"
+      ? undefined
+      : resolveAuxiliaryModelRoute("compression", config.auxiliaryModels, {
+        mainRoute,
+        providerRegistry: config.providerRegistry,
+        providerModels
+      });
+    const hygieneContextWindowTokens = config.compression.summaryModelContextLength ?? config.model.contextWindowTokens ?? 128_000;
+    const sessionHygieneService = new SessionHygieneService({
+      sessionDb,
+      profileId,
+      compressionConfig: config.compression,
+      contextWindowTokens: hygieneContextWindowTokens,
+      compressionService: new SessionCompressionService({
+        sessionDb,
+        config: {
+          ...config.compression,
+          threshold: GATEWAY_HYGIENE_THRESHOLD,
+          summaryModelContextLength: hygieneContextWindowTokens
+        },
+        route: compressionRoute,
+        mainRoute,
+        providerExecutor: new ProviderExecutor({
+          registry: config.providerRegistry
+        })
+      }),
+      logWarning
+    });
 
     const cronStore = new CronStore({
       path: join(profilePaths.cronPath, "jobs.json"),
@@ -948,7 +988,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               metadata,
             });
           },
+          sessionHygieneService,
           hookRegistry,
+          logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
         })
@@ -999,7 +1041,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               metadata,
             });
           },
+          sessionHygieneService,
           hookRegistry,
+          logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
         });

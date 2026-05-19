@@ -18,6 +18,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
+import type { SessionHygieneService } from "./session-hygiene-service.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -101,6 +102,9 @@ export type ChannelGatewayOptions = {
   busyPolicyResolver?: (channelKind: ChannelKind) => BusyPolicyConfig;
   /** Stage 8B: optional hook registry for turn lifecycle events. */
   hookRegistry?: HookRegistry;
+  /** Phase 7F: optional gateway-only pre-runtime session hygiene. */
+  sessionHygieneService?: Pick<SessionHygieneService, "run">;
+  logWarning?: (message: string) => void;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -236,6 +240,7 @@ export class ChannelGateway {
 
   // Stage 8B
   readonly #hookRegistry: HookRegistry | undefined;
+  readonly #sessionHygieneService: Pick<SessionHygieneService, "run"> | undefined;
   readonly #abortReasonByKey = new Map<string, string>();
 
   constructor(options: ChannelGatewayOptions) {
@@ -261,6 +266,7 @@ export class ChannelGateway {
     this.#activeTurnRegistry = options.activeTurnRegistry;
     this.#runtimeCache = options.runtimeCache;
     this.#runtimeFingerprint = options.runtimeFingerprint;
+    this.#logWarning = options.logWarning;
 
     // Stage 6
     this.#isDraining = options.isDraining;
@@ -270,6 +276,7 @@ export class ChannelGateway {
 
     // Stage 8B
     this.#hookRegistry = options.hookRegistry;
+    this.#sessionHygieneService = options.sessionHygieneService;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -621,6 +628,8 @@ export class ChannelGateway {
         await this.#approvalStore.listForSession(normalizedSessionKey)
       );
 
+      await this.#runSessionHygiene(sessionId, controller.signal);
+
       // Runtime acquisition
       runtime = await this.#acquireRuntime(sessionId, securityPolicy, message, normalizedSessionKey);
 
@@ -795,6 +804,23 @@ export class ChannelGateway {
           );
         });
       }
+    }
+  }
+
+  async #runSessionHygiene(sessionId: string, signal: AbortSignal): Promise<void> {
+    if (this.#sessionHygieneService === undefined || this.#isDraining?.()) {
+      return;
+    }
+
+    try {
+      const result = await this.#sessionHygieneService.run({ sessionId, signal });
+      if (result.status === "failed") {
+        this.#logWarning?.(`Gateway session hygiene skipped after failure for ${sessionId}: ${result.error}`);
+      }
+    } catch (error) {
+      this.#logWarning?.(
+        `Gateway session hygiene failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
