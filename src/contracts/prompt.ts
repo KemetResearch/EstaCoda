@@ -15,6 +15,7 @@ export type PromptLayerName =
   | "context-references"
   | "memory"
   | "session-recall"
+  | "external-recall"
   | "native-tools"
   | "tool-results"
   | "artifacts"

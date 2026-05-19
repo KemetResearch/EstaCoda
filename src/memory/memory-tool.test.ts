@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { ExternalMemoryProvider } from "../contracts/memory.js";
 import { createMemoryTool } from "./memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
 
@@ -33,5 +34,48 @@ describe("memory.curate", () => {
       }
     });
     expect(store.read("USER.md")).toBe("short");
+  });
+
+  it("does not fail local memory writes when external mirror writes fail", async () => {
+    const store = new MemoryStore();
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => {
+        throw new Error("api_key=secretsecretsecretsecretsecret");
+      })
+    };
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Likes structured summaries"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.read("USER.md")).toContain("Likes structured summaries");
+    expect(provider.mirrorMemoryWrite).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "default",
+      sessionId: "session-1",
+      source: "memory.curate",
+      operation: expect.objectContaining({
+        kind: "append",
+        file: "USER.md"
+      })
+    }));
+    expect(result.metadata?.warnings).toEqual([
+      "external memory provider fake mirror write failed: api_key=[REDACTED]"
+    ]);
   });
 });

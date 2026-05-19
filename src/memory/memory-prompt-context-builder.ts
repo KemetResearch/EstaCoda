@@ -33,6 +33,7 @@ export class MemoryPromptContextBuilder {
   async build(options: {
     dryRun?: boolean;
     sessionRecall?: PromptMemoryBlock[];
+    externalRecall?: PromptMemoryBlock[];
     recallTriggered?: boolean;
     recallWarnings?: string[];
     recallDecisions?: MemoryRecallDecision[];
@@ -123,11 +124,21 @@ export class MemoryPromptContextBuilder {
       entryIds: recall.entryIds,
       trusted: false
     }, diagnostics));
+    const externalRecall = (options.externalRecall ?? []).map((recall) => block({
+      id: recall.id,
+      kind: "external-recall",
+      scope: recall.scope,
+      source: recall.source,
+      content: recall.content,
+      entryIds: recall.entryIds,
+      trusted: false
+    }, diagnostics));
 
     return {
       frozenCompactMemory,
       safetyMemory,
       ...(sessionRecall.length > 0 ? { sessionRecall } : {}),
+      ...(externalRecall.length > 0 ? { externalRecall } : {}),
       diagnostics
     };
   }

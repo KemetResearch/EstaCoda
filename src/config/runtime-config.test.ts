@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig, normalizeAuxiliaryModels, normalizeSessionCompressionConfig, saveRuntimeConfig } from "./runtime-config.js";
+import {
+  loadRuntimeConfig,
+  normalizeAuxiliaryModels,
+  normalizeExternalMemoryConfig,
+  normalizeSessionCompressionConfig,
+  redactExternalMemoryConfig,
+  saveRuntimeConfig
+} from "./runtime-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
 function profileConfigPath(homeDir: string): string {
@@ -136,6 +143,65 @@ describe("normalizeSessionCompressionConfig", () => {
   });
 });
 
+describe("normalizeExternalMemoryConfig", () => {
+  it("defaults external memory providers off", () => {
+    expect(normalizeExternalMemoryConfig(undefined)).toEqual({
+      enabled: false,
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false
+    });
+  });
+
+  it("requires explicit enablement and provider id", () => {
+    expect(normalizeExternalMemoryConfig({ enabled: true }).enabled).toBe(false);
+    expect(normalizeExternalMemoryConfig({ enabled: true, provider: "test" })).toEqual({
+      enabled: true,
+      provider: "test",
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false
+    });
+  });
+
+  it("normalizes bounds with NaN-safe numeric coercion", () => {
+    expect(normalizeExternalMemoryConfig({
+      enabled: true,
+      provider: "fake",
+      timeoutMs: Number.POSITIVE_INFINITY,
+      maxResults: "100" as never,
+      maxChars: -10,
+      mirrorWrites: true
+    })).toEqual({
+      enabled: true,
+      provider: "fake",
+      timeoutMs: 750,
+      maxResults: 10,
+      maxChars: 1,
+      mirrorWrites: true
+    });
+  });
+
+  it("redacts provider credentials in diagnostics", () => {
+    const config = normalizeExternalMemoryConfig({
+      enabled: true,
+      provider: "fake",
+      credentials: {
+        apiKey: "sk-secretsecretsecretsecretsecret",
+        endpoint: "https://example.test"
+      }
+    });
+    expect(redactExternalMemoryConfig(config)).toEqual(expect.objectContaining({
+      credentials: {
+        apiKey: "[REDACTED]",
+        endpoint: "https://example.test"
+      }
+    }));
+  });
+});
+
 describe("loadRuntimeConfig auxiliaryModels", () => {
   it("normalizes missing tasks to auto/enabled at load time", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
@@ -221,6 +287,50 @@ describe("loadRuntimeConfig compression", () => {
       protectLastN: 1,
       summaryModelContextLength: 64_000,
       experimental: false
+    });
+  });
+});
+
+describe("loadRuntimeConfig external memory", () => {
+  it("exposes disabled normalized external memory config by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.externalMemory).toEqual({
+      enabled: false,
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false
+    });
+  });
+
+  it("loads explicit external memory provider config separately from local memory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      externalMemory: {
+        enabled: true,
+        provider: "fake",
+        maxResults: 2,
+        maxChars: 1000,
+        mirrorWrites: true
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.externalMemory).toEqual({
+      enabled: true,
+      provider: "fake",
+      timeoutMs: 750,
+      maxResults: 2,
+      maxChars: 1000,
+      mirrorWrites: true
     });
   });
 });

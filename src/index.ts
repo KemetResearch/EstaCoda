@@ -177,6 +177,7 @@ async function main(): Promise<void> {
       providerRegistry: latestConfig.providerRegistry,
       auxiliaryModels: latestConfig.auxiliaryModels,
       compression: latestConfig.compression,
+      externalMemory: latestConfig.externalMemory,
       mcpServers: latestConfig.mcp.servers,
       browser: latestConfig.browser,
       imageGen: latestConfig.imageGen,

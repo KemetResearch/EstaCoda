@@ -29,6 +29,13 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       protectLastN: 20,
       experimental: false,
     },
+    externalMemory: {
+      enabled: false,
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false,
+    },
     browser: { backend: "unconfigured", autoLaunch: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
     tts: { provider: "edge", speed: 1.0 },
@@ -514,6 +521,24 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.compressionConfigHash).not.toBe(fp1.compressionConfigHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("external memory config change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        externalMemory: {
+          ...base.externalMemory,
+          enabled: true,
+          provider: "fake",
+        },
+      }),
+      opts
+    );
+    expect(fp2.externalMemoryConfigHash).not.toBe(fp1.externalMemoryConfigHash);
     expect(fp1).not.toEqual(fp2);
   });
 

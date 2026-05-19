@@ -838,6 +838,7 @@ describe("ChannelGateway commands", () => {
         enableWebNetwork: false,
         webMaxContentChars: 1000,
         compressionConfigHash: "hash",
+        externalMemoryConfigHash: "hash",
         disableCronTools: false,
         skillAutonomy: "off",
         skillConfigHash: "hash",

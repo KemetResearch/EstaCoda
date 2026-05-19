@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
-import type { MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
+import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -27,7 +27,7 @@ import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
-import { normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
+import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
@@ -115,6 +115,8 @@ export type RuntimeOptions = {
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
   memoryProvider?: MemoryProvider;
+  externalMemory?: LoadedRuntimeConfig["externalMemory"];
+  externalMemoryProviders?: ExternalMemoryProvider[];
   userMemoryRoot?: string;
   projectMemoryRoot?: string;
   auxiliaryModels?: AuxiliaryModelConfig;
@@ -500,7 +502,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       toolRegistry.register(tool);
     }
   }
-  toolRegistry.register(createMemoryTool(memoryStore));
+  const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
+  const externalMemoryProviders = options.externalMemoryProviders ?? [];
+  toolRegistry.register(createMemoryTool(memoryStore, {
+    externalMemory: externalMemoryConfig,
+    externalMemoryProviders,
+    profileId,
+    sessionId
+  }));
   const memoryFileCompactionService = new MemoryFileCompactionService({
     store: memoryStore,
     memoryRoot: profileMemoryRoot,
@@ -743,7 +752,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
     builder: memoryPromptContextBuilder,
     sessionRecallService,
-    recorder: runRecorder
+    recorder: runRecorder,
+    externalMemory: externalMemoryConfig,
+    externalMemoryProviders,
+    profileId,
+    sessionId,
+    workspaceRoot
   });
 
   const toolPlanRunner = new ToolPlanRunner({

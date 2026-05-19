@@ -1,10 +1,13 @@
 import type {
+  ExternalMemoryProvider,
   MemoryPromptContext,
   MemoryRecallDecision,
   MemoryScope,
   PromptMemoryBlock
 } from "../contracts/memory.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ExternalMemoryRuntimeConfig } from "./external-memory-provider.js";
+import { collectExternalMemoryRecall } from "./external-memory-provider.js";
 import {
   detectSessionRecallIntent,
   sessionRecallResultToPromptBlocks,
@@ -30,6 +33,11 @@ export type MemoryRecallOrchestratorOptions = {
   builder: MemoryPromptContextBuilderLike;
   sessionRecallService?: SessionRecallServiceLike;
   recorder?: SessionRecallDecisionRecorder;
+  externalMemory?: ExternalMemoryRuntimeConfig;
+  externalMemoryProviders?: ExternalMemoryProvider[];
+  profileId?: string;
+  sessionId?: string;
+  workspaceRoot?: string;
 };
 
 export type MemoryRecallOrchestratorResult = {
@@ -38,16 +46,34 @@ export type MemoryRecallOrchestratorResult = {
 };
 
 const LOCAL_AND_SESSION_SCOPES: MemoryScope[] = ["user-global", "project", "session"];
+const LOCAL_SESSION_EXTERNAL_SCOPES: MemoryScope[] = ["user-global", "project", "session", "external"];
+const DEFAULT_EXTERNAL_MEMORY_CONFIG: ExternalMemoryRuntimeConfig = {
+  enabled: false,
+  timeoutMs: 750,
+  maxResults: 3,
+  maxChars: 2_500,
+  mirrorWrites: false
+};
 
 export class MemoryRecallOrchestrator {
   readonly #builder: MemoryPromptContextBuilderLike;
   readonly #sessionRecallService: SessionRecallServiceLike | undefined;
   readonly #recorder: SessionRecallDecisionRecorder | undefined;
+  readonly #externalMemory: ExternalMemoryRuntimeConfig;
+  readonly #externalMemoryProviders: ExternalMemoryProvider[];
+  readonly #profileId: string;
+  readonly #sessionId: string | undefined;
+  readonly #workspaceRoot: string | undefined;
 
   constructor(options: MemoryRecallOrchestratorOptions) {
     this.#builder = options.builder;
     this.#sessionRecallService = options.sessionRecallService;
     this.#recorder = options.recorder;
+    this.#externalMemory = options.externalMemory ?? DEFAULT_EXTERNAL_MEMORY_CONFIG;
+    this.#externalMemoryProviders = options.externalMemoryProviders ?? [];
+    this.#profileId = options.profileId ?? "default";
+    this.#sessionId = options.sessionId;
+    this.#workspaceRoot = options.workspaceRoot;
   }
 
   async prepareForTurn(input: {
@@ -55,7 +81,41 @@ export class MemoryRecallOrchestrator {
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryRecallOrchestratorResult> {
     const intent = detectSessionRecallIntent(input.text);
+    const session = await this.#sessionRecall(intent, input.onEvent);
+    const external = await this.#externalRecall({
+      query: intent.query,
+      triggered: intent.triggered
+    });
+    const warnings = [
+      ...session.warnings,
+      ...external.warnings
+    ];
+    const decisions = [
+      session.decision,
+      external.decision
+    ];
+    const context = await this.#builder.build({
+      recallTriggered: session.triggered,
+      sessionRecall: session.blocks,
+      externalRecall: external.blocks,
+      recallWarnings: warnings,
+      recallDecisions: decisions
+    });
+    return {
+      context,
+      decisions
+    };
+  }
 
+  async #sessionRecall(
+    intent: ReturnType<typeof detectSessionRecallIntent>,
+    onEvent?: RuntimeEventSink
+  ): Promise<{
+    triggered: boolean;
+    blocks: PromptMemoryBlock[];
+    warnings: string[];
+    decision: MemoryRecallDecision;
+  }> {
     if (!intent.triggered || this.#sessionRecallService === undefined) {
       const reason = intent.triggered ? "session recall service unavailable" : intent.reason;
       const warnings = await this.#recordSessionRecallDecision({
@@ -64,7 +124,7 @@ export class MemoryRecallOrchestrator {
         query: intent.query,
         sourceSessionIds: [],
         warningCount: 0,
-        onEvent: input.onEvent
+        onEvent
       });
       const decision: MemoryRecallDecision = {
         included: false,
@@ -74,14 +134,11 @@ export class MemoryRecallOrchestrator {
         sourceSessions: [],
         warnings
       };
-      const context = await this.#builder.build({
-        recallTriggered: false,
-        recallWarnings: warnings,
-        recallDecisions: [decision]
-      });
       return {
-        context,
-        decisions: [decision]
+        triggered: false,
+        blocks: [],
+        warnings,
+        decision
       };
     }
 
@@ -94,7 +151,7 @@ export class MemoryRecallOrchestrator {
       query: intent.query,
       sourceSessionIds,
       warningCount: recall.diagnostics.warnings.length,
-      onEvent: input.onEvent
+      onEvent
     });
     const warnings = [
       ...recall.diagnostics.warnings,
@@ -108,15 +165,73 @@ export class MemoryRecallOrchestrator {
       sourceSessions: sourceSessionIds,
       warnings
     };
-    const context = await this.#builder.build({
-      recallTriggered: true,
-      sessionRecall: blocks,
-      recallWarnings: warnings,
-      recallDecisions: [decision]
+    return {
+      triggered: true,
+      blocks,
+      warnings,
+      decision
+    };
+  }
+
+  async #externalRecall(input: {
+    query: string;
+    triggered: boolean;
+  }): Promise<{
+    blocks: PromptMemoryBlock[];
+    warnings: string[];
+    decision: MemoryRecallDecision;
+  }> {
+    if (this.#externalMemory.enabled !== true || this.#externalMemoryProviders.length === 0) {
+      return {
+        blocks: [],
+        warnings: [],
+        decision: {
+          included: false,
+          reason: this.#externalMemory.enabled === true ? "external memory provider unavailable" : "external memory disabled",
+          query: input.query,
+          scopesConsidered: LOCAL_SESSION_EXTERNAL_SCOPES,
+          sourceSessions: []
+        }
+      };
+    }
+
+    if (!input.triggered) {
+      return {
+        blocks: [],
+        warnings: [],
+        decision: {
+          included: false,
+          reason: "no explicit recall trigger",
+          query: input.query,
+          scopesConsidered: LOCAL_SESSION_EXTERNAL_SCOPES,
+          sourceSessions: []
+        }
+      };
+    }
+
+    const result = await collectExternalMemoryRecall({
+      query: input.query,
+      providers: this.#externalMemoryProviders,
+      config: this.#externalMemory,
+      context: {
+        profileId: this.#profileId,
+        sessionId: this.#sessionId,
+        workspaceRoot: this.#workspaceRoot
+      }
     });
     return {
-      context,
-      decisions: [decision]
+      blocks: result.blocks,
+      warnings: result.warnings,
+      decision: {
+        included: result.blocks.length > 0,
+        reason: result.blocks.length > 0
+          ? "explicit recall trigger matched external memory"
+          : "external memory returned no recall blocks",
+        query: input.query,
+        scopesConsidered: LOCAL_SESSION_EXTERNAL_SCOPES,
+        sourceSessions: result.sourceProviders,
+        warnings: result.warnings
+      }
     };
   }
 
