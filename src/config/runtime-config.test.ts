@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { loadRuntimeConfig, normalizeAuxiliaryModels, normalizeSessionCompressionConfig, saveRuntimeConfig } from "./runtime-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
 function profileConfigPath(homeDir: string): string {
@@ -72,6 +72,70 @@ describe("normalizeAuxiliaryModels", () => {
   });
 });
 
+describe("normalizeSessionCompressionConfig", () => {
+  it("defaults semantic compression off", () => {
+    expect(normalizeSessionCompressionConfig(undefined)).toEqual({
+      enabled: false,
+      threshold: 0.50,
+      targetRatio: 0.20,
+      protectFirstN: 3,
+      protectLastN: 20,
+      experimental: false
+    });
+  });
+
+  it("does not enable compression unless experimental is true", () => {
+    expect(normalizeSessionCompressionConfig({ enabled: true }).enabled).toBe(false);
+    expect(normalizeSessionCompressionConfig({ enabled: true, experimental: true }).enabled).toBe(true);
+  });
+
+  it("clamps threshold and target ratio boundaries", () => {
+    expect(normalizeSessionCompressionConfig({ threshold: 0.01 }).threshold).toBe(0.10);
+    expect(normalizeSessionCompressionConfig({ threshold: 1 }).threshold).toBe(0.95);
+    expect(normalizeSessionCompressionConfig({ threshold: 0.10 }).threshold).toBe(0.10);
+    expect(normalizeSessionCompressionConfig({ threshold: 0.95 }).threshold).toBe(0.95);
+    expect(normalizeSessionCompressionConfig({ targetRatio: 0.01 }).targetRatio).toBe(0.10);
+    expect(normalizeSessionCompressionConfig({ targetRatio: 1 }).targetRatio).toBe(0.80);
+    expect(normalizeSessionCompressionConfig({ targetRatio: 0.10 }).targetRatio).toBe(0.10);
+    expect(normalizeSessionCompressionConfig({ targetRatio: 0.80 }).targetRatio).toBe(0.80);
+  });
+
+  it("normalizes protected message counts", () => {
+    expect(normalizeSessionCompressionConfig({ protectFirstN: -3, protectLastN: -1 })).toMatchObject({
+      protectFirstN: 0,
+      protectLastN: 1
+    });
+    expect(normalizeSessionCompressionConfig({ protectFirstN: "4" as never, protectLastN: "9" as never })).toMatchObject({
+      protectFirstN: 4,
+      protectLastN: 9
+    });
+  });
+
+  it("normalizes optional summary model context length only when positive numeric input is supplied", () => {
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: "128000" as never }).summaryModelContextLength).toBe(128_000);
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: 64_000 }).summaryModelContextLength).toBe(64_000);
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: -1 }).summaryModelContextLength).toBe(1);
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: true as never }).summaryModelContextLength).toBeUndefined();
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: null as never }).summaryModelContextLength).toBeUndefined();
+    expect(normalizeSessionCompressionConfig({ summaryModelContextLength: [] as never }).summaryModelContextLength).toBeUndefined();
+  });
+
+  it("is NaN-safe for malformed values", () => {
+    const normalized = normalizeSessionCompressionConfig({
+      threshold: Number.NaN,
+      targetRatio: Number.POSITIVE_INFINITY,
+      protectFirstN: null as never,
+      protectLastN: [] as never
+    });
+    expect(normalized).toMatchObject({
+      threshold: 0.50,
+      targetRatio: 0.20,
+      protectFirstN: 3,
+      protectLastN: 20
+    });
+  });
+});
+
 describe("loadRuntimeConfig auxiliaryModels", () => {
   it("normalizes missing tasks to auto/enabled at load time", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
@@ -111,6 +175,53 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     const saved = JSON.parse(await readFile(configPath, "utf8"));
     expect(saved.auxiliaryProviders).toBeUndefined();
     expect(saved.auxiliaryModels).toBeUndefined();
+  });
+});
+
+describe("loadRuntimeConfig compression", () => {
+  it("exposes disabled normalized compression config by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.compression).toEqual({
+      enabled: false,
+      threshold: 0.50,
+      targetRatio: 0.20,
+      protectFirstN: 3,
+      protectLastN: 20,
+      experimental: false
+    });
+  });
+
+  it("normalizes configured compression without silently enabling non-experimental compression", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      compression: {
+        enabled: true,
+        threshold: 0.99,
+        targetRatio: "0.05",
+        protectFirstN: "2",
+        protectLastN: 0,
+        summaryModelContextLength: "64000"
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.compression).toEqual({
+      enabled: false,
+      threshold: 0.95,
+      targetRatio: 0.10,
+      protectFirstN: 2,
+      protectLastN: 1,
+      summaryModelContextLength: 64_000,
+      experimental: false
+    });
   });
 });
 

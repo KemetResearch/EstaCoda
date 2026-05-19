@@ -349,6 +349,7 @@ function createMinimalRuntime(): Runtime {
         channel: input.channel,
         metadata: input.metadata
       }),
+      replaceMessages: async () => [],
       appendEvent: async () => {},
       listMessages: async () => [],
       listEvents: async () => [],
@@ -671,6 +672,7 @@ describe("ChannelGateway commands", () => {
         browserHash: "hash",
         enableWebNetwork: false,
         webMaxContentChars: 1000,
+        compressionConfigHash: "hash",
         disableCronTools: false,
         skillAutonomy: "off",
         skillConfigHash: "hash",

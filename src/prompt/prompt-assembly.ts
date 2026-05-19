@@ -16,6 +16,7 @@ import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } f
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { PromptCache } from "./prompt-cache.js";
+import { estimateTextTokensRough } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 
 export type ProviderPromptAssembly = {
@@ -765,7 +766,7 @@ function mergeBudgetWarnings(primary: PromptBudgetReport, secondary: PromptBudge
 }
 
 function estimateTokens(value: string): number {
-  return Math.ceil(value.length / 4);
+  return estimateTextTokensRough(value);
 }
 
 function defaultIdentity(): string {

@@ -32,6 +32,9 @@ export type NamedToolExecutionRequest = {
   trustedWorkspace: boolean;
   sessionId: string;
   environmentType?: EnvironmentType;
+  toolCallId?: string;
+  toolCallName?: string;
+  providerNativeToolCall?: unknown;
   signal?: AbortSignal;
 };
 
@@ -43,6 +46,9 @@ export type ToolExecutionRecord = {
   targetKey?: string;
   targetSummary?: string;
   result?: ToolResult;
+  toolCallId?: string;
+  toolCallName?: string;
+  providerNativeToolCall?: unknown;
 };
 
 export type ToolExecutorOptions = {
@@ -103,17 +109,23 @@ export class ToolExecutor {
         content: `Invalid tool input: ${validationError}`
       };
       await this.#sessionDb.appendEvent(request.sessionId, {
-        kind: "tool-result",
-        tool: tool.name,
-        result: truncateToolResultForStorage(result)
-      });
+      kind: "tool-result",
+      tool: tool.name,
+      result: truncateToolResultForStorage(result),
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    });
 
       return {
         tool: toDefinition(tool),
         input: request.input,
         decision: "deny",
         riskClass,
-        result
+        result,
+        toolCallId: request.toolCallId,
+        toolCallName: request.toolCallName,
+        providerNativeToolCall: request.providerNativeToolCall
       };
     }
 
@@ -171,14 +183,20 @@ export class ToolExecutor {
         decision,
         riskClass,
         targetKey,
-        targetSummary
+        targetSummary,
+        toolCallId: request.toolCallId,
+        toolCallName: request.toolCallName,
+        providerNativeToolCall: request.providerNativeToolCall
       };
     }
 
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-called",
       tool: tool.name,
-      input: redactSensitiveFields(request.input)
+      input: redactSensitiveFields(request.input),
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
     });
     this.#trajectoryRecorder.record("tool-call", {
       tool: tool.name,
@@ -221,7 +239,10 @@ export class ToolExecutor {
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-result",
       tool: tool.name,
-      result: storedResult
+      result: storedResult,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
     });
     await this.#sessionDb.appendMessage({
       sessionId: request.sessionId,
@@ -229,6 +250,9 @@ export class ToolExecutor {
       content: storedResult.content,
       metadata: {
         tool: tool.name,
+        tool_call_id: request.toolCallId,
+        tool_call_name: request.toolCallName,
+        provider_native_tool_call: request.providerNativeToolCall,
         ok: result.ok,
         truncated: storedResult.metadata?.truncatedForStorage
       }
@@ -245,7 +269,10 @@ export class ToolExecutor {
       riskClass,
       targetKey,
       targetSummary,
-      result
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
     };
   }
 

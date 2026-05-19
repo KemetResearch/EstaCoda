@@ -292,6 +292,56 @@ describe("ToolExecutor input redaction", () => {
   });
 });
 
+describe("ToolExecutor tool-call metadata persistence", () => {
+  it("persists stable tool-call metadata on tool events and tool result messages", async () => {
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [createEchoTool("echo")]
+    });
+    const providerNativeToolCall = {
+      id: "call-provider-1",
+      type: "function",
+      function: {
+        name: "echo"
+      }
+    };
+
+    await executor.executeTool({
+      tool: "echo",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      toolCallId: "call-stable-1",
+      toolCallName: "echo",
+      providerNativeToolCall
+    });
+
+    const events = await sessionDb.listEvents("test-session");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "tool-called",
+      tool: "echo",
+      toolCallId: "call-stable-1",
+      toolCallName: "echo",
+      providerNativeToolCall
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "tool-result",
+      tool: "echo",
+      toolCallId: "call-stable-1",
+      toolCallName: "echo",
+      providerNativeToolCall
+    }));
+
+    const messages = await sessionDb.listMessages("test-session");
+    const toolMessage = messages.find((message) => message.role === "tool");
+    expect(toolMessage?.metadata).toMatchObject({
+      tool: "echo",
+      tool_call_id: "call-stable-1",
+      tool_call_name: "echo",
+      provider_native_tool_call: providerNativeToolCall
+    });
+  });
+});
+
 describe("ToolExecutor command environment", () => {
   it("passes explicit backend environmentType into command safety and tool context", async () => {
     let observedRequest: SecurityRequest | undefined;

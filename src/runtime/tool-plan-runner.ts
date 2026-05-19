@@ -136,6 +136,9 @@ export class ToolPlanRunner {
       input: plan.input,
       trustedWorkspace: input.trustedWorkspace,
       sessionId: this.#sessionId,
+      toolCallId: plan.id,
+      toolCallName: plan.tool,
+      providerNativeToolCall: plan.raw,
       signal: input.signal
     });
 
