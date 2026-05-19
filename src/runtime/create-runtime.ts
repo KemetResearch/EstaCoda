@@ -26,6 +26,7 @@ import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memor
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
+import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
@@ -503,7 +504,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   }
   const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
-  const externalMemoryProviders = options.externalMemoryProviders ?? [];
+  const externalMemoryProviders = [
+    ...createExternalMemoryProvidersFromConfig(externalMemoryConfig, { profileRoot: profileMemoryRoot }),
+    ...(options.externalMemoryProviders ?? [])
+  ];
   toolRegistry.register(createMemoryTool(memoryStore, {
     externalMemory: externalMemoryConfig,
     externalMemoryProviders,

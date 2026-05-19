@@ -166,6 +166,42 @@ describe("normalizeExternalMemoryConfig", () => {
     });
   });
 
+  it("normalizes file-backed provider config only when configured", () => {
+    expect(normalizeExternalMemoryConfig({
+      enabled: true,
+      provider: "file"
+    })).toEqual({
+      enabled: true,
+      provider: "file",
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false,
+      file: {
+        maxEntries: 1000
+      }
+    });
+    expect(normalizeExternalMemoryConfig({
+      enabled: true,
+      provider: "file",
+      file: {
+        path: "notes/memory.jsonl",
+        maxEntries: "20000" as never
+      }
+    })).toEqual({
+      enabled: true,
+      provider: "file",
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false,
+      file: {
+        path: "notes/memory.jsonl",
+        maxEntries: 10000
+      }
+    });
+  });
+
   it("normalizes bounds with NaN-safe numeric coercion", () => {
     expect(normalizeExternalMemoryConfig({
       enabled: true,
@@ -315,10 +351,14 @@ describe("loadRuntimeConfig external memory", () => {
       model: { provider: "openai", id: "gpt-4o" },
       externalMemory: {
         enabled: true,
-        provider: "fake",
+        provider: "file",
         maxResults: 2,
         maxChars: 1000,
-        mirrorWrites: true
+        mirrorWrites: true,
+        file: {
+          path: "memory.jsonl",
+          maxEntries: 50
+        }
       }
     }));
 
@@ -326,11 +366,15 @@ describe("loadRuntimeConfig external memory", () => {
 
     expect(loaded.externalMemory).toEqual({
       enabled: true,
-      provider: "fake",
+      provider: "file",
       timeoutMs: 750,
       maxResults: 2,
       maxChars: 1000,
-      mirrorWrites: true
+      mirrorWrites: true,
+      file: {
+        path: "memory.jsonl",
+        maxEntries: 50
+      }
     });
   });
 });

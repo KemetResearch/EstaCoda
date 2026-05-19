@@ -75,6 +75,10 @@ export type ExternalMemoryConfig = {
   maxChars: number;
   mirrorWrites: boolean;
   credentials?: Record<string, unknown>;
+  file?: {
+    path?: string;
+    maxEntries: number;
+  };
 };
 
 export type TtsConfig = {
@@ -1083,6 +1087,7 @@ export function normalizeExternalMemoryConfig(
   const credentials = value?.credentials !== undefined && isPlainRecord(value.credentials)
     ? value.credentials
     : undefined;
+  const fileConfig = normalizeExternalMemoryFileConfig(value?.file);
   return {
     enabled: value?.enabled === true && provider !== undefined,
     ...(provider === undefined ? {} : { provider }),
@@ -1090,7 +1095,19 @@ export function normalizeExternalMemoryConfig(
     maxResults: coercePositiveInteger(value?.maxResults, { default: 3, max: 10 }),
     maxChars: coercePositiveInteger(value?.maxChars, { default: 2_500, max: 20_000 }),
     mirrorWrites: value?.mirrorWrites === true,
-    ...(credentials === undefined ? {} : { credentials })
+    ...(credentials === undefined ? {} : { credentials }),
+    ...(provider === "file" || value?.file !== undefined ? { file: fileConfig } : {})
+  };
+}
+
+function normalizeExternalMemoryFileConfig(value: unknown): ExternalMemoryConfig["file"] {
+  const record = isPlainRecord(value) ? value : {};
+  const path = typeof record.path === "string" && record.path.trim().length > 0
+    ? record.path.trim()
+    : undefined;
+  return {
+    ...(path === undefined ? {} : { path }),
+    maxEntries: coercePositiveInteger(record.maxEntries, { default: 1_000, max: 10_000 })
   };
 }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
@@ -117,6 +117,53 @@ describe("createRuntime MCP trust gating", () => {
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");
+  });
+});
+
+describe("createRuntime external memory providers", () => {
+  it("wires explicitly configured file-backed external memory without enabling providers by default", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-external-memory-"));
+    const options = await minimalRuntimeOptions({
+      workspaceTrusted: true
+    });
+    const runtime = await createRuntime({
+      ...options,
+      homeDir,
+      profileId: "default",
+      securityMode: "open",
+      externalMemory: {
+        enabled: true,
+        provider: "file",
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true,
+        file: {
+          path: "memory.jsonl",
+          maxEntries: 100
+        }
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "memory.curate",
+        toolInput: {
+          kind: "append",
+          file: "USER.md",
+          content: "- Runtime file external memory mirror works"
+        }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      const mirrored = await readFile(
+        join(homeDir, ".estacoda", "profiles", "default", "external-memory", "memory.jsonl"),
+        "utf8"
+      );
+      expect(mirrored).toContain("Runtime file external memory mirror works");
+    } finally {
+      await runtime.dispose();
+    }
   });
 });
 

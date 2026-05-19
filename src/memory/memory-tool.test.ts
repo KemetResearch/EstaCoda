@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { ExternalMemoryProvider } from "../contracts/memory.js";
+import { createFileExternalMemoryProvider } from "./external-memory-provider.js";
 import { createMemoryTool } from "./memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
 
@@ -77,5 +81,38 @@ describe("memory.curate", () => {
     expect(result.metadata?.warnings).toEqual([
       "external memory provider fake mirror write failed: api_key=[REDACTED]"
     ]);
+  });
+
+  it("mirrors memory writes to the file-backed external provider when explicitly enabled", async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-memory-tool-file-provider-"));
+    const store = new MemoryStore();
+    const provider = createFileExternalMemoryProvider({
+      profileRoot,
+      path: "memory.jsonl"
+    });
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Likes external-memory tests"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toBeUndefined();
+    expect(store.read("USER.md")).toContain("Likes external-memory tests");
+    const mirrored = await readFile(join(profileRoot, "external-memory", "memory.jsonl"), "utf8");
+    expect(mirrored).toContain("Likes external-memory tests");
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { ExternalMemoryProvider, MemoryPromotionRecord } from "../contracts/memory.js";
-import { EXTERNAL_RECALL_UNTRUSTED_NOTICE } from "./external-memory-provider.js";
+import { createFileExternalMemoryProvider, EXTERNAL_RECALL_UNTRUSTED_NOTICE } from "./external-memory-provider.js";
 import type { SessionRecallResult } from "../session/session-recall-service.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
@@ -250,6 +253,45 @@ describe("MemoryRecallOrchestrator", () => {
     expect(result.context.externalRecall).toBeUndefined();
     expect(result.context.diagnostics.warnings.join("\n")).toContain("Bearer [REDACTED]");
     expect(result.context.diagnostics.warnings.join("\n")).not.toContain("secretsecret");
+  });
+
+  it("keeps orchestrator decisions deterministic with the file-backed provider enabled", async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-orchestrator-file-provider-"));
+    const provider = createFileExternalMemoryProvider({
+      profileRoot,
+      path: "memory.jsonl",
+      now: () => new Date("2026-05-20T00:00:00.000Z")
+    });
+    await provider.mirrorMemoryWrite?.({
+      profileId: "default",
+      sessionId: "session-1",
+      source: "memory.curate",
+      operation: {
+        kind: "append",
+        file: "MEMORY.md",
+        content: "- Parser errors stay structured and include code frames."
+      }
+    });
+
+    const fixture = orchestratorFixture({
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 2,
+        maxChars: 500,
+        mirrorWrites: true
+      }
+    });
+
+    const first = await fixture.orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+    const second = await fixture.orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+
+    expect(first.context.externalRecall).toEqual(second.context.externalRecall);
+    expect(first.decisions).toEqual(second.decisions);
+    expect(first.context.externalRecall?.[0]?.content).toContain(EXTERNAL_RECALL_UNTRUSTED_NOTICE);
+    expect(first.context.externalRecall?.[0]?.content).toContain("Parser errors stay structured");
+    expect(first.context.frozenCompactMemory.map((block) => block.source)).toEqual(["USER.md", "MEMORY.md"]);
   });
 });
 
