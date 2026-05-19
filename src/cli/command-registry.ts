@@ -156,6 +156,14 @@ function registerAll(): void {
     scope: "slash",
   });
   commandRegistry.register({
+    name: "compact",
+    aliases: [],
+    category: "Session",
+    description: "Compact this in-session context",
+    visibility: "public",
+    scope: "slash",
+  });
+  commandRegistry.register({
     name: "reset",
     aliases: ["new"],
     category: "Session",

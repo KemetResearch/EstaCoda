@@ -425,6 +425,7 @@ exports[`Session surfaces — help > renders in narrow width > sessions-help-nar
 
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
+• estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
@@ -436,6 +437,7 @@ exports[`Session surfaces — help > renders in no Unicode > sessions-help-no Un
 
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
+- estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
@@ -447,6 +449,7 @@ exports[`Session surfaces — help > renders in no color > sessions-help-no colo
 
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
+• estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
@@ -458,6 +461,7 @@ exports[`Session surfaces — help > renders in plain > sessions-help-plain 1`] 
 
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
+- estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
@@ -469,6 +473,7 @@ exports[`Session surfaces — help > renders in standard dark > sessions-help-st
 
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
+• estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
@@ -480,6 +485,7 @@ exports[`Session surfaces — help > renders in standard light > sessions-help-s
 
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
+• estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session

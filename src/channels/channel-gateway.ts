@@ -17,6 +17,7 @@ import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
+import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -932,6 +933,7 @@ export class ChannelGateway {
         "/sessions - list recent sessions for this chat",
         "/switch <session-id> - switch this chat to a specific session",
         "/search <query> - search session history",
+        "/compact [topic] - compact this session context",
         "/new - start a fresh session",
         "/reset - alias for /new",
         "/reload-mcp - reload MCP config for future turns in this chat",
@@ -1569,6 +1571,51 @@ export class ChannelGateway {
       }
     }
 
+    if (command === "/compact") {
+      const focusTopic = message.text.replace(/^\/compact\s*/u, "").trim();
+      const normalizedTopic = focusTopic.length === 0 ? undefined : focusTopic;
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+      const runtime = await this.#runtimeForSession({
+        sessionId,
+        sessionKey: normalizedSessionKey,
+        channel: message.channel,
+        securityPolicy: this.#securityPolicyFor(
+          normalizedSessionKey,
+          sessionId,
+          await this.#approvalStore.listForSession(normalizedSessionKey)
+        )
+      });
+      try {
+        const text = runtime.compactSession === undefined
+          ? "Session compaction is not available in this runtime."
+          : renderSessionCompactionResult(await runtime.compactSession({
+              sessionId,
+              focusTopic: normalizedTopic
+            }), {
+              focusTopic: normalizedTopic
+            });
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } catch (error) {
+        const text = `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return {
+          sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      } finally {
+        await runtime.dispose();
+      }
+    }
+
     if (command === "/approve") {
       return this.#approvePending(message, adapter);
     }
@@ -2128,7 +2175,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policies: Chann
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -2138,6 +2185,7 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/sessions" ||
     token === "/switch" ||
     token === "/search" ||
+    token === "/compact" ||
     token === "/new" ||
     token === "/reset" ||
     token === "/reload-mcp" ||
@@ -2263,6 +2311,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/sessions", description: "List recent chat sessions" },
     { command: "/switch", description: "Switch to an existing session" },
     { command: "/search", description: "Search session history" },
+    { command: "/compact", description: "Compact this session context" },
     { command: "/new", description: "Start a fresh session" },
     { command: "/reset", description: "Alias for /new" },
     { command: "/trust", description: "Trust this workspace" },

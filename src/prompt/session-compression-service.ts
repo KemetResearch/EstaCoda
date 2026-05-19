@@ -31,6 +31,7 @@ export type SessionCompressionServiceOptions = {
 export type SessionCompressionRequest = {
   profileId: string;
   sessionId: string;
+  focusTopic?: string;
   signal?: AbortSignal;
 };
 
@@ -80,6 +81,7 @@ export class SessionCompressionService {
         profileId: input.profileId,
         sessionId: input.sessionId,
         previousState,
+        focusTopic: input.focusTopic,
         force,
         signal: input.signal
       });
@@ -195,6 +197,47 @@ export class SessionCompressionService {
   }
 }
 
+export function renderSessionCompactionResult(
+  result: CompactResult,
+  options: { focusTopic?: string } = {}
+): string {
+  const beforeCount = result.diagnostics.sourceMessageCount;
+  const afterCount = result.messages.length;
+  const savedTokens = Math.max(0, Math.round(result.diagnostics.estimatedSavingsTokens));
+  const savingsPct = Math.max(0, Math.round(result.diagnostics.estimatedSavingsRatio * 100));
+  const lines = result.didCompress
+    ? [
+        `Compacted ${beforeCount} messages -> ${afterCount} messages (~${savedTokens} tokens saved, ${savingsPct}%).`
+      ]
+    : [
+        `Session compaction skipped: ${result.diagnostics.reason}.`
+      ];
+
+  const focusTopic = options.focusTopic?.trim();
+  if (focusTopic !== undefined && focusTopic.length > 0) {
+    lines.push(`Focus topic: ${focusTopic}`);
+  }
+
+  lines.push(`Token estimate: ${result.diagnostics.preTokens} -> ${result.diagnostics.postTokens}`);
+
+  if (result.userFacingMessage !== undefined && result.userFacingMessage.length > 0) {
+    lines.push(result.userFacingMessage);
+  }
+
+  const warnings = uniqueStrings([
+    ...(result.diagnostics.fallbackUsed
+      ? [`fallback summary used${result.diagnostics.fallbackReason === undefined ? "" : ` (${result.diagnostics.fallbackReason})`}`]
+      : []),
+    ...result.diagnostics.warnings,
+    ...result.diagnostics.eventWarnings
+  ]);
+  for (const warning of warnings) {
+    lines.push(`Warning: ${warning}`);
+  }
+
+  return lines.join("\n");
+}
+
 function freezeCompactResult(result: CompactResult): CompactResult {
   for (const message of result.messages) {
     if (message.metadata !== undefined) {
@@ -227,4 +270,17 @@ function toReplacementMessage(message: SessionMessage): ReplacementSessionMessag
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (value.trim().length === 0 || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }

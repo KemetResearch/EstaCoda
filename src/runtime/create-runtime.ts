@@ -44,7 +44,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
-import { SessionCompressionService } from "../prompt/session-compression-service.js";
+import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -191,6 +191,11 @@ export type Runtime = {
   latestResumeNote(): Promise<string | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
+  compactSession?(input?: {
+    sessionId?: string;
+    focusTopic?: string;
+    signal?: AbortSignal;
+  }): Promise<CompactResult>;
   inspectMcpServers(): MCPServerSnapshot[];
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   executeTool?(input: {
@@ -908,6 +913,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async recallSession(query) {
       return await sessionRecallService.recall(query);
+    },
+    async compactSession(input = {}) {
+      const targetSessionId = input.sessionId ?? sessionId;
+      const targetSession = await sessionDb.getSession(targetSessionId);
+      if (targetSession === undefined) {
+        throw new Error(`Session not found: ${targetSessionId}`);
+      }
+      if (targetSession.profileId !== profileId) {
+        throw new Error(`Session not found in active profile: ${targetSessionId}`);
+      }
+      return await sessionCompressionService.compactNow({
+        profileId,
+        sessionId: targetSessionId,
+        focusTopic: input.focusTopic,
+        signal: input.signal
+      });
     },
     inspectMcpServers() {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));

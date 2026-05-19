@@ -359,7 +359,96 @@ function createMinimalRuntime(): Runtime {
   } as Runtime;
 }
 
+function compactResult(overrides: {
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  warnings?: string[];
+} = {}) {
+  return {
+    didCompress: true,
+    messages: [
+      { id: "m1", role: "user" as const, content: "head" },
+      { id: "summary", role: "system" as const, content: "summary", metadata: { semanticCompression: true } },
+      { id: "m7", role: "agent" as const, content: "tail" },
+      { id: "m8", role: "user" as const, content: "latest" }
+    ],
+    diagnostics: {
+      shouldCompress: true,
+      reason: "forced",
+      preTokens: 2000,
+      postTokens: 900,
+      estimatedSavingsTokens: 1100,
+      estimatedSavingsRatio: 0.55,
+      sourceMessageCount: 8,
+      summarizedMessageCount: 4,
+      protectedMessageCount: 4,
+      protectedFirstN: 1,
+      protectedLastN: 1,
+      protectedSpans: [],
+      protectedCategories: [],
+      summaryFormatVersion: "v1",
+      summaryChars: 100,
+      fallbackUsed: overrides.fallbackUsed ?? false,
+      fallbackReason: overrides.fallbackReason,
+      warnings: overrides.warnings ?? [],
+      eventWarnings: [],
+      prunedToolResults: 0,
+      scopeKey: "profile:session"
+    },
+    userFacingMessage: "Session history compacted"
+  };
+}
+
 describe("ChannelGateway commands", () => {
+  it("/compact runs manual session compaction and replies through the gateway", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const calls: Array<{ sessionId?: string; focusTopic?: string }> = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId,
+        compactSession: async (input?: { sessionId?: string; focusTopic?: string }) => {
+          calls.push(input ?? {});
+          return compactResult();
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const result = await gateway.receive(makeMessage("/compact deploy handoff"));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.sessionId).toBe(result.sessionId);
+    expect(calls[0]?.focusTopic).toBe("deploy handoff");
+    expect(result.replyText).toContain("Compacted 8 messages -> 4 messages");
+    expect(result.replyText).toContain("Focus topic: deploy handoff");
+  });
+
+  it("/compact reports provider fallback warnings without adding gateway hygiene", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId,
+        compactSession: async () => compactResult({
+          fallbackUsed: true,
+          fallbackReason: "failed",
+          warnings: ["auxiliary compression failed; used deterministic fallback"]
+        })
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const result = await gateway.receive(makeMessage("/compact"));
+
+    expect(result.replyText).toContain("Warning: fallback summary used (failed)");
+    expect(result.replyText).toContain("Warning: auxiliary compression failed; used deterministic fallback");
+  });
+
   describe("/sethome", () => {
     it("sets home delivery to current chat by default", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
@@ -564,10 +653,12 @@ describe("ChannelGateway commands", () => {
   });
 
   describe("telegramGatewayCommands", () => {
-    it("includes /sethome and /diagnostics", () => {
+    it("includes /compact, /sethome, and /diagnostics", () => {
       const commands = telegramGatewayCommands();
+      const compact = commands.find((c) => c.command === "/compact");
       const sethome = commands.find((c) => c.command === "/sethome");
       const diagnostics = commands.find((c) => c.command === "/diagnostics");
+      expect(compact).toBeDefined();
       expect(sethome).toBeDefined();
       expect(diagnostics).toBeDefined();
     });

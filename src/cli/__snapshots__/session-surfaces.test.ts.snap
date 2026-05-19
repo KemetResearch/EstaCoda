@@ -7,6 +7,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
+• /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect promoted memory conclusions
 • /tools: Browse available tools grouped by toolset
@@ -37,6 +38,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /model: Show the active model and provider without changing saved setup state.
 - /switch: Switch to an existing session
 - /search: Search session history
+- /compact: Compact this in-session context
 - /reset: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect promoted memory conclusions
 - /tools: Browse available tools grouped by toolset
@@ -67,6 +69,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
+• /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect promoted memory conclusions
 • /tools: Browse available tools grouped by toolset
@@ -97,6 +100,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /model: Show the active model and provider without changing saved setup state.
 - /switch: Switch to an existing session
 - /search: Search session history
+- /compact: Compact this in-session context
 - /reset: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect promoted memory conclusions
 - /tools: Browse available tools grouped by toolset
@@ -127,6 +131,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
+• /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect promoted memory conclusions
 • /tools: Browse available tools grouped by toolset
@@ -157,6 +162,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
+• /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect promoted memory conclusions
 • /tools: Browse available tools grouped by toolset
@@ -465,6 +471,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset
@@ -499,6 +506,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset
@@ -533,6 +541,7 @@ Name                     Description
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset
@@ -567,6 +576,7 @@ Name                     Description
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset
@@ -601,6 +611,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset
@@ -635,6 +646,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session
 /search                  Search session history
+/compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect promoted memory conclusions
 /tools                   Browse available tools grouped by toolset

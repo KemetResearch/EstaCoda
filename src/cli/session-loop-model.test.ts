@@ -353,3 +353,130 @@ describe("session-loop session recall", () => {
     expect(text).not.toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
   });
 });
+
+describe("session-loop session compaction", () => {
+  let tempHome: string;
+  let outputChunks: string[];
+  let output: NodeJS.WritableStream;
+
+  beforeEach(() => {
+    tempHome = mkdtempSync(join(tmpdir(), "estacoda-session-compact-test-"));
+    outputChunks = [];
+    output = {
+      write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); },
+      end: () => {}
+    } as NodeJS.WritableStream;
+  });
+
+  afterEach(() => {
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it("/compact uses manual session compaction and passes the focus topic", async () => {
+    const calls: Array<{ focusTopic?: string }> = [];
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      compactSession: async (input?: { focusTopic?: string }) => {
+        calls.push(input ?? {});
+        return compactResult();
+      }
+    };
+
+    const result = await handleSlashCommand({
+      text: "/compact billing topic",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    expect(calls).toEqual([{ focusTopic: "billing topic" }]);
+    const text = outputChunks.join("");
+    expect(text).toContain("Compacted 8 messages -> 4 messages");
+    expect(text).toContain("Token estimate: 2000 -> 900");
+    expect(text).toContain("Focus topic: billing topic");
+  });
+
+  it("/compact stays separate from TaskFlow /flow compact", async () => {
+    let flowDispatched = false;
+    let compactCalled = false;
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      compactSession: async () => {
+        compactCalled = true;
+        return compactResult();
+      },
+      taskflow: {
+        dispatcher: {
+          dispatch: async () => {
+            flowDispatched = true;
+            return { ok: true, message: "flow compacted" };
+          }
+        }
+      }
+    };
+
+    await handleSlashCommand({
+      text: "/compact",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(compactCalled).toBe(true);
+    expect(flowDispatched).toBe(false);
+  });
+});
+
+function compactResult() {
+  return {
+    didCompress: true,
+    messages: [
+      { id: "m1", role: "user", content: "head" },
+      { id: "summary", role: "system", content: "summary", metadata: { semanticCompression: true } },
+      { id: "m7", role: "agent", content: "tail" },
+      { id: "m8", role: "user", content: "latest" }
+    ],
+    diagnostics: {
+      shouldCompress: true,
+      reason: "forced",
+      preTokens: 2000,
+      postTokens: 900,
+      estimatedSavingsTokens: 1100,
+      estimatedSavingsRatio: 0.55,
+      sourceMessageCount: 8,
+      summarizedMessageCount: 4,
+      protectedMessageCount: 4,
+      protectedFirstN: 1,
+      protectedLastN: 1,
+      protectedSpans: [],
+      protectedCategories: [],
+      summaryFormatVersion: "v1",
+      summaryChars: 100,
+      fallbackUsed: false,
+      warnings: [],
+      eventWarnings: [],
+      prunedToolResults: 0,
+      scopeKey: "profile:session"
+    },
+    userFacingMessage: "Session history compacted"
+  };
+}

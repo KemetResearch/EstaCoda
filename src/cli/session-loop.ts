@@ -5,6 +5,7 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
+import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -543,6 +544,9 @@ export async function handleSlashCommand(input: {
       return false;
     case "search":
       input.output.write(`${await renderSessionSearch(input.runtime, args.join(" "))}\n\n`);
+      return false;
+    case "compact":
+      input.output.write(`${await renderSessionCompaction(input.runtime, args.join(" "))}\n\n`);
       return false;
     case "switch": {
       const target = args[0];
@@ -1269,6 +1273,24 @@ async function renderSessionRecall(runtime: Runtime, query: string): Promise<str
   }
 
   return renderSessionRecallResult(await runtime.recallSession(normalizedQuery));
+}
+
+async function renderSessionCompaction(runtime: Runtime, focusTopic: string): Promise<string> {
+  const topic = focusTopic.trim();
+  if (runtime.compactSession === undefined) {
+    return "Session compaction is not available in this runtime.";
+  }
+
+  try {
+    const normalizedTopic = topic.length === 0 ? undefined : topic;
+    return renderSessionCompactionResult(await runtime.compactSession({
+      focusTopic: normalizedTopic
+    }), {
+      focusTopic: normalizedTopic
+    });
+  } catch (error) {
+    return `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 async function runtimeProfileId(runtime: Runtime): Promise<string> {
