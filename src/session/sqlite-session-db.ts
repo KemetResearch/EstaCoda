@@ -305,7 +305,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
   async listEvents(sessionId: string): Promise<SessionEvent[]> {
     return this.#db
-      .query<EventRow>("select event_json from session_events where session_id = ? order by created_at asc")
+      .query<EventRow>("select event_json from session_events where session_id = ? order by created_at asc, rowid asc")
       .all(sessionId)
       .map((row) => JSON.parse(row.event_json) as SessionEvent);
   }
@@ -317,7 +317,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         from session_events e
         join sessions s on s.id = e.session_id
         where s.profile_id = ? and e.session_id = ?
-        order by e.created_at asc`
+        order by e.created_at asc, e.rowid asc`
       )
       .all(profileId, sessionId)
       .map((row) => JSON.parse(row.event_json) as SessionEvent);
