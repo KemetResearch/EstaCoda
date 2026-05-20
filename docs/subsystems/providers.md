@@ -127,6 +127,15 @@ Absolute file paths are rejected. Relative paths must stay under the selected pr
 
 Provider status diagnostics are redacted by helper functions in `src/memory/external-memory-provider.ts`. There is no standalone user-facing external memory status CLI command in this implementation.
 
+External provider observability is best-effort and metadata-only:
+
+| Event | Emitted From | Contents |
+|-------|--------------|----------|
+| `external-memory-recall` | `MemoryRecallOrchestrator` external recall path | provider id, enabled/attempted flags, result count, bounded total character count, warning/failure count, safe scope metadata, redacted/bounded failure reason |
+| `external-memory-mirror-write` | `memory.curate` mirror-write path | provider id, mirror enabled/attempted/success flags, local write success, safe memory kind/file metadata, bounded entry size, safe scope metadata, redacted/bounded failure reason |
+
+These audit events do not include raw recalled content, raw mirrored memory content, credentials, or provider secrets. Event recording failure is non-fatal and must not block local memory prompt inclusion, `memory.curate`, recall, mirror-write behavior, provider turns, semantic compression, or memory-file compaction. Local memory remains authoritative.
+
 ## Important Distinctions
 
 - The model catalog is enriched from models.dev when cached/bundled data is available, with local fallback profiles as a safety net.

@@ -29,7 +29,7 @@ Canonical docs updated for Memory Hardening:
 | 6 | High-confidence runtime recall | `AgentLoop -> MemoryRecallOrchestrator -> SessionRecallService` owns recall; ordinary turns do not trigger broad recall. |
 | 7 | Semantic session compression | Experimental/default-off; `/compact`, `sessions compact`, gateway hygiene. |
 | 8 | `MemoryRecallOrchestrator` | Owns per-turn local/session/external recall decisions and diagnostics. |
-| 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. `afterTurn` and `flushSession` are reserved hooks and are not actively invoked by runtime orchestration. |
+| 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. `afterTurn` and `flushSession` are reserved hooks and are not actively invoked by runtime orchestration. External recall and mirror-write attempts emit metadata-only audit events best-effort. |
 | 10 | File-backed external memory provider | Profile-local JSONL storage beneath `external-memory/`. |
 
 ## Enabling And Disabling
@@ -99,12 +99,15 @@ Implemented gateway slash surface from this set:
 Implemented memory runtime tools:
 
 ```text
+config.compression.status
 memory.file_compact
 memory.file_compaction_restore
 memory.curate
 ```
 
 `memory.curate` is the implemented memory write surface. Its `kind` field accepts `append`, `replace`, or `remove`; docs should not treat a generic `add` memory action as an available command or tool.
+
+`config.compression.status` is read-only. It reports normalized semantic compression config, auxiliary `compression` route status, and latest session compression state/event summary where a session context is available. It does not enable compression, write config, append session events, expose raw summaries, or expose credentials. There is no `config.compression.setup` command or tool.
 
 There is no top-level memory prompt, memory compact, or memory restore-backup CLI command in this implementation. Use the runtime tools for Memory File Compaction and restore.
 
@@ -120,8 +123,18 @@ Key event kinds:
 - `memory-file-compaction` — memory-file compaction dry-run/apply/restore metadata.
 - `session-history-compressed` — semantic session compression source/protection/fallback details.
 - `session-compression-state` — latest semantic compression state for runtime rehydration.
+- `external-memory-recall` — metadata-only external provider recall audit.
+- `external-memory-mirror-write` — metadata-only external provider mirror-write audit.
 
 Compression command output reports message counts, token estimates, optional focus topic, fallback status, and warnings.
+
+Semantic compression observability includes `compressionCount`, redacted/bounded `previousSummary`, `lastCompressedThroughMessageId`, `lastPromptTokensEstimated`, `lastActualPromptTokens`, `lastCompressionSavingsPct`, `ineffectiveCompressionCount`, `summaryFailureCooldownUntil`, `recentSavingsRatios`, `sourceMessageCount`, `protectedMessageCount`, `summaryLengthTokens`, `droppedMessageCount`, `modelUsed`, `auxModelFailure`, `mainRetryFailure`, `fallbackUsed`, and `fallbackReason` where available. These fields are for operational diagnosis; they do not contain raw full transcripts.
+
+Summary budgeting is computed from the source messages being summarized. The target budget uses rough token estimation, `compression.targetRatio`, a `2,000` token minimum, a 5% context cap, and a `12,000` token ceiling. Provider generation requests add `1.3x` headroom above the target budget, so operators should distinguish the target summary budget from provider `maxTokens`.
+
+Anti-thrashing state is durable. Two consecutive compressions saving less than 10% cause automatic semantic compression to skip until a higher-savings compression resets the count or a manual `/compact [topic]` bypasses the gate. The skip applies only to semantic compression; deterministic history packing remains available.
+
+Provider-turn compression diagnostics may include the assembled prompt token estimate and actual provider input tokens when the provider reports usage. Missing usage is normal for some providers and does not fail the turn.
 
 ## Troubleshooting
 
@@ -133,7 +146,8 @@ Auxiliary `session_search` failure:
 
 Auxiliary `compression` failure:
 
-- Semantic compression falls back to deterministic packing.
+- Semantic compression tries the auxiliary `compression` route first. If allowed by route configuration, it may retry on the main route. If model summarization fails, it falls back to deterministic packing.
+- Static emergency marker text is reserved for cases where deterministic packing cannot fit.
 - Warnings are returned in `/compact` / `sessions compact` output and prompt diagnostics.
 - Check `compression.experimental`, `compression.enabled`, `auxiliaryModels.compression`, and provider credentials.
 
@@ -148,6 +162,7 @@ External memory failure:
 
 - Local memory remains authoritative.
 - Recall/mirror failures are warnings.
+- `external-memory-recall` and `external-memory-mirror-write` audit events are best-effort and metadata-only. They never store raw recalled content or raw mirrored memory content, and event write failure does not fail local memory or recall.
 - Verify `externalMemory.enabled`, `externalMemory.provider`, relative file path, and profile directory permissions.
 - There is no standalone external memory status CLI command in this implementation.
 
@@ -168,8 +183,9 @@ Before merge or release, inspect:
 - Recalled, compressed, and external memory is labeled untrusted.
 - External memory is disabled by default and cannot write outside profile-local `external-memory/`.
 - Mirror writes are opt-in and redact secret-looking payloads.
+- External provider audit events are metadata-only and must not include credentials, raw recalled content, or raw mirrored payloads.
 - Memory File Compaction creates backups and scans generated content before writes.
-- Semantic compression is experimental/default-off and preserves protected head/tail/latest-user/tool-pair context.
+- Semantic compression is experimental/default-off and preserves protected head/tail/latest-user/tool-pair context. Tool-result pruning is compression-input-only and must not mutate persisted history.
 - TaskFlow compaction remains separate from bare `/compact`.
 
 ## Rollout Guidance

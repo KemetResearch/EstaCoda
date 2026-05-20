@@ -109,6 +109,14 @@ Memory-file compaction is exposed as runtime tools, not as a top-level CLI comma
 
 No top-level memory prompt, memory compact, or memory restore-backup CLI command is available in this implementation.
 
+Read-only semantic compression diagnostics are exposed as a runtime tool:
+
+| Tool | Purpose |
+|------|---------|
+| `config.compression.status` | Shows normalized compression config, auxiliary `compression` route status, and latest session compression state/event summary when available |
+
+`config.compression.status` does not mutate config, enable compression, write session events, expose raw summaries, or expose credentials. There is no `config.compression.setup` tool or top-level CLI alias in this implementation.
+
 ## Eval Commands
 
 ```bash

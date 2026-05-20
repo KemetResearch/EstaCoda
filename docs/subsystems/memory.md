@@ -224,6 +224,15 @@ External memory cannot:
 
 File-backed external memory redacts record content, status diagnostics, provider warnings, and mirrored operation payloads. Failures are isolated as warnings.
 
+External recall and mirror-write paths also emit best-effort metadata-only audit events:
+
+| Event | Purpose |
+|-------|---------|
+| `external-memory-recall` | Records provider id, attempted/enabled state, result count, bounded character totals, warning/failure counts, safe scope metadata, and redacted/bounded failures |
+| `external-memory-mirror-write` | Records provider id, mirror enabled/attempted/success state, local write success, safe memory kind/file metadata, bounded entry size, safe scope metadata, and redacted/bounded failures |
+
+These events never store raw recalled content, raw mirrored memory content, credentials, or secrets. Audit event failure is non-fatal, and local memory remains authoritative.
+
 ## Workflow Learning Separation
 
 Workflow learning is separated from memory files:
@@ -240,6 +249,8 @@ Workflow learning is separated from memory files:
 ## Session Compression Boundary
 
 Semantic session compression is documented separately in [Semantic Session Compression](./semantic-compression.md). It rewrites older session history into reference-only summaries; it does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata.
+
+Compression observability now includes computed summary budgeting, durable anti-thrashing state, ProviderTurnLoop prompt-token diagnostics, fallback diagnostics, and compression-input-only tool-result pruning. The pruning pass can replace old large tool output with bounded redacted placeholders before summarization, but it does not mutate persisted session history or implement broad orphan cleanup.
 
 Memory File Compaction is also a separate path. It can compact `USER.md` and `MEMORY.md` only, uses the `memory_compaction` auxiliary route, and remains distinct from semantic session compression and TaskFlow compaction.
 
