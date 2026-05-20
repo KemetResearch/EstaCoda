@@ -1,0 +1,397 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { acquireGatewayLock } from "./gateway-lock.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
+import { writeGatewayPid } from "./pid-file.js";
+
+const childProcessMock = vi.hoisted(() => ({
+  spawn: vi.fn(),
+}));
+
+const resolverMock = vi.hoisted(() => ({
+  resolveGatewayExec: vi.fn(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: childProcessMock.spawn,
+  };
+});
+
+vi.mock("./service-exec-resolver.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./service-exec-resolver.js")>();
+  return {
+    ...actual,
+    resolveGatewayExec: resolverMock.resolveGatewayExec,
+  };
+});
+
+import {
+  detectServiceManager,
+  installService,
+  launchdPlistPath,
+  plistNameForProfile,
+  probeServiceState,
+  systemdUnitPath,
+  unitNameForProfile,
+  uninstallService,
+} from "./service-manager.js";
+
+type SpawnCall = { command: string; args: string[] };
+
+async function makeTempDir(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "estacoda-service-manager-test-"));
+}
+
+function setPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", {
+    value,
+    configurable: true,
+  });
+}
+
+async function addExecutable(dir: string, name: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, "#!/bin/sh\n", "utf8");
+  await chmod(path, 0o755);
+}
+
+function mockSpawn(responder?: (call: SpawnCall) => { code?: number; stdout?: string; stderr?: string }): SpawnCall[] {
+  const calls: SpawnCall[] = [];
+  childProcessMock.spawn.mockImplementation((command: string, args: string[]) => {
+    const call = { command, args };
+    calls.push(call);
+    const response = responder?.(call) ?? { code: 0, stdout: "", stderr: "" };
+    const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    queueMicrotask(() => {
+      if (response.stdout !== undefined) child.stdout.write(response.stdout);
+      if (response.stderr !== undefined) child.stderr.write(response.stderr);
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", response.code ?? 0);
+    });
+    return child;
+  });
+  return calls;
+}
+
+describe("service manager", () => {
+  let tmpDir: string;
+  let originalPath: string | undefined;
+  let originalPlatform: NodeJS.Platform;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+    originalPath = process.env.PATH;
+    originalPlatform = process.platform;
+    process.env.PATH = "";
+    childProcessMock.spawn.mockReset();
+    resolverMock.resolveGatewayExec.mockReset();
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "source",
+        command: "/opt/homebrew/bin/bun",
+        args: ["run", join(tmpDir, "workspace with spaces", "src", "index.ts")],
+        cwd: join(tmpDir, "workspace with spaces"),
+      },
+    });
+  });
+
+  afterEach(async () => {
+    Object.defineProperty(process, "platform", {
+      value: originalPlatform,
+      configurable: true,
+    });
+    process.env.PATH = originalPath;
+    vi.restoreAllMocks();
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("detects systemd user, launchd, or none", async () => {
+    const binDir = join(tmpDir, "bin");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    expect(detectServiceManager()).toBe("none");
+
+    await addExecutable(binDir, "systemctl");
+    expect(detectServiceManager()).toBe("systemd-user");
+
+    await rm(join(binDir, "systemctl"), { force: true });
+    setPlatform("darwin");
+    expect(detectServiceManager()).toBe("none");
+    await addExecutable(binDir, "launchctl");
+    expect(detectServiceManager()).toBe("launchd");
+  });
+
+  it("generates collision-resistant profile-aware names", () => {
+    expect(unitNameForProfile("work.prod")).not.toBe(unitNameForProfile("work-prod"));
+    expect(plistNameForProfile("work.prod")).not.toBe(plistNameForProfile("work-prod"));
+    expect(unitNameForProfile("work.prod")).toMatch(/^estacoda-gateway-work-prod-[a-f0-9]{8}\.service$/u);
+  });
+
+  it("installs a systemd user unit with escaped profile-bound launch command and permissions", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = `${binDir}:/usr/bin`;
+    setPlatform("linux");
+    const calls = mockSpawn();
+    const homeDir = join(tmpDir, "home dir");
+
+    const result = await installService({
+      homeDir,
+      workspaceRoot: join(tmpDir, "workspace with spaces"),
+      profileId: "default",
+    });
+
+    expect(result).toEqual({ ok: true, mode: "source" });
+    const unitPath = systemdUnitPath({ homeDir, profileId: "default" });
+    const content = await readFile(unitPath, "utf8");
+    expect(content).toContain("Description=EstaCoda Gateway Supervisor (profile: default)");
+    expect(content.indexOf("StartLimitIntervalSec=300")).toBeLessThan(content.indexOf("[Service]"));
+    expect(content).toContain("StartLimitBurst=10");
+    expect(content).toContain("Restart=on-failure");
+    expect(content).toContain("RestartSec=5");
+    expect(content).toContain("TimeoutStopSec=35");
+    expect(content).toContain("KillMode=mixed");
+    expect(content).toContain(`Environment="HOME=${homeDir}"`);
+    expect(content).toContain("Environment=\"PATH=/opt/homebrew/bin:");
+    expect(content).toContain(`WorkingDirectory="${join(tmpDir, "workspace with spaces")}"`);
+    expect(content).toContain('"gateway" "start" "--profile" "default"');
+    expect(content).not.toContain("--replace");
+    expect((await stat(unitPath)).mode & 0o777).toBe(0o600);
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "enable", unitNameForProfile("default")],
+      ["systemctl", "--user", "start", unitNameForProfile("default")],
+    ]);
+  });
+
+  it("escapes systemd paths with quotes", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "workspace quote", "dist", "index\"quoted.js")],
+        cwd: join(tmpDir, "workspace quote"),
+      },
+    });
+
+    await installService({ homeDir: tmpDir, workspaceRoot: join(tmpDir, "workspace quote"), profileId: "default" });
+    const content = await readFile(systemdUnitPath({ homeDir: tmpDir, profileId: "default" }), "utf8");
+    expect(content).toContain('index\\"quoted.js"');
+  });
+
+  it("refuses idempotent install without force and stops before overwrite with force", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Service already installed for profile 'default'. Use --force to replace.",
+    });
+
+    const calls = mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toMatchObject({ ok: true });
+    expect(calls.map((call) => [call.command, ...call.args])[0]).toEqual(["systemctl", "--user", "stop", unitNameForProfile("default")]);
+  });
+
+  it("refuses a live gateway lock but tolerates stale and corrupt lock evidence", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    const liveHome = join(tmpDir, "live-home");
+    await acquireGatewayLock(resolveProfileStateHome({ homeDir: liveHome, profileId: "default" }));
+
+    const liveResult = await installService({ homeDir: liveHome, workspaceRoot: tmpDir, profileId: "default" });
+    expect(liveResult).toEqual({
+      ok: false,
+      error: "Gateway already appears to be running for profile 'default'; stop it before installing/starting the service.",
+    });
+
+    const staleHome = join(tmpDir, "stale-home");
+    const stalePaths = resolveProfileStateHome({ homeDir: staleHome, profileId: "default" });
+    await mkdir(stalePaths.gatewayStatePath, { recursive: true });
+    await writeFile(join(stalePaths.gatewayStatePath, "gateway.lock"), JSON.stringify({ pid: 999999, startedAt: "2000-01-01T00:00:00.000Z" }), "utf8");
+    await expect(installService({ homeDir: staleHome, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+
+    const corruptHome = join(tmpDir, "corrupt-home");
+    const corruptPaths = resolveProfileStateHome({ homeDir: corruptHome, profileId: "default" });
+    await mkdir(corruptPaths.gatewayStatePath, { recursive: true });
+    await writeFile(join(corruptPaths.gatewayStatePath, "gateway.lock"), "not-json", "utf8");
+    await expect(installService({ homeDir: corruptHome, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("refuses a live gateway PID but tolerates stale PID evidence", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+
+    const liveHome = join(tmpDir, "live-pid-home");
+    await writeGatewayPid(resolveProfileStateHome({ homeDir: liveHome, profileId: "default" }), {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      version: "0.0.6",
+      profileId: "default",
+    });
+    await expect(installService({ homeDir: liveHome, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Gateway already appears to be running for profile 'default'; stop it before installing/starting the service.",
+    });
+
+    const staleHome = join(tmpDir, "stale-pid-home");
+    await writeGatewayPid(resolveProfileStateHome({ homeDir: staleHome, profileId: "default" }), {
+      pid: 999999,
+      startedAt: new Date().toISOString(),
+      version: "0.0.6",
+      profileId: "default",
+    });
+    await expect(installService({ homeDir: staleHome, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("enforces system install root guard and run-as-user requirement", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(1000);
+
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", system: true, runAsUser: "estacoda" })).resolves.toEqual({
+      ok: false,
+      error: "System service install requires root. Use sudo or omit --system.",
+    });
+
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", system: true })).resolves.toEqual({
+      ok: false,
+      error: "System service install requires --run-as-user <user> so HOME/profile state are explicit.",
+    });
+  });
+
+  it("installs a launchd plist with escaped ProgramArguments and permissions", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const calls = mockSpawn();
+    const profileId = "work.prod";
+
+    const result = await installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId });
+
+    expect(result).toEqual({ ok: true, mode: "source" });
+    const plistPath = launchdPlistPath({ homeDir: tmpDir, profileId });
+    const content = await readFile(plistPath, "utf8");
+    expect(content).toContain(`<string>com.estacoda.gateway.work-prod-`);
+    expect(content).toContain("<string>gateway</string>");
+    expect(content).toContain("<string>start</string>");
+    expect(content).toContain("<string>--profile</string>");
+    expect(content).toContain("<string>work.prod</string>");
+    expect(content).toContain("<key>RunAtLoad</key><true/>");
+    expect(content).toContain("<key>HOME</key>");
+    expect(content).toContain("<key>PATH</key>");
+    expect(content).toContain("gateway.stdout");
+    expect(content).toContain("gateway.stderr");
+    expect(content).not.toContain("--replace");
+    expect((await stat(plistPath)).mode & 0o777).toBe(0o600);
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["launchctl", "load", "-w", plistPath],
+    ]);
+  });
+
+  it("uninstalls systemd services and no-ops when absent", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    await installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" });
+
+    const calls = mockSpawn();
+    await expect(uninstallService({ homeDir: tmpDir, profileId: "default" })).resolves.toEqual({ ok: true });
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["systemctl", "--user", "stop", unitNameForProfile("default")],
+      ["systemctl", "--user", "disable", unitNameForProfile("default")],
+      ["systemctl", "--user", "daemon-reload"],
+    ]);
+    await expect(uninstallService({ homeDir: tmpDir, profileId: "default" })).resolves.toEqual({ ok: true });
+  });
+
+  it("parses systemd and launchd probe output", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn((call) => call.args.includes("show")
+      ? { code: 0, stdout: "ActiveState=active\nSubState=running\nLoadState=loaded\n" }
+      : { code: 0 });
+
+    await expect(probeServiceState({ homeDir: tmpDir, profileId: "default" })).resolves.toMatchObject({
+      kind: "systemd-user",
+      installed: true,
+      scope: "user",
+      activeState: "active",
+      subState: "running",
+      profileId: "default",
+    });
+
+    await rm(join(binDir, "systemctl"), { force: true });
+    await addExecutable(binDir, "launchctl");
+    setPlatform("darwin");
+    mockSpawn(() => ({ code: 0, stdout: `123\t0\t${"com.estacoda.gateway.default-37a8eec1"}\n` }));
+    await expect(probeServiceState({ homeDir: tmpDir, profileId: "default" })).resolves.toMatchObject({
+      kind: "launchd",
+      installed: true,
+      activeState: "active",
+    });
+  });
+
+  it("probeServiceState never throws and keeps system fallback kind/scope consistent", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn(() => ({ code: 1, stderr: "boom" }));
+
+    await expect(probeServiceState({ homeDir: tmpDir, profileId: "default", system: true })).resolves.toMatchObject({
+      kind: "systemd-system",
+      installed: false,
+      scope: "system",
+      activeState: "unknown",
+      profileId: "default",
+    });
+
+    await rm(join(binDir, "systemctl"), { force: true });
+    await addExecutable(binDir, "launchctl");
+    setPlatform("darwin");
+    mockSpawn(() => ({ code: 1, stderr: "boom" }));
+    await expect(probeServiceState({ homeDir: tmpDir, profileId: "default", system: true })).resolves.toMatchObject({
+      kind: "launchd",
+      installed: false,
+      scope: "user",
+      activeState: "unknown",
+    });
+  });
+});

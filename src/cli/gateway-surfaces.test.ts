@@ -192,6 +192,9 @@ function fakeGatewayStatusData(): GatewayStatusData {
     missingConfig: [
       { channel: "telegram", item: "BOT_TOKEN_ENV" },
     ],
+    serviceManagerStates: [
+      { kind: "none", installed: false, scope: "user", activeState: "unknown", profileId: "default" },
+    ],
     identityLocks: [],
   };
 }

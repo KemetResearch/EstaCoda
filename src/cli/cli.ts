@@ -130,6 +130,8 @@ import {
   runGatewayStartDryRun,
   runGatewayStartBackground,
   runGatewayApprovals,
+  runGatewayInstallService,
+  runGatewayUninstallService,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -3077,24 +3079,46 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
 
 async function gateway(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
+  const installAliases = new Set(["install", "install-service"]);
+  const uninstallAliases = new Set(["uninstall", "uninstall-service"]);
 
   if (subcommand === "status") {
-    const result = await runGatewayStatus({ ...options, profileId: parseGatewayProfileFlag(rest) });
+    const result = await runGatewayStatus({ ...options, profileId: parseGatewayProfileFlag(rest) ?? options.profileId });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand !== undefined && installAliases.has(subcommand)) {
+    const result = await runGatewayInstallService({
+      ...options,
+      profileId: parseGatewayProfileFlag(rest) ?? options.profileId,
+      system: hasFlag(rest, "--system"),
+      runAsUser: valueAfter(rest, "--run-as-user"),
+      force: hasFlag(rest, "--force"),
+    });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand !== undefined && uninstallAliases.has(subcommand)) {
+    const result = await runGatewayUninstallService({
+      ...options,
+      profileId: parseGatewayProfileFlag(rest) ?? options.profileId,
+      system: hasFlag(rest, "--system"),
+    });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "diagnose") {
-    const result = await runGatewayDiagnose({ ...options, profileId: parseGatewayProfileFlag(rest) });
+    const result = await runGatewayDiagnose({ ...options, profileId: parseGatewayProfileFlag(rest) ?? options.profileId });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "approvals") {
-    const result = await runGatewayApprovals({ ...options, profileId: parseGatewayProfileFlag(rest) }, rest);
+    const result = await runGatewayApprovals({ ...options, profileId: parseGatewayProfileFlag(rest) ?? options.profileId }, rest);
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "stop") {
-    const profileId = parseGatewayProfileFlag(rest);
+    const profileId = parseGatewayProfileFlag(rest) ?? options.profileId;
     const result = await runGatewayStop({
       ...options,
       profileId,
@@ -3104,7 +3128,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   }
 
   if (subcommand === "restart") {
-    const profileId = parseGatewayProfileFlag(rest);
+    const profileId = parseGatewayProfileFlag(rest) ?? options.profileId;
     const result = await runGatewayRestart({
       ...options,
       profileId,
@@ -3114,7 +3138,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   }
 
   if (subcommand === "start") {
-    const profileId = parseGatewayProfileFlag(rest);
+    const profileId = parseGatewayProfileFlag(rest) ?? options.profileId;
     const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
     const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
     if (foundDeprecated !== undefined) {
@@ -3176,6 +3200,12 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway status",
       "  estacoda gateway diagnose",
       "  estacoda gateway approvals [list|approve|deny]",
+      "  estacoda gateway install",
+      "  estacoda gateway install --system --run-as-user <user>",
+      "  estacoda gateway install --force",
+      "  estacoda gateway install --profile <id>",
+      "  estacoda gateway uninstall",
+      "  estacoda gateway uninstall --system",
       "  estacoda gateway stop",
       "  estacoda gateway stop --force",
       "  estacoda gateway restart",

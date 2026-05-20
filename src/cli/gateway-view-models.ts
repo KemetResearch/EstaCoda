@@ -16,6 +16,7 @@ import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostic
 import type { DeliveryErrorRecord } from "../channels/delivery-router.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
+import type { ServiceManagerState } from "../gateway/service-manager.js";
 import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
@@ -68,6 +69,7 @@ export type GatewayStatusData = {
   readonly approvalPolicy: string;
   readonly missingConfig: readonly { readonly channel: string; readonly item: string }[];
   readonly supervisor?: SupervisorSnapshot;
+  readonly serviceManagerStates: readonly ServiceManagerState[];
   readonly identityLocks: readonly IdentityLockStatus[];
   readonly runtimeState?: PersistedRuntimeState;
   readonly runtimeCacheState?: RuntimeCacheState;
@@ -87,6 +89,7 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
   const stuckTurnHistoryBlock = buildStuckTurnHistoryBlock(data.runtimeCacheState);
   const blocks: ViewModel[] = [
     buildSupervisorBlock(data.supervisor),
+    buildServiceManagerBlock(data.serviceManagerStates),
     ...(adapterRuntimeBlock ? [adapterRuntimeBlock] : []),
     ...(runtimeCacheBlock ? [runtimeCacheBlock] : []),
     ...(activeTurnsBlock ? [activeTurnsBlock] : []),
@@ -123,6 +126,28 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     ok: true,
     title: "EstaCoda gateway status",
     blocks,
+  });
+}
+
+function buildServiceManagerBlock(states: readonly ServiceManagerState[]): ViewModel {
+  if (states.length === 0) {
+    return buildKeyValueBlockViewModel({
+      title: "Service Manager",
+      entries: [kv("Status", "unavailable")],
+    });
+  }
+
+  const entries: KeyValueEntry[] = states.map((state) => {
+    const label = state.scope === undefined ? state.kind : `${state.kind} (${state.scope})`;
+    const value = state.installed
+      ? `${state.activeState ?? "unknown"}${state.subState !== undefined ? ` (${state.subState})` : ""}`
+      : "not installed";
+    return kv(label, value);
+  });
+
+  return buildKeyValueBlockViewModel({
+    title: "Service Manager",
+    entries,
   });
 }
 

@@ -7,11 +7,29 @@ const childProcessMock = vi.hoisted(() => ({
   spawn: vi.fn(),
 }));
 
+const serviceManagerMock = vi.hoisted(() => ({
+  detectServiceManager: vi.fn(),
+  installService: vi.fn(),
+  uninstallService: vi.fn(),
+  probeServiceState: vi.fn(),
+}));
+
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     spawn: childProcessMock.spawn,
+  };
+});
+
+vi.mock("../gateway/service-manager.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-manager.js")>();
+  return {
+    ...actual,
+    detectServiceManager: serviceManagerMock.detectServiceManager,
+    installService: serviceManagerMock.installService,
+    uninstallService: serviceManagerMock.uninstallService,
+    probeServiceState: serviceManagerMock.probeServiceState,
   };
 });
 
@@ -31,6 +49,20 @@ describe("cli gateway start", () => {
     childProcessMock.spawn.mockReturnValue({
       pid: 12346,
       unref: vi.fn(),
+    });
+    serviceManagerMock.detectServiceManager.mockReset();
+    serviceManagerMock.installService.mockReset();
+    serviceManagerMock.uninstallService.mockReset();
+    serviceManagerMock.probeServiceState.mockReset();
+    serviceManagerMock.detectServiceManager.mockReturnValue("none");
+    serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+    serviceManagerMock.uninstallService.mockResolvedValue({ ok: true });
+    serviceManagerMock.probeServiceState.mockResolvedValue({
+      kind: "none",
+      installed: false,
+      scope: "user",
+      activeState: "unknown",
+      profileId: "default",
     });
     supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
       ok: true,
@@ -92,6 +124,8 @@ describe("cli gateway start", () => {
     expect(result.output).toContain("estacoda gateway start --background");
     expect(result.output).toContain("estacoda gateway restart");
     expect(result.output).toContain("estacoda gateway restart --graceful");
+    expect(result.output).toContain("estacoda gateway install");
+    expect(result.output).toContain("estacoda gateway uninstall");
   });
 
   it("runs --dry-run without entering the foreground supervisor or writing PID/lock state", async () => {
@@ -178,6 +212,38 @@ describe("cli gateway start", () => {
     });
     expect(result.handled).toBe(true);
     expect(result.output).toContain("Gateway was not running");
+  });
+
+  it("parses gateway install aliases and service flags", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "install-service", "--profile", "work", "--system", "--run-as-user", "estacoda", "--force"],
+      workspaceRoot: "/tmp",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Gateway service installed");
+    expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "work",
+      system: true,
+      runAsUser: "estacoda",
+      force: true,
+    }));
+  });
+
+  it("parses gateway uninstall aliases and service flags", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "uninstall-service", "--profile", "work", "--system"],
+      workspaceRoot: "/tmp",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Gateway service uninstalled");
+    expect(serviceManagerMock.uninstallService).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "work",
+      system: true,
+    }));
   });
 });
 

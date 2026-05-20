@@ -23,6 +23,7 @@ function baseStatusData(): GatewayStatusData {
     approvalCount: 0,
     approvalPolicy: "adaptive",
     missingConfig: [],
+    serviceManagerStates: [],
     identityLocks: [],
   };
 }
