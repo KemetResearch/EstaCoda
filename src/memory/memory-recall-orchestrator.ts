@@ -14,6 +14,8 @@ import {
   type SessionRecallService
 } from "../session/session-recall-service.js";
 import type { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
+import { truncate } from "../utils/formatting.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 type MemoryPromptContextBuilderLike = Pick<MemoryPromptContextBuilder, "build">;
 type SessionRecallServiceLike = Pick<SessionRecallService, "recall">;
@@ -26,6 +28,18 @@ type SessionRecallDecisionRecorder = {
     sourceSessionIds: string[];
     warningCount: number;
     onEvent?: RuntimeEventSink;
+  }): Promise<string[]>;
+  recordExternalMemoryRecall?(input: {
+    providerIds: string[];
+    enabled: boolean;
+    attempted: boolean;
+    resultCount: number;
+    totalChars: number;
+    workspaceScoped: boolean;
+    warningCount: number;
+    failureCount: number;
+    failures?: Array<{ providerId?: string; reason: string }>;
+    durationMs?: number;
   }): Promise<string[]>;
 };
 
@@ -209,6 +223,7 @@ export class MemoryRecallOrchestrator {
       };
     }
 
+    const startedAt = Date.now();
     const result = await collectExternalMemoryRecall({
       query: input.query,
       providers: this.#externalMemoryProviders,
@@ -219,9 +234,25 @@ export class MemoryRecallOrchestrator {
         workspaceRoot: this.#workspaceRoot
       }
     });
+    const eventWarnings = await this.#recordExternalMemoryRecall({
+      providerIds: this.#externalMemoryProviders.map((provider) => provider.id),
+      enabled: this.#externalMemory.enabled === true,
+      attempted: true,
+      resultCount: result.blocks.length,
+      totalChars: result.blocks.reduce((sum, block) => sum + block.content.length, 0),
+      workspaceScoped: this.#workspaceRoot !== undefined,
+      warningCount: result.warnings.length,
+      failureCount: result.warnings.filter((warning) => /\b(?:failed|timed out|no recall hook)\b/iu.test(warning)).length,
+      failures: failuresFromWarnings(result.warnings),
+      durationMs: Date.now() - startedAt
+    });
+    const warnings = [
+      ...result.warnings,
+      ...eventWarnings
+    ];
     return {
       blocks: result.blocks,
-      warnings: result.warnings,
+      warnings,
       decision: {
         included: result.blocks.length > 0,
         reason: result.blocks.length > 0
@@ -230,7 +261,7 @@ export class MemoryRecallOrchestrator {
         query: input.query,
         scopesConsidered: LOCAL_SESSION_EXTERNAL_SCOPES,
         sourceSessions: result.sourceProviders,
-        warnings: result.warnings
+        warnings
       }
     };
   }
@@ -248,8 +279,45 @@ export class MemoryRecallOrchestrator {
     }
     return await this.#recorder.recordSessionRecallDecision(input);
   }
+
+  async #recordExternalMemoryRecall(input: {
+    providerIds: string[];
+    enabled: boolean;
+    attempted: boolean;
+    resultCount: number;
+    totalChars: number;
+    workspaceScoped: boolean;
+    warningCount: number;
+    failureCount: number;
+    failures?: Array<{ providerId?: string; reason: string }>;
+    durationMs?: number;
+  }): Promise<string[]> {
+    if (this.#recorder?.recordExternalMemoryRecall === undefined) {
+      return [];
+    }
+    try {
+      return await this.#recorder.recordExternalMemoryRecall(input);
+    } catch (error) {
+      return [`external memory recall event failed: ${truncate(redactSensitiveText(error instanceof Error ? error.message : String(error)), 240)}`];
+    }
+  }
 }
 
 function uniqueSourceSessionIds(blocks: PromptMemoryBlock[]): string[] {
   return [...new Set(blocks.flatMap((block) => block.entryIds ?? []))];
+}
+
+function failuresFromWarnings(warnings: readonly string[]): Array<{ providerId?: string; reason: string }> | undefined {
+  const failures = warnings
+    .filter((warning) => /\b(?:failed|timed out|no recall hook)\b/iu.test(warning))
+    .map((warning) => ({
+      providerId: providerIdFromWarning(warning),
+      reason: truncate(redactSensitiveText(warning), 240)
+    }));
+  return failures.length === 0 ? undefined : failures;
+}
+
+function providerIdFromWarning(warning: string): string | undefined {
+  const match = /external memory provider ([^\s]+) /iu.exec(warning);
+  return match?.[1];
 }

@@ -11,12 +11,17 @@ import type {
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import {
   SemanticCompressor,
   type SemanticCompressionDiagnostics,
   SUMMARY_FORMAT_VERSION
 } from "./semantic-compressor.js";
 import { estimateMessageTokensRough } from "./token-estimator.js";
+
+const MAX_PERSISTED_SUMMARY_CHARS = 10_000;
+const MAX_PERSISTED_FAILURE_MESSAGE_CHARS = 500;
+const MAX_RECENT_SAVINGS_RATIOS = 2;
 
 export type SessionCompressionServiceOptions = {
   sessionDb: SessionDB;
@@ -34,6 +39,8 @@ export type SessionCompressionRequest = {
   sessionId: string;
   focusTopic?: string;
   trigger?: SessionCompressionTrigger;
+  lastPromptTokensEstimated?: number;
+  lastActualPromptTokens?: number;
   signal?: AbortSignal;
 };
 
@@ -110,6 +117,8 @@ export class SessionCompressionService {
         messagesBefore: messages,
         messagesAfter: written,
         previousState,
+        lastPromptTokensEstimated: input.lastPromptTokensEstimated,
+        lastActualPromptTokens: input.lastActualPromptTokens,
         diagnostics: compressed.diagnostics
       });
 
@@ -131,6 +140,8 @@ export class SessionCompressionService {
     messagesBefore: SessionMessage[];
     messagesAfter: SessionMessage[];
     previousState: SessionCompressionState;
+    lastPromptTokensEstimated?: number;
+    lastActualPromptTokens?: number;
     diagnostics: SemanticCompressionDiagnostics;
   }): Promise<string[]> {
     const warnings: string[] = [];
@@ -146,6 +157,17 @@ export class SessionCompressionService {
       content: summaryMessage.content,
       metadata: summaryMessage.metadata
     });
+    const summaryLengthTokens = summaryEstimatedTokens;
+    const sourceMessageCount = input.messagesBefore.length;
+    const protectedMessageCount = input.diagnostics.protectedMessageCount;
+    const droppedMessageCount = Math.max(0, input.messagesBefore.length - input.messagesAfter.length);
+    const lastCompressedThroughMessageId = lastSource?.id;
+    const previousSummary = summaryMessage === undefined
+      ? undefined
+      : sanitizePersistedText(summaryMessage.content, MAX_PERSISTED_SUMMARY_CHARS);
+    const modelUsed = input.diagnostics.model;
+    const auxModelFailure = sanitizeFailure(input.diagnostics.auxModelFailure);
+    const mainRetryFailure = sanitizeFailure(input.diagnostics.mainRetryFailure);
     const compressedEvent: SessionEvent = {
       kind: "session-history-compressed",
       trigger: input.trigger,
@@ -155,17 +177,24 @@ export class SessionCompressionService {
         messageCount: input.diagnostics.summarizedMessageCount,
         estimatedTokens: input.diagnostics.preTokens
       },
+      sourceMessageCount,
       protectedFirstN: input.diagnostics.protectedFirstN,
       protectedLastN: input.diagnostics.protectedLastN,
       protectedSpans: input.diagnostics.protectedSpans,
+      protectedMessageCount,
       summaryFormatVersion: SUMMARY_FORMAT_VERSION,
       summaryChars: input.diagnostics.summaryChars,
       ...(summaryEstimatedTokens === undefined ? {} : { summaryEstimatedTokens }),
+      ...(summaryLengthTokens === undefined ? {} : { summaryLengthTokens }),
+      droppedMessageCount,
       estimatedSavingsTokens: input.diagnostics.estimatedSavingsTokens,
       estimatedSavingsRatio: input.diagnostics.estimatedSavingsRatio,
       fallbackUsed: input.diagnostics.fallbackUsed,
       fallbackReason: input.diagnostics.fallbackReason,
       model: input.diagnostics.model,
+      modelUsed,
+      ...(auxModelFailure === undefined ? {} : { auxModelFailure }),
+      ...(mainRetryFailure === undefined ? {} : { mainRetryFailure }),
       warnings: input.diagnostics.warnings
     };
     const stateEvent: SessionEvent = {
@@ -173,18 +202,43 @@ export class SessionCompressionService {
       state: {
         status: "compressed",
         trigger: compressedEvent.trigger,
+        compressionCount: input.previousState.compressionCount + 1,
         lastCompressedAt: this.#now().toISOString(),
+        ...(previousSummary === undefined ? {} : { previousSummary }),
+        lastCompressedThroughMessageId,
+        lastPromptTokensEstimated: input.lastPromptTokensEstimated ?? input.diagnostics.preTokens,
+        ...((input.lastActualPromptTokens ?? input.previousState.lastActualPromptTokens) === undefined ? {} : {
+          lastActualPromptTokens: input.lastActualPromptTokens ?? input.previousState.lastActualPromptTokens
+        }),
         source: compressedEvent.source,
         protectedFirstN: input.diagnostics.protectedFirstN,
         protectedLastN: input.diagnostics.protectedLastN,
         protectedSpans: input.diagnostics.protectedSpans,
+        sourceMessageCount,
+        protectedMessageCount,
         summaryFormatVersion: SUMMARY_FORMAT_VERSION,
         summaryMessageId: summaryMessage?.id,
         summaryChars: input.diagnostics.summaryChars,
         ...(summaryEstimatedTokens === undefined ? {} : { summaryEstimatedTokens }),
+        ...(summaryLengthTokens === undefined ? {} : { summaryLengthTokens }),
+        droppedMessageCount,
         estimatedSavingsTokens: input.diagnostics.estimatedSavingsTokens,
+        ...(input.diagnostics.lastCompressionSavingsPct === undefined ? {} : {
+          lastCompressionSavingsPct: input.diagnostics.lastCompressionSavingsPct
+        }),
+        ineffectiveCompressionCount: input.diagnostics.ineffectiveCompressionCount,
+        ...(input.diagnostics.recentSavingsRatios === undefined ? {} : {
+          recentSavingsRatios: input.diagnostics.recentSavingsRatios.slice(-MAX_RECENT_SAVINGS_RATIOS)
+        }),
+        ...(input.previousState.summaryFailureCooldownUntil === undefined ? {} : {
+          summaryFailureCooldownUntil: input.previousState.summaryFailureCooldownUntil
+        }),
         fallbackUsed: input.diagnostics.fallbackUsed,
+        fallbackReason: input.diagnostics.fallbackReason,
         model: input.diagnostics.model,
+        modelUsed,
+        ...(auxModelFailure === undefined ? {} : { auxModelFailure }),
+        ...(mainRetryFailure === undefined ? {} : { mainRetryFailure }),
         warnings: input.diagnostics.warnings
       }
     };
@@ -269,6 +323,24 @@ function toReplacementMessage(message: SessionMessage): ReplacementSessionMessag
     createdAt: message.createdAt,
     channel: message.channel,
     metadata: message.metadata === undefined ? undefined : { ...message.metadata }
+  };
+}
+
+function sanitizePersistedText(value: string, maxChars: number): string {
+  const redacted = redactSensitiveText(value);
+  return redacted.length <= maxChars ? redacted : redacted.slice(0, maxChars);
+}
+
+function sanitizeFailure(
+  failure: SemanticCompressionDiagnostics["auxModelFailure"]
+): SemanticCompressionDiagnostics["auxModelFailure"] {
+  if (failure === undefined) {
+    return undefined;
+  }
+  return {
+    code: sanitizePersistedText(failure.code, 80),
+    message: sanitizePersistedText(failure.message, MAX_PERSISTED_FAILURE_MESSAGE_CHARS),
+    recoverable: failure.recoverable
   };
 }
 

@@ -55,6 +55,8 @@ Provider-turn compression runs before prompt assembly when enabled and over thre
 
 Threshold checks use image-aware rough token estimation over persisted session messages. Image parts count toward pressure so multimodal sessions are less likely to be underestimated.
 
+Provider-turn token accounting is split into two signals. Before prompt assembly, compression still uses a rough estimate of persisted session messages to decide whether semantic compression should run. After prompt assembly, `ProviderTurnLoop` records the assembled prompt estimate from `prompt.budget.estimatedTokens`; after provider execution, it records actual input tokens when the provider exposes usage. Providers that omit usage and first turns without usage remain safe. These tracked values feed compression diagnostics and session compression state when available.
+
 Manual session compaction is available through:
 
 - interactive `/compact [topic]`
@@ -90,13 +92,66 @@ The notice tells the model:
 
 ## Fallback
 
-The compressor first tries the configured auxiliary `compression` route. If provider summarization is unavailable or fails, it falls back to deterministic packing. Static emergency text is reserved for cases where deterministic packing cannot fit.
+The compressor first tries the configured auxiliary `compression` route. If auxiliary summarization fails and the resolved route allows or provides main-route fallback behavior, compression retries the main route explicitly. If model summarization still cannot produce a usable summary, the service falls back to deterministic packing. Static emergency text is reserved for cases where deterministic packing cannot fit.
 
 Event persistence is best-effort. Event write failures must not corrupt compressed messages or turn a successful compaction into a failed user turn.
 
-Repeated marginal compactions are suppressed by anti-thrashing logic. A session-level compression lock prevents concurrent compactions for the same session. Auxiliary compression uses a per-session scope key so unrelated sessions do not block each other.
+Fallback diagnostics are persisted and surfaced as bounded, redacted metadata: `auxModelFailure`, `mainRetryFailure`, `fallbackUsed`, `fallbackReason`, and `modelUsed`. `fallbackReason` distinguishes deterministic fallback from the static emergency marker path. Model failure details are not stored as raw stacks.
+
+Repeated marginal compactions are suppressed by durable anti-thrashing logic. Compression state tracks the most recent savings percentage, a bounded list of recent savings ratios, and `ineffectiveCompressionCount`. A compression that saves less than 10% increments the count; a higher-savings compression resets it. After two consecutive ineffective compressions, automatic provider-turn and gateway-hygiene semantic compression skips. Manual `/compact [topic]` still bypasses this gate. An anti-thrash skip means "skip semantic compression"; deterministic history packing remains available.
+
+A session-level compression lock prevents concurrent compactions for the same session. Auxiliary compression uses a per-session scope key so unrelated sessions do not block each other.
 
 Summary output is redacted and normalized with the current summary prefix. Legacy prefixes are tolerated. The current implementation does not structurally validate headings as a schema; malformed summaries are treated as historical context and remain subordinate to live instructions.
+
+## Summary Budgeting
+
+Semantic compression computes a target summary budget instead of using a fixed provider generation limit. The target budget is based on the source messages being summarized, rough token estimation, `compression.targetRatio`, and the summary model context length when available.
+
+Implemented constants:
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| Minimum target summary budget | `2,000` tokens | Floor for small transcripts |
+| Context ratio cap | `0.05` | Summary target is capped at 5% of context |
+| Target ceiling | `12,000` tokens | Absolute target budget cap |
+| Provider generation headroom | `1.3x` | Provider `maxTokens` is larger than the target so the model can finish |
+
+The target summary budget and provider generation limit are intentionally different. The target budget appears in prompts, diagnostics, and events as the intended summary size. The provider request uses the target multiplied by the headroom ratio, rounded up, so a target budget of `2,000` sends `2,600` as the generation limit.
+
+## Observability
+
+Semantic compression records two best-effort event families:
+
+| Event | Purpose |
+|-------|---------|
+| `session-history-compressed` | Records what was compacted and how the compression path behaved |
+| `session-compression-state` | Stores rehydratable state for runtime/cache recreation |
+
+Operator-relevant state and event fields include:
+
+- `compressionCount`
+- `previousSummary` (redacted and bounded; not a full transcript)
+- `lastCompressedThroughMessageId`
+- `lastPromptTokensEstimated`
+- `lastActualPromptTokens`
+- `lastCompressionSavingsPct`
+- `ineffectiveCompressionCount`
+- `summaryFailureCooldownUntil`
+- `recentSavingsRatios`
+- `sourceMessageCount`
+- `protectedMessageCount`
+- `summaryLengthTokens`
+- `droppedMessageCount`
+- `modelUsed`
+- `auxModelFailure`
+- `mainRetryFailure`
+- `fallbackUsed`
+- `fallbackReason`
+
+Event/state payloads do not store full raw transcripts. Failure details are redacted and bounded. State is reconstructed from session events so compression count, previous bounded summary, cooldown, token counts, and anti-thrashing state survive runtime/cache eviction.
+
+Read-only status is available through the runtime tool `config.compression.status`. It reports normalized compression config, auxiliary compression route status, and latest session compression state/event summary when a session context is available. It does not write config, append session events, enable compression, expose `previousSummary`, or show credentials. There is no `config.compression.setup` tool.
 
 ## Safety Boundaries
 
@@ -112,7 +167,7 @@ Summarizer input and generated summary output are redacted with transcript-grade
 
 The compressor preserves protected head/tail spans, the latest user message, active tool-call/tool-result pairs where metadata permits, security decisions, explicit constraints, unresolved approvals, and recent turns.
 
-Older tool results may be pruned or summarized before LLM summarization. Provider-native tool call/result metadata is used where available to avoid orphaning active tool pairs.
+Older large tool results may be pruned before LLM summarization. This pruning affects semantic compression summarizer input only; persisted session history and normal provider-turn message flow are unchanged. The pruning pass preserves protected, recent, current, active, and metadata-insufficient tool results conservatively. When it can safely prune old large output, it replaces the content with a bounded redacted placeholder that may include tool name, command/path/status metadata, output size, line count, and short bounded context. Diagnostics record counts and removed character estimates, not raw pruned output. The pass does not implement broad orphan cleanup or full exact tool-pair repair.
 
 ## Distinctions
 
@@ -145,9 +200,15 @@ Deterministic history packing:
 This subsystem still does not provide:
 
 - default-on semantic compression
+- `config.compression.setup`
+- config mutation through `config.compression.status`
 - channel pointer rewrites
 - archive tables
 - vector search
+- embedding stores
+- broad orphan cleanup
+- full exact tool-pair repair
+- evolution integration
 - session recall changes
 - memory-file compaction changes
 - TaskFlow compaction changes

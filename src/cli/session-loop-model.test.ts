@@ -475,7 +475,8 @@ function compactResult() {
       warnings: [],
       eventWarnings: [],
       prunedToolResults: 0,
-      scopeKey: "profile:session"
+      scopeKey: "profile:session",
+      ineffectiveCompressionCount: 0
     },
     userFacingMessage: "Session history compacted"
   };

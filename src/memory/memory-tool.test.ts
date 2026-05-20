@@ -3,6 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ExternalMemoryProvider } from "../contracts/memory.js";
+import type { TrajectoryEvent, TrajectoryEventKind } from "../contracts/trajectory.js";
 import { createFileExternalMemoryProvider } from "./external-memory-provider.js";
 import { createMemoryTool } from "./memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
@@ -118,5 +119,202 @@ describe("memory.curate", () => {
     const mirrored = await readFile(join(profileRoot, "external-memory", "memory.jsonl"), "utf8");
     expect(mirrored).toContain("Likes external-memory tests");
     expect(mirrored).toContain("\"workspaceRoot\":\"/workspace/a\"");
+  });
+
+  it("records mirror-write audit data without raw memory content", async () => {
+    const store = new MemoryStore();
+    const events: unknown[] = [];
+    const trajectories: Array<{ kind: string; data: unknown }> = [];
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => undefined)
+    };
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      sessionDb: {
+        appendEvent: vi.fn(async (_sessionId, event) => {
+          events.push(event);
+        })
+      },
+      trajectoryRecorder: {
+        record: vi.fn((kind: TrajectoryEventKind, data: Record<string, unknown>): TrajectoryEvent => {
+          trajectories.push({ kind, data });
+          return {
+            id: `trajectory-${trajectories.length}`,
+            kind,
+            timestamp: "2026-05-20T00:00:00.000Z",
+            data
+          };
+        })
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Audit-sensitive preference should stay out of audit"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "external-memory-mirror-write",
+      providerIds: ["fake"],
+      enabled: true,
+      mirrorEnabled: true,
+      localWriteSucceeded: true,
+      mirrorAttempted: true,
+      mirrorSucceeded: true,
+      memoryFile: "USER.md",
+      operationKind: "append",
+      profileId: "default",
+      workspaceScoped: true,
+      warningCount: 0,
+      failureCount: 0
+    });
+    expect(JSON.stringify(events[0])).not.toContain("Audit-sensitive preference");
+    expect(JSON.stringify(events[0])).not.toContain("should stay out of audit");
+    expect(trajectories).toHaveLength(1);
+    expect(trajectories[0]?.kind).toBe("external-memory-mirror-write");
+  });
+
+  it("records redacted mirror-write failures without failing local memory writes", async () => {
+    const store = new MemoryStore();
+    const events: unknown[] = [];
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => {
+        throw new Error("TOKEN=secretsecretsecretsecretsecret " + "x".repeat(500));
+      })
+    };
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      sessionDb: {
+        appendEvent: vi.fn(async (_sessionId, event) => {
+          events.push(event);
+        })
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "MEMORY.md",
+      content: "- Local memory still wins"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.read("MEMORY.md")).toContain("Local memory still wins");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "external-memory-mirror-write",
+      mirrorSucceeded: false,
+      warningCount: 1,
+      failureCount: 1,
+      failures: [
+        expect.objectContaining({
+          providerId: "fake"
+        })
+      ]
+    });
+    const eventJson = JSON.stringify(events[0]);
+    expect(eventJson).toContain("TOKEN=[REDACTED]");
+    expect(eventJson).not.toContain("secretsecret");
+    expect(eventJson.length).toBeLessThan(1_200);
+  });
+
+  it("keeps mirror-write audit failures non-fatal and redacted", async () => {
+    const store = new MemoryStore();
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => undefined)
+    };
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      workspaceRoot: "/workspace/a",
+      sessionDb: {
+        appendEvent: vi.fn(async () => {
+          throw new Error("db token=secretsecretsecretsecretsecret");
+        })
+      },
+      trajectoryRecorder: {
+        record: vi.fn(() => {
+          throw new Error("trajectory token=secretsecretsecretsecretsecret");
+        })
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Event failure should not block local writes"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.read("USER.md")).toContain("Event failure should not block local writes");
+    const warnings = result.metadata?.warnings as string[] | undefined;
+    expect(warnings?.join("\n")).toContain("external memory mirror write session event failed");
+    expect(warnings?.join("\n")).toContain("external memory mirror write trajectory event failed");
+    expect(warnings?.join("\n")).not.toContain("secretsecret");
+  });
+
+  it("does not audit or run mirror writes when external memory is disabled", async () => {
+    const store = new MemoryStore();
+    const appendEvent = vi.fn(async () => undefined);
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => undefined)
+    };
+    const tool = createMemoryTool(store, {
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: { appendEvent },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: false,
+        timeoutMs: 750,
+        maxResults: 3,
+        maxChars: 2500,
+        mirrorWrites: true
+      }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Disabled external memory stays quiet"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(provider.mirrorMemoryWrite).not.toHaveBeenCalled();
+    expect(appendEvent).not.toHaveBeenCalled();
   });
 });

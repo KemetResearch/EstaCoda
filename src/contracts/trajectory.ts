@@ -27,6 +27,8 @@ export type TrajectoryEventKind =
   | "agent-cancelled"
   | "prompt-assembled"
   | "session-recall-decision"
+  | "external-memory-recall"
+  | "external-memory-mirror-write"
   | "session-history-packed"
   | "session-history-compressed"
   | "session-compression-state"

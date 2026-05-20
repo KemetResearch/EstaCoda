@@ -6,13 +6,19 @@ import {
   CONTENT_HEAD,
   CONTENT_MAX,
   CONTENT_TAIL,
+  computeSummaryBudget,
+  computeSummaryRequestMaxTokens,
+  deterministicFallbackSummary,
+  pruneOldToolResults,
   SemanticCompressor,
   SUMMARY_FORMAT_VERSION,
   SUMMARY_PREFIX,
+  SUMMARY_REQUEST_HEADROOM_RATIO,
   normalizeSummaryPrefix,
   serializeMessagesForSummary,
   TOOL_ARGS_MAX,
-  TOOL_ARGS_HEAD
+  TOOL_ARGS_HEAD,
+  TOOL_RESULT_PRUNE_THRESHOLD
 } from "./semantic-compressor.js";
 
 describe("SemanticCompressor", () => {
@@ -104,7 +110,99 @@ describe("SemanticCompressor", () => {
     expect(serialized.prunedToolResults).toBe(1);
   });
 
+  it("prunes old large tool results into bounded redacted placeholders before summarization", () => {
+    const secret = "OPENAI_API_KEY=sk-tool-secret1234567890abcdef";
+    const output = [
+      `start ${secret}`,
+      "middle line",
+      `end ${secret}`
+    ].join("\n") + "\n" + "x".repeat(TOOL_RESULT_PRUNE_THRESHOLD + 500);
+    const messages = [
+      message("tool-call", "agent", "calling shell", {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        command: "pnpm test",
+        path: "src/prompt/semantic-compressor.ts",
+        exitCode: 0
+      }),
+      message("tool-result", "tool", output, {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        command: "pnpm test",
+        path: "src/prompt/semantic-compressor.ts",
+        exitCode: 0
+      })
+    ];
+
+    const first = pruneOldToolResults(messages);
+    const second = pruneOldToolResults(messages);
+    const result = first.messages[1]!;
+
+    expect(first).toEqual(second);
+    expect(result.content).toContain("[tool result pruned]");
+    expect(result.content).toContain('tool="terminal"');
+    expect(result.content).toContain('command="pnpm test"');
+    expect(result.content).toContain('path="src/prompt/semantic-compressor.ts"');
+    expect(result.content).toContain('exit="0"');
+    expect(result.content).toContain("chars /");
+    expect(result.content).toContain("[REDACTED]");
+    expect(result.content).not.toContain("sk-tool-secret");
+    expect(result.content.length).toBeLessThan(output.length);
+    expect(result.metadata?.semanticCompressionToolResultPruned).toBe(true);
+    expect(first.diagnostics.prunedToolResults).toBe(1);
+    expect(first.diagnostics.prunedToolResultChars).toBeGreaterThan(0);
+    expect(first.diagnostics.protectedToolResultsKept).toBe(0);
+    expect(first.diagnostics.warnings).toContain("tool result tool-result was pruned before summarization");
+  });
+
+  it("does not prune protected tail, active, or metadata-insufficient tool results", () => {
+    const large = "important output\n".repeat(180);
+    const messages = [
+      message("old-call", "agent", "calling old tool", { tool_call_id: "old", tool_call_name: "terminal" }),
+      message("old-result", "tool", large, { tool_call_id: "old", tool_call_name: "terminal" }),
+      message("active-call", "agent", "calling active tool", { tool_call_id: "active", tool_call_name: "terminal", activeToolCall: true }),
+      message("active-result", "tool", large, { tool_call_id: "active", tool_call_name: "terminal", activeToolResult: true }),
+      message("weak-result", "tool", large),
+      message("tail-result", "tool", large, { tool_call_name: "terminal", command: "tail" }),
+      message("latest-user", "user", "latest user request")
+    ];
+
+    const result = pruneOldToolResults(messages, { protectedIndexes: new Set([5, 6]) });
+
+    expect(result.messages.find((entry) => entry.id === "old-result")?.content).toContain("[tool result pruned]");
+    expect(result.messages.find((entry) => entry.id === "active-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "weak-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "tail-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "latest-user")?.content).toBe("latest user request");
+    expect(result.diagnostics.prunedToolResults).toBe(1);
+    expect(result.diagnostics.protectedToolResultsKept).toBe(3);
+    expect(result.diagnostics.warnings).toContain("tool result weak-result kept before summarization: tool result metadata is insufficient");
+  });
+
+  it("keeps tool-call/result metadata sequences intact after pruning", () => {
+    const messages = [
+      message("old-call", "agent", "calling tool", { tool_call_id: "call-old", tool_call_name: "terminal" }),
+      message("old-result", "tool", "x".repeat(TOOL_RESULT_PRUNE_THRESHOLD + 1), { tool_call_id: "call-old", tool_call_name: "terminal" }),
+      message("latest-user", "user", "latest")
+    ];
+
+    const pruned = pruneOldToolResults(messages);
+    const serialized = serializeMessagesForSummary(pruned.messages);
+
+    expect(pruned.messages.map((entry) => entry.id)).toEqual(messages.map((entry) => entry.id));
+    expect(pruned.messages[0]?.metadata?.tool_call_id).toBe("call-old");
+    expect(pruned.messages[1]?.metadata?.tool_call_id).toBe("call-old");
+    expect(serialized.text.length).toBeLessThan(messages.map((entry) => entry.content).join("\n").length);
+    expect(serialized.text).toContain("[tool result pruned]");
+  });
+
   it("summarizes old tool results instead of preserving them as live history", async () => {
+    let observedTranscript = "";
+    const harness = auxiliaryHarness("old tool work summarized");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedTranscript = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("old tool work summarized");
+    });
     const compressor = new SemanticCompressor({
       config: normalizeSessionCompressionConfig({
         enabled: true,
@@ -114,11 +212,12 @@ describe("SemanticCompressor", () => {
         summaryModelContextLength: 50,
         threshold: 0.10
       }),
-      ...auxiliaryHarness("old tool work summarized")
+      ...harness
     });
+    const largeToolOutput = "x".repeat(CONTENT_MAX + 20);
     const messages = [
       message("old-tool-call", "agent", "calling tool", { tool_call_id: "call-old", tool_call_name: "shell.run" }),
-      message("old-tool-result", "tool", "x".repeat(CONTENT_MAX + 20), { tool_call_id: "call-old", tool_call_name: "shell.run" }),
+      message("old-tool-result", "tool", largeToolOutput, { tool_call_id: "call-old", tool_call_name: "shell.run" }),
       ...fixtureMessages(5)
     ];
 
@@ -128,9 +227,13 @@ describe("SemanticCompressor", () => {
     expect(result.messages.map((entry) => entry.id)).not.toContain("old-tool-call");
     expect(result.messages.map((entry) => entry.id)).not.toContain("old-tool-result");
     expect(result.diagnostics.prunedToolResults).toBe(1);
+    expect(result.diagnostics.prunedToolResultChars).toBeGreaterThan(0);
     expect(result.diagnostics.warnings).toEqual(expect.arrayContaining([
-      "tool result old-tool-result was truncated before summarization"
+      "tool result old-tool-result was pruned before summarization"
     ]));
+    expect(observedTranscript).toContain("[tool result pruned]");
+    expect(observedTranscript).not.toContain("x".repeat(CONTENT_HEAD));
+    expect(observedTranscript.length).toBeLessThan(largeToolOutput.length);
   });
 
   it("redacts summarizer input and generated summary output", async () => {
@@ -207,10 +310,12 @@ describe("SemanticCompressor", () => {
       sessionId: "session",
       previousState: {
         status: "compressed",
+        compressionCount: 1,
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
         summaryMessageId: "summary-prev",
+        ineffectiveCompressionCount: 0,
         fallbackUsed: false,
         warnings: []
       }
@@ -240,6 +345,98 @@ describe("SemanticCompressor", () => {
     expect(result.diagnostics.model).toBe("compression-model");
     expect(result.diagnostics.scopeKey).toBe("profile:session");
     expect(harness.providerExecutor.complete).toHaveBeenCalled();
+  });
+
+  it("passes computed summary budget with provider generation headroom", async () => {
+    let observedMaxTokens: number | undefined;
+    const harness = auxiliaryHarness("provider summary");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedMaxTokens = (request as { maxTokens?: number }).maxTokens;
+      return providerResult("provider summary");
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...harness
+    });
+
+    await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
+
+    const targetSummaryBudget = computeSummaryBudget({
+      sourceMessages: fixtureMessages(5),
+      targetRatio: 0.20,
+      contextLength: 50
+    });
+    expect(targetSummaryBudget).toBe(2_000);
+    expect(SUMMARY_REQUEST_HEADROOM_RATIO).toBe(1.3);
+    expect(observedMaxTokens).toBe(computeSummaryRequestMaxTokens(targetSummaryBudget));
+    expect(observedMaxTokens).toBe(2_600);
+    expect(observedMaxTokens).not.toBe(1_200);
+  });
+
+  it("computes Hermes-style summary budgets from source tokens, ratio, context cap, and ceiling", () => {
+    const small = computeSummaryBudget({
+      sourceMessages: [message("small", "user", "small transcript")],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const normalMessages = [message("normal", "user", "x".repeat(79_960))];
+    const normal = computeSummaryBudget({
+      sourceMessages: normalMessages,
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const lowerRatio = computeSummaryBudget({
+      sourceMessages: normalMessages,
+      targetRatio: 0.10,
+      contextLength: 128_000
+    });
+    const contextCapped = computeSummaryBudget({
+      sourceMessages: [message("huge", "user", "x".repeat(399_960))],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const ceilingCapped = computeSummaryBudget({
+      sourceMessages: [message("ceiling", "user", "x".repeat(999_960))],
+      targetRatio: 0.20,
+      contextLength: 400_000
+    });
+
+    expect(small).toBe(2_000);
+    expect(normal).toBe(4_000);
+    expect(lowerRatio).toBe(2_000);
+    expect(contextCapped).toBe(6_400);
+    expect(ceilingCapped).toBe(12_000);
+  });
+
+  it("uses context length and image-aware metadata when computing summary budgets", () => {
+    const sourceMessages = [message("images", "user", "", { imageCount: 10 })];
+    const imageBudget = computeSummaryBudget({
+      sourceMessages,
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const textOnlyBudget = computeSummaryBudget({
+      sourceMessages: [message("text", "user", "")],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const lowerContextBudget = computeSummaryBudget({
+      sourceMessages: [message("large", "user", "x".repeat(79_960))],
+      targetRatio: 0.20,
+      contextLength: 50_000
+    });
+
+    expect(imageBudget).toBeGreaterThan(textOnlyBudget);
+    expect(imageBudget).toBe(3_202);
+    expect(lowerContextBudget).toBe(2_500);
   });
 
   it("passes manual focus topics into the summarizer prompt", async () => {
@@ -272,7 +469,7 @@ describe("SemanticCompressor", () => {
     expect(observedPrompt).toContain("Manual focus topic: deployment handoff");
   });
 
-  it("falls back deterministically when auxiliary or main fallback summarization fails", async () => {
+  it("falls back deterministically when auxiliary and explicit main retry fail", async () => {
     const failing = auxiliaryHarness("provider failed", false);
     const compressor = new SemanticCompressor({
       config: normalizeSessionCompressionConfig({
@@ -289,8 +486,61 @@ describe("SemanticCompressor", () => {
     const result = await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
 
     expect(result.diagnostics.fallbackUsed).toBe(true);
-    expect(result.diagnostics.fallbackReason).toBe("failed");
+    expect(result.diagnostics.fallbackReason).toBe("deterministic-fallback");
+    expect(result.diagnostics.auxModelFailure).toEqual(expect.objectContaining({
+      code: "failed"
+    }));
+    expect(result.diagnostics.mainRetryFailure).toEqual(expect.objectContaining({
+      code: "failed"
+    }));
     expect(result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content).toContain(SUMMARY_PREFIX);
+  });
+
+  it("records main retry success after auxiliary compression failure", async () => {
+    const providerExecutor = {
+      complete: vi.fn(async (_request?: unknown, _preferences?: unknown, options?: { primaryRoute?: ResolvedModelRoute }): Promise<any> => {
+        if (options?.primaryRoute?.id === "compression-model") {
+          return providerResult("aux failed OPENAI_API_KEY=aux-secret", false, "compression-model", "network");
+        }
+        return providerResult("main retry summary", true, "main-model");
+      })
+    };
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      route: auxiliaryRoute(),
+      mainRoute: mainRoute(),
+      providerExecutor
+    });
+
+    const result = await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
+
+    expect(providerExecutor.complete).toHaveBeenCalledTimes(2);
+    expect(result.diagnostics.fallbackUsed).toBe(true);
+    expect(result.diagnostics.fallbackReason).toBeUndefined();
+    expect(result.diagnostics.model).toBe("main-model");
+    expect(result.diagnostics.auxModelFailure).toEqual({
+      code: "network",
+      message: "aux failed OPENAI_API_KEY=[REDACTED]",
+      recoverable: true
+    });
+    expect(result.diagnostics.mainRetryFailure).toBeUndefined();
+    expect(result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content).toContain("main retry summary");
+  });
+
+  it("uses a static emergency marker only when deterministic fallback cannot fit", () => {
+    const deterministic = deterministicFallbackSummary("old context ".repeat(100), 2_000);
+    const staticFallback = deterministicFallbackSummary("old context ".repeat(100), 1);
+
+    expect(deterministic.reason).toBe("deterministic-fallback");
+    expect(staticFallback.reason).toBe("static-emergency-marker");
+    expect(staticFallback.summary).toContain("could not be summarized within the fallback budget");
   });
 
   it("skips after ineffective recent compression to avoid thrashing", async () => {
@@ -311,10 +561,11 @@ describe("SemanticCompressor", () => {
       sessionId: "session",
       previousState: {
         status: "compressed",
+        compressionCount: 2,
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
-        estimatedSavingsTokens: 0,
+        ineffectiveCompressionCount: 2,
         fallbackUsed: false,
         warnings: []
       }
@@ -322,7 +573,8 @@ describe("SemanticCompressor", () => {
 
     expect(result.didCompress).toBe(false);
     expect(result.diagnostics.reason).toBe("anti-thrashing");
-    expect(result.diagnostics.warnings).toContain("recent compression was ineffective; skipped to avoid thrashing");
+    expect(result.diagnostics.ineffectiveCompressionCount).toBe(2);
+    expect(result.diagnostics.warnings).toContain("last 2 compressions saved <10% each; skipped to avoid thrashing");
   });
 
   it("uses image-aware token estimates", () => {
@@ -391,18 +643,19 @@ function auxiliaryHarness(content: string, ok = true) {
   };
 }
 
-function providerResult(content: string, ok = true) {
+function providerResult(content: string, ok = true, model = "compression-model", errorClass?: ProviderResponse["errorClass"]) {
   const response: ProviderResponse = {
     ok,
     content,
-    model: "compression-model",
-    provider: "test-provider"
+    model,
+    provider: "test-provider",
+    errorClass
   };
   return {
     ok,
     response,
     fallbackUsed: false,
-    attempts: [{ provider: "test-provider", model: "compression-model", ok, content }],
+    attempts: [{ provider: "test-provider", model, ok, content, errorClass }],
     toolCalls: []
   };
 }

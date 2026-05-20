@@ -230,10 +230,12 @@ describe("semantic compression deterministic evals", () => {
       sessionId: "iterative-session",
       previousState: {
         status: "compressed",
+        compressionCount: 1,
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
         summaryMessageId: "previous-summary",
+        ineffectiveCompressionCount: 0,
         fallbackUsed: false,
         warnings: []
       }

@@ -184,9 +184,12 @@ Workspace/profile scoping matters:
 Secret handling:
 
 - Transcript-grade redaction is used for semantic compression and external memory recall/mirroring paths.
+- Semantic compression failure diagnostics, fallback diagnostics, and status output are redacted and bounded. Status output omits raw summaries and `previousSummary` content.
+- Semantic compression may prune old large tool results before summarization, but that pruning is compression-input-only and must not mutate persisted session history.
 - External memory credentials and provider diagnostics are redacted before display.
+- External memory recall and mirror-write audit events are metadata-only. They must not include raw recalled content, raw mirrored memory content, credentials, or provider secrets.
 - Mirrored memory writes are opt-in and should not include secrets.
-- Provider failures, mirror-write failures, and event-recording failures surface as warnings rather than weakening local memory or security policy.
+- Provider failures, mirror-write failures, compression event failures, external audit event failures, and status diagnostic failures surface as warnings rather than weakening local memory or security policy.
 
 Prompt injection from historical or external memory is expected input. Retrieved text must be treated as data about prior context, not executable instruction.
 

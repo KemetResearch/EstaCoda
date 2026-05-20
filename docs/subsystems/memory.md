@@ -19,7 +19,7 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/memory/memory-prompt-context-builder.ts` | ~200 | Canonical prompt memory context builder |
 | `src/memory/memory-recall-orchestrator.ts` | ~230 | Per-turn recall and external-memory orchestration |
 | `src/memory/memory-promotion.ts` | ~260 | Promote repeated preferences and facts |
-| `src/memory/memory-tool.ts` | ~140 | Agent-facing memory CRUD tool |
+| `src/memory/memory-tool.ts` | ~140 | Agent-facing `memory.curate` curation tool |
 | `src/memory/memory-file-compaction-service.ts` | ~540 | Manual memory-file compaction and restore service |
 | `src/memory/external-memory-provider.ts` | ~530 | External memory lifecycle helpers and file-backed provider |
 
@@ -66,7 +66,13 @@ Duplicate `USER.md` / `MEMORY.md` injection is prevented by using one prepared `
 
 ## Recall Orchestration
 
-`MemoryRecallOrchestrator` prepares per-turn memory prompt context. It owns the decision flow for optional recall layers:
+`MemoryRecallOrchestrator` prepares per-turn memory prompt context. Recall ownership follows this implemented path:
+
+```text
+AgentLoop -> MemoryRecallOrchestrator -> SessionRecallService
+```
+
+The orchestrator owns the decision flow for optional recall layers:
 
 1. Build local memory context through `MemoryPromptContextBuilder`.
 2. Detect explicit recall/continuity language.
@@ -74,7 +80,7 @@ Duplicate `USER.md` / `MEMORY.md` injection is prevented by using one prepared `
 4. Include bounded external recall only when external memory is explicitly enabled and the same recall intent is present.
 5. Attach diagnostic decisions explaining why recall was included or omitted.
 
-Ordinary turns do not trigger broad recall. Intent routing can request recall, but it does not bypass security gates or memory precedence.
+Ordinary turns do not trigger broad recall. `ProviderTurnLoop` consumes the prepared memory context; it does not decide recall policy. `IntentRouter` does not currently emit recall-specific labels. Future router labels could become additive recall signals, but today the orchestrator's deterministic recall/continuity checks are the source of truth.
 
 ## Runtime Memory Refresh
 
@@ -119,6 +125,18 @@ There is no `read` action — memory content is automatically injected into the 
 ## Budget Pressure
 
 Memory budget pressure is calculated for bounded memory files and reported as:
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | Memory file kind, such as `USER.md` or `MEMORY.md` |
+| `source` | Source label; currently mirrors `kind` for memory-file pressure |
+| `chars` | Current character count |
+| `maxChars` | Configured character budget |
+| `ratio` | `chars / maxChars` as a decimal |
+| `percent` | Rounded percent of budget used |
+| `state` | Pressure state |
+| `remainingChars` | Remaining budget, floored at zero |
+| `overflowChars` | Characters over budget, floored at zero |
 
 | State | Meaning |
 |-------|---------|
@@ -195,7 +213,7 @@ External memory can:
 - mirror `memory.curate` writes when `mirrorWrites: true`
 - expose provider status through internal provider status helpers
 
-The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. The current runtime orchestration does not actively call those hooks; implemented runtime paths are external recall and opt-in `memory.curate` mirror writes.
+The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. These hooks are reserved for future orchestration unless a caller invokes them directly; current runtime orchestration does not actively call them. Implemented runtime paths are external recall and opt-in `memory.curate` mirror writes.
 
 External memory cannot:
 
@@ -205,6 +223,15 @@ External memory cannot:
 - write outside the profile `external-memory/` directory
 
 File-backed external memory redacts record content, status diagnostics, provider warnings, and mirrored operation payloads. Failures are isolated as warnings.
+
+External recall and mirror-write paths also emit best-effort metadata-only audit events:
+
+| Event | Purpose |
+|-------|---------|
+| `external-memory-recall` | Records provider id, attempted/enabled state, result count, bounded character totals, warning/failure counts, safe scope metadata, and redacted/bounded failures |
+| `external-memory-mirror-write` | Records provider id, mirror enabled/attempted/success state, local write success, safe memory kind/file metadata, bounded entry size, safe scope metadata, and redacted/bounded failures |
+
+These events never store raw recalled content, raw mirrored memory content, credentials, or secrets. Audit event failure is non-fatal, and local memory remains authoritative.
 
 ## Workflow Learning Separation
 
@@ -222,6 +249,8 @@ Workflow learning is separated from memory files:
 ## Session Compression Boundary
 
 Semantic session compression is documented separately in [Semantic Session Compression](./semantic-compression.md). It rewrites older session history into reference-only summaries; it does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata.
+
+Compression observability now includes computed summary budgeting, durable anti-thrashing state, ProviderTurnLoop prompt-token diagnostics, fallback diagnostics, and compression-input-only tool-result pruning. The pruning pass can replace old large tool output with bounded redacted placeholders before summarization, but it does not mutate persisted session history or implement broad orphan cleanup.
 
 Memory File Compaction is also a separate path. It can compact `USER.md` and `MEMORY.md` only, uses the `memory_compaction` auxiliary route, and remains distinct from semantic session compression and TaskFlow compaction.
 

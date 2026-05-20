@@ -57,18 +57,35 @@ export type SessionCompressionFailure = {
 export type SessionCompressionState = {
   status: "idle" | "compressed" | "failed";
   trigger?: SessionCompressionTrigger;
+  compressionCount: number;
   lastCompressedAt?: string;
+  previousSummary?: string;
+  lastCompressedThroughMessageId?: string;
+  lastPromptTokensEstimated?: number;
+  lastActualPromptTokens?: number;
   source?: SessionCompressionSourceRange;
   protectedFirstN: number;
   protectedLastN: number;
   protectedSpans: SessionCompressionProtectedSpan[];
+  sourceMessageCount?: number;
+  protectedMessageCount?: number;
   summaryFormatVersion?: string;
   summaryMessageId?: string;
   summaryChars?: number;
   summaryEstimatedTokens?: number;
+  summaryLengthTokens?: number;
+  droppedMessageCount?: number;
   estimatedSavingsTokens?: number;
+  lastCompressionSavingsPct?: number;
+  ineffectiveCompressionCount: number;
+  recentSavingsRatios?: number[];
+  summaryFailureCooldownUntil?: string;
   fallbackUsed: boolean;
+  fallbackReason?: string;
   model?: string;
+  modelUsed?: string;
+  auxModelFailure?: SessionCompressionFailure;
+  mainRetryFailure?: SessionCompressionFailure;
   warnings: string[];
   failure?: SessionCompressionFailure;
 };
@@ -77,17 +94,24 @@ export type SessionHistoryCompressedEvent = {
   kind: "session-history-compressed";
   trigger: SessionCompressionTrigger;
   source: SessionCompressionSourceRange;
+  sourceMessageCount?: number;
   protectedFirstN: number;
   protectedLastN: number;
   protectedSpans?: SessionCompressionProtectedSpan[];
+  protectedMessageCount?: number;
   summaryFormatVersion: string;
   summaryChars: number;
   summaryEstimatedTokens?: number;
+  summaryLengthTokens?: number;
+  droppedMessageCount?: number;
   estimatedSavingsTokens?: number;
   estimatedSavingsRatio?: number;
   fallbackUsed?: boolean;
   fallbackReason?: string;
   model?: string;
+  modelUsed?: string;
+  auxModelFailure?: SessionCompressionFailure;
+  mainRetryFailure?: SessionCompressionFailure;
   warnings?: string[];
   failure?: SessionCompressionFailure;
 };
@@ -250,6 +274,43 @@ export type SessionEvent =
       query?: string;
       sourceSessionIds: string[];
       warningCount: number;
+    }
+  | {
+      kind: "external-memory-recall";
+      providerIds: string[];
+      enabled: boolean;
+      attempted: boolean;
+      resultCount: number;
+      totalChars: number;
+      profileId?: string;
+      workspaceScoped: boolean;
+      warningCount: number;
+      failureCount: number;
+      failures?: Array<{
+        providerId?: string;
+        reason: string;
+      }>;
+      durationMs?: number;
+    }
+  | {
+      kind: "external-memory-mirror-write";
+      providerIds: string[];
+      enabled: boolean;
+      mirrorEnabled: boolean;
+      localWriteSucceeded: boolean;
+      mirrorAttempted: boolean;
+      mirrorSucceeded: boolean;
+      memoryFile?: string;
+      operationKind?: string;
+      entryChars: number;
+      profileId?: string;
+      workspaceScoped: boolean;
+      warningCount: number;
+      failureCount: number;
+      failures?: Array<{
+        providerId?: string;
+        reason: string;
+      }>;
     }
   | {
       kind: "session-history-packed";

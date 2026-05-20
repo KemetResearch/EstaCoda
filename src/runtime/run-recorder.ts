@@ -23,6 +23,7 @@ import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 export type RunRecorderOptions = {
   sessionDb: SessionDB;
@@ -360,6 +361,92 @@ export class RunRecorder {
     return warnings;
   }
 
+  async recordExternalMemoryRecall(input: {
+    providerIds: string[];
+    enabled: boolean;
+    attempted: boolean;
+    resultCount: number;
+    totalChars: number;
+    workspaceScoped: boolean;
+    warningCount: number;
+    failureCount: number;
+    failures?: Array<{ providerId?: string; reason: string }>;
+    durationMs?: number;
+  }): Promise<string[]> {
+    const event = {
+      kind: "external-memory-recall" as const,
+      providerIds: input.providerIds,
+      enabled: input.enabled,
+      attempted: input.attempted,
+      resultCount: input.resultCount,
+      totalChars: input.totalChars,
+      profileId: this.#profileId,
+      workspaceScoped: input.workspaceScoped,
+      warningCount: input.warningCount,
+      failureCount: input.failureCount,
+      ...(input.failures === undefined ? {} : { failures: sanitizeAuditFailures(input.failures) }),
+      ...(input.durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(input.durationMs)) })
+    };
+    const warnings: string[] = [];
+    try {
+      await this.#sessionDb.appendEvent(this.#sessionId, event);
+    } catch (error) {
+      warnings.push(`external memory recall session event failed: ${auditErrorMessage(error)}`);
+    }
+    try {
+      this.#trajectoryRecorder.record("external-memory-recall", event);
+    } catch (error) {
+      warnings.push(`external memory recall trajectory event failed: ${auditErrorMessage(error)}`);
+    }
+    return warnings;
+  }
+
+  async recordExternalMemoryMirrorWrite(input: {
+    providerIds: string[];
+    enabled: boolean;
+    mirrorEnabled: boolean;
+    localWriteSucceeded: boolean;
+    mirrorAttempted: boolean;
+    mirrorSucceeded: boolean;
+    memoryFile?: string;
+    operationKind?: string;
+    entryChars: number;
+    workspaceScoped: boolean;
+    warningCount: number;
+    failureCount: number;
+    failures?: Array<{ providerId?: string; reason: string }>;
+  }): Promise<string[]> {
+    const event = {
+      kind: "external-memory-mirror-write" as const,
+      providerIds: input.providerIds,
+      enabled: input.enabled,
+      mirrorEnabled: input.mirrorEnabled,
+      localWriteSucceeded: input.localWriteSucceeded,
+      mirrorAttempted: input.mirrorAttempted,
+      mirrorSucceeded: input.mirrorSucceeded,
+      ...(input.memoryFile === undefined ? {} : { memoryFile: input.memoryFile }),
+      ...(input.operationKind === undefined ? {} : { operationKind: input.operationKind }),
+      entryChars: Math.max(0, input.entryChars),
+      profileId: this.#profileId,
+      workspaceScoped: input.workspaceScoped,
+      warningCount: input.warningCount,
+      failureCount: input.failureCount,
+      ...(input.failures === undefined ? {} : { failures: sanitizeAuditFailures(input.failures) })
+    };
+    const warnings: string[] = [];
+    try {
+      await this.#sessionDb.appendEvent(this.#sessionId, event);
+    } catch (error) {
+      warnings.push(`external memory mirror write session event failed: ${auditErrorMessage(error)}`);
+    }
+    try {
+      this.#trajectoryRecorder.record("external-memory-mirror-write", event);
+    } catch (error) {
+      warnings.push(`external memory mirror write trajectory event failed: ${auditErrorMessage(error)}`);
+    }
+    return warnings;
+  }
+
   async recordSkillOutcomes(input: {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     userText: string;
@@ -542,6 +629,19 @@ function isArtifactRecord(value: unknown): value is ArtifactRecord {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function auditErrorMessage(error: unknown): string {
+  return truncate(redactSensitiveText(error instanceof Error ? error.message : String(error)), 240);
+}
+
+function sanitizeAuditFailures(
+  failures: Array<{ providerId?: string; reason: string }>
+): Array<{ providerId?: string; reason: string }> {
+  return failures.slice(0, 8).map((failure) => ({
+    ...(failure.providerId === undefined ? {} : { providerId: truncate(redactSensitiveText(failure.providerId), 80) }),
+    reason: truncate(redactSensitiveText(failure.reason), 240)
+  }));
 }
 
 function summarizeSkillOutcome(
