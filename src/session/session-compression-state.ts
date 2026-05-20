@@ -10,6 +10,7 @@ export const INITIAL_SESSION_COMPRESSION_STATE: SessionCompressionState = {
   protectedFirstN: 0,
   protectedLastN: 0,
   protectedSpans: [],
+  ineffectiveCompressionCount: 0,
   fallbackUsed: false,
   warnings: []
 };
@@ -46,6 +47,9 @@ export function normalizeSessionCompressionState(value: unknown): SessionCompres
   const summaryChars = normalizeOptionalNonNegativeInteger(value.summaryChars);
   const summaryEstimatedTokens = normalizeOptionalNonNegativeInteger(value.summaryEstimatedTokens);
   const estimatedSavingsTokens = normalizeOptionalInteger(value.estimatedSavingsTokens);
+  const lastCompressionSavingsPct = normalizeOptionalFiniteNumber(value.lastCompressionSavingsPct);
+  const ineffectiveCompressionCount = normalizeNonNegativeInteger(value.ineffectiveCompressionCount);
+  const recentSavingsRatios = normalizeRecentSavingsRatios(value.recentSavingsRatios);
   const fallbackUsed = value.fallbackUsed === true;
   const model = typeof value.model === "string" ? value.model : undefined;
   const warnings = Array.isArray(value.warnings)
@@ -74,6 +78,9 @@ export function normalizeSessionCompressionState(value: unknown): SessionCompres
     summaryChars,
     summaryEstimatedTokens,
     estimatedSavingsTokens,
+    lastCompressionSavingsPct,
+    ineffectiveCompressionCount,
+    recentSavingsRatios,
     fallbackUsed,
     model,
     warnings,
@@ -86,6 +93,7 @@ function cloneSessionCompressionState(state: SessionCompressionState): SessionCo
     ...state,
     source: state.source === undefined ? undefined : { ...state.source },
     protectedSpans: state.protectedSpans.map((span) => ({ ...span })),
+    recentSavingsRatios: state.recentSavingsRatios === undefined ? undefined : [...state.recentSavingsRatios],
     warnings: [...state.warnings],
     failure: state.failure === undefined ? undefined : { ...state.failure }
   };
@@ -131,6 +139,20 @@ function normalizeOptionalInteger(value: unknown): number | undefined {
     return undefined;
   }
   return Math.trunc(value);
+}
+
+function normalizeOptionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeRecentSavingsRatios(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const ratios = value
+    .filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry))
+    .slice(-2);
+  return ratios.length === 0 ? undefined : ratios;
 }
 
 function isCompressionTrigger(value: unknown): value is SessionCompressionTrigger {

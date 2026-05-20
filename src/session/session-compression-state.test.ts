@@ -49,6 +49,9 @@ describe("session compression events and state", () => {
         protectedSpans: [],
         summaryFormatVersion: "session-summary.v1",
         summaryChars: 500,
+        lastCompressionSavingsPct: 8.5,
+        ineffectiveCompressionCount: 2,
+        recentSavingsRatios: [0.12, 0.085],
         fallbackUsed: true,
         warnings: ["fallback"]
       }
@@ -104,6 +107,9 @@ describe("session compression events and state", () => {
       summaryChars: undefined,
       summaryEstimatedTokens: undefined,
       estimatedSavingsTokens: undefined,
+      lastCompressionSavingsPct: undefined,
+      ineffectiveCompressionCount: 0,
+      recentSavingsRatios: undefined,
       fallbackUsed: false,
       model: undefined,
       warnings: [],
@@ -131,6 +137,9 @@ describe("session compression events and state", () => {
           protectedLastN: Infinity,
           protectedSpans: [{ messageCount: 2, future: true }, "bad"],
           summaryChars: "500",
+          lastCompressionSavingsPct: "8.5",
+          ineffectiveCompressionCount: -1,
+          recentSavingsRatios: [0.3, "bad", Number.NaN, 0.08, 0.09],
           fallbackUsed: "yes",
           warnings: ["kept", 123],
           futureField: { ok: true }
@@ -145,6 +154,9 @@ describe("session compression events and state", () => {
     expect(state.protectedLastN).toBe(0);
     expect(state.protectedSpans).toEqual([{ startMessageId: undefined, endMessageId: undefined, messageCount: 2 }]);
     expect(state.summaryChars).toBeUndefined();
+    expect(state.lastCompressionSavingsPct).toBeUndefined();
+    expect(state.ineffectiveCompressionCount).toBe(0);
+    expect(state.recentSavingsRatios).toEqual([0.08, 0.09]);
     expect(state.fallbackUsed).toBe(false);
     expect(state.warnings).toEqual(["kept"]);
   });

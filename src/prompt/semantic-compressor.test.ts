@@ -6,9 +6,12 @@ import {
   CONTENT_HEAD,
   CONTENT_MAX,
   CONTENT_TAIL,
+  computeSummaryBudget,
+  computeSummaryRequestMaxTokens,
   SemanticCompressor,
   SUMMARY_FORMAT_VERSION,
   SUMMARY_PREFIX,
+  SUMMARY_REQUEST_HEADROOM_RATIO,
   normalizeSummaryPrefix,
   serializeMessagesForSummary,
   TOOL_ARGS_MAX,
@@ -211,6 +214,7 @@ describe("SemanticCompressor", () => {
         protectedLastN: 0,
         protectedSpans: [],
         summaryMessageId: "summary-prev",
+        ineffectiveCompressionCount: 0,
         fallbackUsed: false,
         warnings: []
       }
@@ -240,6 +244,98 @@ describe("SemanticCompressor", () => {
     expect(result.diagnostics.model).toBe("compression-model");
     expect(result.diagnostics.scopeKey).toBe("profile:session");
     expect(harness.providerExecutor.complete).toHaveBeenCalled();
+  });
+
+  it("passes computed summary budget with provider generation headroom", async () => {
+    let observedMaxTokens: number | undefined;
+    const harness = auxiliaryHarness("provider summary");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedMaxTokens = (request as { maxTokens?: number }).maxTokens;
+      return providerResult("provider summary");
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...harness
+    });
+
+    await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
+
+    const targetSummaryBudget = computeSummaryBudget({
+      sourceMessages: fixtureMessages(5),
+      targetRatio: 0.20,
+      contextLength: 50
+    });
+    expect(targetSummaryBudget).toBe(2_000);
+    expect(SUMMARY_REQUEST_HEADROOM_RATIO).toBe(1.3);
+    expect(observedMaxTokens).toBe(computeSummaryRequestMaxTokens(targetSummaryBudget));
+    expect(observedMaxTokens).toBe(2_600);
+    expect(observedMaxTokens).not.toBe(1_200);
+  });
+
+  it("computes Hermes-style summary budgets from source tokens, ratio, context cap, and ceiling", () => {
+    const small = computeSummaryBudget({
+      sourceMessages: [message("small", "user", "small transcript")],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const normalMessages = [message("normal", "user", "x".repeat(79_960))];
+    const normal = computeSummaryBudget({
+      sourceMessages: normalMessages,
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const lowerRatio = computeSummaryBudget({
+      sourceMessages: normalMessages,
+      targetRatio: 0.10,
+      contextLength: 128_000
+    });
+    const contextCapped = computeSummaryBudget({
+      sourceMessages: [message("huge", "user", "x".repeat(399_960))],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const ceilingCapped = computeSummaryBudget({
+      sourceMessages: [message("ceiling", "user", "x".repeat(999_960))],
+      targetRatio: 0.20,
+      contextLength: 400_000
+    });
+
+    expect(small).toBe(2_000);
+    expect(normal).toBe(4_000);
+    expect(lowerRatio).toBe(2_000);
+    expect(contextCapped).toBe(6_400);
+    expect(ceilingCapped).toBe(12_000);
+  });
+
+  it("uses context length and image-aware metadata when computing summary budgets", () => {
+    const sourceMessages = [message("images", "user", "", { imageCount: 10 })];
+    const imageBudget = computeSummaryBudget({
+      sourceMessages,
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const textOnlyBudget = computeSummaryBudget({
+      sourceMessages: [message("text", "user", "")],
+      targetRatio: 0.20,
+      contextLength: 128_000
+    });
+    const lowerContextBudget = computeSummaryBudget({
+      sourceMessages: [message("large", "user", "x".repeat(79_960))],
+      targetRatio: 0.20,
+      contextLength: 50_000
+    });
+
+    expect(imageBudget).toBeGreaterThan(textOnlyBudget);
+    expect(imageBudget).toBe(3_202);
+    expect(lowerContextBudget).toBe(2_500);
   });
 
   it("passes manual focus topics into the summarizer prompt", async () => {
@@ -314,7 +410,7 @@ describe("SemanticCompressor", () => {
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
-        estimatedSavingsTokens: 0,
+        ineffectiveCompressionCount: 2,
         fallbackUsed: false,
         warnings: []
       }
@@ -322,7 +418,8 @@ describe("SemanticCompressor", () => {
 
     expect(result.didCompress).toBe(false);
     expect(result.diagnostics.reason).toBe("anti-thrashing");
-    expect(result.diagnostics.warnings).toContain("recent compression was ineffective; skipped to avoid thrashing");
+    expect(result.diagnostics.ineffectiveCompressionCount).toBe(2);
+    expect(result.diagnostics.warnings).toContain("last 2 compressions saved <10% each; skipped to avoid thrashing");
   });
 
   it("uses image-aware token estimates", () => {

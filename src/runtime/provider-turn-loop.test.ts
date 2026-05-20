@@ -271,6 +271,7 @@ function compressionDiagnostics(
     warnings: [],
     prunedToolResults: 0,
     scopeKey: "default:test",
+    ineffectiveCompressionCount: 0,
     eventWarnings: [],
     ...overrides
   };
@@ -450,6 +451,48 @@ describe("ProviderTurnLoop semantic session compression", () => {
       kind: "provider-completion",
       usage: expect.objectContaining({
         inputTokens: 123
+      })
+    }));
+  });
+
+  it("provider turn succeeds when semantic compression skips for anti-thrashing", async () => {
+    const harness = await createCompressionHarness();
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: false,
+      messages: [],
+      diagnostics: compressionDiagnostics({
+        shouldCompress: false,
+        reason: "anti-thrashing",
+        warnings: ["last 2 compressions saved <10% each; skipped to avoid thrashing"],
+        ineffectiveCompressionCount: 2
+      }),
+      userFacingMessage: undefined
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await appendHistory(harness.sessionDb, harness.sessionId, "large history ".repeat(200));
+
+    const result = await runBasicProviderTurn(loop);
+
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(compactIfNeeded).toHaveBeenCalledTimes(1);
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    expect(promptEvent).toEqual(expect.objectContaining({
+      kind: "prompt-assembled",
+      budget: expect.objectContaining({
+        compression: expect.objectContaining({
+          triggered: false,
+          mode: "none",
+          warnings: expect.arrayContaining(["last 2 compressions saved <10% each; skipped to avoid thrashing"])
+        })
       })
     }));
   });

@@ -234,6 +234,7 @@ describe("semantic compression deterministic evals", () => {
         protectedLastN: 0,
         protectedSpans: [],
         summaryMessageId: "previous-summary",
+        ineffectiveCompressionCount: 0,
         fallbackUsed: false,
         warnings: []
       }

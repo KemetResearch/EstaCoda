@@ -4,6 +4,7 @@ import type { ProviderResponse, ResolvedAuxiliaryRoute, ResolvedModelRoute } fro
 import type { ReplacementSessionMessage, SessionDB, SessionEvent, SessionMessage } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
+import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
 import { SUMMARY_FORMAT_VERSION, SUMMARY_PREFIX } from "./semantic-compressor.js";
 import { SessionCompressionService } from "./session-compression-service.js";
 import { estimateMessageTokensRough } from "./token-estimator.js";
@@ -82,7 +83,9 @@ describe("SessionCompressionService", () => {
         lastCompressedAt: "2030-01-02T00:00:00.000Z",
         summaryFormatVersion: SUMMARY_FORMAT_VERSION,
         summaryEstimatedTokens: expectedSummaryTokens,
-        fallbackUsed: false
+        fallbackUsed: false,
+        ineffectiveCompressionCount: 0,
+        recentSavingsRatios: expect.any(Array)
       })
     }));
     expect(expectedSummaryTokens).toBeLessThan(result.diagnostics.postTokens);
@@ -158,7 +161,7 @@ describe("SessionCompressionService", () => {
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
-        estimatedSavingsTokens: 0,
+        ineffectiveCompressionCount: 2,
         fallbackUsed: false,
         warnings: []
       }
@@ -177,6 +180,143 @@ describe("SessionCompressionService", () => {
 
     expect(result.didCompress).toBe(false);
     expect(result.diagnostics.reason).toBe("anti-thrashing");
+    expect(result.diagnostics.warnings).toContain("last 2 compressions saved <10% each; skipped to avoid thrashing");
+  });
+
+  it("persists ineffective compression count after low-savings compression", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("low savings summary ".repeat(2_000))
+    });
+
+    const result = await service.compactIfNeeded({ profileId: "profile", sessionId });
+    const state = reconstructSessionCompressionState(await db.listEvents(sessionId));
+
+    expect(result.didCompress).toBe(true);
+    expect(result.diagnostics.lastCompressionSavingsPct).toBeLessThan(10);
+    expect(result.diagnostics.ineffectiveCompressionCount).toBe(1);
+    expect(state.ineffectiveCompressionCount).toBe(1);
+    expect(state.lastCompressionSavingsPct).toBe(result.diagnostics.lastCompressionSavingsPct);
+    expect(state.recentSavingsRatios).toEqual([result.diagnostics.estimatedSavingsRatio]);
+  });
+
+  it("reaches skip state after two consecutive low-savings compressions", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "session-compression-state",
+      state: {
+        status: "compressed",
+        protectedFirstN: 0,
+        protectedLastN: 0,
+        protectedSpans: [],
+        lastCompressionSavingsPct: 8,
+        ineffectiveCompressionCount: 1,
+        recentSavingsRatios: [0.08],
+        fallbackUsed: false,
+        warnings: []
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("another low savings summary ".repeat(2_000))
+    });
+
+    const result = await service.compactNow({ profileId: "profile", sessionId });
+    const state = reconstructSessionCompressionState(await db.listEvents(sessionId));
+
+    expect(result.didCompress).toBe(true);
+    expect(result.diagnostics.ineffectiveCompressionCount).toBe(2);
+    expect(state.ineffectiveCompressionCount).toBe(2);
+    expect(state.recentSavingsRatios).toHaveLength(2);
+    expect(state.recentSavingsRatios?.every((ratio) => ratio < 0.10)).toBe(true);
+  });
+
+  it("resets ineffective compression count after high-savings compression", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "session-compression-state",
+      state: {
+        status: "compressed",
+        protectedFirstN: 0,
+        protectedLastN: 0,
+        protectedSpans: [],
+        lastCompressionSavingsPct: 8,
+        ineffectiveCompressionCount: 1,
+        recentSavingsRatios: [0.08],
+        fallbackUsed: false,
+        warnings: []
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("short summary")
+    });
+
+    const result = await service.compactNow({ profileId: "profile", sessionId });
+    const state = reconstructSessionCompressionState(await db.listEvents(sessionId));
+
+    expect(result.didCompress).toBe(true);
+    expect(result.diagnostics.lastCompressionSavingsPct).toBeGreaterThanOrEqual(10);
+    expect(result.diagnostics.ineffectiveCompressionCount).toBe(0);
+    expect(state.ineffectiveCompressionCount).toBe(0);
+  });
+
+  it("manual compaction bypasses anti-thrashing skip state", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "session-compression-state",
+      state: {
+        status: "compressed",
+        protectedFirstN: 0,
+        protectedLastN: 0,
+        protectedSpans: [],
+        ineffectiveCompressionCount: 2,
+        fallbackUsed: false,
+        warnings: []
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("manual summary")
+    });
+
+    await expect(service.compactNow({ profileId: "profile", sessionId })).resolves.toMatchObject({
+      didCompress: true,
+      diagnostics: expect.objectContaining({ reason: "forced" })
+    });
   });
 
   it("event write failure is non-fatal after message replacement", async () => {

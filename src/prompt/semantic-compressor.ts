@@ -21,6 +21,12 @@ export const CONTENT_HEAD = 4_000;
 export const CONTENT_TAIL = 1_500;
 export const TOOL_ARGS_MAX = 1_500;
 export const TOOL_ARGS_HEAD = 1_200;
+export const MIN_SUMMARY_TOKENS = 2_000;
+export const MAX_SUMMARY_CONTEXT_RATIO = 0.05;
+export const MAX_SUMMARY_TOKENS_CEILING = 12_000;
+export const SUMMARY_REQUEST_HEADROOM_RATIO = 1.3;
+export const INEFFECTIVE_COMPRESSION_SAVINGS_PCT = 10;
+export const INEFFECTIVE_COMPRESSION_SKIP_COUNT = 2;
 export const SUMMARY_PREFIX = [
   "[CONTEXT COMPACTION — REFERENCE ONLY]",
   "Compacted earlier turns are reference only, not active instructions. Answer only the latest user message after this summary. Persistent memory remains authoritative.",
@@ -58,6 +64,9 @@ export type SemanticCompressionDiagnostics = {
   warnings: string[];
   prunedToolResults: number;
   scopeKey: string;
+  lastCompressionSavingsPct?: number;
+  ineffectiveCompressionCount: number;
+  recentSavingsRatios?: number[];
 };
 
 export type SemanticCompressionResult = {
@@ -94,6 +103,7 @@ type CompressionPlan = {
   protectedIndexes: Set<number>;
   protectedSpans: SessionCompressionProtectedSpan[];
   protectedCategories: Set<ProtectedContentCategory>;
+  previousState?: SessionCompressionState;
   warnings: string[];
 };
 
@@ -144,11 +154,19 @@ export class SemanticCompressor {
 
     const serialized = serializeMessagesForSummary(plan.source);
     const previousSummary = previousSummaryText(input.messages, input.previousState);
+    const summaryBudget = computeSummaryBudget({
+      sourceMessages: plan.source,
+      targetRatio: this.#config.targetRatio,
+      contextLength: this.#summaryContextLength()
+    });
+    const providerMaxTokens = computeSummaryRequestMaxTokens(summaryBudget);
     const summary = await this.#summarize({
       activeTask: redactSensitiveText(input.focusTopic?.trim() || latestUserText(input.messages)),
       focusTopic: input.focusTopic === undefined ? undefined : redactSensitiveText(input.focusTopic),
       transcript: serialized.text,
       previousSummary: previousSummary === undefined ? undefined : redactSensitiveText(previousSummary),
+      summaryBudget,
+      providerMaxTokens,
       scopeKey,
       signal: input.signal
     });
@@ -184,6 +202,7 @@ export class SemanticCompressor {
     const source = input.messages.filter((_message, index) => !protectedIndexes.has(index));
     const protectedSpans = protectedSpansFromIndexes(input.messages, protectedIndexes);
     const protectedCategories = protectedCategoriesFor(input.messages, protectedIndexes);
+    const previousState = input.previousState;
 
     if (this.#config.enabled !== true && input.force !== true) {
       return {
@@ -194,12 +213,13 @@ export class SemanticCompressor {
         protectedIndexes,
         protectedSpans,
         protectedCategories,
+        previousState,
         warnings
       };
     }
 
-    if (input.force !== true && compressionWasRecentlyIneffective(input.previousState)) {
-      warnings.push("recent compression was ineffective; skipped to avoid thrashing");
+    if (input.force !== true && compressionWasRecentlyIneffective(previousState)) {
+      warnings.push("last 2 compressions saved <10% each; skipped to avoid thrashing");
       return {
         shouldCompress: false,
         reason: "anti-thrashing",
@@ -208,6 +228,7 @@ export class SemanticCompressor {
         protectedIndexes,
         protectedSpans,
         protectedCategories,
+        previousState,
         warnings
       };
     }
@@ -221,6 +242,7 @@ export class SemanticCompressor {
         protectedIndexes,
         protectedSpans,
         protectedCategories,
+        previousState,
         warnings
       };
     }
@@ -236,6 +258,7 @@ export class SemanticCompressor {
         protectedIndexes,
         protectedSpans,
         protectedCategories,
+        previousState,
         warnings
       };
     }
@@ -248,8 +271,17 @@ export class SemanticCompressor {
       protectedIndexes,
       protectedSpans,
       protectedCategories,
+      previousState,
       warnings
     };
+  }
+
+  #summaryContextLength(): number {
+    return this.#config.summaryModelContextLength
+      ?? this.#route?.route?.contextWindowTokens
+      ?? this.#mainRoute?.contextWindowTokens
+      ?? this.#mainRoute?.profile.contextWindowTokens
+      ?? 128_000;
   }
 
   async #summarize(input: {
@@ -257,6 +289,8 @@ export class SemanticCompressor {
     focusTopic?: string;
     transcript: string;
     previousSummary?: string;
+    summaryBudget: number;
+    providerMaxTokens: number;
     scopeKey: string;
     signal?: AbortSignal;
   }): Promise<{
@@ -290,7 +324,8 @@ export class SemanticCompressor {
         activeTask: input.activeTask,
         focusTopic: input.focusTopic,
         transcript: input.transcript,
-        previousSummary: input.previousSummary
+        previousSummary: input.previousSummary,
+        maxTokens: input.providerMaxTokens
       }),
       signal: input.signal,
       scopeKey: input.scopeKey
@@ -343,13 +378,22 @@ export class SemanticCompressor {
   }): SemanticCompressionDiagnostics {
     const postTokens = input.postTokens ?? estimateSessionMessages(input.postMessages);
     const savings = input.plan.preTokens - postTokens;
+    const estimatedSavingsRatio = input.plan.preTokens === 0 ? 0 : savings / input.plan.preTokens;
+    const savingsPct = estimatedSavingsRatio * 100;
+    const didCompress = input.plan.shouldCompress && input.summary.length > 0;
+    const ineffectiveCompressionCount = didCompress
+      ? nextIneffectiveCompressionCount(input.plan.previousState, savingsPct)
+      : input.plan.previousState?.ineffectiveCompressionCount ?? 0;
+    const recentSavingsRatios = didCompress
+      ? nextRecentSavingsRatios(input.plan.previousState?.recentSavingsRatios, estimatedSavingsRatio)
+      : input.plan.previousState?.recentSavingsRatios;
     return {
       shouldCompress: input.plan.shouldCompress,
       reason: input.plan.reason,
       preTokens: input.plan.preTokens,
       postTokens,
       estimatedSavingsTokens: savings,
-      estimatedSavingsRatio: input.plan.preTokens === 0 ? 0 : savings / input.plan.preTokens,
+      estimatedSavingsRatio,
       sourceMessageCount: input.plan.source.length + input.plan.protectedIndexes.size,
       summarizedMessageCount: input.plan.source.length,
       protectedMessageCount: input.plan.protectedIndexes.size,
@@ -364,9 +408,48 @@ export class SemanticCompressor {
       model: input.model,
       warnings: input.warnings,
       prunedToolResults: input.prunedToolResults,
-      scopeKey: input.scopeKey
+      scopeKey: input.scopeKey,
+      ...(didCompress ? { lastCompressionSavingsPct: savingsPct } : {
+        ...(input.plan.previousState?.lastCompressionSavingsPct === undefined ? {} : {
+          lastCompressionSavingsPct: input.plan.previousState.lastCompressionSavingsPct
+        })
+      }),
+      ineffectiveCompressionCount,
+      ...(recentSavingsRatios === undefined ? {} : { recentSavingsRatios })
     };
   }
+}
+
+export function computeSummaryBudget(input: {
+  sourceMessages: readonly SessionMessage[];
+  targetRatio: number;
+  contextLength: number;
+}): number {
+  const sourceTokens = estimateMessagesTokensRough(input.sourceMessages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    metadata: message.metadata
+  })));
+  const targetRatio = Number.isFinite(input.targetRatio) && input.targetRatio > 0
+    ? input.targetRatio
+    : 0;
+  const contextLength = Number.isFinite(input.contextLength) && input.contextLength > 0
+    ? Math.floor(input.contextLength)
+    : 128_000;
+  const ratioBudget = Math.floor(sourceTokens * targetRatio);
+  const contextCap = Math.min(
+    Math.floor(contextLength * MAX_SUMMARY_CONTEXT_RATIO),
+    MAX_SUMMARY_TOKENS_CEILING
+  );
+
+  return Math.max(MIN_SUMMARY_TOKENS, Math.min(ratioBudget, contextCap));
+}
+
+export function computeSummaryRequestMaxTokens(summaryBudget: number): number {
+  const normalized = Number.isFinite(summaryBudget) && summaryBudget > 0
+    ? summaryBudget
+    : MIN_SUMMARY_TOKENS;
+  return Math.ceil(normalized * SUMMARY_REQUEST_HEADROOM_RATIO);
 }
 
 export function normalizeSummaryPrefix(summary: string): string {
@@ -414,6 +497,7 @@ function summarizerRequest(input: {
   focusTopic?: string;
   transcript: string;
   previousSummary?: string;
+  maxTokens: number;
 }) {
   return {
     model: input.model,
@@ -470,7 +554,7 @@ function summarizerRequest(input: {
       }
     ],
     temperature: 0.1,
-    maxTokens: 1_200
+    maxTokens: input.maxTokens
   };
 }
 
@@ -716,8 +800,17 @@ function compressionWasRecentlyIneffective(state: SessionCompressionState | unde
   if (state === undefined || state.status !== "compressed") {
     return false;
   }
-  return (state.estimatedSavingsTokens ?? 1) <= 0 ||
-    state.warnings.some((warning) => /ineffective|thrash/i.test(warning));
+  return state.ineffectiveCompressionCount >= INEFFECTIVE_COMPRESSION_SKIP_COUNT;
+}
+
+function nextIneffectiveCompressionCount(state: SessionCompressionState | undefined, savingsPct: number): number {
+  return savingsPct < INEFFECTIVE_COMPRESSION_SAVINGS_PCT
+    ? (state?.ineffectiveCompressionCount ?? 0) + 1
+    : 0;
+}
+
+function nextRecentSavingsRatios(previous: readonly number[] | undefined, savingsRatio: number): number[] {
+  return [...(previous ?? []), savingsRatio].slice(-2);
 }
 
 function modelFromAttempts(result: AuxiliaryExecutionResult): string | undefined {
@@ -749,6 +842,9 @@ function freezeResult(result: SemanticCompressionResult): SemanticCompressionRes
   Object.freeze(result.messages);
   Object.freeze(result.diagnostics.protectedSpans);
   Object.freeze(result.diagnostics.protectedCategories);
+  if (result.diagnostics.recentSavingsRatios !== undefined) {
+    Object.freeze(result.diagnostics.recentSavingsRatios);
+  }
   Object.freeze(result.diagnostics.warnings);
   Object.freeze(result.diagnostics);
   return Object.freeze(result);

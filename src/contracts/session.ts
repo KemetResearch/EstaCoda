@@ -67,6 +67,9 @@ export type SessionCompressionState = {
   summaryChars?: number;
   summaryEstimatedTokens?: number;
   estimatedSavingsTokens?: number;
+  lastCompressionSavingsPct?: number;
+  ineffectiveCompressionCount: number;
+  recentSavingsRatios?: number[];
   fallbackUsed: boolean;
   model?: string;
   warnings: string[];

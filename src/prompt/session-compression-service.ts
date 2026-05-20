@@ -183,6 +183,13 @@ export class SessionCompressionService {
         summaryChars: input.diagnostics.summaryChars,
         ...(summaryEstimatedTokens === undefined ? {} : { summaryEstimatedTokens }),
         estimatedSavingsTokens: input.diagnostics.estimatedSavingsTokens,
+        ...(input.diagnostics.lastCompressionSavingsPct === undefined ? {} : {
+          lastCompressionSavingsPct: input.diagnostics.lastCompressionSavingsPct
+        }),
+        ineffectiveCompressionCount: input.diagnostics.ineffectiveCompressionCount,
+        ...(input.diagnostics.recentSavingsRatios === undefined ? {} : {
+          recentSavingsRatios: input.diagnostics.recentSavingsRatios
+        }),
         fallbackUsed: input.diagnostics.fallbackUsed,
         model: input.diagnostics.model,
         warnings: input.diagnostics.warnings
