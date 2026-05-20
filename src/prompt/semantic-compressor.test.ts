@@ -210,6 +210,7 @@ describe("SemanticCompressor", () => {
       sessionId: "session",
       previousState: {
         status: "compressed",
+        compressionCount: 1,
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],
@@ -407,6 +408,7 @@ describe("SemanticCompressor", () => {
       sessionId: "session",
       previousState: {
         status: "compressed",
+        compressionCount: 2,
         protectedFirstN: 0,
         protectedLastN: 0,
         protectedSpans: [],

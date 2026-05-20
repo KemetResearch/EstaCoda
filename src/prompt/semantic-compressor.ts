@@ -5,6 +5,7 @@ import type {
 } from "../contracts/provider.js";
 import type {
   ReplacementSessionMessage,
+  SessionCompressionFailure,
   SessionCompressionProtectedSpan,
   SessionCompressionState,
   SessionMessage
@@ -61,6 +62,8 @@ export type SemanticCompressionDiagnostics = {
   fallbackUsed: boolean;
   fallbackReason?: string;
   model?: string;
+  auxModelFailure?: SessionCompressionFailure;
+  mainRetryFailure?: SessionCompressionFailure;
   warnings: string[];
   prunedToolResults: number;
   scopeKey: string;
@@ -181,6 +184,8 @@ export class SemanticCompressor {
       fallbackUsed: summary.fallbackUsed,
       fallbackReason: summary.fallbackReason,
       model: summary.model,
+      auxModelFailure: summary.auxModelFailure,
+      mainRetryFailure: summary.mainRetryFailure,
       scopeKey,
       warnings: [...plan.warnings, ...summary.warnings, ...serialized.warnings],
       prunedToolResults: serialized.prunedToolResults,
@@ -298,6 +303,8 @@ export class SemanticCompressor {
     fallbackUsed: boolean;
     fallbackReason?: string;
     model?: string;
+    auxModelFailure?: SessionCompressionFailure;
+    mainRetryFailure?: SessionCompressionFailure;
     warnings: string[];
   }> {
     const fallback = deterministicFallbackSummary(input.transcript);
@@ -311,6 +318,11 @@ export class SemanticCompressor {
         summary: fallback,
         fallbackUsed: true,
         fallbackReason: "auxiliary-unavailable",
+        auxModelFailure: {
+          code: "unavailable",
+          message: "auxiliary compression unavailable",
+          recoverable: true
+        },
         warnings: ["auxiliary compression unavailable; used deterministic fallback"]
       };
     }
@@ -337,6 +349,8 @@ export class SemanticCompressor {
         fallbackUsed: true,
         fallbackReason: auxiliary.status,
         model: modelFromAttempts(auxiliary),
+        auxModelFailure: compressionFailureFromAttempt(auxiliary, "primary"),
+        mainRetryFailure: compressionFailureFromAttempt(auxiliary, "fallback"),
         warnings: ["auxiliary compression failed; used deterministic fallback", ...auxiliary.diagnostics]
       };
     }
@@ -345,6 +359,8 @@ export class SemanticCompressor {
       summary: redactSensitiveText(auxiliary.response.content),
       fallbackUsed: auxiliary.fallbackUsed,
       model: auxiliary.response.model,
+      auxModelFailure: compressionFailureFromAttempt(auxiliary, "primary"),
+      mainRetryFailure: compressionFailureFromAttempt(auxiliary, "fallback"),
       warnings: auxiliary.diagnostics
     };
   }
@@ -371,6 +387,8 @@ export class SemanticCompressor {
     fallbackUsed: boolean;
     fallbackReason?: string;
     model?: string;
+    auxModelFailure?: SessionCompressionFailure;
+    mainRetryFailure?: SessionCompressionFailure;
     scopeKey: string;
     warnings: string[];
     prunedToolResults: number;
@@ -406,6 +424,8 @@ export class SemanticCompressor {
       fallbackUsed: input.fallbackUsed,
       fallbackReason: input.fallbackReason,
       model: input.model,
+      auxModelFailure: input.auxModelFailure,
+      mainRetryFailure: input.mainRetryFailure,
       warnings: input.warnings,
       prunedToolResults: input.prunedToolResults,
       scopeKey: input.scopeKey,
@@ -818,6 +838,21 @@ function modelFromAttempts(result: AuxiliaryExecutionResult): string | undefined
   return attempt === undefined ? undefined : `${attempt.provider}/${attempt.model}`;
 }
 
+function compressionFailureFromAttempt(
+  result: AuxiliaryExecutionResult,
+  role: "primary" | "fallback"
+): SessionCompressionFailure | undefined {
+  const attempt = [...result.attempts].reverse().find((entry) => entry.role === role && !entry.ok);
+  if (attempt === undefined) {
+    return undefined;
+  }
+  return {
+    code: attempt.errorClass ?? "failed",
+    message: redactSensitiveText(attempt.content),
+    recoverable: attempt.errorClass !== "aborted"
+  };
+}
+
 function toReplacementMessage(message: SessionMessage | ReplacementSessionMessage): ReplacementSessionMessage {
   return {
     id: message.id,
@@ -844,6 +879,12 @@ function freezeResult(result: SemanticCompressionResult): SemanticCompressionRes
   Object.freeze(result.diagnostics.protectedCategories);
   if (result.diagnostics.recentSavingsRatios !== undefined) {
     Object.freeze(result.diagnostics.recentSavingsRatios);
+  }
+  if (result.diagnostics.auxModelFailure !== undefined) {
+    Object.freeze(result.diagnostics.auxModelFailure);
+  }
+  if (result.diagnostics.mainRetryFailure !== undefined) {
+    Object.freeze(result.diagnostics.mainRetryFailure);
   }
   Object.freeze(result.diagnostics.warnings);
   Object.freeze(result.diagnostics);
