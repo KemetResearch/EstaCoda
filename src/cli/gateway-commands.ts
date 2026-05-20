@@ -64,9 +64,12 @@ import {
   detectServiceManager,
   installService,
   probeServiceState,
+  restartService,
+  stopService,
   uninstallService,
 } from "../gateway/service-manager.js";
-import type { ServiceManagerState } from "../gateway/service-manager.js";
+import type { ServiceManagerState, ServiceScope } from "../gateway/service-manager.js";
+import { resolveGatewayExec } from "../gateway/service-exec-resolver.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -269,12 +272,14 @@ export async function runGatewayStatus(
 }
 
 export async function runGatewayInstallService(
-  options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean }
+  options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean; serviceHomeDir?: string }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
-  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const stateHomeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = options.serviceHomeDir ?? stateHomeDir;
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await installService({
     homeDir,
+    serviceHomeDir: options.serviceHomeDir,
     workspaceRoot: options.workspaceRoot,
     profileId,
     system: options.system,
@@ -559,14 +564,24 @@ export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
+  const resolved = resolveGatewayExec({ workspaceRoot: options.workspaceRoot });
+  if (!resolved.ok) {
+    return { ok: false, output: `Failed to start gateway in background: ${resolved.error}` };
+  }
   const logPath = join(selected.paths.logsPath, "gateway.log");
   await mkdir(selected.paths.logsPath, { recursive: true });
 
   let logFd: number | undefined;
   try {
     logFd = openSync(logPath, "a", 0o600);
-    const child = spawn(process.execPath, resolveBackgroundGatewayStartArgs(selected.profileId), {
-      cwd: options.workspaceRoot,
+    const child = spawn(resolved.resolved.command, [
+      ...resolved.resolved.args,
+      "gateway",
+      "start",
+      "--profile",
+      selected.profileId,
+    ], {
+      cwd: resolved.resolved.cwd,
       detached: true,
       env: {
         ...process.env,
@@ -601,9 +616,26 @@ export async function runGatewayStartBackground(
 // ───────────────────────────────────────────────────────────
 
 export async function runGatewayStop(
-  options: GatewayCommandOptions & { force?: boolean }
+  options: GatewayCommandOptions & { force?: boolean; system?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const serviceSelection = await selectLifecycleService(selected, options.system);
+  if (serviceSelection.kind === "message") {
+    return { ok: serviceSelection.ok, output: serviceSelection.output };
+  }
+  if (serviceSelection.kind === "service") {
+    const result = await stopService({
+      homeDir: selected.homeDir,
+      profileId: selected.profileId,
+      system: serviceSelection.scope === "system",
+    });
+    if (!result.ok) return { ok: false, output: result.error };
+    return {
+      ok: true,
+      output: `Gateway service stopped (${serviceSelection.scope} scope, profile: ${selected.profileId}).`,
+    };
+  }
+
   const result = await stopGateway(selected.paths, { force: options.force });
 
   if (result.ok) {
@@ -638,9 +670,25 @@ export async function runGatewayStop(
 // ───────────────────────────────────────────────────────────
 
 export async function runGatewayRestart(
-  options: GatewayCommandOptions & { graceful?: boolean }
+  options: GatewayCommandOptions & { graceful?: boolean; system?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const serviceSelection = await selectLifecycleService(selected, options.system);
+  if (serviceSelection.kind === "message") {
+    return { ok: serviceSelection.ok, output: serviceSelection.output };
+  }
+  if (serviceSelection.kind === "service") {
+    const result = await restartService({
+      homeDir: selected.homeDir,
+      profileId: selected.profileId,
+      system: serviceSelection.scope === "system",
+    });
+    if (!result.ok) return { ok: false, output: result.error };
+    return {
+      ok: true,
+      output: `Gateway service restarted (${serviceSelection.scope} scope, profile: ${selected.profileId}).`,
+    };
+  }
 
   // Stop existing gateway (always graceful — plain restart should not force-kill)
   const stopResult = await stopGateway(selected.paths, { force: false });
@@ -664,6 +712,54 @@ export async function runGatewayRestart(
     ok: startResult.ok,
     output: [stopOutput, startResult.output].filter(Boolean).join("\n"),
   };
+}
+
+type LifecycleServiceSelection =
+  | { kind: "service"; scope: ServiceScope }
+  | { kind: "process" }
+  | { kind: "message"; ok: boolean; output: string };
+
+async function selectLifecycleService(
+  selected: SelectedGatewayProfile,
+  systemRequested: boolean | undefined
+): Promise<LifecycleServiceSelection> {
+  if (systemRequested === true) {
+    const systemState = await probeServiceState({
+      homeDir: selected.homeDir,
+      profileId: selected.profileId,
+      system: true,
+    });
+    if (systemState.installed) return { kind: "service", scope: "system" };
+    return {
+      kind: "message",
+      ok: false,
+      output: `Gateway system service is not installed for profile '${selected.profileId}'. Omit --system to use process-oriented lifecycle for an unmanaged gateway.`,
+    };
+  }
+
+  const userState = await probeServiceState({
+    homeDir: selected.homeDir,
+    profileId: selected.profileId,
+    system: false,
+  });
+  if (userState.installed) return { kind: "service", scope: "user" };
+
+  if (detectServiceManager().startsWith("systemd")) {
+    const systemState = await probeServiceState({
+      homeDir: selected.homeDir,
+      profileId: selected.profileId,
+      system: true,
+    });
+    if (systemState.installed) {
+      return {
+        kind: "message",
+        ok: false,
+        output: `Gateway system service is installed for profile '${selected.profileId}'. Rerun with --system to control it.`,
+      };
+    }
+  }
+
+  return { kind: "process" };
 }
 
 // ───────────────────────────────────────────────────────────
@@ -1129,17 +1225,6 @@ function firstPositional(args: string[]): string | undefined {
 
 function positionalAt(args: string[], index: number): string | undefined {
   return positionalArgs(args)[index];
-}
-
-function resolveBackgroundGatewayStartArgs(profileId?: string): string[] {
-  const entrypoint = process.argv[1];
-  return [
-    ...process.execArgv,
-    ...(entrypoint === undefined ? [] : [entrypoint]),
-    "gateway",
-    "start",
-    ...(profileId === undefined ? [] : ["--profile", profileId]),
-  ];
 }
 
 async function isReadable(path: string): Promise<boolean> {

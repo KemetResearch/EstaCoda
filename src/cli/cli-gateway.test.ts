@@ -12,6 +12,12 @@ const serviceManagerMock = vi.hoisted(() => ({
   installService: vi.fn(),
   uninstallService: vi.fn(),
   probeServiceState: vi.fn(),
+  restartService: vi.fn(),
+  stopService: vi.fn(),
+}));
+
+const execResolverMock = vi.hoisted(() => ({
+  resolveGatewayExec: vi.fn(),
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -30,6 +36,16 @@ vi.mock("../gateway/service-manager.js", async (importOriginal) => {
     installService: serviceManagerMock.installService,
     uninstallService: serviceManagerMock.uninstallService,
     probeServiceState: serviceManagerMock.probeServiceState,
+    restartService: serviceManagerMock.restartService,
+    stopService: serviceManagerMock.stopService,
+  };
+});
+
+vi.mock("../gateway/service-exec-resolver.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-exec-resolver.js")>();
+  return {
+    ...actual,
+    resolveGatewayExec: execResolverMock.resolveGatewayExec,
   };
 });
 
@@ -54,9 +70,23 @@ describe("cli gateway start", () => {
     serviceManagerMock.installService.mockReset();
     serviceManagerMock.uninstallService.mockReset();
     serviceManagerMock.probeServiceState.mockReset();
+    serviceManagerMock.restartService.mockReset();
+    serviceManagerMock.stopService.mockReset();
+    execResolverMock.resolveGatewayExec.mockReset();
     serviceManagerMock.detectServiceManager.mockReturnValue("none");
     serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
     serviceManagerMock.uninstallService.mockResolvedValue({ ok: true });
+    serviceManagerMock.restartService.mockResolvedValue({ ok: true });
+    serviceManagerMock.stopService.mockResolvedValue({ ok: true });
+    execResolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: ["/tmp/estacoda/dist/index.js"],
+        cwd: "/tmp/estacoda",
+      },
+    });
     serviceManagerMock.probeServiceState.mockResolvedValue({
       kind: "none",
       installed: false,
@@ -214,9 +244,51 @@ describe("cli gateway start", () => {
     expect(result.output).toContain("Gateway was not running");
   });
 
+  it("parses gateway stop --system", async () => {
+    serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+    serviceManagerMock.probeServiceState.mockResolvedValue({
+      kind: "systemd-system",
+      installed: true,
+      scope: "system",
+      activeState: "active",
+      profileId: "default",
+    });
+
+    const result = await runCliCommand({
+      argv: ["gateway", "stop", "--system"],
+      workspaceRoot: "/tmp",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("system scope");
+    expect(serviceManagerMock.stopService).toHaveBeenCalledWith(expect.objectContaining({ system: true }));
+  });
+
+  it("parses gateway restart --system", async () => {
+    serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+    serviceManagerMock.probeServiceState.mockResolvedValue({
+      kind: "systemd-system",
+      installed: true,
+      scope: "system",
+      activeState: "active",
+      profileId: "default",
+    });
+
+    const result = await runCliCommand({
+      argv: ["gateway", "restart", "--system"],
+      workspaceRoot: "/tmp",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("system scope");
+    expect(serviceManagerMock.restartService).toHaveBeenCalledWith(expect.objectContaining({ system: true }));
+  });
+
   it("parses gateway install aliases and service flags", async () => {
     const result = await runCliCommand({
-      argv: ["gateway", "install-service", "--profile", "work", "--system", "--run-as-user", "estacoda", "--force"],
+      argv: ["gateway", "install-service", "--profile", "work", "--system", "--run-as-user", "estacoda", "--home", "/home/estacoda", "--force"],
       workspaceRoot: "/tmp",
       homeDir: "/tmp/home",
     });
@@ -227,6 +299,7 @@ describe("cli gateway start", () => {
       profileId: "work",
       system: true,
       runAsUser: "estacoda",
+      serviceHomeDir: "/home/estacoda",
       force: true,
     }));
   });

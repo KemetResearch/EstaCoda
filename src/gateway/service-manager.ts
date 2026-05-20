@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
 import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, delimiter, join, resolve } from "node:path";
+import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { inspectGatewayLockState } from "./gateway-lock.js";
 import { isStalePid, readGatewayPid } from "./pid-file.js";
@@ -29,6 +29,9 @@ type CommandResult = {
   code?: number | null;
 };
 
+type ValidationResult = { ok: true } | { ok: false; error: string };
+type HomeDirResult = { ok: true; homeDir: string } | { ok: false; error: string };
+
 export function detectServiceManager(): ServiceManagerKind {
   if (process.platform === "linux" && commandExists("systemctl")) {
     return "systemd-user";
@@ -41,13 +44,14 @@ export function detectServiceManager(): ServiceManagerKind {
 
 export async function installService(options: {
   homeDir: string;
+  serviceHomeDir?: string;
   workspaceRoot: string;
   profileId: string;
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
 }): Promise<{ ok: true; mode: ExecMode } | { ok: false; error: string }> {
-  const homeDir = resolve(options.homeDir);
+  let homeDir = resolve(options.homeDir);
   const workspaceRoot = resolve(options.workspaceRoot);
   const kind = targetKind(options);
 
@@ -61,26 +65,28 @@ export async function installService(options: {
     if (process.geteuid?.() !== 0) {
       return { ok: false, error: "System service install requires root. Use sudo or omit --system." };
     }
-    if (options.runAsUser === undefined || options.runAsUser.trim().length === 0) {
+    const runAsUser = options.runAsUser;
+    if (runAsUser === undefined || runAsUser.trim().length === 0) {
       return { ok: false, error: "System service install requires --run-as-user <user> so HOME/profile state are explicit." };
     }
+    const userValidation = validateSystemRunAsUser(runAsUser);
+    if (!userValidation.ok) return userValidation;
+    const userExists = await verifySystemUserExists(runAsUser);
+    if (!userExists.ok) return userExists;
+    const systemHome = options.serviceHomeDir === undefined
+      ? await resolveSystemUserHome(runAsUser)
+      : await validateExplicitSystemHome(options.serviceHomeDir);
+    if (!systemHome.ok) return systemHome;
+    homeDir = systemHome.homeDir;
   }
-
-  const profilePaths = resolveProfileStateHome({ homeDir, profileId: options.profileId });
-  const lock = await inspectGatewayLockState(profilePaths);
-  if (lock.state === "active") {
-    return {
-      ok: false,
-      error: `Gateway already appears to be running for profile '${options.profileId}'; stop it before installing/starting the service.`,
-    };
-  }
-  const pid = await readGatewayPid(profilePaths);
-  if (pid !== undefined && !(await isStalePid(profilePaths))) {
-    return {
-      ok: false,
-      error: `Gateway already appears to be running for profile '${options.profileId}'; stop it before installing/starting the service.`,
-    };
-  }
+  const baseValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    { label: "homeDir", value: homeDir },
+    ...(kind === "systemd-system" && options.runAsUser !== undefined
+      ? [{ label: "runAsUser", value: options.runAsUser }]
+      : []),
+  ]);
+  if (!baseValidation.ok) return baseValidation;
 
   const resolved = resolveGatewayExec({ workspaceRoot });
   if (!resolved.ok) {
@@ -113,6 +119,64 @@ export async function uninstallService(options: {
   return uninstallSystemd({ homeDir, profileId: options.profileId, kind });
 }
 
+export async function stopService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service stop is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return stopLaunchd({ profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "stop" });
+}
+
+export async function startService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const homeDir = resolve(options.homeDir);
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service start is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return startLaunchd({ homeDir, profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "start" });
+}
+
+export async function restartService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service restart is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return restartLaunchd({ profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "restart" });
+}
+
 export async function probeServiceState(options: {
   homeDir: string;
   profileId: string;
@@ -120,7 +184,7 @@ export async function probeServiceState(options: {
 }): Promise<ServiceManagerState> {
   try {
     const homeDir = resolve(options.homeDir);
-    const kind = targetKind(options);
+    const kind = targetKind(options, { unsupportedSystemAsNone: true });
     if (kind === "none") return fallbackState(options);
     if (kind === "launchd") return await probeLaunchd({ homeDir, profileId: options.profileId });
     return await probeSystemd({ homeDir, profileId: options.profileId, kind });
@@ -162,25 +226,20 @@ export function launchdPlistPath(options: { homeDir: string; profileId: string }
   return join(options.homeDir, "Library", "LaunchAgents", plistNameForProfile(options.profileId));
 }
 
-function targetKind(options: { system?: boolean }): ServiceManagerKind {
+function targetKind(options: { system?: boolean }, behavior: { unsupportedSystemAsNone?: boolean } = {}): ServiceManagerKind {
   const detected = detectServiceManager();
   if (options.system === true && detected.startsWith("systemd")) {
     return "systemd-system";
   }
-  return detected;
-}
-
-function fallbackKind(options: { system?: boolean }): ServiceManagerKind {
-  const detected = detectServiceManager();
-  if (options.system === true && detected.startsWith("systemd")) {
-    return "systemd-system";
+  if (options.system === true && behavior.unsupportedSystemAsNone === true) {
+    return "none";
   }
   return detected;
 }
 
 function fallbackState(options: { profileId: string; system?: boolean }): ServiceManagerState {
-  const kind = fallbackKind(options);
-  const scope: ServiceScope = kind === "systemd-system" ? "system" : "user";
+  const kind = targetKind(options, { unsupportedSystemAsNone: true });
+  const scope: ServiceScope = options.system === true || kind === "systemd-system" ? "system" : "user";
   return {
     kind,
     installed: false,
@@ -207,11 +266,20 @@ async function installSystemd(options: {
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
+  const validation = validateSystemdUnitInput({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    runAsUser: options.kind === "systemd-system" ? options.runAsUser : undefined,
+    resolved: options.resolved,
+  });
+  if (!validation.ok) return validation;
 
   if (exists && options.force === true) {
     const stop = await systemctl(options.kind, ["stop", unitName]);
     if (!stop.ok) return { ok: false, error: commandError("systemctl stop", stop) };
   }
+  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  if (!liveEvidence.ok) return liveEvidence;
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, renderSystemdUnit({
@@ -260,10 +328,19 @@ async function installLaunchd(options: {
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
+  const validation = validateLaunchdPlistInput({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    resolved: options.resolved,
+  });
+  if (!validation.ok) return validation;
+
   if (exists && options.force === true) {
     const unload = await runCommand("launchctl", ["unload", "-w", path]);
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   }
+  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  if (!liveEvidence.ok) return liveEvidence;
 
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
   await mkdir(dirname(path), { recursive: true });
@@ -290,6 +367,54 @@ async function uninstallLaunchd(options: {
   if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   await rm(path, { force: true });
   return { ok: true };
+}
+
+async function controlSystemd(options: {
+  profileId: string;
+  kind: "systemd-user" | "systemd-system";
+  action: "start" | "stop" | "restart";
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await systemctl(options.kind, [options.action, unitNameForProfile(options.profileId)]);
+  if (!result.ok) return { ok: false, error: commandError(`systemctl ${options.action}`, result) };
+  return { ok: true };
+}
+
+async function stopLaunchd(options: { profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const target = launchdServiceTarget(options.profileId);
+  if (!target.ok) return target;
+  const result = await runCommand("launchctl", ["bootout", target.target]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl bootout", result) };
+  return { ok: true };
+}
+
+async function startLaunchd(options: { homeDir: string; profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const domain = launchdGuiDomain();
+  if (!domain.ok) return domain;
+  const result = await runCommand("launchctl", ["bootstrap", domain.domain, launchdPlistPath(options)]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl bootstrap", result) };
+  return { ok: true };
+}
+
+async function restartLaunchd(options: { profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const target = launchdServiceTarget(options.profileId);
+  if (!target.ok) return target;
+  const result = await runCommand("launchctl", ["kickstart", "-k", target.target]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl kickstart", result) };
+  return { ok: true };
+}
+
+function launchdServiceTarget(profileId: string): { ok: true; target: string } | { ok: false; error: string } {
+  const domain = launchdGuiDomain();
+  if (!domain.ok) return domain;
+  return { ok: true, target: `${domain.domain}/${launchdLabelForProfile(profileId)}` };
+}
+
+function launchdGuiDomain(): { ok: true; domain: string } | { ok: false; error: string } {
+  const uid = process.getuid?.();
+  if (uid === undefined) {
+    return { ok: false, error: "launchd GUI domain requires a numeric user id." };
+  }
+  return { ok: true, domain: `gui/${uid}` };
 }
 
 function renderSystemdUnit(options: {
@@ -323,7 +448,7 @@ function renderSystemdUnit(options: {
 
   return [
     "[Unit]",
-    `Description=EstaCoda Gateway Supervisor (profile: ${options.profileId})`,
+    `Description=EstaCoda Gateway Supervisor (profile: ${systemdEscapeScalar(options.profileId)})`,
     "After=network-online.target",
     "Wants=network-online.target",
     "StartLimitIntervalSec=300",
@@ -450,6 +575,132 @@ function normalizeActiveState(value: string | undefined): ServiceActiveState {
   return "unknown";
 }
 
+function validateSystemdUnitInput(options: {
+  homeDir: string;
+  profileId: string;
+  runAsUser?: string;
+  resolved: ResolvedExec;
+}): ValidationResult {
+  const inputValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    ...(options.runAsUser === undefined ? [] : [{ label: "runAsUser", value: options.runAsUser }]),
+    { label: "homeDir", value: options.homeDir },
+    { label: "resolved.command", value: options.resolved.command },
+    ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
+    { label: "resolved.cwd", value: options.resolved.cwd },
+  ]);
+  if (!inputValidation.ok) return inputValidation;
+
+  return validateServiceRenderValues([
+    { label: "PATH", value: servicePath(options.resolved.command) },
+  ]);
+}
+
+function validateLaunchdPlistInput(options: {
+  homeDir: string;
+  profileId: string;
+  resolved: ResolvedExec;
+}): ValidationResult {
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const inputValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    { label: "homeDir", value: options.homeDir },
+    { label: "resolved.command", value: options.resolved.command },
+    ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
+    { label: "resolved.cwd", value: options.resolved.cwd },
+  ]);
+  if (!inputValidation.ok) return inputValidation;
+
+  return validateServiceRenderValues([
+    { label: "PATH", value: servicePath(options.resolved.command) },
+    { label: "StandardOutPath", value: join(profilePaths.logsPath, "gateway.stdout") },
+    { label: "StandardErrorPath", value: join(profilePaths.logsPath, "gateway.stderr") },
+  ]);
+}
+
+function validateServiceRenderValues(values: Array<{ label: string; value: string | undefined }>): ValidationResult {
+  for (const { label, value } of values) {
+    if (value === undefined) continue;
+    if (/[\u0000-\u001F\u007F]/u.test(value)) {
+      return { ok: false, error: `Invalid service manager value for ${label}: control characters are not allowed.` };
+    }
+  }
+  return { ok: true };
+}
+
+async function assertNoLiveGatewayEvidence(homeDir: string, profileId: string): Promise<ValidationResult> {
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+  const lock = await inspectGatewayLockState(profilePaths);
+  if (lock.state === "active") {
+    return {
+      ok: false,
+      error: `Gateway already appears to be running for profile '${profileId}'; stop it before installing/starting the service.`,
+    };
+  }
+  const pid = await readGatewayPid(profilePaths);
+  if (pid !== undefined && !(await isStalePid(profilePaths))) {
+    return {
+      ok: false,
+      error: `Gateway already appears to be running for profile '${profileId}'; stop it before installing/starting the service.`,
+    };
+  }
+  return { ok: true };
+}
+
+function validateSystemRunAsUser(value: string): ValidationResult {
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*[$]?$/u.test(value)) {
+    return {
+      ok: false,
+      error: "Invalid --run-as-user value. Expected a local username matching ^[A-Za-z_][A-Za-z0-9_-]*[$]?$",
+    };
+  }
+  return { ok: true };
+}
+
+async function verifySystemUserExists(user: string): Promise<ValidationResult> {
+  const result = await runCommand("id", ["-u", user]);
+  if (result.ok) return { ok: true };
+  return { ok: false, error: `System service user '${user}' does not exist or cannot be resolved.` };
+}
+
+async function resolveSystemUserHome(user: string): Promise<HomeDirResult> {
+  const result = await runCommand("getent", ["passwd", user]);
+  if (!result.ok) {
+    return { ok: false, error: `Could not resolve home directory for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  const line = result.stdout.split(/\r?\n/u).find((entry) => entry.trim().length > 0);
+  if (line === undefined) {
+    return { ok: false, error: `Could not resolve home directory for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  const fields = line.split(":");
+  if (fields.length < 7 || fields[0] !== user || fields[5] === undefined || fields[5].length === 0) {
+    return { ok: false, error: `Malformed passwd entry for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  return validateSystemHomeDir(fields[5], "Resolved home directory");
+}
+
+async function validateExplicitSystemHome(homeDir: string): Promise<HomeDirResult> {
+  return validateSystemHomeDir(homeDir, "--home");
+}
+
+async function validateSystemHomeDir(homeDir: string, label: string): Promise<HomeDirResult> {
+  const controlValidation = validateServiceRenderValues([{ label, value: homeDir }]);
+  if (!controlValidation.ok) return controlValidation;
+  if (!isAbsolute(homeDir)) {
+    return { ok: false, error: `${label} for system service install must be an absolute path.` };
+  }
+  let stats: Awaited<ReturnType<typeof stat>>;
+  try {
+    stats = await stat(homeDir);
+  } catch {
+    return { ok: false, error: `${label} for system service install must exist and be a directory.` };
+  }
+  if (!stats.isDirectory()) {
+    return { ok: false, error: `${label} for system service install must exist and be a directory.` };
+  }
+  return { ok: true, homeDir };
+}
+
 async function systemctl(kind: "systemd-user" | "systemd-system", args: string[]): Promise<CommandResult> {
   return runCommand("systemctl", kind === "systemd-user" ? ["--user", ...args] : args);
 }
@@ -507,7 +758,7 @@ function systemdEscapeArg(value: string): string {
 }
 
 function systemdEscapeScalar(value: string): string {
-  return value.replace(/\\/gu, "\\\\").replace(/"/gu, "\\\"");
+  return value.replace(/\\/gu, "\\\\").replace(/"/gu, "\\\"").replace(/%/gu, "%%");
 }
 
 function systemdEscapeEnvAssignment(name: string, value: string): string {
