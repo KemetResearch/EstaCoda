@@ -218,4 +218,185 @@ describe("SQLiteSessionDB", () => {
       reopened.close();
     }
   });
+
+  it("lists same-timestamp session events in insertion order", async () => {
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `event-${++next}`;
+      })()
+    });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendEvent("session-1", {
+        kind: "session-history-compressed",
+        trigger: "auto",
+        source: { messageCount: 10 },
+        protectedFirstN: 3,
+        protectedLastN: 20,
+        summaryFormatVersion: "session-summary.v1",
+        summaryChars: 128
+      });
+      await db.appendEvent("session-1", {
+        kind: "session-compression-state",
+        state: {
+          status: "compressed",
+          trigger: "auto",
+          compressionCount: 1,
+          protectedFirstN: 3,
+          protectedLastN: 20,
+          protectedSpans: [],
+          summaryFormatVersion: "session-summary.v1",
+          summaryChars: 128,
+          fallbackUsed: false,
+          warnings: []
+        }
+      });
+      await db.appendEvent("session-1", {
+        kind: "external-memory-recall",
+        providerIds: ["file"],
+        enabled: true,
+        attempted: true,
+        resultCount: 0,
+        totalChars: 0,
+        workspaceScoped: false,
+        warningCount: 0,
+        failureCount: 0
+      });
+
+      const events = await db.listEvents("session-1");
+
+      expect(events.map((event) => event.kind)).toEqual([
+        "session-history-compressed",
+        "session-compression-state",
+        "external-memory-recall"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("hydrates the last inserted same-timestamp session-compression-state event", async () => {
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `event-${++next}`;
+      })()
+    });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendEvent("session-1", {
+        kind: "session-compression-state",
+        state: {
+          status: "compressed",
+          trigger: "auto",
+          compressionCount: 1,
+          ineffectiveCompressionCount: 1,
+          protectedFirstN: 3,
+          protectedLastN: 20,
+          protectedSpans: [],
+          summaryFormatVersion: "session-summary.v1",
+          summaryChars: 128,
+          fallbackUsed: false,
+          warnings: ["older state"]
+        }
+      });
+      await db.appendEvent("session-1", {
+        kind: "session-compression-state",
+        state: {
+          status: "compressed",
+          trigger: "manual",
+          compressionCount: 2,
+          ineffectiveCompressionCount: 0,
+          protectedFirstN: 4,
+          protectedLastN: 30,
+          protectedSpans: [],
+          summaryFormatVersion: "session-summary.v1",
+          summaryChars: 256,
+          fallbackUsed: true,
+          fallbackReason: "deterministic-packing",
+          warnings: ["newer state"]
+        }
+      });
+
+      const state = reconstructSessionCompressionState(await db.listEvents("session-1"));
+
+      expect(state).toMatchObject({
+        status: "compressed",
+        trigger: "manual",
+        compressionCount: 2,
+        ineffectiveCompressionCount: 0,
+        protectedFirstN: 4,
+        protectedLastN: 30,
+        summaryChars: 256,
+        fallbackUsed: true,
+        fallbackReason: "deterministic-packing",
+        warnings: ["newer state"]
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lists same-timestamp profile-scoped session events in insertion order", async () => {
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `event-${++next}`;
+      })()
+    });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendEvent("session-1", {
+        kind: "session-history-packed",
+        sourceMessageCount: 10,
+        summarizedMessageCount: 4,
+        protectedMessageCount: 6,
+        estimatedTokens: 900
+      });
+      await db.appendEvent("session-1", {
+        kind: "session-history-compressed",
+        trigger: "manual",
+        source: { messageCount: 10 },
+        protectedFirstN: 3,
+        protectedLastN: 20,
+        summaryFormatVersion: "session-summary.v1",
+        summaryChars: 128
+      });
+      await db.appendEvent("session-1", {
+        kind: "session-compression-state",
+        state: {
+          status: "compressed",
+          trigger: "manual",
+          compressionCount: 1,
+          protectedFirstN: 3,
+          protectedLastN: 20,
+          protectedSpans: [],
+          summaryFormatVersion: "session-summary.v1",
+          summaryChars: 128,
+          fallbackUsed: false,
+          warnings: []
+        }
+      });
+
+      const events = await db.listEventsForProfile("session-1", "default");
+
+      expect(events.map((event) => event.kind)).toEqual([
+        "session-history-packed",
+        "session-history-compressed",
+        "session-compression-state"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });
