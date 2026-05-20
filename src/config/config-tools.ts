@@ -1,4 +1,6 @@
 import type { RegisteredTool } from "../contracts/tool.js";
+import type { SessionDB } from "../contracts/session.js";
+import { buildCompressionStatusReport, renderCompressionStatusReport } from "./compression-status.js";
 import {
   loadRuntimeConfig,
   setupMcpConfig,
@@ -23,6 +25,8 @@ export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
   profileId?: string;
+  sessionId?: string;
+  sessionDb?: Pick<SessionDB, "listEvents">;
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -91,6 +95,35 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           metadata: {
             sources: loaded.sources,
             security: loaded.security
+          }
+        };
+      }
+    },
+    {
+      name: "config.compression.status",
+      description: "Show read-only semantic compression config, auxiliary route, and current session compression diagnostics.",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core"],
+      progressLabel: "checking compression config",
+      maxResultSizeChars: 5000,
+      isAvailable: () => true,
+      run: async () => {
+        const loaded = await loadRuntimeConfig(options);
+        const status = await buildCompressionStatusReport({
+          loaded,
+          sessionDb: options.sessionDb,
+          sessionId: options.sessionId
+        });
+
+        return {
+          ok: true,
+          content: renderCompressionStatusReport(status),
+          metadata: {
+            compressionStatus: status
           }
         };
       }

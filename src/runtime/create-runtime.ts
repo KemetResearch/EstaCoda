@@ -494,7 +494,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createConfigTools({
     workspaceRoot,
     homeDir: options.homeDir,
-    profileId: options.profileId
+    profileId: options.profileId,
+    sessionId,
+    sessionDb
   })) {
     toolRegistry.register(tool);
   }
