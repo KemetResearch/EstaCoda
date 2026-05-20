@@ -590,6 +590,7 @@ describe("gateway commands", () => {
         profileId: "work",
         system: true,
         runAsUser: "estacoda",
+        serviceHomeDir: "/home/estacoda",
         force: true,
       });
 
@@ -597,6 +598,8 @@ describe("gateway commands", () => {
       expect(result.output).toContain("system scope, profile: work");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
         profileId: "work",
+        homeDir: "/home/estacoda",
+        serviceHomeDir: "/home/estacoda",
         system: true,
         runAsUser: "estacoda",
         force: true,

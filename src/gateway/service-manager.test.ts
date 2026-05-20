@@ -16,6 +16,11 @@ const resolverMock = vi.hoisted(() => ({
   resolveGatewayExec: vi.fn(),
 }));
 
+const fsPromisesMock = vi.hoisted(() => ({
+  interceptedSystemWrites: [] as Array<{ path: string; data: string; options: unknown }>,
+  interceptedSystemChmods: [] as Array<{ path: string; mode: number }>,
+}));
+
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
@@ -29,6 +34,40 @@ vi.mock("./service-exec-resolver.js", async (importOriginal) => {
   return {
     ...actual,
     resolveGatewayExec: resolverMock.resolveGatewayExec,
+  };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  function isSystemdSystemPath(path: unknown): path is string {
+    return typeof path === "string" && path.startsWith("/etc/systemd/system");
+  }
+  return {
+    ...actual,
+    mkdir: async (path: Parameters<typeof actual.mkdir>[0], ...args: unknown[]) => {
+      if (isSystemdSystemPath(String(path))) return undefined;
+      return actual.mkdir(path, ...(args as []));
+    },
+    stat: async (path: Parameters<typeof actual.stat>[0], ...args: unknown[]) => {
+      if (isSystemdSystemPath(String(path))) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+      return actual.stat(path, ...(args as []));
+    },
+    writeFile: async (path: Parameters<typeof actual.writeFile>[0], data: Parameters<typeof actual.writeFile>[1], options?: Parameters<typeof actual.writeFile>[2]) => {
+      if (isSystemdSystemPath(String(path))) {
+        fsPromisesMock.interceptedSystemWrites.push({ path: String(path), data: String(data), options });
+        return undefined;
+      }
+      return actual.writeFile(path, data, options);
+    },
+    chmod: async (path: Parameters<typeof actual.chmod>[0], mode: Parameters<typeof actual.chmod>[1]) => {
+      if (isSystemdSystemPath(String(path))) {
+        fsPromisesMock.interceptedSystemChmods.push({ path: String(path), mode: Number(mode) });
+        return undefined;
+      }
+      return actual.chmod(path, mode);
+    },
   };
 });
 
@@ -96,6 +135,8 @@ describe("service manager", () => {
     process.env.PATH = "";
     childProcessMock.spawn.mockReset();
     resolverMock.resolveGatewayExec.mockReset();
+    fsPromisesMock.interceptedSystemWrites = [];
+    fsPromisesMock.interceptedSystemChmods = [];
     resolverMock.resolveGatewayExec.mockReturnValue({
       ok: true,
       resolved: {
@@ -137,6 +178,9 @@ describe("service manager", () => {
     expect(unitNameForProfile("work.prod")).not.toBe(unitNameForProfile("work-prod"));
     expect(plistNameForProfile("work.prod")).not.toBe(plistNameForProfile("work-prod"));
     expect(unitNameForProfile("work.prod")).toMatch(/^estacoda-gateway-work-prod-[a-f0-9]{8}\.service$/u);
+    expect(systemdUnitPath({ homeDir: tmpDir, profileId: "work.prod", system: true })).toBe(
+      join("/etc", "systemd", "system", unitNameForProfile("work.prod"))
+    );
   });
 
   it("installs a systemd user unit with escaped profile-bound launch command and permissions", async () => {
@@ -294,7 +338,7 @@ describe("service manager", () => {
       runAsUser: "estacoda\nExecStartPost=/bin/false",
     })).resolves.toEqual({
       ok: false,
-      error: "Invalid service manager value for runAsUser: control characters are not allowed.",
+      error: "Invalid --run-as-user value. Expected a local username matching ^[A-Za-z_][A-Za-z0-9_-]*[$]?$",
     });
 
     process.env.PATH = `${binDir}:${join(tmpDir, "bad\npath")}`;
@@ -396,6 +440,235 @@ describe("service manager", () => {
       ok: false,
       error: "System service install requires --run-as-user <user> so HOME/profile state are explicit.",
     });
+  });
+
+  it("rejects invalid system run-as users before invoking id", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+
+    for (const runAsUser of ["-root", "bad user", "bad/user", "bad:user", "bad\nuser", `bad${"\u0000"}user`]) {
+      const calls = mockSpawn();
+      await expect(installService({
+        homeDir: tmpDir,
+        workspaceRoot: tmpDir,
+        profileId: "default",
+        system: true,
+        runAsUser,
+      })).resolves.toEqual({
+        ok: false,
+        error: "Invalid --run-as-user value. Expected a local username matching ^[A-Za-z_][A-Za-z0-9_-]*[$]?$",
+      });
+      expect(calls.some((call) => call.command === "id")).toBe(false);
+    }
+  });
+
+  it("fails system install when the run-as user cannot be resolved", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+    const calls = mockSpawn((call) => call.command === "id" ? { code: 1, stderr: "no such user" } : { code: 0 });
+
+    await expect(installService({
+      homeDir: tmpDir,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "System service user 'estacoda' does not exist or cannot be resolved.",
+    });
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["id", "-u", "estacoda"],
+    ]);
+  });
+
+  it("validates explicit system service home before writing the unit", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+    mockSpawn((call) => call.command === "id" ? { code: 0, stdout: "501\n" } : { code: 0 });
+
+    await expect(installService({
+      homeDir: tmpDir,
+      serviceHomeDir: "relative-home",
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "--home for system service install must be an absolute path.",
+    });
+
+    await expect(installService({
+      homeDir: tmpDir,
+      serviceHomeDir: `${tmpDir}\n`,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for --home: control characters are not allowed.",
+    });
+
+    const fileHome = join(tmpDir, "not-a-dir");
+    await writeFile(fileHome, "not a directory", "utf8");
+    await expect(installService({
+      homeDir: tmpDir,
+      serviceHomeDir: fileHome,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "--home for system service install must exist and be a directory.",
+    });
+  });
+
+  it("fails clearly when getent cannot resolve a system service home", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+
+    mockSpawn((call) => {
+      if (call.command === "id") return { code: 0, stdout: "501\n" };
+      if (call.command === "getent") return { code: 1, stderr: "missing" };
+      return { code: 0 };
+    });
+    await expect(installService({
+      homeDir: "/root",
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Could not resolve home directory for system service user 'estacoda'. Pass --home <absolute-dir>.",
+    });
+
+    mockSpawn((call) => {
+      if (call.command === "id") return { code: 0, stdout: "501\n" };
+      if (call.command === "getent") return { code: 0, stdout: "malformed\n" };
+      return { code: 0 };
+    });
+    await expect(installService({
+      homeDir: "/root",
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Malformed passwd entry for system service user 'estacoda'. Pass --home <absolute-dir>.",
+    });
+
+    mockSpawn((call) => {
+      if (call.command === "id") return { code: 0, stdout: "501\n" };
+      if (call.command === "getent") return { code: 0, stdout: "estacoda:x:501:501::relative-home:/bin/sh\n" };
+      return { code: 0 };
+    });
+    await expect(installService({
+      homeDir: "/root",
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Resolved home directory for system service install must be an absolute path.",
+    });
+  });
+
+  it("uses the getent-resolved home for system install preflight instead of root HOME", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+    const serviceHome = join(tmpDir, "service-home");
+    await mkdir(serviceHome, { recursive: true });
+    mockSpawn((call) => {
+      if (call.command === "id") return { code: 0, stdout: "501\n" };
+      if (call.command === "getent") return { code: 0, stdout: `estacoda:x:501:501::${serviceHome}:/bin/sh\n` };
+      return { code: 0 };
+    });
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "dist", "index.js")],
+        cwd: `${tmpDir}\n`,
+      },
+    });
+
+    await expect(installService({
+      homeDir: "/root",
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for resolved.cwd: control characters are not allowed.",
+    });
+  });
+
+  it("renders system units with run-as user, explicit home, and system permissions without touching real /etc", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+    const serviceHome = join(tmpDir, "service-home");
+    await mkdir(serviceHome, { recursive: true });
+    const calls = mockSpawn((call) => call.command === "id" ? { code: 0, stdout: "501\n" } : { code: 0 });
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "dist", "index.js")],
+        cwd: tmpDir,
+      },
+    });
+
+    await expect(installService({
+      homeDir: "/root",
+      serviceHomeDir: serviceHome,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda",
+    })).resolves.toEqual({ ok: true, mode: "compiled" });
+
+    const unitPath = systemdUnitPath({ homeDir: serviceHome, profileId: "default", system: true });
+    expect(fsPromisesMock.interceptedSystemWrites).toHaveLength(1);
+    expect(fsPromisesMock.interceptedSystemWrites[0]).toMatchObject({
+      path: unitPath,
+      options: { encoding: "utf8", mode: 0o644 },
+    });
+    expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain("User=estacoda");
+    expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain(`Environment="HOME=${serviceHome}"`);
+    expect(fsPromisesMock.interceptedSystemChmods).toEqual([{ path: unitPath, mode: 0o644 }]);
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["id", "-u", "estacoda"],
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "enable", unitNameForProfile("default")],
+      ["systemctl", "start", unitNameForProfile("default")],
+    ]);
   });
 
   it("installs a launchd plist with escaped ProgramArguments and permissions", async () => {

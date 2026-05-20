@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
 import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, delimiter, join, resolve } from "node:path";
+import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { inspectGatewayLockState } from "./gateway-lock.js";
 import { isStalePid, readGatewayPid } from "./pid-file.js";
@@ -30,6 +30,7 @@ type CommandResult = {
 };
 
 type ValidationResult = { ok: true } | { ok: false; error: string };
+type HomeDirResult = { ok: true; homeDir: string } | { ok: false; error: string };
 
 export function detectServiceManager(): ServiceManagerKind {
   if (process.platform === "linux" && commandExists("systemctl")) {
@@ -43,13 +44,14 @@ export function detectServiceManager(): ServiceManagerKind {
 
 export async function installService(options: {
   homeDir: string;
+  serviceHomeDir?: string;
   workspaceRoot: string;
   profileId: string;
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
 }): Promise<{ ok: true; mode: ExecMode } | { ok: false; error: string }> {
-  const homeDir = resolve(options.homeDir);
+  let homeDir = resolve(options.homeDir);
   const workspaceRoot = resolve(options.workspaceRoot);
   const kind = targetKind(options);
 
@@ -63,9 +65,19 @@ export async function installService(options: {
     if (process.geteuid?.() !== 0) {
       return { ok: false, error: "System service install requires root. Use sudo or omit --system." };
     }
-    if (options.runAsUser === undefined || options.runAsUser.trim().length === 0) {
+    const runAsUser = options.runAsUser;
+    if (runAsUser === undefined || runAsUser.trim().length === 0) {
       return { ok: false, error: "System service install requires --run-as-user <user> so HOME/profile state are explicit." };
     }
+    const userValidation = validateSystemRunAsUser(runAsUser);
+    if (!userValidation.ok) return userValidation;
+    const userExists = await verifySystemUserExists(runAsUser);
+    if (!userExists.ok) return userExists;
+    const systemHome = options.serviceHomeDir === undefined
+      ? await resolveSystemUserHome(runAsUser)
+      : await validateExplicitSystemHome(options.serviceHomeDir);
+    if (!systemHome.ok) return systemHome;
+    homeDir = systemHome.homeDir;
   }
   const baseValidation = validateServiceRenderValues([
     { label: "profileId", value: options.profileId },
@@ -525,6 +537,60 @@ function validateServiceRenderValues(values: Array<{ label: string; value: strin
     }
   }
   return { ok: true };
+}
+
+function validateSystemRunAsUser(value: string): ValidationResult {
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*[$]?$/u.test(value)) {
+    return {
+      ok: false,
+      error: "Invalid --run-as-user value. Expected a local username matching ^[A-Za-z_][A-Za-z0-9_-]*[$]?$",
+    };
+  }
+  return { ok: true };
+}
+
+async function verifySystemUserExists(user: string): Promise<ValidationResult> {
+  const result = await runCommand("id", ["-u", user]);
+  if (result.ok) return { ok: true };
+  return { ok: false, error: `System service user '${user}' does not exist or cannot be resolved.` };
+}
+
+async function resolveSystemUserHome(user: string): Promise<HomeDirResult> {
+  const result = await runCommand("getent", ["passwd", user]);
+  if (!result.ok) {
+    return { ok: false, error: `Could not resolve home directory for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  const line = result.stdout.split(/\r?\n/u).find((entry) => entry.trim().length > 0);
+  if (line === undefined) {
+    return { ok: false, error: `Could not resolve home directory for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  const fields = line.split(":");
+  if (fields.length < 7 || fields[0] !== user || fields[5] === undefined || fields[5].length === 0) {
+    return { ok: false, error: `Malformed passwd entry for system service user '${user}'. Pass --home <absolute-dir>.` };
+  }
+  return validateSystemHomeDir(fields[5], "Resolved home directory");
+}
+
+async function validateExplicitSystemHome(homeDir: string): Promise<HomeDirResult> {
+  return validateSystemHomeDir(homeDir, "--home");
+}
+
+async function validateSystemHomeDir(homeDir: string, label: string): Promise<HomeDirResult> {
+  const controlValidation = validateServiceRenderValues([{ label, value: homeDir }]);
+  if (!controlValidation.ok) return controlValidation;
+  if (!isAbsolute(homeDir)) {
+    return { ok: false, error: `${label} for system service install must be an absolute path.` };
+  }
+  let stats: Awaited<ReturnType<typeof stat>>;
+  try {
+    stats = await stat(homeDir);
+  } catch {
+    return { ok: false, error: `${label} for system service install must exist and be a directory.` };
+  }
+  if (!stats.isDirectory()) {
+    return { ok: false, error: `${label} for system service install must exist and be a directory.` };
+  }
+  return { ok: true, homeDir };
 }
 
 async function systemctl(kind: "systemd-user" | "systemd-system", args: string[]): Promise<CommandResult> {

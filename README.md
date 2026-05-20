@@ -111,13 +111,14 @@ estacoda gateway install
 estacoda gateway install --profile work
 estacoda gateway install --force
 sudo estacoda gateway install --system --run-as-user "$USER"
+sudo estacoda gateway install --system --run-as-user estacoda --home /home/estacoda
 
 estacoda gateway uninstall
 estacoda gateway uninstall --profile work
 sudo estacoda gateway uninstall --system
 ```
 
-Service installs inherit `HOME` but not your interactive shell environment. Keep bot tokens and provider API keys in the selected profile env file, for example `~/.estacoda/profiles/default/.env`. On headless Linux hosts, systemd user services may stop at logout unless linger is enabled with `sudo loginctl enable-linger $USER`. Source-mode installs hardcode the workspace path, so reinstall the service if the repo moves. `estacoda gateway status` includes a Service Manager block and remains usable when systemd or launchd probing fails or is permission-limited.
+Service installs use an explicit `HOME` but not your interactive shell environment. For system-scope installs, EstaCoda validates `--run-as-user`, verifies the user exists, and resolves that user's home with `getent passwd`; pass `--home <absolute-dir>` when the home cannot be resolved automatically. Keep bot tokens and provider API keys in the selected profile env file, for example `~/.estacoda/profiles/default/.env`. On headless Linux hosts, systemd user services may stop on logout unless linger is enabled with `sudo loginctl enable-linger $USER`. Source-mode installs hardcode the workspace path, so reinstall the service if the repo moves. `estacoda gateway status` includes a Service Manager block and remains usable when systemd or launchd probing fails or is permission-limited.
 
 ## Security And Approvals
 

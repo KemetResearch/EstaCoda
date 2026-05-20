@@ -216,7 +216,7 @@ describe("cli gateway start", () => {
 
   it("parses gateway install aliases and service flags", async () => {
     const result = await runCliCommand({
-      argv: ["gateway", "install-service", "--profile", "work", "--system", "--run-as-user", "estacoda", "--force"],
+      argv: ["gateway", "install-service", "--profile", "work", "--system", "--run-as-user", "estacoda", "--home", "/home/estacoda", "--force"],
       workspaceRoot: "/tmp",
       homeDir: "/tmp/home",
     });
@@ -227,6 +227,7 @@ describe("cli gateway start", () => {
       profileId: "work",
       system: true,
       runAsUser: "estacoda",
+      serviceHomeDir: "/home/estacoda",
       force: true,
     }));
   });

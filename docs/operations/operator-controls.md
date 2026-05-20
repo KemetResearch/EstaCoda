@@ -117,6 +117,7 @@ estacoda gateway install --profile work   # Install a service bound to profile "
 estacoda gateway install --force          # Stop and replace an existing service unit
 
 sudo estacoda gateway install --system --run-as-user estacoda
+sudo estacoda gateway install --system --run-as-user estacoda --home /home/estacoda
 
 estacoda gateway uninstall                # Remove user-scope service for the selected profile
 estacoda gateway uninstall-service        # Alias for uninstall
@@ -132,11 +133,11 @@ Supported service managers:
 
 Installed gateway services are profile-aware. The generated service launch command includes `gateway start --profile <profileId>`, and each profile receives its own hash-suffixed unit or plist name, so multiple profiles can have independent managed services.
 
-System-scope installs require root and an explicit `--run-as-user <user>`. EstaCoda does not insert `sudo` for you; run the install command with the privilege model you intend.
+System-scope installs require root and an explicit `--run-as-user <user>`. EstaCoda validates the username, verifies the user exists with `id -u`, and resolves the service `HOME` with `getent passwd <user>`. Pass `--home <absolute-dir>` when automatic home resolution is unavailable or should be overridden. EstaCoda does not insert `sudo` for you; run the install command with the privilege model you intend.
 
 Operational warnings:
 
-- Services inherit `HOME` but not your interactive shell environment.
+- Services use an explicit `HOME` but not your interactive shell environment.
 - Put bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
 - systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.

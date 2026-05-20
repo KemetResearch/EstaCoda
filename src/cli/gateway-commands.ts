@@ -269,12 +269,14 @@ export async function runGatewayStatus(
 }
 
 export async function runGatewayInstallService(
-  options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean }
+  options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean; serviceHomeDir?: string }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
-  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const stateHomeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = options.serviceHomeDir ?? stateHomeDir;
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await installService({
     homeDir,
+    serviceHomeDir: options.serviceHomeDir,
     workspaceRoot: options.workspaceRoot,
     profileId,
     system: options.system,

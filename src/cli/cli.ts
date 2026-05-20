@@ -3093,6 +3093,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       profileId: parseGatewayProfileFlag(rest) ?? options.profileId,
       system: hasFlag(rest, "--system"),
       runAsUser: valueAfter(rest, "--run-as-user"),
+      serviceHomeDir: valueAfter(rest, "--home"),
       force: hasFlag(rest, "--force"),
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
@@ -3202,6 +3203,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway approvals [list|approve|deny]",
       "  estacoda gateway install",
       "  estacoda gateway install --system --run-as-user <user>",
+      "  estacoda gateway install --system --run-as-user <user> --home <absolute-dir>",
       "  estacoda gateway install --force",
       "  estacoda gateway install --profile <id>",
       "  estacoda gateway uninstall",
