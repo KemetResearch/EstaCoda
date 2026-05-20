@@ -10,6 +10,19 @@ import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "./memory-recall-orchestrator.js";
 import { MemoryStore } from "./memory-store.js";
 
+type ExternalRecallAuditInput = {
+  providerIds: string[];
+  enabled: boolean;
+  attempted: boolean;
+  resultCount: number;
+  totalChars: number;
+  workspaceScoped: boolean;
+  warningCount: number;
+  failureCount: number;
+  failures?: Array<{ providerId?: string; reason: string }>;
+  durationMs?: number;
+};
+
 describe("MemoryRecallOrchestrator", () => {
   it("makes deterministic local-memory and omitted-recall decisions for the same inputs", async () => {
     const first = await orchestratorFixture().orchestrator.prepareForTurn({
@@ -255,6 +268,129 @@ describe("MemoryRecallOrchestrator", () => {
     expect(result.context.diagnostics.warnings.join("\n")).not.toContain("secretsecret");
   });
 
+  it("records bounded external recall audit data without raw recalled content", async () => {
+    const audit = vi.fn(async (_input: ExternalRecallAuditInput) => []);
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      prefetch: vi.fn(async () => [
+        {
+          id: "ext-1",
+          source: "remote-note",
+          content: "sensitive recalled content should not be in audit",
+          score: 0.9
+        }
+      ])
+    };
+    const { orchestrator } = orchestratorFixture({
+      recorder: {
+        recordSessionRecallDecision: vi.fn(async () => []),
+        recordExternalMemoryRecall: audit
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 2,
+        maxChars: 500,
+        mirrorWrites: false
+      }
+    });
+
+    await orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      providerIds: ["fake"],
+      enabled: true,
+      attempted: true,
+      resultCount: 1,
+      workspaceScoped: true,
+      warningCount: 0,
+      failureCount: 0
+    }));
+    expect(JSON.stringify(audit.mock.calls[0]?.[0])).not.toContain("sensitive recalled content");
+  });
+
+  it("records redacted external recall failures without blocking local memory", async () => {
+    const audit = vi.fn(async (_input: ExternalRecallAuditInput) => []);
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      prefetch: vi.fn(async () => {
+        throw new Error("Bearer secretsecretsecretsecretsecret " + "x".repeat(500));
+      })
+    };
+    const { orchestrator } = orchestratorFixture({
+      recorder: {
+        recordSessionRecallDecision: vi.fn(async () => []),
+        recordExternalMemoryRecall: audit
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 2,
+        maxChars: 500,
+        mirrorWrites: false
+      }
+    });
+
+    const result = await orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+
+    expect(result.context.frozenCompactMemory.map((block) => block.source)).toEqual(["USER.md", "MEMORY.md"]);
+    expect(result.context.externalRecall).toBeUndefined();
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      providerIds: ["fake"],
+      resultCount: 0,
+      warningCount: 1,
+      failureCount: 1,
+      failures: [
+        expect.objectContaining({
+          providerId: "fake"
+        })
+      ]
+    }));
+    const auditJson = JSON.stringify(audit.mock.calls[0]?.[0]);
+    expect(auditJson).toContain("Bearer [REDACTED]");
+    expect(auditJson).not.toContain("secretsecret");
+    expect(auditJson.length).toBeLessThan(1_200);
+  });
+
+  it("keeps local memory when external recall audit recording fails", async () => {
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      prefetch: vi.fn(async () => [
+        {
+          id: "ext-1",
+          source: "remote-note",
+          content: "Parser errors stay structured.",
+          score: 0.9
+        }
+      ])
+    };
+    const { orchestrator } = orchestratorFixture({
+      recorder: {
+        recordSessionRecallDecision: vi.fn(async () => []),
+        recordExternalMemoryRecall: vi.fn(async () => {
+          throw new Error("TOKEN=secretsecretsecretsecretsecret");
+        })
+      },
+      externalMemoryProviders: [provider],
+      externalMemory: {
+        enabled: true,
+        timeoutMs: 750,
+        maxResults: 2,
+        maxChars: 500,
+        mirrorWrites: false
+      }
+    });
+
+    const result = await orchestrator.prepareForTurn({ text: "What did we decide about parser errors?" });
+
+    expect(result.context.frozenCompactMemory.map((block) => block.source)).toEqual(["USER.md", "MEMORY.md"]);
+    expect(result.context.externalRecall).toHaveLength(1);
+    expect(result.context.diagnostics.warnings.join("\n")).toContain("TOKEN=[REDACTED]");
+    expect(result.context.diagnostics.warnings.join("\n")).not.toContain("secretsecret");
+  });
+
   it("keeps orchestrator decisions deterministic with the file-backed provider enabled", async () => {
     const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-orchestrator-file-provider-"));
     const provider = createFileExternalMemoryProvider({
@@ -350,6 +486,18 @@ function orchestratorFixture(input: {
       query?: string;
       sourceSessionIds: string[];
       warningCount: number;
+    }): Promise<string[]>;
+    recordExternalMemoryRecall?(input: {
+      providerIds: string[];
+      enabled: boolean;
+      attempted: boolean;
+      resultCount: number;
+      totalChars: number;
+      workspaceScoped: boolean;
+      warningCount: number;
+      failureCount: number;
+      failures?: Array<{ providerId?: string; reason: string }>;
+      durationMs?: number;
     }): Promise<string[]>;
   };
 } = {}) {

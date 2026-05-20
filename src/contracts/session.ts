@@ -276,6 +276,43 @@ export type SessionEvent =
       warningCount: number;
     }
   | {
+      kind: "external-memory-recall";
+      providerIds: string[];
+      enabled: boolean;
+      attempted: boolean;
+      resultCount: number;
+      totalChars: number;
+      profileId?: string;
+      workspaceScoped: boolean;
+      warningCount: number;
+      failureCount: number;
+      failures?: Array<{
+        providerId?: string;
+        reason: string;
+      }>;
+      durationMs?: number;
+    }
+  | {
+      kind: "external-memory-mirror-write";
+      providerIds: string[];
+      enabled: boolean;
+      mirrorEnabled: boolean;
+      localWriteSucceeded: boolean;
+      mirrorAttempted: boolean;
+      mirrorSucceeded: boolean;
+      memoryFile?: string;
+      operationKind?: string;
+      entryChars: number;
+      profileId?: string;
+      workspaceScoped: boolean;
+      warningCount: number;
+      failureCount: number;
+      failures?: Array<{
+        providerId?: string;
+        reason: string;
+      }>;
+    }
+  | {
       kind: "session-history-packed";
       sourceMessageCount: number;
       summarizedMessageCount: number;
