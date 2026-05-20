@@ -59,6 +59,7 @@ estacoda gateway diagnose     # Per-channel readiness check
 ```
 
 `gateway status` surfaces:
+- Service Manager state for managed gateway services
 - Process state (CLI view)
 - All configured channels (Telegram, Discord, Email, WhatsApp) with ready/configured/disabled state
 - DeliveryRouter platforms
@@ -68,6 +69,8 @@ estacoda gateway diagnose     # Per-channel readiness check
 - Recent cron failures (last 5)
 - Recent delivery errors (last 5)
 - Missing config/env warnings
+
+The Service Manager block reports installed/active state for the user service and, on systemd hosts, the system service scope too. Status remains usable when `systemctl` or `launchctl` probing fails or is permission-limited; failed probes degrade to an unknown/not-installed state instead of failing the whole status command.
 
 `gateway diagnose` checks:
 - Telegram token presence, allowed users/chats
@@ -104,6 +107,40 @@ Gateway processes are bound to the profile selected at start time. Changing `act
 `stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. If the process does not exit within the graceful timeout, `--force` sends SIGKILL and cleans up.
 
 `restart` calls `stop`, then performs `start --background`, then returns. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
+
+### Gateway Managed Services
+
+```bash
+estacoda gateway install                  # Install user-scope service for the selected profile
+estacoda gateway install-service          # Alias for install
+estacoda gateway install --profile work   # Install a service bound to profile "work"
+estacoda gateway install --force          # Stop and replace an existing service unit
+
+sudo estacoda gateway install --system --run-as-user estacoda
+
+estacoda gateway uninstall                # Remove user-scope service for the selected profile
+estacoda gateway uninstall-service        # Alias for uninstall
+estacoda gateway uninstall --profile work # Remove the service for profile "work"
+sudo estacoda gateway uninstall --system  # Remove system-scope service
+```
+
+Supported service managers:
+
+- Linux systemd user services.
+- Linux systemd system services.
+- macOS launchd user LaunchAgents.
+
+Installed gateway services are profile-aware. The generated service launch command includes `gateway start --profile <profileId>`, and each profile receives its own hash-suffixed unit or plist name, so multiple profiles can have independent managed services.
+
+System-scope installs require root and an explicit `--run-as-user <user>`. EstaCoda does not insert `sudo` for you; run the install command with the privilege model you intend.
+
+Operational warnings:
+
+- Services inherit `HOME` but not your interactive shell environment.
+- Put bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
+- systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
+- Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.
+- In v0.1.0, `estacoda gateway start`, `estacoda gateway stop`, and `estacoda gateway restart` are still process-oriented lifecycle commands. They do not yet delegate to systemd or launchd.
 
 ### Channel Commands
 

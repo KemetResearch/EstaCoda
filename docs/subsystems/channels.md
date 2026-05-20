@@ -239,6 +239,51 @@ Gateway processes are bound to the profile selected at gateway start time. Chang
 
 Gateway turns rebuild runtimes from fresh selected-profile config snapshots. This helps MCP reload semantics, but the supervisor remains bound to the profile chosen at start.
 
+## Gateway Service Management
+
+EstaCoda can install the gateway supervisor as a managed service:
+
+- Linux systemd user services.
+- Linux systemd system services.
+- macOS launchd user LaunchAgents.
+
+Commands:
+
+```bash
+estacoda gateway install
+estacoda gateway install-service
+estacoda gateway uninstall
+estacoda gateway uninstall-service
+```
+
+Every installed service is bound to a profile. The generated launch command includes `gateway start --profile <profileId>`, and service names include a profile-derived hash suffix so profiles such as `work.prod` and `work-prod` do not collide. Multiple profiles can have independent service units installed at the same time.
+
+Install examples:
+
+```bash
+estacoda gateway install
+estacoda gateway install --profile work
+estacoda gateway install --force
+sudo estacoda gateway install --system --run-as-user estacoda
+```
+
+Uninstall examples:
+
+```bash
+estacoda gateway uninstall
+estacoda gateway uninstall --profile work
+sudo estacoda gateway uninstall --system
+```
+
+Service operation notes:
+
+- Services inherit `HOME` but not the interactive shell environment.
+- Secrets should live in the selected profile env file, for example `~/.estacoda/profiles/work/.env`.
+- systemd user services may stop on logout unless linger is enabled with `sudo loginctl enable-linger $USER`.
+- Source-mode service installs hardcode the workspace path and may need reinstall if the repo moves.
+- v0.1.0 does not make `gateway start`, `gateway stop`, or `gateway restart` service-aware lifecycle commands; use the service manager directly for managed-service lifecycle after install.
+- `estacoda gateway status` includes a Service Manager block. The status command remains usable when systemd or launchd probing fails or is permission-limited.
+
 ## Gateway Approvals
 
 Gateway approval prompts create durable rows in `pending_approvals`. Rows include `profile_id`, `session_id`, command preview/hash, transient command payload, tool name, status, expiry, channel, and optional chat id.

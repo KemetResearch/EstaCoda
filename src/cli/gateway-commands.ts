@@ -60,6 +60,13 @@ import {
   isRuntimeCacheStatePidMatch,
   type RuntimeCacheState,
 } from "../gateway/runtime-cache-state.js";
+import {
+  detectServiceManager,
+  installService,
+  probeServiceState,
+  uninstallService,
+} from "../gateway/service-manager.js";
+import type { ServiceManagerState } from "../gateway/service-manager.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -193,6 +200,21 @@ export async function runGatewayStatus(
 
   const state = await readGatewayState(selected.paths);
   const pidContent = await readGatewayPid(selected.paths);
+  const serviceManagerStates: ServiceManagerState[] = [];
+  const userServiceState = await probeServiceState({
+    homeDir: selected.homeDir,
+    profileId: selected.profileId,
+    system: false,
+  });
+  serviceManagerStates.push(userServiceState);
+
+  if (detectServiceManager().startsWith("systemd")) {
+    serviceManagerStates.push(await probeServiceState({
+      homeDir: selected.homeDir,
+      profileId: selected.profileId,
+      system: true,
+    }));
+  }
 
   const identityLocks = await buildIdentityLockStatuses(selected.paths, config.channels);
 
@@ -236,6 +258,7 @@ export async function runGatewayStatus(
               profileId: pidContent.profileId ?? selected.profileId,
             }
           : undefined,
+    serviceManagerStates,
     identityLocks,
     runtimeState: runtimeStateValid ? runtimeState : undefined,
     runtimeCacheState: runtimeCacheStateTrustworthy ? rawRuntimeCacheState : undefined,
@@ -243,6 +266,65 @@ export async function runGatewayStatus(
 
   const viewModel = buildGatewayStatusViewModel(data);
   return { ok: true, output: renderer(viewModel) };
+}
+
+export async function runGatewayInstallService(
+  options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean }
+): Promise<{ ok: boolean; output: string }> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const result = await installService({
+    homeDir,
+    workspaceRoot: options.workspaceRoot,
+    profileId,
+    system: options.system,
+    runAsUser: options.runAsUser,
+    force: options.force,
+  });
+
+  if (!result.ok) return { ok: false, output: result.error };
+
+  const scope = options.system ? "system" : "user";
+  const warnings = [
+    "Service inherits HOME but not interactive shell environment.",
+    `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ~/.estacoda/profiles/${profileId}/.env, not only shell exports.`,
+  ];
+
+  if (!options.system && detectServiceManager().startsWith("systemd")) {
+    warnings.push("User services stop on logout. On a headless server, run: sudo loginctl enable-linger $USER");
+  }
+
+  if (result.mode === "source") {
+    warnings.push(`Installed in source mode. If this workspace is moved, run "estacoda gateway uninstall --profile ${profileId} && estacoda gateway install --profile ${profileId}" again.`);
+  }
+
+  return {
+    ok: true,
+    output: [
+      `Gateway service installed (${scope} scope, profile: ${profileId}).`,
+      ...warnings.map((warning) => `Warning: ${warning}`),
+    ].join("\n"),
+  };
+}
+
+export async function runGatewayUninstallService(
+  options: GatewayCommandOptions & { system?: boolean }
+): Promise<{ ok: boolean; output: string }> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const result = await uninstallService({
+    homeDir,
+    profileId,
+    system: options.system,
+  });
+
+  if (!result.ok) return { ok: false, output: result.error };
+
+  const scope = options.system ? "system" : "user";
+  return {
+    ok: true,
+    output: `Gateway service uninstalled (${scope} scope, profile: ${profileId}).`,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────

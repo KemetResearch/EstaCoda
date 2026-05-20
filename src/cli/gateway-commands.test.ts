@@ -11,6 +11,13 @@ const childProcessMock = vi.hoisted(() => ({
   spawn: vi.fn(),
 }));
 
+const serviceManagerMock = vi.hoisted(() => ({
+  detectServiceManager: vi.fn(),
+  installService: vi.fn(),
+  uninstallService: vi.fn(),
+  probeServiceState: vi.fn(),
+}));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   fsPromisesMock.rename.mockImplementation(actual.rename);
@@ -28,6 +35,17 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+vi.mock("../gateway/service-manager.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-manager.js")>();
+  return {
+    ...actual,
+    detectServiceManager: serviceManagerMock.detectServiceManager,
+    installService: serviceManagerMock.installService,
+    uninstallService: serviceManagerMock.uninstallService,
+    probeServiceState: serviceManagerMock.probeServiceState,
+  };
+});
+
 import {
   runGatewayStatus,
   runGatewayDiagnose,
@@ -40,6 +58,8 @@ import {
   runGatewayStartDryRun,
   runGatewayStartBackground,
   runGatewayApprovals,
+  runGatewayInstallService,
+  runGatewayUninstallService,
 } from "./gateway-commands.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
@@ -158,6 +178,19 @@ describe("gateway commands", () => {
     await mkdir(stateRoot, { recursive: true });
     fsPromisesMock.rename.mockClear();
     childProcessMock.spawn.mockReset();
+    serviceManagerMock.detectServiceManager.mockReset();
+    serviceManagerMock.installService.mockReset();
+    serviceManagerMock.uninstallService.mockReset();
+    serviceManagerMock.probeServiceState.mockReset();
+    serviceManagerMock.detectServiceManager.mockReturnValue("none");
+    serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+      kind: "none",
+      installed: false,
+      scope: options.system ? "system" : "user",
+      activeState: "unknown",
+      unitName: `estacoda-gateway-${options.profileId}.service`,
+      profileId: options.profileId,
+    }));
   });
 
   afterEach(async () => {
@@ -507,6 +540,129 @@ describe("gateway commands", () => {
       } finally {
         sessionDb.close();
       }
+    });
+  });
+
+  describe("gateway service commands", () => {
+    it("installs a user service with source-mode warnings", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "source" });
+
+      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Gateway service installed (user scope, profile: default).");
+      expect(result.output).toContain("profile-local");
+      expect(result.output).toContain("not interactive shell environment");
+      expect(result.output).toContain("loginctl enable-linger");
+      expect(result.output).toContain("Installed in source mode");
+      expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
+        homeDir: tmpDir,
+        workspaceRoot: tmpDir,
+        profileId: "default",
+      }));
+    });
+
+    it("omits source-mode warning for package installs", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "package-bin" });
+
+      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).not.toContain("Installed in source mode");
+    });
+
+    it("returns install failures", async () => {
+      serviceManagerMock.installService.mockResolvedValue({ ok: false, error: "already installed" });
+
+      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result).toEqual({ ok: false, output: "already installed" });
+    });
+
+    it("propagates explicit profile, system scope, runAsUser, and force", async () => {
+      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+
+      const result = await runGatewayInstallService({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        profileId: "work",
+        system: true,
+        runAsUser: "estacoda",
+        force: true,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("system scope, profile: work");
+      expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
+        profileId: "work",
+        system: true,
+        runAsUser: "estacoda",
+        force: true,
+      }));
+    });
+
+    it("uninstalls a service and returns failures", async () => {
+      serviceManagerMock.uninstallService.mockResolvedValueOnce({ ok: true });
+      const success = await runGatewayUninstallService({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        profileId: "work",
+        system: true,
+      });
+      expect(success).toEqual({
+        ok: true,
+        output: "Gateway service uninstalled (system scope, profile: work).",
+      });
+      expect(serviceManagerMock.uninstallService).toHaveBeenCalledWith(expect.objectContaining({
+        homeDir: tmpDir,
+        profileId: "work",
+        system: true,
+      }));
+
+      serviceManagerMock.uninstallService.mockResolvedValueOnce({ ok: false, error: "not supported" });
+      const failure = await runGatewayUninstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(failure).toEqual({ ok: false, output: "not supported" });
+    });
+
+    it("renders user and system service state in status on systemd", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: true,
+        scope: options.system ? "system" : "user",
+        activeState: options.system ? "inactive" : "active",
+        subState: options.system ? "dead" : "running",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Service Manager");
+      expect(result.output).toContain("systemd-user (user): active (running)");
+      expect(result.output).toContain("systemd-system (system): inactive (dead)");
+    });
+
+    it("keeps status ok when service probing degrades", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: false,
+        scope: options.system ? "system" : "user",
+        activeState: "unknown",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Service Manager");
+      expect(result.output).toContain("systemd-user (user): not installed");
+      expect(result.output).toContain("systemd-system (system): not installed");
     });
   });
 

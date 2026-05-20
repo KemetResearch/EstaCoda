@@ -553,6 +553,9 @@ exports[`Gateway surfaces — status > renders in narrow width > gateway-status-
 PID: none
 State: stopped
 
+[1mService Manager[0m
+none (user): not installed
+
 [1mProcess[0m
 Status: CLI view (no live gateway process in this shell)
 
@@ -593,6 +596,9 @@ exports[`Gateway surfaces — status > renders in no Unicode > gateway-status-no
 [1mSupervisor[0m
 PID: none
 State: stopped
+
+[1mService Manager[0m
+none (user): not installed
 
 [1mProcess[0m
 Status: CLI view (no live gateway process in this shell)
@@ -635,6 +641,9 @@ Supervisor
 PID: none
 State: stopped
 
+Service Manager
+none (user): not installed
+
 Process
 Status: CLI view (no live gateway process in this shell)
 
@@ -675,6 +684,9 @@ exports[`Gateway surfaces — status > renders in plain > gateway-status-plain 1
 Supervisor
 PID: none
 State: stopped
+
+Service Manager
+none (user): not installed
 
 Process
 Status: CLI view (no live gateway process in this shell)
@@ -717,6 +729,9 @@ exports[`Gateway surfaces — status > renders in standard dark > gateway-status
 PID: none
 State: stopped
 
+[1mService Manager[0m
+none (user): not installed
+
 [1mProcess[0m
 Status: CLI view (no live gateway process in this shell)
 
@@ -757,6 +772,9 @@ exports[`Gateway surfaces — status > renders in standard light > gateway-statu
 [1mSupervisor[0m
 PID: none
 State: stopped
+
+[1mService Manager[0m
+none (user): not installed
 
 [1mProcess[0m
 Status: CLI view (no live gateway process in this shell)
