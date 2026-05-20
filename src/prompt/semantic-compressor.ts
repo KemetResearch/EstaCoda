@@ -22,6 +22,8 @@ export const CONTENT_HEAD = 4_000;
 export const CONTENT_TAIL = 1_500;
 export const TOOL_ARGS_MAX = 1_500;
 export const TOOL_ARGS_HEAD = 1_200;
+export const TOOL_RESULT_PRUNE_THRESHOLD = 2_000;
+export const TOOL_RESULT_SNIPPET_CHARS = 240;
 export const MIN_SUMMARY_TOKENS = 2_000;
 export const MAX_SUMMARY_CONTEXT_RATIO = 0.05;
 export const MAX_SUMMARY_TOKENS_CEILING = 12_000;
@@ -66,6 +68,8 @@ export type SemanticCompressionDiagnostics = {
   mainRetryFailure?: SessionCompressionFailure;
   warnings: string[];
   prunedToolResults: number;
+  prunedToolResultChars: number;
+  protectedToolResultsKept: number;
   scopeKey: string;
   lastCompressionSavingsPct?: number;
   ineffectiveCompressionCount: number;
@@ -155,7 +159,8 @@ export class SemanticCompressor {
       });
     }
 
-    const serialized = serializeMessagesForSummary(plan.source);
+    const pruned = pruneOldToolResults(plan.source);
+    const serialized = serializeMessagesForSummary(pruned.messages);
     const previousSummary = previousSummaryText(input.messages, input.previousState);
     const summaryBudget = computeSummaryBudget({
       sourceMessages: plan.source,
@@ -187,8 +192,10 @@ export class SemanticCompressor {
       auxModelFailure: summary.auxModelFailure,
       mainRetryFailure: summary.mainRetryFailure,
       scopeKey,
-      warnings: [...plan.warnings, ...summary.warnings, ...serialized.warnings],
-      prunedToolResults: serialized.prunedToolResults,
+      warnings: [...plan.warnings, ...pruned.diagnostics.warnings, ...summary.warnings, ...serialized.warnings],
+      prunedToolResults: pruned.diagnostics.prunedToolResults + serialized.prunedToolResults,
+      prunedToolResultChars: pruned.diagnostics.prunedToolResultChars,
+      protectedToolResultsKept: pruned.diagnostics.protectedToolResultsKept,
       postTokens
     });
 
@@ -392,6 +399,8 @@ export class SemanticCompressor {
     scopeKey: string;
     warnings: string[];
     prunedToolResults: number;
+    prunedToolResultChars?: number;
+    protectedToolResultsKept?: number;
     postTokens?: number;
   }): SemanticCompressionDiagnostics {
     const postTokens = input.postTokens ?? estimateSessionMessages(input.postMessages);
@@ -428,6 +437,8 @@ export class SemanticCompressor {
       mainRetryFailure: input.mainRetryFailure,
       warnings: input.warnings,
       prunedToolResults: input.prunedToolResults,
+      prunedToolResultChars: input.prunedToolResultChars ?? 0,
+      protectedToolResultsKept: input.protectedToolResultsKept ?? 0,
       scopeKey: input.scopeKey,
       ...(didCompress ? { lastCompressionSavingsPct: savingsPct } : {
         ...(input.plan.previousState?.lastCompressionSavingsPct === undefined ? {} : {
@@ -509,6 +520,173 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
     warnings,
     prunedToolResults
   };
+}
+
+export type ToolResultPruneDiagnostics = {
+  prunedToolResults: number;
+  prunedToolResultChars: number;
+  protectedToolResultsKept: number;
+  warnings: string[];
+};
+
+export function pruneOldToolResults(
+  messages: readonly SessionMessage[],
+  options: { protectedIndexes?: ReadonlySet<number> } = {}
+): {
+  messages: SessionMessage[];
+  diagnostics: ToolResultPruneDiagnostics;
+} {
+  const protectedIndexes = options.protectedIndexes ?? new Set<number>();
+  const toolGroups = toolCallGroups(messages);
+  const warnings: string[] = [];
+  let prunedToolResults = 0;
+  let prunedToolResultChars = 0;
+  let protectedToolResultsKept = 0;
+  const prunedMessages = messages.map((message, index) => {
+    if (message.role !== "tool" || message.content.length <= TOOL_RESULT_PRUNE_THRESHOLD) {
+      return cloneSessionMessage(message);
+    }
+    if (
+      protectedIndexes.has(index) ||
+      isActiveToolMessage(message) ||
+      isSecurityDecision(message) ||
+      isExplicitConstraint(message) ||
+      hasUnresolvedApproval(message)
+    ) {
+      protectedToolResultsKept += 1;
+      return cloneSessionMessage(message);
+    }
+    const safety = toolResultPruneSafety(message, index, messages, toolGroups, protectedIndexes);
+    if (!safety.safe) {
+      protectedToolResultsKept += 1;
+      warnings.push(`tool result ${message.id} kept before summarization: ${safety.reason}`);
+      return cloneSessionMessage(message);
+    }
+
+    const placeholder = buildPrunedToolResultPlaceholder(message);
+    prunedToolResults += 1;
+    prunedToolResultChars += Math.max(0, message.content.length - placeholder.length);
+    warnings.push(`tool result ${message.id} was pruned before summarization`);
+    return {
+      ...cloneSessionMessage(message),
+      content: placeholder,
+      metadata: {
+        ...(message.metadata ?? {}),
+        semanticCompressionToolResultPruned: true,
+        originalToolResultChars: message.content.length
+      }
+    };
+  });
+
+  return {
+    messages: prunedMessages,
+    diagnostics: {
+      prunedToolResults,
+      prunedToolResultChars,
+      protectedToolResultsKept,
+      warnings
+    }
+  };
+}
+
+function cloneSessionMessage(message: SessionMessage): SessionMessage {
+  return {
+    ...message,
+    metadata: message.metadata === undefined ? undefined : { ...message.metadata }
+  };
+}
+
+function toolResultPruneSafety(
+  message: SessionMessage,
+  index: number,
+  messages: readonly SessionMessage[],
+  toolGroups: ReadonlyMap<string, number[]>,
+  protectedIndexes: ReadonlySet<number>
+): { safe: true } | { safe: false; reason: string } {
+  const toolCallId = toolCallIdFrom(message);
+  if (toolCallId !== undefined) {
+    const group = toolGroups.get(toolCallId) ?? [];
+    const hasCall = group.some((entry) => entry !== index && messages[entry]?.role !== "tool");
+    const hasResult = group.some((entry) => messages[entry]?.role === "tool");
+    const touchesProtected = group.some((entry) => protectedIndexes.has(entry));
+    const active = group.some((entry) => {
+      const groupedMessage = messages[entry];
+      return groupedMessage !== undefined && isActiveToolMessage(groupedMessage);
+    });
+    if (!hasCall || !hasResult) {
+      return { safe: false, reason: "tool pair metadata is incomplete" };
+    }
+    if (touchesProtected || active) {
+      return { safe: false, reason: "tool pair is protected or active" };
+    }
+    return { safe: true };
+  }
+  if (hasUsefulToolMetadata(message.metadata)) {
+    return { safe: true };
+  }
+  return { safe: false, reason: "tool result metadata is insufficient" };
+}
+
+function hasUsefulToolMetadata(metadata: Record<string, unknown> | undefined): boolean {
+  if (metadata === undefined) {
+    return false;
+  }
+  return [
+    "tool_call_name",
+    "tool",
+    "toolName",
+    "command",
+    "cmd",
+    "path",
+    "file",
+    "exitCode",
+    "status"
+  ].some((key) => metadata[key] !== undefined);
+}
+
+function buildPrunedToolResultPlaceholder(message: SessionMessage): string {
+  const metadata = message.metadata ?? {};
+  const content = redactSensitiveText(message.content);
+  const charCount = message.content.length;
+  const lineCount = message.content.length === 0 ? 0 : message.content.split(/\r\n|\r|\n/u).length;
+  const details = [
+    metadataValue("tool", metadata.tool_call_name ?? metadata.tool ?? metadata.toolName),
+    metadataValue("command", metadata.command ?? metadata.cmd),
+    metadataValue("path", metadata.path ?? metadata.file),
+    metadataValue("exit", metadata.exitCode ?? metadata.exit_code),
+    metadataValue("status", metadata.status)
+  ].filter((entry): entry is string => entry !== undefined);
+  const head = boundedSnippet(content, 0);
+  const tail = content.length > TOOL_RESULT_SNIPPET_CHARS
+    ? boundedSnippet(content, Math.max(0, content.length - TOOL_RESULT_SNIPPET_CHARS))
+    : undefined;
+  return [
+    `[tool result pruned] ${details.join(" ")}`.trim(),
+    `output=${charCount.toLocaleString("en-US")} chars / ${lineCount.toLocaleString("en-US")} lines`,
+    head === undefined ? undefined : `head: ${head}`,
+    tail === undefined || tail === head ? undefined : `tail: ${tail}`
+  ].filter((line): line is string => line !== undefined && line.length > 0).join("\n");
+}
+
+function metadataValue(label: string, value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = redactSensitiveText(String(value)).trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  return `${label}=${JSON.stringify(normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized)}`;
+}
+
+function boundedSnippet(content: string, start: number): string | undefined {
+  const snippet = content.slice(start, start + TOOL_RESULT_SNIPPET_CHARS).trim();
+  if (snippet.length === 0) {
+    return undefined;
+  }
+  return JSON.stringify(snippet.length > TOOL_RESULT_SNIPPET_CHARS
+    ? snippet.slice(0, TOOL_RESULT_SNIPPET_CHARS)
+    : snippet);
 }
 
 function summarizerRequest(input: {

@@ -270,6 +270,8 @@ function compressionDiagnostics(
     fallbackUsed: false,
     warnings: [],
     prunedToolResults: 0,
+    prunedToolResultChars: 0,
+    protectedToolResultsKept: 0,
     scopeKey: "default:test",
     ineffectiveCompressionCount: 0,
     eventWarnings: [],

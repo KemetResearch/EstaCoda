@@ -9,6 +9,7 @@ import {
   computeSummaryBudget,
   computeSummaryRequestMaxTokens,
   deterministicFallbackSummary,
+  pruneOldToolResults,
   SemanticCompressor,
   SUMMARY_FORMAT_VERSION,
   SUMMARY_PREFIX,
@@ -16,7 +17,8 @@ import {
   normalizeSummaryPrefix,
   serializeMessagesForSummary,
   TOOL_ARGS_MAX,
-  TOOL_ARGS_HEAD
+  TOOL_ARGS_HEAD,
+  TOOL_RESULT_PRUNE_THRESHOLD
 } from "./semantic-compressor.js";
 
 describe("SemanticCompressor", () => {
@@ -108,7 +110,99 @@ describe("SemanticCompressor", () => {
     expect(serialized.prunedToolResults).toBe(1);
   });
 
+  it("prunes old large tool results into bounded redacted placeholders before summarization", () => {
+    const secret = "OPENAI_API_KEY=sk-tool-secret1234567890abcdef";
+    const output = [
+      `start ${secret}`,
+      "middle line",
+      `end ${secret}`
+    ].join("\n") + "\n" + "x".repeat(TOOL_RESULT_PRUNE_THRESHOLD + 500);
+    const messages = [
+      message("tool-call", "agent", "calling shell", {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        command: "pnpm test",
+        path: "src/prompt/semantic-compressor.ts",
+        exitCode: 0
+      }),
+      message("tool-result", "tool", output, {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        command: "pnpm test",
+        path: "src/prompt/semantic-compressor.ts",
+        exitCode: 0
+      })
+    ];
+
+    const first = pruneOldToolResults(messages);
+    const second = pruneOldToolResults(messages);
+    const result = first.messages[1]!;
+
+    expect(first).toEqual(second);
+    expect(result.content).toContain("[tool result pruned]");
+    expect(result.content).toContain('tool="terminal"');
+    expect(result.content).toContain('command="pnpm test"');
+    expect(result.content).toContain('path="src/prompt/semantic-compressor.ts"');
+    expect(result.content).toContain('exit="0"');
+    expect(result.content).toContain("chars /");
+    expect(result.content).toContain("[REDACTED]");
+    expect(result.content).not.toContain("sk-tool-secret");
+    expect(result.content.length).toBeLessThan(output.length);
+    expect(result.metadata?.semanticCompressionToolResultPruned).toBe(true);
+    expect(first.diagnostics.prunedToolResults).toBe(1);
+    expect(first.diagnostics.prunedToolResultChars).toBeGreaterThan(0);
+    expect(first.diagnostics.protectedToolResultsKept).toBe(0);
+    expect(first.diagnostics.warnings).toContain("tool result tool-result was pruned before summarization");
+  });
+
+  it("does not prune protected tail, active, or metadata-insufficient tool results", () => {
+    const large = "important output\n".repeat(180);
+    const messages = [
+      message("old-call", "agent", "calling old tool", { tool_call_id: "old", tool_call_name: "terminal" }),
+      message("old-result", "tool", large, { tool_call_id: "old", tool_call_name: "terminal" }),
+      message("active-call", "agent", "calling active tool", { tool_call_id: "active", tool_call_name: "terminal", activeToolCall: true }),
+      message("active-result", "tool", large, { tool_call_id: "active", tool_call_name: "terminal", activeToolResult: true }),
+      message("weak-result", "tool", large),
+      message("tail-result", "tool", large, { tool_call_name: "terminal", command: "tail" }),
+      message("latest-user", "user", "latest user request")
+    ];
+
+    const result = pruneOldToolResults(messages, { protectedIndexes: new Set([5, 6]) });
+
+    expect(result.messages.find((entry) => entry.id === "old-result")?.content).toContain("[tool result pruned]");
+    expect(result.messages.find((entry) => entry.id === "active-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "weak-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "tail-result")?.content).toBe(large);
+    expect(result.messages.find((entry) => entry.id === "latest-user")?.content).toBe("latest user request");
+    expect(result.diagnostics.prunedToolResults).toBe(1);
+    expect(result.diagnostics.protectedToolResultsKept).toBe(3);
+    expect(result.diagnostics.warnings).toContain("tool result weak-result kept before summarization: tool result metadata is insufficient");
+  });
+
+  it("keeps tool-call/result metadata sequences intact after pruning", () => {
+    const messages = [
+      message("old-call", "agent", "calling tool", { tool_call_id: "call-old", tool_call_name: "terminal" }),
+      message("old-result", "tool", "x".repeat(TOOL_RESULT_PRUNE_THRESHOLD + 1), { tool_call_id: "call-old", tool_call_name: "terminal" }),
+      message("latest-user", "user", "latest")
+    ];
+
+    const pruned = pruneOldToolResults(messages);
+    const serialized = serializeMessagesForSummary(pruned.messages);
+
+    expect(pruned.messages.map((entry) => entry.id)).toEqual(messages.map((entry) => entry.id));
+    expect(pruned.messages[0]?.metadata?.tool_call_id).toBe("call-old");
+    expect(pruned.messages[1]?.metadata?.tool_call_id).toBe("call-old");
+    expect(serialized.text.length).toBeLessThan(messages.map((entry) => entry.content).join("\n").length);
+    expect(serialized.text).toContain("[tool result pruned]");
+  });
+
   it("summarizes old tool results instead of preserving them as live history", async () => {
+    let observedTranscript = "";
+    const harness = auxiliaryHarness("old tool work summarized");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedTranscript = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("old tool work summarized");
+    });
     const compressor = new SemanticCompressor({
       config: normalizeSessionCompressionConfig({
         enabled: true,
@@ -118,11 +212,12 @@ describe("SemanticCompressor", () => {
         summaryModelContextLength: 50,
         threshold: 0.10
       }),
-      ...auxiliaryHarness("old tool work summarized")
+      ...harness
     });
+    const largeToolOutput = "x".repeat(CONTENT_MAX + 20);
     const messages = [
       message("old-tool-call", "agent", "calling tool", { tool_call_id: "call-old", tool_call_name: "shell.run" }),
-      message("old-tool-result", "tool", "x".repeat(CONTENT_MAX + 20), { tool_call_id: "call-old", tool_call_name: "shell.run" }),
+      message("old-tool-result", "tool", largeToolOutput, { tool_call_id: "call-old", tool_call_name: "shell.run" }),
       ...fixtureMessages(5)
     ];
 
@@ -132,9 +227,13 @@ describe("SemanticCompressor", () => {
     expect(result.messages.map((entry) => entry.id)).not.toContain("old-tool-call");
     expect(result.messages.map((entry) => entry.id)).not.toContain("old-tool-result");
     expect(result.diagnostics.prunedToolResults).toBe(1);
+    expect(result.diagnostics.prunedToolResultChars).toBeGreaterThan(0);
     expect(result.diagnostics.warnings).toEqual(expect.arrayContaining([
-      "tool result old-tool-result was truncated before summarization"
+      "tool result old-tool-result was pruned before summarization"
     ]));
+    expect(observedTranscript).toContain("[tool result pruned]");
+    expect(observedTranscript).not.toContain("x".repeat(CONTENT_HEAD));
+    expect(observedTranscript.length).toBeLessThan(largeToolOutput.length);
   });
 
   it("redacts summarizer input and generated summary output", async () => {

@@ -134,6 +134,8 @@ function compactResult(): CompactResult {
       warnings: [],
       eventWarnings: [],
       prunedToolResults: 0,
+      prunedToolResultChars: 0,
+      protectedToolResultsKept: 0,
       scopeKey: "profile:session",
       ineffectiveCompressionCount: 0
     },
