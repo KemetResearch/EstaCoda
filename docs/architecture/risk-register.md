@@ -25,19 +25,26 @@ description: "Identified architecture risks, severity, and mitigations."
 | R16 | **MCP HTTP transport unproven** | Low | Low | Low | **Accepted** | Smoke-tested but not broadly live-proven. |
 | R17 | **Local/Ollama unproven** | Low | Low | Low | **Accepted** | Present but unproven in practice. |
 | R18 | **ACP editor polish incomplete** | Low | Medium | Low | **Accepted** | Terminal/process rendering targeted v0.9. |
+| R19 | **systemd user services stop on logout** | Medium | Medium | Medium | **Accepted** | Install output and operator docs warn that headless Linux hosts may need `sudo loginctl enable-linger $USER`. |
+| R20 | **Service environment omits shell secrets** | High | Medium | High | **Accepted** | Services set explicit `HOME`/`PATH` but do not inherit interactive shell exports. Operators must place bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`. |
+| R21 | **Source-mode service path drift** | Medium | Medium | Medium | **Accepted** | Source-mode units hardcode the workspace path. Install output and docs tell operators to reinstall if the repo moves. |
+| R22 | **System service privilege boundary** | High | Low | High | **Mitigated** | System installs require root for installation and explicit `--run-as-user <user>` for runtime execution; units include `User=<runAsUser>` and explicit `HOME`. |
+| R23 | **Service-aware lifecycle gap** | Medium | Medium | Medium | **Accepted** | v0.1.0 installs/uninstalls/probes services, but `gateway start`, `gateway stop`, and `gateway restart` remain process-oriented. Docs warn operators to use systemd/launchd directly for managed-service lifecycle. |
+| R24 | **Service manager probe failures obscure state** | Low | Medium | Low | **Mitigated** | `probeServiceState` never throws; `gateway status` remains usable and reports unknown/not-installed state when systemd/launchd probing fails or is permission-limited. |
 
 ## Risk Heat Map
 
 | | Low Likelihood | Medium Likelihood | High Likelihood |
 |---|----------------|-------------------|-----------------|
 | **Critical Severity** | — | — | — |
-| **High Severity** | — | — | R02 |
-| **Medium Severity** | R07, R12 | R15 | R05 |
-| **Low Severity** | R16, R17 | R13, R18 | R10 |
+| **High Severity** | R22 | R20 | R02 |
+| **Medium Severity** | R07, R12 | R15, R19, R21, R23 | R05 |
+| **Low Severity** | R16, R17 | R13, R18, R24 | R10 |
 
 ## Summary
 
 - **Resolved (8):** R01, R03, R04, R06, R08, R09, R11, R14
 - **Partially resolved (2):** R05, R10
+- **Mitigated (2):** R22, R24
 - **Mitigation in progress (0):** —
-- **Accepted (8):** R02, R07, R12, R13, R15, R16, R17, R18
+- **Accepted (12):** R02, R07, R12, R13, R15, R16, R17, R18, R19, R20, R21, R23

@@ -98,10 +98,26 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.
 - English and Arabic first-run onboarding, with localized setup labels, supported status copy, and LTR isolation for technical tokens in onboarding-owned surfaces.
 - **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
-- **Operator surface (v0.9):** CLI commands for gateway status/diagnose/start/stop/restart, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
+- **Operator surface (v0.9):** CLI commands for gateway status/diagnose/start/stop/restart/install/uninstall, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
 - **Gateway startup and restart:** `estacoda gateway start` runs the supervisor in the foreground; `estacoda gateway start --dry-run` performs local readiness checks without acquiring the gateway lock or writing PID/lock state; `estacoda gateway start --background` starts the gateway in the background and writes stdout/stderr to the selected profile `logs/gateway.log`. `estacoda gateway start --profile <id>` starts a gateway bound to that profile. `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination. `estacoda gateway restart` stops the old gateway, background-starts a new gateway, and returns; `estacoda gateway restart --graceful` is an alias for `restart` in v0.1.0.
+- **Gateway service manager integration:** `estacoda gateway install` installs a profile-bound managed gateway service; `estacoda gateway uninstall` removes it. `install-service` and `uninstall-service` are accepted aliases. Supported managers are systemd user services on Linux, systemd system services on Linux, and launchd user LaunchAgents on macOS. Generated service commands include `gateway start --profile <profileId>`, so multiple profiles can have independent service units. In v0.1.0, `gateway start`, `gateway stop`, and `gateway restart` remain process-oriented and do not delegate to systemd or launchd.
 - **Per-channel busy policy:** configure `busyPolicy` (`reject`, `queue`, `interrupt`) and `queueDepth` (clamped to `[1, 10]`, default `3`) independently per channel.
+
+Gateway service examples:
+
+```bash
+estacoda gateway install
+estacoda gateway install --profile work
+estacoda gateway install --force
+sudo estacoda gateway install --system --run-as-user "$USER"
+
+estacoda gateway uninstall
+estacoda gateway uninstall --profile work
+sudo estacoda gateway uninstall --system
+```
+
+Service installs inherit `HOME` but not your interactive shell environment. Keep bot tokens and provider API keys in the selected profile env file, for example `~/.estacoda/profiles/default/.env`. On headless Linux hosts, systemd user services may stop at logout unless linger is enabled with `sudo loginctl enable-linger $USER`. Source-mode installs hardcode the workspace path, so reinstall the service if the repo moves. `estacoda gateway status` includes a Service Manager block and remains usable when systemd or launchd probing fails or is permission-limited.
 
 ## Security And Approvals
 
