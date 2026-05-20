@@ -119,6 +119,64 @@ export async function uninstallService(options: {
   return uninstallSystemd({ homeDir, profileId: options.profileId, kind });
 }
 
+export async function stopService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service stop is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return stopLaunchd({ profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "stop" });
+}
+
+export async function startService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const homeDir = resolve(options.homeDir);
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service start is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return startLaunchd({ homeDir, profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "start" });
+}
+
+export async function restartService(options: {
+  homeDir: string;
+  profileId: string;
+  system?: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const kind = targetKind(options);
+  if (kind === "none") {
+    return { ok: false, error: "No supported service manager detected." };
+  }
+  if (options.system === true && !kind.startsWith("systemd")) {
+    return { ok: false, error: "System service restart is only supported with systemd." };
+  }
+
+  if (kind === "launchd") {
+    return restartLaunchd({ profileId: options.profileId });
+  }
+  return controlSystemd({ profileId: options.profileId, kind, action: "restart" });
+}
+
 export async function probeServiceState(options: {
   homeDir: string;
   profileId: string;
@@ -314,6 +372,54 @@ async function uninstallLaunchd(options: {
   if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   await rm(path, { force: true });
   return { ok: true };
+}
+
+async function controlSystemd(options: {
+  profileId: string;
+  kind: "systemd-user" | "systemd-system";
+  action: "start" | "stop" | "restart";
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await systemctl(options.kind, [options.action, unitNameForProfile(options.profileId)]);
+  if (!result.ok) return { ok: false, error: commandError(`systemctl ${options.action}`, result) };
+  return { ok: true };
+}
+
+async function stopLaunchd(options: { profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const target = launchdServiceTarget(options.profileId);
+  if (!target.ok) return target;
+  const result = await runCommand("launchctl", ["bootout", target.target]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl bootout", result) };
+  return { ok: true };
+}
+
+async function startLaunchd(options: { homeDir: string; profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const domain = launchdGuiDomain();
+  if (!domain.ok) return domain;
+  const result = await runCommand("launchctl", ["bootstrap", domain.domain, launchdPlistPath(options)]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl bootstrap", result) };
+  return { ok: true };
+}
+
+async function restartLaunchd(options: { profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const target = launchdServiceTarget(options.profileId);
+  if (!target.ok) return target;
+  const result = await runCommand("launchctl", ["kickstart", "-k", target.target]);
+  if (!result.ok) return { ok: false, error: commandError("launchctl kickstart", result) };
+  return { ok: true };
+}
+
+function launchdServiceTarget(profileId: string): { ok: true; target: string } | { ok: false; error: string } {
+  const domain = launchdGuiDomain();
+  if (!domain.ok) return domain;
+  return { ok: true, target: `${domain.domain}/${launchdLabelForProfile(profileId)}` };
+}
+
+function launchdGuiDomain(): { ok: true; domain: string } | { ok: false; error: string } {
+  const uid = process.getuid?.();
+  if (uid === undefined) {
+    return { ok: false, error: "launchd GUI domain requires a numeric user id." };
+  }
+  return { ok: true, domain: `gui/${uid}` };
 }
 
 function renderSystemdUnit(options: {

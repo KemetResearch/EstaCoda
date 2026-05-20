@@ -104,9 +104,9 @@ estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 
 Gateway processes are bound to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
 
-`stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. If the process does not exit within the graceful timeout, `--force` sends SIGKILL and cleans up.
+`stop` first checks whether the selected profile has an installed managed service. If a user-scope service exists, `stop` delegates to systemd or launchd. On systemd, `stop --force` still uses `systemctl stop`; it does not send SIGKILL to the supervisor directly. If no managed service exists, `stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. In that unmanaged process mode, `--force` sends SIGKILL and cleans up.
 
-`restart` calls `stop`, then performs `start --background`, then returns. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
+`restart` uses the same service selection rules. If a user-scope service exists, it delegates to systemd or launchd and does not spawn an unmanaged background gateway. If no managed service exists, it calls `stop`, then performs `start --background`, then returns. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
 
 ### Gateway Managed Services
 
@@ -123,6 +123,9 @@ estacoda gateway uninstall                # Remove user-scope service for the se
 estacoda gateway uninstall-service        # Alias for uninstall
 estacoda gateway uninstall --profile work # Remove the service for profile "work"
 sudo estacoda gateway uninstall --system  # Remove system-scope service
+
+estacoda gateway stop --system            # Stop a system-scope service
+estacoda gateway restart --system         # Restart a system-scope service
 ```
 
 Supported service managers:
@@ -141,7 +144,8 @@ Operational warnings:
 - Put bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
 - systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.
-- In v0.1.0, `estacoda gateway start`, `estacoda gateway stop`, and `estacoda gateway restart` are still process-oriented lifecycle commands. They do not yet delegate to systemd or launchd.
+- `estacoda gateway stop` and `estacoda gateway restart` prefer a user-scope managed service when one exists. If both user and system services exist, the user service is controlled unless `--system` is passed. If only a system service exists, rerun with `--system`; EstaCoda will not silently control the system unit or start/stop an unmanaged process.
+- `estacoda gateway start` remains process-oriented in v0.1.0. Use the platform service manager, or `gateway restart`, for managed service startup after installation.
 
 ### Channel Commands
 

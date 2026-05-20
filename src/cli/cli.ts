@@ -3123,6 +3123,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     const result = await runGatewayStop({
       ...options,
       profileId,
+      system: hasFlag(rest, "--system"),
       force: hasFlag(rest, "--force")
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
@@ -3133,6 +3134,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     const result = await runGatewayRestart({
       ...options,
       profileId,
+      system: hasFlag(rest, "--system"),
       graceful: hasFlag(rest, "--graceful"),
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
@@ -3210,7 +3212,9 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway uninstall --system",
       "  estacoda gateway stop",
       "  estacoda gateway stop --force",
+      "  estacoda gateway stop --system",
       "  estacoda gateway restart",
+      "  estacoda gateway restart --system",
       "  estacoda gateway restart --graceful",
       "  estacoda gateway start",
       "  estacoda gateway start --dry-run",

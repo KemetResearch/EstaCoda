@@ -74,9 +74,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import {
   detectServiceManager,
   installService,
+  launchdLabelForProfile,
   launchdPlistPath,
   plistNameForProfile,
   probeServiceState,
+  restartService,
+  startService,
+  stopService,
   systemdUnitPath,
   unitNameForProfile,
   uninstallService,
@@ -365,6 +369,24 @@ describe("service manager", () => {
     const calls = mockSpawn();
     await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toMatchObject({ ok: true });
     expect(calls.map((call) => [call.command, ...call.args])[0]).toEqual(["systemctl", "--user", "stop", unitNameForProfile("default")]);
+  });
+
+  it("controls systemd lifecycle with explicit argv", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    const calls = mockSpawn();
+
+    await expect(stopService({ homeDir: tmpDir, profileId: "default" })).resolves.toEqual({ ok: true });
+    await expect(restartService({ homeDir: tmpDir, profileId: "default", system: true })).resolves.toEqual({ ok: true });
+    await expect(startService({ homeDir: tmpDir, profileId: "default" })).resolves.toEqual({ ok: true });
+
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["systemctl", "--user", "stop", unitNameForProfile("default")],
+      ["systemctl", "restart", unitNameForProfile("default")],
+      ["systemctl", "--user", "start", unitNameForProfile("default")],
+    ]);
   });
 
   it("stops existing systemd units before checking live gateway evidence during force replacement", async () => {
@@ -787,6 +809,28 @@ describe("service manager", () => {
     await expect(readFile(plistPath, "utf8")).resolves.toBe(originalPlist);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "unload", "-w", plistPath],
+    ]);
+  });
+
+  it("controls launchd lifecycle without disabling the LaunchAgent", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const calls = mockSpawn();
+    const profileId = "default";
+    const uid = process.getuid?.();
+    expect(uid).toBeDefined();
+
+    await expect(restartService({ homeDir: tmpDir, profileId })).resolves.toEqual({ ok: true });
+    await expect(stopService({ homeDir: tmpDir, profileId })).resolves.toEqual({ ok: true });
+    await expect(startService({ homeDir: tmpDir, profileId })).resolves.toEqual({ ok: true });
+
+    const target = `gui/${uid}/${launchdLabelForProfile(profileId)}`;
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["launchctl", "kickstart", "-k", target],
+      ["launchctl", "bootout", target],
+      ["launchctl", "bootstrap", `gui/${uid}`, launchdPlistPath({ homeDir: tmpDir, profileId })],
     ]);
   });
 
