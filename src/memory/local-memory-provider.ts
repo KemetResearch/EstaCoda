@@ -11,7 +11,7 @@ import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryInspector } from "./memory-inspector.js";
-import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
+import type { MemoryStore } from "./memory-store.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -123,14 +123,12 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created" || applied.action === "replaced") {
           this.#appendDedupe(target, `- ${conclusion.content}`);
         }
+        await this.#save();
       } catch (error) {
-        if (isMemoryBudgetOverflowError(error)) {
-          this.#store.write(target, previousMarkdown);
-          await this.#promotionStore.restore(previousRecords);
-        }
+        this.#store.write(target, previousMarkdown);
+        await this.#promotionStore.restore(previousRecords);
         throw error;
       }
-      await this.#save();
       return;
     }
     if (conclusion.kind === "project-fact" && this.#promotionStore !== undefined) {
@@ -150,14 +148,12 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created") {
           this.#appendDedupe(target, `- ${conclusion.content}`);
         }
+        await this.#save();
       } catch (error) {
-        if (isMemoryBudgetOverflowError(error)) {
-          this.#store.write(target, previousMarkdown);
-          await this.#promotionStore.restore(previousRecords);
-        }
+        this.#store.write(target, previousMarkdown);
+        await this.#promotionStore.restore(previousRecords);
         throw error;
       }
-      await this.#save();
       return;
     }
 

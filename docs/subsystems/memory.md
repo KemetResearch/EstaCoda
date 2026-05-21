@@ -108,6 +108,12 @@ When `memory.curate` changes memory during a session, the mutation updates the r
 - Forgetting (removing outdated entries)
 - Inspection (listing current entries)
 
+Promotion persistence is fail-closed at the memory layer. If a markdown write fails after promotion metadata changes, `LocalMemoryProvider` rolls back both the markdown content and `promotions.json`. This includes budget overflows, scanner/safety rejections, and other bounded persistence failures after the metadata mutation.
+
+Promotion overflow after an otherwise successful assistant response is non-fatal to the turn. The runtime records a best-effort `memory-promotion-failed` diagnostic with pressure/remediation metadata only; it does not include raw promoted text. Unexpected non-overflow promotion errors still follow the existing fatal policy.
+
+Scanner/safety rejection prevents secret-looking promotion text from being written to memory. A failed promotion must not leave active promotion metadata, and prompt memory rendering must not resurrect rejected or manually deleted entries from stale metadata.
+
 ## Memory Tool
 
 The agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
@@ -145,7 +151,9 @@ Memory budget pressure is calculated for bounded memory files and reported as:
 | `critical` | At or above 95% of the file budget |
 | `overflow` | Over the file budget |
 
-`MemoryStore.apply()` fails closed on overflow and returns structured overflow metadata to tool callers. Config numeric coercion for memory-adjacent features is NaN-safe; malformed values fall back to defaults or configured bounds instead of leaking `NaN` into runtime behavior.
+`MemoryBudgetPressure.state === "critical"` is diagnostic only. It does not trigger automatic Memory File Compaction, and other automatic compaction systems use their own thresholds rather than `MemoryBudgetPressure.critical`.
+
+`MemoryStore.apply()` fails closed only on overflow and returns structured overflow metadata to tool callers. Overflow blocks the write; it is not silent. Config numeric coercion for memory-adjacent features is NaN-safe; malformed values fall back to defaults or configured bounds instead of leaking `NaN` into runtime behavior.
 
 ## Memory File Compaction
 
@@ -169,7 +177,7 @@ Forbidden files:
 - promotion metadata
 - session history
 
-The service uses the `memory_compaction` auxiliary route. It does not run automatically by default. Dry-run mode returns generated compacted text without writing or creating a backup. Applied compaction scans generated output with `MemoryScanner`, writes a timestamped backup under `.memory-file-compaction-backups/`, then writes the compacted file. Restore scans the backup before writing and creates a pre-restore backup of the current file.
+The service uses the `memory_compaction` auxiliary route. It does not run automatically by default, including when memory-file pressure reaches `critical`. Dry-run mode returns generated compacted text without writing or creating a backup. Applied compaction scans generated output with `MemoryScanner`, writes a timestamped backup under `.memory-file-compaction-backups/`, then writes the compacted file. Restore scans the backup before writing and creates a pre-restore backup of the current file.
 
 Provider failures, missing `memory_compaction` routes, scanner blocks, invalid targets, and write failures fail closed and preserve the original file.
 
