@@ -307,6 +307,7 @@ export async function runGatewayInstallService(
     ok: true,
     output: [
       `Gateway service installed (${scope} scope, profile: ${profileId}).`,
+      ...(result.logCommand === undefined ? [] : [`Logs: ${result.logCommand}`]),
       ...warnings.map((warning) => `Warning: ${warning}`),
     ].join("\n"),
   };

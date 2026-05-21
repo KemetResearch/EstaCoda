@@ -202,7 +202,12 @@ describe("service manager", () => {
       profileId: "default",
     });
 
-    expect(result).toEqual({ ok: true, mode: "source" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "source",
+      unitName: unitNameForProfile("default"),
+      logCommand: `journalctl --user -u ${unitNameForProfile("default")} -f`,
+    });
     const unitPath = systemdUnitPath({ homeDir, profileId: "default" });
     const content = await readFile(unitPath, "utf8");
     expect(content).toContain("Description=EstaCoda Gateway Supervisor (profile: default)");
@@ -212,6 +217,8 @@ describe("service manager", () => {
     expect(content).toContain("RestartSec=5");
     expect(content).toContain("TimeoutStopSec=35");
     expect(content).toContain("KillMode=mixed");
+    expect(content).toContain("StandardOutput=journal");
+    expect(content).toContain("StandardError=journal");
     expect(content).toContain(`Environment="HOME=${homeDir}"`);
     expect(content).toContain("Environment=\"PATH=/opt/homebrew/bin:");
     expect(content).toContain(`WorkingDirectory="${join(tmpDir, "workspace with spaces")}"`);
@@ -223,6 +230,47 @@ describe("service manager", () => {
       ["systemctl", "--user", "enable", unitNameForProfile("default")],
       ["systemctl", "--user", "start", unitNameForProfile("default")],
     ]);
+  });
+
+  it.each([
+    ["daemon-reload"],
+    ["enable"],
+    ["start"],
+  ])("removes a fresh systemd unit when systemctl %s fails after write", async (failingAction) => {
+    const binDir = join(tmpDir, `bin-${failingAction}`);
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    const homeDir = join(tmpDir, `home-${failingAction}`);
+    const unitPath = systemdUnitPath({ homeDir, profileId: "default" });
+    mockSpawn((call) => call.args.includes(failingAction)
+      ? { code: 1, stderr: `${failingAction} boom` }
+      : { code: 0 });
+
+    await expect(installService({ homeDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: `systemctl ${failingAction === "daemon-reload" ? "daemon-reload" : `${failingAction} ${unitNameForProfile("default")}`} failed: ${failingAction} boom`,
+    });
+    await expect(readFile(unitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("restores previous systemd unit content and permissions when forced reinstall fails after write", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    const unitPath = systemdUnitPath({ homeDir: tmpDir, profileId: "default" });
+    await mkdir(join(tmpDir, ".config", "systemd", "user"), { recursive: true });
+    await writeFile(unitPath, "previous unit\n", { encoding: "utf8", mode: 0o640 });
+    await chmod(unitPath, 0o640);
+    mockSpawn((call) => call.args.includes("start") ? { code: 1, stderr: "start boom" } : { code: 0 });
+
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toEqual({
+      ok: false,
+      error: `systemctl start ${unitNameForProfile("default")} failed: start boom`,
+    });
+    await expect(readFile(unitPath, "utf8")).resolves.toBe("previous unit\n");
+    expect((await stat(unitPath)).mode & 0o777).toBe(0o640);
   });
 
   it("escapes systemd paths with quotes", async () => {
@@ -389,7 +437,7 @@ describe("service manager", () => {
     ]);
   });
 
-  it("stops existing systemd units before checking live gateway evidence during force replacement", async () => {
+  it("fails before writing a forced systemd replacement when live evidence remains after timeout", async () => {
     const binDir = join(tmpDir, "bin");
     await addExecutable(binDir, "systemctl");
     process.env.PATH = binDir;
@@ -418,9 +466,9 @@ describe("service manager", () => {
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["systemctl", "--user", "stop", unitNameForProfile("default")],
     ]);
-  });
+  }, 8_000);
 
-  it("allows systemd force replacement after stop clears live gateway evidence", async () => {
+  it("waits for systemd force replacement live evidence to clear before replacing", async () => {
     const binDir = join(tmpDir, "bin");
     await addExecutable(binDir, "systemctl");
     process.env.PATH = binDir;
@@ -431,9 +479,11 @@ describe("service manager", () => {
     await acquireGatewayLock(paths);
     const lockPath = join(paths.gatewayStatePath, "gateway.lock");
 
-    const calls = mockSpawn(async (call) => {
+    const calls = mockSpawn((call) => {
       if (call.command === "systemctl" && call.args.includes("stop")) {
-        await rm(lockPath, { force: true });
+        setTimeout(() => {
+          rm(lockPath, { force: true }).catch(() => undefined);
+        }, 500);
       }
       return { code: 0 };
     });
@@ -725,14 +775,20 @@ describe("service manager", () => {
       },
     });
 
-    await expect(installService({
+    const result = await installService({
       homeDir: "/root",
       serviceHomeDir: serviceHome,
       workspaceRoot: tmpDir,
       profileId: "default",
       system: true,
       runAsUser: "estacoda",
-    })).resolves.toEqual({ ok: true, mode: "compiled" });
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "compiled",
+      unitName: unitNameForProfile("default"),
+      logCommand: `sudo journalctl -u ${unitNameForProfile("default")} -f`,
+    });
 
     const unitPath = systemdUnitPath({ homeDir: serviceHome, profileId: "default", system: true });
     expect(fsPromisesMock.interceptedSystemWrites).toHaveLength(1);
@@ -742,6 +798,8 @@ describe("service manager", () => {
     });
     expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain("User=estacoda");
     expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain(`Environment="HOME=${serviceHome}"`);
+    expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain("StandardOutput=journal");
+    expect(fsPromisesMock.interceptedSystemWrites[0]?.data).toContain("StandardError=journal");
     expect(fsPromisesMock.interceptedSystemChmods).toEqual([{ path: unitPath, mode: 0o644 }]);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["id", "-u", "estacoda"],
@@ -781,7 +839,41 @@ describe("service manager", () => {
     ]);
   });
 
-  it("unloads existing launchd plists before checking live gateway evidence during force replacement", async () => {
+  it("removes a fresh launchd plist when load fails after write", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const plistPath = launchdPlistPath({ homeDir: tmpDir, profileId: "default" });
+    mockSpawn(() => ({ code: 1, stderr: "load boom" }));
+
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "launchctl load failed: load boom",
+    });
+    await expect(readFile(plistPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("restores previous launchd plist content and permissions when forced reinstall load fails", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const plistPath = launchdPlistPath({ homeDir: tmpDir, profileId: "default" });
+    await mkdir(join(tmpDir, "Library", "LaunchAgents"), { recursive: true });
+    await writeFile(plistPath, "previous plist\n", { encoding: "utf8", mode: 0o640 });
+    await chmod(plistPath, 0o640);
+    mockSpawn((call) => call.args.includes("load") ? { code: 1, stderr: "load boom" } : { code: 0 });
+
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toEqual({
+      ok: false,
+      error: "launchctl load failed: load boom",
+    });
+    await expect(readFile(plistPath, "utf8")).resolves.toBe("previous plist\n");
+    expect((await stat(plistPath)).mode & 0o777).toBe(0o640);
+  });
+
+  it("fails before writing a forced launchd replacement when live evidence remains after timeout", async () => {
     const binDir = join(tmpDir, "bin");
     await addExecutable(binDir, "launchctl");
     process.env.PATH = binDir;
@@ -810,7 +902,7 @@ describe("service manager", () => {
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "unload", "-w", plistPath],
     ]);
-  });
+  }, 8_000);
 
   it("controls launchd lifecycle without disabling the LaunchAgent", async () => {
     const binDir = join(tmpDir, "bin");
@@ -901,12 +993,46 @@ describe("service manager", () => {
     await rm(join(binDir, "systemctl"), { force: true });
     await addExecutable(binDir, "launchctl");
     setPlatform("darwin");
-    mockSpawn(() => ({ code: 0, stdout: `123\t0\t${"com.estacoda.gateway.default-37a8eec1"}\n` }));
+    const launchdCalls = mockSpawn(() => ({
+      code: 0,
+      stdout: [
+        "{",
+        "\t\"PID\" = 123;",
+        "\t\"LastExitStatus\" = 0;",
+        "\t\"Label\" = \"com.estacoda.gateway.default-37a8eec1\";",
+        "}",
+        "",
+      ].join("\n"),
+    }));
     await expect(probeServiceState({ homeDir: tmpDir, profileId: "default" })).resolves.toMatchObject({
       kind: "launchd",
       installed: true,
       activeState: "active",
+      subState: "0",
     });
+    expect(launchdCalls.map((call) => [call.command, ...call.args])).toEqual([
+      ["launchctl", "list", launchdLabelForProfile("default")],
+    ]);
+  });
+
+  it("launchd probe uses exact label lookup instead of suffix matching broad list output", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const calls = mockSpawn((call) => {
+      expect(call.args).toEqual(["list", launchdLabelForProfile("default")]);
+      return { code: 1, stdout: `123\t0\tprefix-${launchdLabelForProfile("default")}\n` };
+    });
+
+    await expect(probeServiceState({ homeDir: tmpDir, profileId: "default" })).resolves.toMatchObject({
+      kind: "launchd",
+      installed: false,
+      activeState: "unknown",
+    });
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["launchctl", "list", launchdLabelForProfile("default")],
+    ]);
   });
 
   it("probeServiceState never throws and keeps system fallback kind/scope consistent", async () => {

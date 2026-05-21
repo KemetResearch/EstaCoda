@@ -576,12 +576,18 @@ describe("gateway commands", () => {
   describe("gateway service commands", () => {
     it("installs a user service with source-mode warnings", async () => {
       serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
-      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "source" });
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "source",
+        unitName: "estacoda-gateway-default-37a8eec1.service",
+        logCommand: "journalctl --user -u estacoda-gateway-default-37a8eec1.service -f",
+      });
 
       const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Gateway service installed (user scope, profile: default).");
+      expect(result.output).toContain("Logs: journalctl --user -u estacoda-gateway-default-37a8eec1.service -f");
       expect(result.output).toContain("profile-local");
       expect(result.output).toContain("not interactive shell environment");
       expect(result.output).toContain("loginctl enable-linger");
@@ -612,7 +618,12 @@ describe("gateway commands", () => {
     });
 
     it("propagates explicit profile, system scope, runAsUser, and force", async () => {
-      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "compiled",
+        unitName: "estacoda-gateway-work-6b7fb7c6.service",
+        logCommand: "sudo journalctl -u estacoda-gateway-work-6b7fb7c6.service -f",
+      });
 
       const result = await runGatewayInstallService({
         workspaceRoot: tmpDir,
@@ -626,6 +637,7 @@ describe("gateway commands", () => {
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("system scope, profile: work");
+      expect(result.output).toContain("Logs: sudo journalctl -u estacoda-gateway-work-6b7fb7c6.service -f");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
         profileId: "work",
         homeDir: "/home/estacoda",
