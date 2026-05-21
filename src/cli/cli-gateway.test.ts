@@ -225,6 +225,33 @@ describe("cli gateway start", () => {
     }
   });
 
+  it("keeps bare gateway start process-oriented even when a managed service exists", async () => {
+    serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+    serviceManagerMock.probeServiceState.mockResolvedValue({
+      kind: "systemd-user",
+      installed: true,
+      scope: "user",
+      activeState: "active",
+      unitName: "unit",
+      profileId: "default",
+    });
+
+    const result = await runCliCommand({
+      argv: ["gateway", "start"],
+      workspaceRoot: "/tmp",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("Gateway started");
+    expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: undefined,
+      once: false,
+    }));
+    expect(serviceManagerMock.probeServiceState).not.toHaveBeenCalled();
+    expect(serviceManagerMock.restartService).not.toHaveBeenCalled();
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
+
   it("parses gateway restart subcommand", async () => {
     const result = await runCliCommand({
       argv: ["gateway", "restart"],

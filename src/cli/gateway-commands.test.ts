@@ -576,12 +576,18 @@ describe("gateway commands", () => {
   describe("gateway service commands", () => {
     it("installs a user service with source-mode warnings", async () => {
       serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
-      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "source" });
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "source",
+        unitName: "estacoda-gateway-default-37a8eec1.service",
+        logCommand: "journalctl --user -u estacoda-gateway-default-37a8eec1.service -f",
+      });
 
       const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Gateway service installed (user scope, profile: default).");
+      expect(result.output).toContain("Logs: journalctl --user -u estacoda-gateway-default-37a8eec1.service -f");
       expect(result.output).toContain("profile-local");
       expect(result.output).toContain("not interactive shell environment");
       expect(result.output).toContain("loginctl enable-linger");
@@ -612,7 +618,12 @@ describe("gateway commands", () => {
     });
 
     it("propagates explicit profile, system scope, runAsUser, and force", async () => {
-      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "compiled",
+        unitName: "estacoda-gateway-work-6b7fb7c6.service",
+        logCommand: "sudo journalctl -u estacoda-gateway-work-6b7fb7c6.service -f",
+      });
 
       const result = await runGatewayInstallService({
         workspaceRoot: tmpDir,
@@ -626,6 +637,7 @@ describe("gateway commands", () => {
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("system scope, profile: work");
+      expect(result.output).toContain("Logs: sudo journalctl -u estacoda-gateway-work-6b7fb7c6.service -f");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
         profileId: "work",
         homeDir: "/home/estacoda",
@@ -1234,7 +1246,7 @@ describe("gateway commands", () => {
     });
   });
 
-  describe("runGatewayRestart", () => {
+  describe("runGatewayStartBackground and runGatewayRestart", () => {
     let stopGatewaySpy: ReturnType<typeof vi.spyOn>;
     let unrefSpy: ReturnType<typeof vi.fn>;
 
@@ -1271,6 +1283,104 @@ describe("gateway commands", () => {
         expect.any(Number),
       ]);
       expect(unrefSpy).toHaveBeenCalled();
+    });
+
+    it("refuses background start when a user managed service exists before spawning", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: options.system !== true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("user service is installed");
+      expect(result.output).toContain("estacoda gateway restart");
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
+      expect(execResolverMock.resolveGatewayExec).not.toHaveBeenCalled();
+    });
+
+    it("refuses background start when a system managed service exists before spawning", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: options.system === true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("system service is installed");
+      expect(result.output).toContain("estacoda gateway restart --system");
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
+      expect(execResolverMock.resolveGatewayExec).not.toHaveBeenCalled();
+    });
+
+    it("refuses background start when both user and system managed services exist before spawning", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("both user and system managed services");
+      expect(result.output).toContain("estacoda gateway restart --system");
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
+      expect(execResolverMock.resolveGatewayExec).not.toHaveBeenCalled();
+    });
+
+    it("refuses background start when live PID evidence exists before spawning", async () => {
+      await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.1" });
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain(`PID ${process.pid}`);
+      expect(result.output).toContain("Refusing to start an unmanaged background gateway");
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
+      expect(execResolverMock.resolveGatewayExec).not.toHaveBeenCalled();
+    });
+
+    it("allows background start when PID evidence is stale and no managed service exists", async () => {
+      await writeGatewayPid(profilePaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Gateway started (PID 12346)");
+      expect(execResolverMock.resolveGatewayExec).toHaveBeenCalled();
+      expect(childProcessMock.spawn).toHaveBeenCalledOnce();
+    });
+
+    it("refuses background start when active lock evidence exists before spawning", async () => {
+      await acquireGatewayLock(profilePaths);
+      try {
+        const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+        expect(result.ok).toBe(false);
+        expect(result.output).toContain("active lock held");
+        expect(result.output).toContain("Refusing to start an unmanaged background gateway");
+        expect(childProcessMock.spawn).not.toHaveBeenCalled();
+        expect(execResolverMock.resolveGatewayExec).not.toHaveBeenCalled();
+      } finally {
+        await releaseGatewayLock(profilePaths);
+      }
     });
 
     it("starts package-bin mode through the resolved package bin path", async () => {

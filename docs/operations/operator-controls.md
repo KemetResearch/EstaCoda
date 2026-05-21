@@ -100,7 +100,7 @@ estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 
 `start --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
 
-`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`.
+`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`. It refuses to spawn when the selected profile has an installed managed service, a live PID file, or an active gateway lock; use `gateway restart`, `gateway restart --system`, or the platform service manager for managed-service lifecycle.
 
 Gateway processes are bound to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
 
@@ -143,6 +143,7 @@ Operational warnings:
 - Services use an explicit `HOME` but not your interactive shell environment.
 - Put bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
 - systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
+- systemd service output is sent to the journal. Use `journalctl --user -u <unit> -f` for user services and `sudo journalctl -u <unit> -f` for system services.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.
 - `estacoda gateway stop` and `estacoda gateway restart` prefer a user-scope managed service when one exists. If both user and system services exist, the user service is controlled unless `--system` is passed. If only a system service exists, rerun with `--system`; EstaCoda will not silently control the system unit or start/stop an unmanaged process.
 - `estacoda gateway start` remains process-oriented in v0.1.0. Use the platform service manager, or `gateway restart`, for managed service startup after installation.

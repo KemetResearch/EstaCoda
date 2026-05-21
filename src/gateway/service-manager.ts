@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
-import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { inspectGatewayLockState } from "./gateway-lock.js";
@@ -31,6 +31,11 @@ type CommandResult = {
 
 type ValidationResult = { ok: true } | { ok: false; error: string };
 type HomeDirResult = { ok: true; homeDir: string } | { ok: false; error: string };
+type InstallResult = { ok: true; mode: ExecMode; unitName?: string; logCommand?: string } | { ok: false; error: string };
+type ExistingServiceFile = { content: string; mode: number };
+
+const FORCE_REINSTALL_EVIDENCE_WAIT_MS = 5_000;
+const FORCE_REINSTALL_EVIDENCE_POLL_MS = 250;
 
 export function detectServiceManager(): ServiceManagerKind {
   if (process.platform === "linux" && commandExists("systemctl")) {
@@ -50,7 +55,7 @@ export async function installService(options: {
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
-}): Promise<{ ok: true; mode: ExecMode } | { ok: false; error: string }> {
+}): Promise<InstallResult> {
   let homeDir = resolve(options.homeDir);
   const workspaceRoot = resolve(options.workspaceRoot);
   const kind = targetKind(options);
@@ -259,7 +264,7 @@ async function installSystemd(options: {
   force?: boolean;
   kind: "systemd-user" | "systemd-system";
   resolved: ResolvedExec;
-}): Promise<{ ok: true; mode: ExecMode } | { ok: false; error: string }> {
+}): Promise<InstallResult> {
   const path = systemdUnitPath({ homeDir: options.homeDir, profileId: options.profileId, system: options.kind === "systemd-system" });
   const unitName = unitNameForProfile(options.profileId);
   const exists = await fileExists(path);
@@ -274,11 +279,18 @@ async function installSystemd(options: {
   });
   if (!validation.ok) return validation;
 
+  const previous = exists ? await readExistingServiceFile(path) : undefined;
+  if (exists && previous === undefined) {
+    return { ok: false, error: `Could not read existing service file before replacement: ${path}` };
+  }
+
   if (exists && options.force === true) {
     const stop = await systemctl(options.kind, ["stop", unitName]);
     if (!stop.ok) return { ok: false, error: commandError("systemctl stop", stop) };
   }
-  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  const liveEvidence = exists && options.force === true
+    ? await waitForNoLiveGatewayEvidence(options.homeDir, options.profileId)
+    : await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
   if (!liveEvidence.ok) return liveEvidence;
 
   await mkdir(dirname(path), { recursive: true });
@@ -292,9 +304,19 @@ async function installSystemd(options: {
 
   for (const args of [["daemon-reload"], ["enable", unitName], ["start", unitName]]) {
     const result = await systemctl(options.kind, args);
-    if (!result.ok) return { ok: false, error: commandError(`systemctl ${args.join(" ")}`, result) };
+    if (!result.ok) {
+      await rollbackSystemdServiceFile(path, previous, options.kind, args[0] !== "daemon-reload");
+      return { ok: false, error: commandError(`systemctl ${args.join(" ")}`, result) };
+    }
   }
-  return { ok: true, mode: options.resolved.mode };
+  return {
+    ok: true,
+    mode: options.resolved.mode,
+    unitName,
+    logCommand: options.kind === "systemd-system"
+      ? `sudo journalctl -u ${unitName} -f`
+      : `journalctl --user -u ${unitName} -f`,
+  };
 }
 
 async function uninstallSystemd(options: {
@@ -322,7 +344,7 @@ async function installLaunchd(options: {
   profileId: string;
   force?: boolean;
   resolved: ResolvedExec;
-}): Promise<{ ok: true; mode: ExecMode } | { ok: false; error: string }> {
+}): Promise<InstallResult> {
   const path = launchdPlistPath({ homeDir: options.homeDir, profileId: options.profileId });
   const exists = await fileExists(path);
   if (exists && options.force !== true) {
@@ -335,11 +357,18 @@ async function installLaunchd(options: {
   });
   if (!validation.ok) return validation;
 
+  const previous = exists ? await readExistingServiceFile(path) : undefined;
+  if (exists && previous === undefined) {
+    return { ok: false, error: `Could not read existing service file before replacement: ${path}` };
+  }
+
   if (exists && options.force === true) {
     const unload = await runCommand("launchctl", ["unload", "-w", path]);
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   }
-  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  const liveEvidence = exists && options.force === true
+    ? await waitForNoLiveGatewayEvidence(options.homeDir, options.profileId)
+    : await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
   if (!liveEvidence.ok) return liveEvidence;
 
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
@@ -353,7 +382,10 @@ async function installLaunchd(options: {
   await chmod(path, 0o600);
 
   const load = await runCommand("launchctl", ["load", "-w", path]);
-  if (!load.ok) return { ok: false, error: commandError("launchctl load", load) };
+  if (!load.ok) {
+    await restoreServiceFile(path, previous);
+    return { ok: false, error: commandError("launchctl load", load) };
+  }
   return { ok: true, mode: options.resolved.mode };
 }
 
@@ -441,6 +473,8 @@ function renderSystemdUnit(options: {
     "RestartSec=5",
     "TimeoutStopSec=35",
     "KillMode=mixed",
+    "StandardOutput=journal",
+    "StandardError=journal",
     `Environment="${systemdEscapeEnvAssignment("HOME", options.homeDir)}"`,
     `Environment="${systemdEscapeEnvAssignment("PATH", path)}"`,
     `WorkingDirectory=${systemdEscapeArg(options.resolved.cwd)}`,
@@ -535,10 +569,8 @@ async function probeLaunchd(options: {
   profileId: string;
 }): Promise<ServiceManagerState> {
   const label = launchdLabelForProfile(options.profileId);
-  const result = await runCommand("launchctl", ["list"]);
-  if (!result.ok) return fallbackState({ profileId: options.profileId });
-  const match = result.stdout.split(/\r?\n/u).map((line) => line.trim()).find((line) => line.endsWith(label));
-  if (match === undefined) {
+  const result = await runCommand("launchctl", ["list", label]);
+  if (!result.ok) {
     return {
       kind: "launchd",
       installed: false,
@@ -548,16 +580,22 @@ async function probeLaunchd(options: {
       profileId: options.profileId,
     };
   }
-  const [pid, status] = match.split(/\s+/u);
+  const pid = parseLaunchdListValue(result.stdout, "PID");
+  const status = parseLaunchdListValue(result.stdout, "LastExitStatus");
   return {
     kind: "launchd",
     installed: true,
     scope: "user",
-    activeState: pid !== undefined && pid !== "-" ? "active" : status === "0" ? "inactive" : "failed",
+    activeState: pid !== undefined && pid !== "0" && pid !== "-" ? "active" : status === undefined || status === "0" ? "inactive" : "failed",
     subState: status,
     unitName: plistNameForProfile(options.profileId),
     profileId: options.profileId,
   };
+}
+
+function parseLaunchdListValue(output: string, key: string): string | undefined {
+  const pattern = new RegExp(`^\\s*"?${key}"?\\s*=\\s*"?([^";]+)"?;?\\s*$`, "um");
+  return output.match(pattern)?.[1]?.trim();
 }
 
 function parseSystemdShow(output: string): Map<string, string> {
@@ -645,6 +683,50 @@ async function assertNoLiveGatewayEvidence(homeDir: string, profileId: string): 
     };
   }
   return { ok: true };
+}
+
+async function waitForNoLiveGatewayEvidence(homeDir: string, profileId: string): Promise<ValidationResult> {
+  const deadline = Date.now() + FORCE_REINSTALL_EVIDENCE_WAIT_MS;
+  let last = await assertNoLiveGatewayEvidence(homeDir, profileId);
+  while (!last.ok && Date.now() < deadline) {
+    await sleep(FORCE_REINSTALL_EVIDENCE_POLL_MS);
+    last = await assertNoLiveGatewayEvidence(homeDir, profileId);
+  }
+  return last;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+async function readExistingServiceFile(path: string): Promise<ExistingServiceFile | undefined> {
+  try {
+    const [content, stats] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+    return { content, mode: stats.mode & 0o777 };
+  } catch {
+    return undefined;
+  }
+}
+
+async function restoreServiceFile(path: string, previous: ExistingServiceFile | undefined): Promise<void> {
+  if (previous === undefined) {
+    await rm(path, { force: true });
+    return;
+  }
+  await writeFile(path, previous.content, { encoding: "utf8", mode: previous.mode });
+  await chmod(path, previous.mode);
+}
+
+async function rollbackSystemdServiceFile(
+  path: string,
+  previous: ExistingServiceFile | undefined,
+  kind: "systemd-user" | "systemd-system",
+  reloadAfterRestore: boolean
+): Promise<void> {
+  await restoreServiceFile(path, previous);
+  if (reloadAfterRestore) {
+    await systemctl(kind, ["daemon-reload"]);
+  }
 }
 
 function validateSystemRunAsUser(value: string): ValidationResult {

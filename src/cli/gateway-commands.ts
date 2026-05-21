@@ -307,6 +307,7 @@ export async function runGatewayInstallService(
     ok: true,
     output: [
       `Gateway service installed (${scope} scope, profile: ${profileId}).`,
+      ...(result.logCommand === undefined ? [] : [`Logs: ${result.logCommand}`]),
       ...warnings.map((warning) => `Warning: ${warning}`),
     ].join("\n"),
   };
@@ -564,6 +565,10 @@ export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
+  const preflight = await preflightBackgroundStart(selected);
+  if (!preflight.ok) {
+    return { ok: false, output: preflight.output };
+  }
   const resolved = resolveGatewayExec({ workspaceRoot: options.workspaceRoot });
   if (!resolved.ok) {
     return { ok: false, output: `Failed to start gateway in background: ${resolved.error}` };
@@ -609,6 +614,58 @@ export async function runGatewayStartBackground(
       closeSync(logFd);
     }
   }
+}
+
+async function preflightBackgroundStart(selected: SelectedGatewayProfile): Promise<{ ok: true } | { ok: false; output: string }> {
+  const userState = await probeServiceState({
+    homeDir: selected.homeDir,
+    profileId: selected.profileId,
+    system: false,
+  });
+  const systemState = detectServiceManager().startsWith("systemd")
+    ? await probeServiceState({
+        homeDir: selected.homeDir,
+        profileId: selected.profileId,
+        system: true,
+      })
+    : undefined;
+
+  if (userState.installed && systemState?.installed) {
+    return {
+      ok: false,
+      output: `Gateway has both user and system managed services installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart for the user service or estacoda gateway restart --system for the system service.`,
+    };
+  }
+  if (userState.installed) {
+    return {
+      ok: false,
+      output: `Gateway user service is installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart or the service manager directly.`,
+    };
+  }
+  if (systemState?.installed) {
+    return {
+      ok: false,
+      output: `Gateway system service is installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart --system or the service manager directly.`,
+    };
+  }
+
+  const pidContent = await readGatewayPid(selected.paths);
+  if (pidContent !== undefined && !(await isStalePid(selected.paths))) {
+    return {
+      ok: false,
+      output: `Gateway already appears to be running for profile '${selected.profileId}' (PID ${pidContent.pid}). Refusing to start an unmanaged background gateway.`,
+    };
+  }
+
+  const lock = await inspectGatewayLockState(selected.paths);
+  if (lock.state === "active") {
+    return {
+      ok: false,
+      output: `Gateway already appears to be running for profile '${selected.profileId}' (active lock held by PID ${lock.pid}). Refusing to start an unmanaged background gateway.`,
+    };
+  }
+
+  return { ok: true };
 }
 
 // ───────────────────────────────────────────────────────────
