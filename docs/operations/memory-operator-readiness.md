@@ -69,7 +69,7 @@ External memory is off unless a provider id is set:
 
 `externalMemory.file.path` is relative to the selected profile's `external-memory/` directory. Absolute paths and paths escaping that directory are rejected.
 
-Memory File Compaction is manual/tool-driven by default. It requires a configured `auxiliaryModels.memory_compaction` route to generate compacted content.
+Memory File Compaction is manual/tool-driven by default. It requires a configured `auxiliaryModels.memory_compaction` route to generate compacted content. Memory-file critical pressure is diagnostic only; it does not trigger automatic Memory File Compaction. Overflow fails closed with structured errors. Other auto-compaction paths use their own thresholds, not `MemoryBudgetPressure.critical`.
 
 ## Commands And Tools
 
@@ -127,6 +127,7 @@ Memory budget pressure reports the implemented `MemoryBudgetPressure` contract: 
 Key event kinds:
 
 - `session-recall-decision` — why runtime recall was or was not injected.
+- `memory-promotion-failed` — best-effort promotion overflow diagnostic with safe pressure/remediation metadata and no raw promoted text.
 - `memory-file-compaction` — memory-file compaction dry-run/apply/restore metadata.
 - `session-history-compressed` — semantic session compression source/protection/fallback details.
 - `session-compression-state` — latest semantic compression state for runtime rehydration.
@@ -164,9 +165,20 @@ Auxiliary `compression` failure:
 Memory File Compaction failure:
 
 - Missing `memory_compaction` route returns `memory-file-compaction-route-unavailable`.
+- Critical memory-file pressure is diagnostic only and does not start compaction by itself.
+- Overflow blocks the write with structured pressure metadata; it does not self-heal or silently compact.
 - Scanner-blocked output preserves the original file.
 - Provider failures preserve the original file.
 - Applied compactions create backups before writes; restore uses `memory.file_compaction_restore`.
+
+Promotion persistence failure:
+
+- Budget overflow after an otherwise successful response is non-fatal to the user turn.
+- The runtime records a best-effort `memory-promotion-failed` diagnostic with provider, target file/kind, pressure, reason, and remediation metadata where available.
+- Promotion diagnostics must not include raw promoted text or secrets.
+- `LocalMemoryProvider` rolls back markdown and promotion metadata if promotion persistence fails.
+- Scanner/safety rejection prevents secret-looking text from being written to memory and must not leave active promotion metadata.
+- Unexpected non-overflow promotion errors still follow the existing fatal policy.
 
 External memory failure:
 

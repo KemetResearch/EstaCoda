@@ -175,6 +175,7 @@ Important memory trust rules:
 - Transcript-preserving semantic compaction keeps the parent transcript available for audit/history and continues work in the compacted child only on surfaces that adopt the child session.
 - External memory recall is untrusted historical context. It cannot replace local memory or session recall.
 - Memory File Compaction can target only `USER.md` and `MEMORY.md`; it must never compact `SOUL.md`, `AGENTS.md`, session history, shared memory, or promotion metadata.
+- Memory-file critical pressure is diagnostic only. Overflow fails closed with structured errors; Memory File Compaction remains manual/tool-driven by default and is not automatic self-healing.
 
 Workspace/profile scoping matters:
 
@@ -185,6 +186,8 @@ Workspace/profile scoping matters:
 Secret handling:
 
 - Transcript-grade redaction is used for semantic compression and external memory recall/mirroring paths.
+- Scanner/safety rejection prevents secret-looking text from being promoted into local memory. Failed promotion persistence rolls back markdown and promotion metadata so rejected or stale promotion records are not rendered into prompt memory context.
+- Promotion overflow after an otherwise successful response is non-fatal to the user turn and is reported through best-effort `memory-promotion-failed` diagnostics. Those diagnostics carry pressure/remediation metadata only and must not include raw promoted text or secrets.
 - Semantic compression failure diagnostics, fallback diagnostics, and status output are redacted and bounded. Status output omits raw summaries and `previousSummary` content.
 - Semantic compression may prune old large tool results before summarization, but that pruning is compression-input-only and must not mutate persisted session history.
 - Preserved semantic compaction must write the compacted child transcript before marking the parent ended. Parent-side lineage/audit events are best-effort; child transcript creation and parent lifecycle marking are the durable preservation contract.
