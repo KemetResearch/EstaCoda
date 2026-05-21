@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalMemoryProvider } from "./local-memory-provider.js";
+import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryBudgetOverflowError, MemoryStore } from "./memory-store.js";
 
@@ -75,6 +76,42 @@ describe("LocalMemoryProvider", () => {
     ]);
   });
 
+  it("rolls back secret-looking preference metadata when scanner rejects markdown", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    store.write("USER.md", "- existing safe preference");
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "existing safe preference",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const secretPreference = "Prefer OPENAI_API_KEY=secret-value by default.";
+
+    await expect(provider.conclude({
+      id: "pref-secret",
+      kind: "user-preference",
+      content: secretPreference,
+      confidence: 0.9
+    })).rejects.toThrow("Memory content rejected");
+
+    expect(store.read("USER.md")).toBe("- existing safe preference");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "existing safe preference",
+        active: true
+      })
+    ]);
+    const promptContext = await new MemoryPromptContextBuilder({ store, promotionStore }).build();
+    expect(JSON.stringify(promptContext)).not.toContain("secret-value");
+    expect((await provider.context()).text).not.toContain("secret-value");
+  });
+
   it("rolls back superseded promotion metadata and markdown when replacement overflows", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore({ budgets: [{ kind: "USER.md", maxChars: 36 }] });
@@ -106,6 +143,40 @@ describe("LocalMemoryProvider", () => {
       })
     ]);
     expect((await promotionStore.list())[0]?.supersededBy).toBeUndefined();
+  });
+
+  it("rolls back superseded promotion metadata and markdown when replacement is scanner-blocked", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    store.write("USER.md", "- Prefer concise replies.");
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "Prefer concise replies.",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await expect(provider.conclude({
+      id: "pref-replacement",
+      kind: "user-preference",
+      content: "Prefer detailed replies with OPENAI_API_KEY=secret-value.",
+      confidence: 0.9
+    })).rejects.toThrow("Memory content rejected");
+
+    expect(store.read("USER.md")).toBe("- Prefer concise replies.");
+    const records = await promotionStore.list();
+    expect(records).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "Prefer concise replies.",
+        active: true
+      })
+    ]);
+    expect(records[0]?.supersededBy).toBeUndefined();
   });
 
   it("rolls back project fact promotion metadata when MEMORY.md overflows", async () => {
