@@ -1,22 +1,22 @@
 import type { ToolProvider } from "../contracts/tool.js";
-import { configToolProvider } from "../config/config-tools.js";
-import { cronToolProvider } from "../cron/cron-tools.js";
-import { delegationToolProvider } from "../delegation/delegation-tools.js";
-import { knowledgeCodeToolProvider } from "../knowledge/knowledge-code-tools.js";
-import { knowledgeMemoryToolProvider } from "../memory/knowledge-memory-tools.js";
-import { memoryFileCompactionToolProvider } from "../memory/memory-file-compaction-tools.js";
-import { memoryToolProvider } from "../memory/memory-tool.js";
-import { processToolProvider } from "../process/process-tools.js";
-import { workspaceTrustToolProvider } from "../security/workspace-trust-tools.js";
-import { skillToolProvider } from "../skills/skill-tools.js";
 import { builtinToolProvider } from "./builtin-tools.js";
+import { configToolProvider } from "./config-tools.js";
+import { cronToolProvider } from "./cron-tools.js";
+import { delegationToolProvider } from "./delegation-tools.js";
 import { executeCodeToolProvider } from "./execute-code-tool.js";
 import { imageGenerationToolProvider } from "./image-generation-tools.js";
+import { knowledgeCodeToolProvider } from "./knowledge-code-tools.js";
+import { knowledgeMemoryToolProvider } from "./knowledge-memory-tools.js";
 import { mediaToolProvider } from "./media-tools.js";
+import { memoryFileCompactionToolProvider } from "./memory-file-compaction-tools.js";
+import { memoryToolProvider } from "./memory-tool.js";
+import { processToolProvider } from "./process-tools.js";
 import { pythonToolProvider } from "./python-tools.js";
+import { skillToolProvider } from "./skill-tools.js";
 import { visionToolProvider } from "./vision-tools.js";
 import { voiceToolProvider } from "./voice-tools.js";
 import { webToolProvider } from "./web-tools.js";
+import { workspaceTrustToolProvider } from "./workspace-trust-tools.js";
 import { workspaceToolProvider } from "./workspace-tools.js";
 
 export {

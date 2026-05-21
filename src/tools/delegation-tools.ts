@@ -1,5 +1,5 @@
 import type { RegisteredTool, SessionToolProvider, ToolsetName } from "../contracts/tool.js";
-import type { DelegationManager } from "./delegation-manager.js";
+import type { DelegationManager } from "../delegation/delegation-manager.js";
 
 export type DelegationToolOptions = {
   manager: DelegationManager;

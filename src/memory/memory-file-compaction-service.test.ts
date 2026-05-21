@@ -9,7 +9,7 @@ import {
   DEFAULT_MEMORY_FILE_COMPACTION_CONFIG,
   MemoryFileCompactionService
 } from "./memory-file-compaction-service.js";
-import { createMemoryFileCompactionTools } from "./memory-file-compaction-tools.js";
+import { createMemoryFileCompactionTools } from "../tools/memory-file-compaction-tools.js";
 import { MemoryStore } from "./memory-store.js";
 
 const tempDirs: string[] = [];

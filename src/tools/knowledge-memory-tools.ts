@@ -1,5 +1,5 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
-import type { MemoryInspector } from "./memory-inspector.js";
+import type { MemoryInspector } from "../memory/memory-inspector.js";
 
 export function createKnowledgeMemoryTools(inspector: MemoryInspector | undefined): RegisteredTool[] {
   if (inspector === undefined) {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import type { ExternalMemoryProvider } from "../contracts/memory.js";
 import type { TrajectoryEvent, TrajectoryEventKind } from "../contracts/trajectory.js";
 import { createFileExternalMemoryProvider } from "./external-memory-provider.js";
-import { createMemoryTool } from "./memory-tool.js";
+import { createMemoryTool } from "../tools/memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
 
 describe("memory.curate", () => {

@@ -1,7 +1,7 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { EnvironmentType } from "../contracts/security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
-import type { ProcessManager } from "./process-manager.js";
+import type { ProcessManager } from "../process/process-manager.js";
 
 export type ProcessToolOptions = {
   processManager: ProcessManager;

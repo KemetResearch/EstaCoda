@@ -1,6 +1,6 @@
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { SessionDB } from "../contracts/session.js";
-import { buildCompressionStatusReport, renderCompressionStatusReport } from "./compression-status.js";
+import { buildCompressionStatusReport, renderCompressionStatusReport } from "../config/compression-status.js";
 import {
   loadRuntimeConfig,
   setupMcpConfig,
@@ -17,9 +17,9 @@ import {
   type SecuritySetupInput,
   type TelegramSetupInput,
   type WebSetupInput
-} from "./runtime-config.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
-import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
+} from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;

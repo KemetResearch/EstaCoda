@@ -1,6 +1,6 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
-import { KnowledgeCache } from "./knowledge-cache.js";
-import { forwardDeps, reverseDeps, affectedFiles, graphSummary } from "./code-dependency-graph.js";
+import { KnowledgeCache } from "../knowledge/knowledge-cache.js";
+import { forwardDeps, reverseDeps, affectedFiles, graphSummary } from "../knowledge/code-dependency-graph.js";
 
 export function createKnowledgeCodeTools(workspaceRoot: string): RegisteredTool[] {
   const cache = new KnowledgeCache({ workspaceRoot });

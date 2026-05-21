@@ -4,9 +4,9 @@ import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contrac
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { truncate } from "../utils/formatting.js";
 import { redactSensitiveText } from "../utils/redaction.js";
-import type { ExternalMemoryRuntimeConfig } from "./external-memory-provider.js";
-import { mirrorMemoryWriteToExternalProviders } from "./external-memory-provider.js";
-import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
+import type { ExternalMemoryRuntimeConfig } from "../memory/external-memory-provider.js";
+import { mirrorMemoryWriteToExternalProviders } from "../memory/external-memory-provider.js";
+import { isMemoryBudgetOverflowError, type MemoryStore } from "../memory/memory-store.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 

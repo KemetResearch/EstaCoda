@@ -1,5 +1,5 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
-import type { MemoryFileCompactionService } from "./memory-file-compaction-service.js";
+import type { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 
 export function createMemoryFileCompactionTools(
   service: MemoryFileCompactionService
