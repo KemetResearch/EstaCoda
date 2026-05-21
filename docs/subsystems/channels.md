@@ -281,7 +281,9 @@ Service operation notes:
 - Secrets should live in the selected profile env file, for example `~/.estacoda/profiles/work/.env`.
 - systemd user services may stop on logout unless linger is enabled with `sudo loginctl enable-linger $USER`.
 - Source-mode service installs hardcode the workspace path and may need reinstall if the repo moves.
-- v0.1.0 does not make `gateway start`, `gateway stop`, or `gateway restart` service-aware lifecycle commands; use the service manager directly for managed-service lifecycle after install.
+- `gateway stop` and `gateway restart` are service-aware: they prefer an installed user service and require `--system` to control a system service.
+- `gateway start` remains process-oriented in v0.1.0 because installed units still launch the supervisor through `gateway start --profile <profileId>`.
+- `gateway start --background` refuses to spawn an unmanaged process when a managed service, live PID file, or active gateway lock exists for the selected profile.
 - `estacoda gateway status` includes a Service Manager block. The status command remains usable when systemd or launchd probing fails or is permission-limited.
 
 ## Gateway Approvals

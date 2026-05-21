@@ -100,7 +100,7 @@ estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 
 `start --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
 
-`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`.
+`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`. It refuses to spawn when the selected profile has an installed managed service, a live PID file, or an active gateway lock; use `gateway restart`, `gateway restart --system`, or the platform service manager for managed-service lifecycle.
 
 Gateway processes are bound to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
 
