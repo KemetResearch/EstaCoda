@@ -340,6 +340,7 @@ function createMinimalRuntime(): Runtime {
       }),
       getSession: async () => undefined,
       listSessions: async () => [],
+      endSession: async () => {},
       appendMessage: async (input) => ({
         id: "msg-1",
         sessionId: input.sessionId,
@@ -350,6 +351,7 @@ function createMinimalRuntime(): Runtime {
         metadata: input.metadata
       }),
       replaceMessages: async () => [],
+      rewriteTranscript: async () => [],
       appendEvent: async () => {},
       listMessages: async () => [],
       listEvents: async () => [],
@@ -366,6 +368,9 @@ function compactResult(overrides: {
 } = {}) {
   return {
     didCompress: true,
+    originalSessionId: "sess-1",
+    activeSessionId: "sess-1",
+    rotated: false,
     messages: [
       { id: "m1", role: "user" as const, content: "head" },
       { id: "summary", role: "system" as const, content: "summary", metadata: { semanticCompression: true } },

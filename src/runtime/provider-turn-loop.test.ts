@@ -284,8 +284,10 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
+    rewriteTranscript: overrides.rewriteTranscript ?? db.rewriteTranscript.bind(db),
     appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),
@@ -330,6 +332,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const harness = await createCompressionHarness();
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: false,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: [],
       diagnostics: compressionDiagnostics(),
       userFacingMessage: undefined
@@ -359,6 +364,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const harness = await createCompressionHarness();
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: false,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: [],
       diagnostics: compressionDiagnostics({ reason: "below-threshold" }),
       userFacingMessage: undefined
@@ -389,6 +397,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const harness = await createCompressionHarness();
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: false,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: [],
       diagnostics: compressionDiagnostics({
         shouldCompress: false,
@@ -441,6 +452,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     ];
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: true,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: compressedMessages,
       diagnostics: compressionDiagnostics({
         preTokens: 500,
@@ -513,6 +527,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     ];
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: true,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: compressedMessages,
       diagnostics: compressionDiagnostics({
         preTokens: 500,
@@ -563,6 +580,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     });
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: false,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: [],
       diagnostics: compressionDiagnostics({
         shouldCompress: false,
@@ -596,6 +616,9 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const harness = await createCompressionHarness();
     const compactIfNeeded = vi.fn(async () => ({
       didCompress: false,
+      originalSessionId: harness.sessionId,
+      activeSessionId: harness.sessionId,
+      rotated: false,
       messages: [],
       diagnostics: compressionDiagnostics({
         shouldCompress: false,

@@ -46,6 +46,10 @@ export type SessionCompressionRequest = {
 
 export type CompactResult = {
   didCompress: boolean;
+  originalSessionId: string;
+  activeSessionId: string;
+  replacementSessionId?: string;
+  rotated: boolean;
   messages: readonly ReplacementSessionMessage[];
   diagnostics: Readonly<SemanticCompressionDiagnostics & {
     eventWarnings: readonly string[];
@@ -98,6 +102,9 @@ export class SessionCompressionService {
       if (!compressed.didCompress) {
         return freezeCompactResult({
           didCompress: false,
+          originalSessionId: input.sessionId,
+          activeSessionId: input.sessionId,
+          rotated: false,
           messages: compressed.messages,
           diagnostics: {
             ...compressed.diagnostics,
@@ -124,6 +131,9 @@ export class SessionCompressionService {
 
       return freezeCompactResult({
         didCompress: true,
+        originalSessionId: input.sessionId,
+        activeSessionId: input.sessionId,
+        rotated: false,
         messages: written.map(toReplacementMessage),
         diagnostics: {
           ...compressed.diagnostics,

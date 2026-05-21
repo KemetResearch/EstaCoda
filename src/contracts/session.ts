@@ -20,6 +20,8 @@ export type SessionRecord = {
   createdAt: string;
   updatedAt: string;
   parentSessionId?: string;
+  endedAt?: string;
+  endReason?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -440,6 +442,8 @@ export type CreateSessionInput = {
   profileId: string;
   title?: string;
   parentSessionId?: string;
+  endedAt?: string;
+  endReason?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -465,8 +469,10 @@ export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
+  endSession(sessionId: string, reason: string): Promise<void>;
   appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
   replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
+  rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;

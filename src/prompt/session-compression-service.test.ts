@@ -27,6 +27,10 @@ describe("SessionCompressionService", () => {
     const result = await service.compactIfNeeded({ profileId: "profile", sessionId });
 
     expect(result.didCompress).toBe(false);
+    expect(result.originalSessionId).toBe(sessionId);
+    expect(result.activeSessionId).toBe(sessionId);
+    expect(result.rotated).toBe(false);
+    expect(result.replacementSessionId).toBeUndefined();
     expect(result.diagnostics.reason).toBe("below-threshold");
     expect(await db.listMessages(sessionId)).toHaveLength(8);
   });
@@ -52,6 +56,10 @@ describe("SessionCompressionService", () => {
     const events = await db.listEvents(sessionId);
 
     expect(result.didCompress).toBe(true);
+    expect(result.originalSessionId).toBe(sessionId);
+    expect(result.activeSessionId).toBe(sessionId);
+    expect(result.rotated).toBe(false);
+    expect(result.replacementSessionId).toBeUndefined();
     expect(result.userFacingMessage).toContain("Session history compacted");
     const summaryMessage = result.messages.find((message) => message.metadata?.semanticCompression === true);
     expect(summaryMessage).toBeDefined();
@@ -676,8 +684,10 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
+    rewriteTranscript: overrides.rewriteTranscript ?? db.rewriteTranscript.bind(db),
     appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),

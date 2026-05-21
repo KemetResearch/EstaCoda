@@ -138,6 +138,9 @@ async function dbWithMessages(sessionId: string, contents: string[]): Promise<In
 function compactResult(): CompactResult {
   return {
     didCompress: true,
+    originalSessionId: "session",
+    activeSessionId: "session",
+    rotated: false,
     messages: [
       { id: "summary", role: "system", content: "summary", metadata: { semanticCompression: true } },
       { id: "latest", role: "user", content: "latest" }
