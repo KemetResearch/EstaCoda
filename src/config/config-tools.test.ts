@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import type { SessionEvent } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { resolveProfileStateHome } from "./profile-home.js";
-import { createConfigTools } from "./config-tools.js";
+import { createConfigTools } from "../tools/config-tools.js";
 
 type CompressionStatusMetadata = {
   compressionStatus: {

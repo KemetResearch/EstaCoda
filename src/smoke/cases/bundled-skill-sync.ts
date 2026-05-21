@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { SmokeCase } from "../smoke-case.js";
 import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "../../skills/skill-bundled-sync.js";
-import { buildSkillFileContent } from "../../skills/skill-tools.js";
+import { buildSkillFileContent } from "../../tools/skill-tools.js";
 
 export const bundled_skill_sync_case: SmokeCase = {
   id: "bundled-skill-sync",

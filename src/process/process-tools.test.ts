@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProcessTools } from "./process-tools.js";
+import { createProcessTools } from "../tools/process-tools.js";
 import type { ProcessManager } from "./process-manager.js";
 
 function createFakeProcessManager(): ProcessManager {

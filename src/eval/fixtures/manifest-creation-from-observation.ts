@@ -5,7 +5,7 @@ import type { EvalCase, EvalResult } from "../../contracts/eval.js";
 import { ChangeManifestStore } from "../../skills/change-manifest-store.js";
 import { SkillEvolutionStore } from "../../skills/skill-evolution.js";
 import { SkillRegistry } from "../../skills/skill-registry.js";
-import { createSkillTools } from "../../skills/skill-tools.js";
+import { createSkillTools } from "../../tools/skill-tools.js";
 import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
 
 export const manifestCreationFromObservationCase: EvalCase = {

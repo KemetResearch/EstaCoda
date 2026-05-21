@@ -1,5 +1,5 @@
-import type { RegisteredTool } from "../contracts/tool.js";
-import type { WorkspaceTrustStore } from "./workspace-trust-store.js";
+import type { RegisteredTool, RuntimeToolProvider } from "../contracts/tool.js";
+import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 
 export type WorkspaceTrustToolOptions = {
   workspaceRoot: string;
@@ -92,3 +92,14 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
     }
   ];
 }
+
+export const workspaceTrustToolProvider: RuntimeToolProvider = {
+  name: "workspaceTrust",
+  kind: "runtime",
+  createTools(ctx) {
+    return createWorkspaceTrustTools({
+      workspaceRoot: ctx.workspaceRoot,
+      trustStore: ctx.trustStore
+    });
+  }
+};

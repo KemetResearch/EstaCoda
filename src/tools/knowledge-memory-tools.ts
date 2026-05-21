@@ -1,5 +1,5 @@
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import type { MemoryInspector } from "./memory-inspector.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
+import type { MemoryInspector } from "../memory/memory-inspector.js";
 
 export function createKnowledgeMemoryTools(inspector: MemoryInspector | undefined): RegisteredTool[] {
   if (inspector === undefined) {
@@ -89,3 +89,11 @@ export function createKnowledgeMemoryTools(inspector: MemoryInspector | undefine
     }
   ];
 }
+
+export const knowledgeMemoryToolProvider: SessionToolProvider = {
+  name: "knowledgeMemory",
+  kind: "session",
+  createTools(ctx) {
+    return createKnowledgeMemoryTools(ctx.memoryInspector);
+  }
+};

@@ -6,7 +6,7 @@ import type { ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { parseSkillFile, hydrateSkillResources } from "./skill-loader.js";
 import type { SkillRegistry } from "./skill-registry.js";
-import { buildSkillFileContent, slugifySkillName } from "./skill-tools.js";
+import { buildSkillFileContent, slugifySkillName } from "../tools/skill-tools.js";
 
 export type SkillAutonomy = "none" | "suggest" | "proactive" | "autonomous";
 

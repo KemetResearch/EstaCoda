@@ -1,6 +1,6 @@
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { SessionDB } from "../contracts/session.js";
-import { buildCompressionStatusReport, renderCompressionStatusReport } from "./compression-status.js";
+import { buildCompressionStatusReport, renderCompressionStatusReport } from "../config/compression-status.js";
 import {
   loadRuntimeConfig,
   setupMcpConfig,
@@ -17,9 +17,9 @@ import {
   type SecuritySetupInput,
   type TelegramSetupInput,
   type WebSetupInput
-} from "./runtime-config.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
-import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
+} from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
@@ -575,6 +575,27 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       }
     }
   ];
+}
+
+export const configToolProvider: SessionToolProvider = {
+  name: "config",
+  kind: "session",
+  createTools(ctx) {
+    return createConfigTools({
+      workspaceRoot: ctx.workspaceRoot,
+      homeDir: ctx.homeDir,
+      profileId: ctx.profileId,
+      sessionId: ctx.currentSessionId,
+      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb)
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 function redactConfigToolInput<T extends Record<string, unknown>>(input: T): T {

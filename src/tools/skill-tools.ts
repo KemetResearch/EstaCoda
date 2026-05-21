@@ -1,15 +1,15 @@
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
-import { resetBundledSkill } from "./skill-bundled-sync.js";
-import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "./skill-limits.js";
-import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "./skill-loader.js";
-import { assertSkillContentMutationAllowed, assertSkillMutable } from "./skill-mutation-policy.js";
-import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
-import type { SkillRegistry } from "./skill-registry.js";
-import { ChangeManifestStore } from "./change-manifest-store.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
+import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "../skills/skill-evolution.js";
+import { resetBundledSkill } from "../skills/skill-bundled-sync.js";
+import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "../skills/skill-limits.js";
+import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "../skills/skill-loader.js";
+import { assertSkillContentMutationAllowed, assertSkillMutable } from "../skills/skill-mutation-policy.js";
+import { ensureContainedDirectory, isSafeRelativeSkillPath } from "../skills/skill-path-safety.js";
+import type { SkillRegistry } from "../skills/skill-registry.js";
+import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import {
   SkillProposalService,
   type SkillEvalGateResult,
@@ -23,8 +23,8 @@ import {
   applySkillPatch,
   isLoadedSkill as isLoadedSkillFromService,
   slugifySkillName
-} from "./skill-proposal-service.js";
-export { slugifySkillName } from "./skill-proposal-service.js";
+} from "../skills/skill-proposal-service.js";
+export { slugifySkillName } from "../skills/skill-proposal-service.js";
 
 export type SkillToolsOptions = {
   registry: SkillRegistry;
@@ -1172,6 +1172,28 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       }
     }
   ];
+}
+
+export const skillToolProvider: SessionToolProvider = {
+  name: "skill",
+  kind: "session",
+  createTools(ctx) {
+    return createSkillTools({
+      registry: requireProviderDependency("skill", "skillRegistry", ctx.skillRegistry),
+      visibleRegistry: ctx.sessionSkillRegistry,
+      localSkillsRoot: requireProviderDependency("skill", "localSkillsRoot", ctx.localSkillsRoot),
+      bundledSkillsRoot: ctx.bundledSkillsRoot,
+      skillEvolutionStore: ctx.skillEvolutionStore,
+      changeManifestStore: ctx.changeManifestStore
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 type GetSkillResult =
