@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
@@ -81,32 +82,37 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       maxResultSizeChars: maxContentChars,
       isAvailable: () => true,
       run: async (input: { url?: string; text?: string; maxContentChars?: number }, context) => {
+        const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
         if (url === undefined) {
-          return {
+          debug.log("web.extract.blocked", { reason: "missing-url" });
+          return withDebug({
             ok: false,
             content: "No URL found for web.extract.",
             metadata: {
               reason: "missing-url"
             }
-          };
+          }, debug);
         }
+        debug.log("web.extract.start", { url });
 
         const secretFailure = blockSecretUrl(url, "secret-in-url");
         if (secretFailure !== undefined) {
-          return secretFailure;
+          debug.log("web.extract.blocked", { reason: "secret-in-url", url });
+          return withDebug(secretFailure, debug);
         }
 
         if (options.enableNetwork !== true) {
-          return {
+          debug.log("web.extract.blocked", { reason: "network-disabled", url });
+          return withDebug({
             ok: false,
             content: `web.extract is ready for ${redactUrlForMetadata(url)}, but network fetching is not enabled for this runtime.`,
             metadata: {
               url: redactUrlForMetadata(url),
               reason: "network-disabled"
             }
-          };
+          }, debug);
         }
 
         const guardFailure = await urlGuard(url, {
@@ -114,23 +120,30 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           policyReason: "website-policy"
         });
         if (guardFailure !== undefined) {
-          return guardFailure;
+          debug.log("web.extract.blocked", { reason: guardFailure.metadata.reason, url });
+          return withDebug(guardFailure, debug);
         }
 
         const providerSelection = await selectWebResearchProvider("extract", options.webConfig);
+        debug.log("web.extract.provider", {
+          provider: providerSelection.providerName,
+          fallback: providerSelection.fallback,
+          available: providerSelection.availability.available,
+          reason: providerSelection.availability.reason
+        });
         if (!providerSelection.availability.available) {
-          return unavailableWebResearchResult("web.extract", "extract", providerSelection);
+          return withDebug(unavailableWebResearchResult("web.extract", "extract", providerSelection), debug);
         }
 
         if (!providerSelection.fallback && providerSelection.providerName !== "fetch") {
           if (providerSelection.provider?.extract === undefined) {
-            return unavailableWebResearchResult("web.extract", "extract", {
+            return withDebug(unavailableWebResearchResult("web.extract", "extract", {
               ...providerSelection,
               availability: {
                 available: false,
                 reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web extract.`
               }
-            });
+            }), debug);
           }
 
           const providerResult = await providerSelection.provider.extract(url, {
@@ -138,7 +151,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             signal: context?.signal
           }).catch((error: unknown) => ({ error }));
           if ("error" in providerResult) {
-            return {
+            debug.log("web.extract.provider_failed", { provider: providerSelection.providerName, url });
+            return withDebug({
               ok: false,
               content: providerResult.error instanceof Error ? providerResult.error.message : "web.extract provider failed.",
               metadata: {
@@ -146,10 +160,16 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
                 provider: providerSelection.providerName,
                 reason: "provider-failed"
               }
-            };
+            }, debug);
           }
 
-          return formatWebExtractProviderResult(providerSelection.provider, providerResult);
+          debug.log("web.extract.complete", {
+            provider: providerSelection.providerName,
+            url: providerResult.url,
+            status: providerResult.status,
+            contentLength: providerResult.content.length
+          });
+          return withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult), debug);
         }
 
         return extractWithFetch({
@@ -157,6 +177,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           fetch: options.fetch ?? globalThis.fetch,
           maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
           guardUrl: urlGuard,
+          debug,
           signal: context?.signal
         });
       }
@@ -354,25 +375,47 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       maxResultSizeChars: 8000,
       isAvailable: () => browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
+        const debug = createBrowserDebugSession();
         if (browserBackend.cdp === undefined) {
-          return unsupportedBrowserTool(browserBackend, "browser.cdp");
+          return withDebug(unsupportedBrowserTool(browserBackend, "browser.cdp"), debug);
         }
+        debug.log("browser.cdp.start", {
+          backend: browserBackend.kind,
+          method: input.method,
+          params: input.params
+        });
         const guardFailure = await guardBrowserCdpInput(input, urlGuard, browserBackend.kind);
         if (guardFailure !== undefined) {
-          return guardFailure;
+          debug.log("browser.cdp.blocked", {
+            backend: browserBackend.kind,
+            method: input.method,
+            reason: guardFailure.metadata.reason,
+            url: guardFailure.metadata.url
+          });
+          return withDebug(guardFailure, debug);
         }
         const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
         if (typeof result === "object" && result !== null && "error" in result) {
-          return {
+          debug.log("browser.cdp.error", {
+            backend: browserBackend.kind,
+            method: input.method,
+            error: result.error instanceof Error ? result.error.message : "Browser CDP command failed."
+          });
+          return withDebug({
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser CDP command failed.",
             metadata: { backend: browserBackend.kind }
-          };
+          }, debug);
         }
+        debug.log("browser.cdp.complete", {
+          backend: browserBackend.kind,
+          method: input.method,
+          responseShape: describeValueShape(result)
+        });
         return {
           ok: true,
           content: JSON.stringify(result, null, 2),
-          metadata: { backend: browserBackend.kind, result: result as Record<string, unknown> }
+          metadata: withDebugMetadata({ backend: browserBackend.kind, result: result as Record<string, unknown> }, debug)
         };
       }
     },
@@ -499,22 +542,26 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       maxResultSizeChars: 4000,
       isAvailable: () => browserBackend.isAvailable(),
       run: async (input: { url?: string; text?: string }, context) => {
+        const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
         if (url === undefined) {
-          return {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "missing-url" });
+          return withDebug({
             ok: false,
             content: "No URL found for browser.navigate.",
             metadata: {
               reason: "missing-url",
               backend: "unconfigured"
             }
-          };
+          }, debug);
         }
+        debug.log("browser.navigate.start", { backend: browserBackend.kind, requestedUrl: url });
 
         const secretFailure = blockSecretUrl(url, "secret-in-url", { backend: browserBackend.kind });
         if (secretFailure !== undefined) {
-          return secretFailure;
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "secret-in-url", requestedUrl: url });
+          return withDebug(secretFailure, debug);
         }
 
         const guardFailure = await urlGuard(url, {
@@ -523,11 +570,13 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           metadata: { backend: browserBackend.kind }
         });
         if (guardFailure !== undefined) {
-          return guardFailure;
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: guardFailure.metadata.reason, requestedUrl: url });
+          return withDebug(guardFailure, debug);
         }
 
         if (!(await browserBackend.isAvailable())) {
-          return {
+          debug.log("browser.navigate.unavailable", { backend: browserBackend.kind, requestedUrl: url });
+          return withDebug({
             ok: false,
             content: [
               `Browser navigation requested for ${redactUrlForMetadata(url)}.`,
@@ -537,11 +586,12 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
               url: redactUrlForMetadata(url),
               backend: browserBackend.kind
             }
-          };
+          }, debug);
         }
 
         if (context?.signal?.aborted === true) {
-          return {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "cancelled", requestedUrl: url });
+          return withDebug({
             ok: false,
             content: "Browser navigation cancelled.",
             metadata: {
@@ -549,7 +599,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
               backend: browserBackend.kind,
               reason: "cancelled"
             }
-          };
+          }, debug);
         }
 
         const result = await browserBackend.navigate({ url, signal: context?.signal }).catch((error: unknown) => ({
@@ -557,7 +607,12 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         }));
 
         if ("error" in result) {
-          return {
+          debug.log("browser.navigate.error", {
+            backend: browserBackend.kind,
+            requestedUrl: url,
+            error: result.error instanceof Error ? result.error.message : "Browser navigation failed."
+          });
+          return withDebug({
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser navigation failed.",
             metadata: {
@@ -565,7 +620,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
               backend: browserBackend.kind,
               reason: "navigation-failed"
             }
-          };
+          }, debug);
         }
 
         const postNavigationFailure = await checkPostNavigationUrl({
@@ -576,9 +631,22 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           signal: context?.signal
         });
         if (postNavigationFailure !== undefined) {
-          return postNavigationFailure;
+          debug.log("browser.navigate.blocked", {
+            backend: browserBackend.kind,
+            sessionId: result.session.id,
+            requestedUrl: url,
+            finalUrl: result.snapshot.url,
+            reason: postNavigationFailure.metadata.reason
+          });
+          return withDebug(postNavigationFailure, debug);
         }
 
+        debug.log("browser.navigate.complete", {
+          backend: result.session.backend,
+          sessionId: result.session.id,
+          requestedUrl: url,
+          finalUrl: result.snapshot.url
+        });
         return {
           ok: true,
           content: [
@@ -593,7 +661,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             url: redactUrlForMetadata(url),
             backend: result.session.backend,
             session: result.session,
-            snapshot: result.snapshot
+            snapshot: result.snapshot,
+            ...debugMetadata(debug)
           }
         };
       }
@@ -917,6 +986,41 @@ function createBrowserActionTool(input: {
   };
 }
 
+function withDebug<T extends { metadata?: Record<string, unknown> }>(result: T, debug: BrowserDebugSession): T {
+  if (!debug.enabled) {
+    return result;
+  }
+  return {
+    ...result,
+    metadata: withDebugMetadata(result.metadata ?? {}, debug)
+  };
+}
+
+function withDebugMetadata(metadata: Record<string, unknown>, debug: BrowserDebugSession): Record<string, unknown> {
+  return {
+    ...metadata,
+    ...debugMetadata(debug)
+  };
+}
+
+function debugMetadata(debug: BrowserDebugSession): Record<string, unknown> {
+  if (!debug.enabled) {
+    return {};
+  }
+  const events = debug.flush();
+  return events.length === 0 ? {} : { debug: events };
+}
+
+function describeValueShape(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { type: "array", length: value.length };
+  }
+  if (value !== null && typeof value === "object") {
+    return { type: "object", keys: Object.keys(value).slice(0, 20) };
+  }
+  return { type: typeof value };
+}
+
 async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: string): Promise<{ path: string; bytes: number }> {
   const root = workspaceRoot ?? process.cwd();
   const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
@@ -1160,12 +1264,13 @@ async function extractWithFetch(input: {
   fetch: FetchLike;
   maxContentChars: number;
   guardUrl: UrlGuard;
+  debug: BrowserDebugSession;
   signal?: AbortSignal;
 }) {
   const { signal, cleanup } = createTimeoutSignal(30_000, input.signal);
 
   try {
-    const { response, url } = await fetchWithGuardedRedirects(input.url, {
+    const { response, url, redirectCount } = await fetchWithGuardedRedirects(input.url, {
       fetch: input.fetch,
       guardUrl: input.guardUrl,
       signal
@@ -1181,8 +1286,15 @@ async function extractWithFetch(input: {
       status: response.status,
       source: "fetch"
     };
+    input.debug.log("web.extract.complete", {
+      provider: "fetch",
+      url,
+      status: response.status,
+      redirectCount,
+      contentLength: result.content.length
+    });
 
-    return {
+    return withDebug({
       ok: response.ok,
       content: [
         `URL: ${result.url}`,
@@ -1192,19 +1304,30 @@ async function extractWithFetch(input: {
         result.content
       ].filter((line) => line !== undefined).join("\n"),
       metadata: result
-    };
+    }, input.debug);
   } catch (error) {
     if (isUrlGuardFailure(error)) {
-      return error;
+      input.debug.log("web.extract.blocked", {
+        provider: "fetch",
+        reason: error.metadata.reason,
+        url: error.metadata.url
+      });
+      return withDebug(error, input.debug);
     }
-    return {
+    input.debug.log("web.extract.error", {
+      provider: "fetch",
+      url: input.url,
+      reason: "fetch-failed",
+      error: error instanceof Error ? error.message : "web.extract failed."
+    });
+    return withDebug({
       ok: false,
       content: error instanceof Error ? error.message : "web.extract failed.",
       metadata: {
         url: redactUrlForMetadata(input.url),
         reason: "fetch-failed"
       }
-    };
+    }, input.debug);
   } finally {
     cleanup();
   }
@@ -1220,6 +1343,7 @@ async function fetchWithGuardedRedirects(
 ): Promise<{
   response: Awaited<ReturnType<FetchLike>>;
   url: string;
+  redirectCount: number;
 }> {
   let currentUrl = startUrl;
   for (let redirectCount = 0; redirectCount <= MAX_WEB_EXTRACT_REDIRECTS; redirectCount++) {
@@ -1234,7 +1358,7 @@ async function fetchWithGuardedRedirects(
 
     const location = response.headers.get("location");
     if (!isRedirectStatus(response.status) || location === null) {
-      return { response, url: currentUrl };
+      return { response, url: currentUrl, redirectCount };
     }
 
     if (redirectCount >= MAX_WEB_EXTRACT_REDIRECTS) {

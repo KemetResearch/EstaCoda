@@ -98,6 +98,7 @@ describe("web and browser tools baselines", () => {
     await Promise.all(tempRoots.map((path) => rm(path, { recursive: true, force: true })));
     tempRoots = [];
     resetWebResearchProvidersForTest();
+    vi.unstubAllEnvs();
   });
 
   it("exposes the expected browser and web tool names", () => {
@@ -249,6 +250,92 @@ describe("web and browser tools baselines", () => {
       source: "fetch"
     });
     expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET", redirect: "manual" }));
+  });
+
+  it("omits debug payloads when browser debug is disabled", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "public page" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/article" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).not.toHaveProperty("debug");
+  });
+
+  it("includes bounded web.extract debug metadata when enabled", async () => {
+    vi.stubEnv("ESTACODA_WEB_TOOLS_DEBUG", "true");
+    const fetch = vi.fn(async (url: string) => url === "https://example.com/start?token=debug-secret"
+      ? createFetchResponse({
+        status: 302,
+        statusText: "Found",
+        location: "https://example.com/final",
+        body: ""
+      })
+      : createFetchResponse({ body: "<html><body>debug content</body></html>" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/start?token=debug-secret" });
+
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("debug-secret");
+    expect(result.metadata).toMatchObject({
+      url: "[REDACTED_URL_WITH_SECRET]",
+      reason: "secret-in-url",
+      debug: expect.arrayContaining([
+        expect.objectContaining({
+          event: "web.extract.start",
+          data: { url: "[REDACTED_URL_WITH_SECRET]" }
+        }),
+        expect.objectContaining({
+          event: "web.extract.blocked",
+          data: expect.objectContaining({ reason: "secret-in-url" })
+        })
+      ])
+    });
+  });
+
+  it("web.extract debug records fetch status, redirect count, and content length", async () => {
+    vi.stubEnv("ESTACODA_BROWSER_DEBUG", "true");
+    const fetch = vi.fn(async (url: string) => url === "https://example.com/start"
+      ? createFetchResponse({
+        status: 302,
+        statusText: "Found",
+        location: "https://example.com/final",
+        body: ""
+      })
+      : createFetchResponse({ body: "<html><body>debug content</body></html>" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toMatchObject({
+      status: 200,
+      debug: expect.arrayContaining([
+        expect.objectContaining({
+          event: "web.extract.complete",
+          data: expect.objectContaining({
+            provider: "fetch",
+            url: "https://example.com/final",
+            status: 200,
+            redirectCount: 1,
+            contentLength: expect.any(Number)
+          })
+        })
+      ])
+    });
   });
 
   it("does not silently fall back when explicit web.extract provider is unavailable", async () => {
@@ -596,6 +683,33 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("browser.navigate debug enabled includes redacted URL and blocked reason", async () => {
+    vi.stubEnv("ESTACODA_BROWSER_DEBUG", "true");
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: createMockBrowserBackend()
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/?api_key=nav-debug-secret" });
+
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("nav-debug-secret");
+    expect(result.metadata).toMatchObject({
+      url: "[REDACTED_URL_WITH_SECRET]",
+      backend: "mock",
+      reason: "secret-in-url",
+      debug: expect.arrayContaining([
+        expect.objectContaining({
+          event: "browser.navigate.start",
+          data: { backend: "mock", requestedUrl: "[REDACTED_URL_WITH_SECRET]" }
+        }),
+        expect.objectContaining({
+          event: "browser.navigate.blocked",
+          data: expect.objectContaining({ backend: "mock", reason: "secret-in-url" })
+        })
+      ])
+    });
+  });
+
   it("blocks secret-bearing browser.navigate URLs without leaking raw values", async () => {
     const navigate = tool("browser.navigate", createWebTools({
       browserBackend: createMockBrowserBackend()
@@ -930,6 +1044,48 @@ describe("web and browser tools baselines", () => {
       }
     });
     expect(JSON.stringify(result)).not.toContain("cdp-secret");
+    expect(calls).toEqual([]);
+  });
+
+  it("browser.cdp debug logs method without leaking raw dangerous Runtime.evaluate expression", async () => {
+    vi.stubEnv("ESTACODA_WEB_TOOLS_DEBUG", "true");
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "fetch(\"https://example.com/?token=cdp-debug-secret\")" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("cdp-debug-secret");
+    expect(JSON.stringify(result)).not.toContain("fetch(");
+    expect(result.metadata).toMatchObject({
+      backend: "mock",
+      method: "Runtime.evaluate",
+      reason: "secret-in-url",
+      debug: expect.arrayContaining([
+        expect.objectContaining({
+          event: "browser.cdp.start",
+          data: {
+            backend: "mock",
+            method: "Runtime.evaluate",
+            params: { expression: "[REDACTED_EXPRESSION]" }
+          }
+        }),
+        expect.objectContaining({
+          event: "browser.cdp.blocked",
+          data: expect.objectContaining({
+            backend: "mock",
+            method: "Runtime.evaluate",
+            reason: "secret-in-url"
+          })
+        })
+      ])
+    });
     expect(calls).toEqual([]);
   });
 
