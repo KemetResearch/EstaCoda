@@ -290,6 +290,132 @@ describe("ToolExecutor input redaction", () => {
       }
     });
   });
+
+  it("redacts secret-bearing web.extract URLs before persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.extract")]
+    });
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input: { url: "https://x.test/?token=secret" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
+    expect(persisted).not.toContain("token=secret");
+    expect(trajectory).not.toContain("token=secret");
+    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+  });
+
+  it("redacts secret-bearing browser.navigate URLs before persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("browser.navigate")]
+    });
+
+    await executor.executeTool({
+      tool: "browser.navigate",
+      input: { url: "https://x.test/?api_key=secret" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
+    expect(persisted).not.toContain("api_key=secret");
+    expect(trajectory).not.toContain("api_key=secret");
+    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+  });
+
+  it("redacts secret-bearing web.crawl URLs before persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.crawl")]
+    });
+
+    await executor.executeTool({
+      tool: "web.crawl",
+      input: { url: "https://x.test/?key=secret" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
+    expect(persisted).not.toContain("key=secret");
+    expect(trajectory).not.toContain("key=secret");
+    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+  });
+
+  it("redacts Runtime.evaluate expressions before persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("browser.cdp")]
+    });
+
+    await executor.executeTool({
+      tool: "browser.cdp",
+      input: {
+        method: "Runtime.evaluate",
+        params: {
+          expression: "fetch('https://x.test/?token=secret')"
+        }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
+    expect(persisted).not.toContain("fetch");
+    expect(trajectory).not.toContain("fetch");
+    expect(persisted).toContain("[REDACTED_CDP_EXPRESSION]");
+    expect(trajectory).toContain("[REDACTED_CDP_EXPRESSION]");
+  });
+
+  it("redacts Runtime.callFunctionOn function declarations before persistence", async () => {
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [createEchoTool("browser.cdp")]
+    });
+
+    await executor.executeTool({
+      tool: "browser.cdp",
+      input: {
+        method: "Runtime.callFunctionOn",
+        params: {
+          functionDeclaration: "function () { return 'https://x.test/?token=secret'; }"
+        }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    expect(persisted).not.toContain("function ()");
+    expect(persisted).not.toContain("token=secret");
+    expect(persisted).toContain("[REDACTED_CDP_EXPRESSION]");
+  });
+
+  it("keeps safe inputs readable in persisted records", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.extract")]
+    });
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input: { url: "https://example.test/page", maxContentChars: 1000 },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
+    expect(persisted).toContain("https://example.test/page");
+    expect(trajectory).toContain("https://example.test/page");
+  });
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
