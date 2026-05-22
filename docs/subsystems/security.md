@@ -113,6 +113,22 @@ Persistent approvals do not override hardline command blocks. The hardline check
 - Trust is global directory-owned state persisted per workspace root in `~/.estacoda/trust.json`.
 - Trust does not control config loading. Runtime config always comes from the selected profile.
 
+## Browser And Web URL Safety
+
+Network-capable browser and web tools enforce a separate URL-safety floor before the normal tool result is returned. Private and internal URLs are blocked by default, including loopback, RFC1918, link-local, multicast, unspecified, reserved, CGNAT, and equivalent IPv6 ranges. Cloud metadata endpoints are always blocked, even when private URLs are otherwise allowed.
+
+The canonical config key is `security.allowPrivateUrls`; `browser.allowPrivateUrls` is a deprecated alias only. `ESTACODA_ALLOW_PRIVATE_URLS` overrides config and accepts `1`, `true`, `yes`, and `on` for true, and `0`, `false`, `no`, and `off` for false. Any other value fails config loading instead of silently changing the safety posture.
+
+`security.websiteBlocklist` supports exact domain rules and wildcard suffix rules such as `*.example.com`. Rules may be configured inline in `domains` or loaded from `sharedFiles`; shared files use one rule per line, ignore blanks and `#` comments, and missing files warn and are skipped. The blocklist policy is enabled when at least one normalized rule is loaded.
+
+Current protection coverage:
+
+- `web.extract` guards the initial URL and every manual redirect before reading the response body.
+- `browser.navigate` guards the initial URL and checks the final post-navigation URL, with best-effort cleanup to `about:blank` when a redirect lands on a blocked target.
+- `browser.cdp` is an `external-side-effect` tool. URL-capable CDP methods including `Page.navigate`, `Target.createTarget`, `Runtime.evaluate`, and `Runtime.callFunctionOn` apply URL-safety, secret scanning, and website-policy checks to explicit URLs and obvious network/navigation literal URL expressions.
+
+Known limits: there is no socket-level DNS rebinding or TOCTOU protection, browser subresource interception is deferred to PR 2C, and runtime-expression guarding is not full JavaScript static analysis.
+
 ## Channel Security Model
 
 ### Global Policy

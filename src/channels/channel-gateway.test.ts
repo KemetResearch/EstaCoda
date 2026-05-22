@@ -1825,6 +1825,7 @@ describe("ChannelGateway commands", () => {
         securityMode: "adaptive",
         securityAssessorEnabled: false,
         securityAssessorTimeoutMs: 5000,
+        securityUrlPolicyHash: "hash",
         approvalControllerPresent: false,
         explicitSecurityPolicyPresent: false,
         workspaceRoot: "/tmp",

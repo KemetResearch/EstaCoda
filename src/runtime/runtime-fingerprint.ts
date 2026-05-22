@@ -20,6 +20,7 @@ export type RuntimeFingerprint = {
   securityAssessorProvider?: string;
   securityAssessorModel?: string;
   securityAssessorTimeoutMs: number;
+  securityUrlPolicyHash: string;
   approvalControllerPresent: boolean;
   explicitSecurityPolicyPresent: boolean;
 
@@ -98,6 +99,10 @@ export function computeRuntimeFingerprint(
     securityAssessorProvider: config.security.assessor.provider,
     securityAssessorModel: config.security.assessor.model,
     securityAssessorTimeoutMs: config.security.assessor.timeoutMs,
+    securityUrlPolicyHash: stableJsonHash({
+      allowPrivateUrls: config.security.allowPrivateUrls,
+      websiteBlocklist: config.security.websiteBlocklist,
+    }),
     approvalControllerPresent: options.approvalControllerPresent,
     explicitSecurityPolicyPresent: options.explicitSecurityPolicyPresent,
     workspaceRoot: options.workspaceRoot,

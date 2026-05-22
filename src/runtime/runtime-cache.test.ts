@@ -55,6 +55,7 @@ function fakeFingerprint(overrides?: Partial<RuntimeFingerprint>): RuntimeFinger
     securityMode: "adaptive",
     securityAssessorEnabled: false,
     securityAssessorTimeoutMs: 30_000,
+    securityUrlPolicyHash: "0000000000000000",
     approvalControllerPresent: false,
     explicitSecurityPolicyPresent: false,
     workspaceRoot: "/workspace",

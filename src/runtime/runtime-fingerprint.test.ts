@@ -46,6 +46,8 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
     profile: { mode: "focused", responseLanguage: "en" },
     security: {
       approvalMode: "adaptive",
+      allowPrivateUrls: false,
+      websiteBlocklist: {},
       assessor: { enabled: false, timeoutMs: 30_000 },
     },
     channels: {
@@ -429,6 +431,43 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.securityAssessorEnabled).toBe(true);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("security allow-private URL policy change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        security: {
+          ...base.security,
+          allowPrivateUrls: true,
+        },
+      }),
+      opts
+    );
+    expect(fp2.securityUrlPolicyHash).not.toBe(fp1.securityUrlPolicyHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("security website blocklist policy change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        security: {
+          ...base.security,
+          websiteBlocklist: {
+            domains: ["blocked.test", "*.internal.test"],
+            sharedFiles: ["/policy/shared-blocklist.txt"],
+          },
+        },
+      }),
+      opts
+    );
+    expect(fp2.securityUrlPolicyHash).not.toBe(fp1.securityUrlPolicyHash);
     expect(fp1).not.toEqual(fp2);
   });
 
