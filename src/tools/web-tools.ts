@@ -4,6 +4,8 @@ import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
+import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { analyzeImageWithVision } from "./vision-tools.js";
 
@@ -13,6 +15,8 @@ export type WebToolOptions = {
   enableNetwork?: boolean;
   maxContentChars?: number;
   workspaceRoot?: string;
+  securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
+  resolveHostname?: ResolveHostnameFn;
   visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
     ok: boolean;
     content: string;
@@ -23,6 +27,7 @@ export type WebToolOptions = {
 export type FetchLike = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
+  redirect?: "manual" | "follow" | "error";
   signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
@@ -35,10 +40,12 @@ export type FetchLike = (url: string, init?: {
 }>;
 
 const DEFAULT_MAX_CONTENT_CHARS = 24_000;
+const MAX_WEB_EXTRACT_REDIRECTS = 10;
 
 export function createWebTools(options: WebToolOptions = {}): readonly RegisteredTool[] {
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
+  const urlGuard = createUrlGuard(options);
 
   return [
     {
@@ -70,21 +77,35 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           };
         }
 
+        const secretFailure = blockSecretUrl(url, "secret-in-url");
+        if (secretFailure !== undefined) {
+          return secretFailure;
+        }
+
         if (options.enableNetwork !== true) {
           return {
             ok: false,
-            content: `web.extract is ready for ${url}, but network fetching is not enabled for this runtime.`,
+            content: `web.extract is ready for ${redactUrlForMetadata(url)}, but network fetching is not enabled for this runtime.`,
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               reason: "network-disabled"
             }
           };
+        }
+
+        const guardFailure = await urlGuard(url, {
+          unsafeReason: "unsafe-url",
+          policyReason: "website-policy"
+        });
+        if (guardFailure !== undefined) {
+          return guardFailure;
         }
 
         return extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
           maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+          guardUrl: urlGuard,
           signal: context?.signal
         });
       }
@@ -435,15 +456,29 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           };
         }
 
+        const secretFailure = blockSecretUrl(url, "secret-in-url", { backend: browserBackend.kind });
+        if (secretFailure !== undefined) {
+          return secretFailure;
+        }
+
+        const guardFailure = await urlGuard(url, {
+          unsafeReason: "unsafe-url",
+          policyReason: "website-policy",
+          metadata: { backend: browserBackend.kind }
+        });
+        if (guardFailure !== undefined) {
+          return guardFailure;
+        }
+
         if (!(await browserBackend.isAvailable())) {
           return {
             ok: false,
             content: [
-              `Browser navigation requested for ${url}.`,
+              `Browser navigation requested for ${redactUrlForMetadata(url)}.`,
               "No browser backend is configured yet. Next backends to wire: local CDP, Firecrawl, Browserbase/Camofox."
             ].join("\n"),
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind
             }
           };
@@ -454,7 +489,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ok: false,
             content: "Browser navigation cancelled.",
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind,
               reason: "cancelled"
             }
@@ -470,11 +505,22 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser navigation failed.",
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind,
               reason: "navigation-failed"
             }
           };
+        }
+
+        const postNavigationFailure = await checkPostNavigationUrl({
+          requestedUrl: url,
+          result,
+          browserBackend,
+          guardUrl: urlGuard,
+          signal: context?.signal
+        });
+        if (postNavigationFailure !== undefined) {
+          return postNavigationFailure;
         }
 
         return {
@@ -488,7 +534,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             renderBrowserSnapshot(result.snapshot)
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
-            url,
+            url: redactUrlForMetadata(url),
             backend: result.session.backend,
             session: result.session,
             snapshot: result.snapshot
@@ -511,6 +557,7 @@ export const webToolProvider: SessionToolProvider = {
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
       workspaceRoot: ctx.workspaceRoot,
+      securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
         allowedRoots: [channelMediaRoot],
@@ -636,27 +683,99 @@ function unsupportedBrowserTool(browserBackend: BrowserBackend, tool: string) {
   };
 }
 
+type UrlGuardFailure = {
+  ok: false;
+  content: string;
+  metadata: Record<string, unknown>;
+};
+
+type UrlGuard = (
+  url: string,
+  reasons: {
+    unsafeReason: string;
+    policyReason: string;
+    metadata?: Record<string, unknown>;
+  }
+) => Promise<UrlGuardFailure | undefined>;
+
+function createUrlGuard(options: WebToolOptions): UrlGuard {
+  const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
+  const allowPrivateUrls = options.securityConfig?.allowPrivateUrls === true;
+  return async (url, reasons) => {
+    if (!await isSafeUrl(url, {
+      allowPrivateUrls,
+      resolveHostname: options.resolveHostname
+    })) {
+      return {
+        ok: false,
+        content: "Blocked unsafe URL.",
+        metadata: {
+          url: redactUrlForMetadata(url),
+          ...(reasons.metadata ?? {}),
+          reason: reasons.unsafeReason
+        }
+      };
+    }
+
+    const websiteAccess = checkWebsiteAccess(url, websitePolicy);
+    if (websiteAccess?.allowed === false) {
+      return {
+        ok: false,
+        content: "Blocked by website policy.",
+        metadata: {
+          url: redactUrlForMetadata(url),
+          ...(reasons.metadata ?? {}),
+          reason: reasons.policyReason,
+          host: websiteAccess.host,
+          matchedRule: websiteAccess.matchedRule
+        }
+      };
+    }
+
+    return undefined;
+  };
+}
+
+function blockSecretUrl(
+  url: string,
+  reason: string,
+  metadata: Record<string, unknown> = {}
+): UrlGuardFailure | undefined {
+  if (scanUrlForSecrets(url) === undefined) {
+    return undefined;
+  }
+
+  return {
+    ok: false,
+    content: "Blocked URL containing a secret.",
+    metadata: {
+      ...metadata,
+      url: redactUrlForMetadata(url),
+      reason
+    }
+  };
+}
+
 async function extractWithFetch(input: {
   url: string;
   fetch: FetchLike;
   maxContentChars: number;
+  guardUrl: UrlGuard;
   signal?: AbortSignal;
 }) {
   const { signal, cleanup } = createTimeoutSignal(30_000, input.signal);
 
   try {
-    const response = await input.fetch(input.url, {
-      method: "GET",
-      headers: {
-        "user-agent": "EstaCoda/2 web.extract"
-      },
+    const { response, url } = await fetchWithGuardedRedirects(input.url, {
+      fetch: input.fetch,
+      guardUrl: input.guardUrl,
       signal
     });
     const raw = await response.text();
     const contentType = response.headers.get("content-type") ?? undefined;
     const extracted = extractReadableText(raw, contentType);
     const result: WebExtractionResult = {
-      url: input.url,
+      url,
       title: extractTitle(raw),
       content: truncate(extracted, input.maxContentChars),
       contentType,
@@ -676,17 +795,162 @@ async function extractWithFetch(input: {
       metadata: result
     };
   } catch (error) {
+    if (isUrlGuardFailure(error)) {
+      return error;
+    }
     return {
       ok: false,
       content: error instanceof Error ? error.message : "web.extract failed.",
       metadata: {
-        url: input.url,
+        url: redactUrlForMetadata(input.url),
         reason: "fetch-failed"
       }
     };
   } finally {
     cleanup();
   }
+}
+
+async function fetchWithGuardedRedirects(
+  startUrl: string,
+  input: {
+    fetch: FetchLike;
+    guardUrl: UrlGuard;
+    signal: AbortSignal;
+  }
+): Promise<{
+  response: Awaited<ReturnType<FetchLike>>;
+  url: string;
+}> {
+  let currentUrl = startUrl;
+  for (let redirectCount = 0; redirectCount <= MAX_WEB_EXTRACT_REDIRECTS; redirectCount++) {
+    const response = await input.fetch(currentUrl, {
+      method: "GET",
+      headers: {
+        "user-agent": "EstaCoda/2 web.extract"
+      },
+      redirect: "manual",
+      signal: input.signal
+    });
+
+    const location = response.headers.get("location");
+    if (!isRedirectStatus(response.status) || location === null) {
+      return { response, url: currentUrl };
+    }
+
+    if (redirectCount >= MAX_WEB_EXTRACT_REDIRECTS) {
+      throw createRedirectFailure(currentUrl, "too-many-redirects");
+    }
+
+    const nextUrl = resolveRedirectUrl(location, currentUrl);
+    if (nextUrl === undefined) {
+      throw createRedirectFailure(currentUrl, "redirect-unsafe-url");
+    }
+
+    const secretFailure = blockSecretUrl(nextUrl, "redirect-secret-in-url");
+    if (secretFailure !== undefined) {
+      throw secretFailure;
+    }
+
+    const guardFailure = await input.guardUrl(nextUrl, {
+      unsafeReason: "redirect-unsafe-url",
+      policyReason: "redirect-website-policy"
+    });
+    if (guardFailure !== undefined) {
+      throw guardFailure;
+    }
+
+    currentUrl = nextUrl;
+  }
+
+  throw createRedirectFailure(currentUrl, "too-many-redirects");
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function resolveRedirectUrl(location: string, currentUrl: string): string | undefined {
+  try {
+    return normalizeUrl(new URL(location, currentUrl).toString());
+  } catch {
+    return undefined;
+  }
+}
+
+function createRedirectFailure(url: string, reason: string): UrlGuardFailure {
+  return {
+    ok: false,
+    content: "Blocked web.extract redirect.",
+    metadata: {
+      url: redactUrlForMetadata(url),
+      reason
+    }
+  };
+}
+
+function isUrlGuardFailure(value: unknown): value is UrlGuardFailure {
+  return typeof value === "object" &&
+    value !== null &&
+    (value as { ok?: unknown }).ok === false &&
+    typeof (value as { metadata?: unknown }).metadata === "object";
+}
+
+async function checkPostNavigationUrl(input: {
+  requestedUrl: string;
+  result: import("../contracts/browser.js").BrowserNavigateResult;
+  browserBackend: BrowserBackend;
+  guardUrl: UrlGuard;
+  signal?: AbortSignal;
+}): Promise<UrlGuardFailure | undefined> {
+  const finalUrl = normalizeUrl(input.result.snapshot.url);
+  if (finalUrl === undefined || finalUrl === input.requestedUrl) {
+    return undefined;
+  }
+
+  const baseMetadata = {
+    backend: input.result.session.backend,
+    url: redactUrlForMetadata(input.requestedUrl),
+    finalUrl: redactUrlForMetadata(input.result.snapshot.url)
+  };
+
+  const secretFailure = blockSecretUrl(finalUrl, "post-redirect-secret-in-url", baseMetadata);
+  if (secretFailure !== undefined) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return secretFailure;
+  }
+
+  if (isAlwaysBlockedUrl(finalUrl)) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return {
+      ok: false,
+      content: "Blocked browser navigation to an always-blocked redirect target.",
+      metadata: {
+        ...baseMetadata,
+        reason: "post-redirect-always-blocked"
+      }
+    };
+  }
+
+  const guardFailure = await input.guardUrl(finalUrl, {
+    unsafeReason: "post-redirect-unsafe",
+    policyReason: "post-redirect-website-policy",
+    metadata: baseMetadata
+  });
+  if (guardFailure !== undefined) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return guardFailure;
+  }
+
+  return undefined;
+}
+
+async function blankBrowserSession(browserBackend: BrowserBackend, sessionId: string, signal: AbortSignal | undefined): Promise<void> {
+  await browserBackend.navigate({
+    url: "about:blank",
+    sessionId,
+    signal
+  }).catch(() => undefined);
 }
 
 export function extractFirstUrl(text: string): string | undefined {

@@ -37,18 +37,32 @@ function createFetchResponse(input: {
   status?: number;
   statusText?: string;
   contentType?: string | null;
+  location?: string | null;
   body: string;
+  onText?: () => void;
 }): Awaited<ReturnType<FetchLike>> {
   return {
     ok: input.ok ?? true,
     status: input.status ?? 200,
     statusText: input.statusText ?? "OK",
     headers: {
-      get: (name) => name.toLowerCase() === "content-type" ? input.contentType ?? "text/html" : null
+      get: (name) => {
+        const normalized = name.toLowerCase();
+        if (normalized === "content-type") return input.contentType ?? "text/html";
+        if (normalized === "location") return input.location ?? null;
+        return null;
+      }
     },
-    text: async () => input.body
+    text: async () => {
+      input.onText?.();
+      return input.body;
+    }
   };
 }
+
+const publicResolver = async (hostname: string) => hostname === "localhost"
+  ? ["127.0.0.1"]
+  : ["93.184.216.34"];
 
 function createInvalidRefBackend(): BrowserBackend {
   const backend = createMockBrowserBackend();
@@ -76,7 +90,7 @@ describe("web and browser tools baselines", () => {
     const fetch = vi.fn(async () => createFetchResponse({
       body: "<html><head><title>Example Title</title></head><body><main>Hello world.</main></body></html>"
     }));
-    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true }));
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true, resolveHostname: publicResolver }));
 
     const result = await extract.run({ url: "https://example.com/article" });
 
@@ -93,7 +107,217 @@ describe("web and browser tools baselines", () => {
       status: 200,
       source: "fetch"
     });
-    expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET" }));
+    expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET", redirect: "manual" }));
+  });
+
+  it("allows ordinary public URLs with mocked fetch", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "public page" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/public" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toMatchObject({
+      url: "https://example.com/public",
+      status: 200,
+      source: "fetch"
+    });
+  });
+
+  it("blocks unsafe web.extract URLs before fetch", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true }));
+
+    await expect(extract.run({ url: "http://169.254.169.254" })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(extract.run({ url: "http://localhost:8080" })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://localhost:8080/",
+        reason: "unsafe-url"
+      }
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks secret-bearing web.extract URLs without leaking raw values", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true }));
+
+    const result = await extract.run({ url: "https://example.com/?token=super-secret" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toEqual({
+      url: "[REDACTED_URL_WITH_SECRET]",
+      reason: "secret-in-url"
+    });
+    expect(JSON.stringify(result)).not.toContain("super-secret");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks website-policy web.extract URLs before fetch", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver,
+      securityConfig: {
+        allowPrivateUrls: false,
+        websiteBlocklist: { domains: ["blocked.test"] }
+      }
+    }));
+
+    const result = await extract.run({ url: "https://blocked.test/page" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "https://blocked.test/page",
+      reason: "website-policy",
+      host: "blocked.test",
+      matchedRule: "blocked.test"
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("allows ordinary private web.extract URLs only when configured", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "private page" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      securityConfig: {
+        allowPrivateUrls: true,
+        websiteBlocklist: {}
+      }
+    }));
+
+    const result = await extract.run({ url: "http://192.168.1.12/status" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toMatchObject({
+      url: "http://192.168.1.12/status",
+      status: 200
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("still blocks metadata web.extract URLs when private URLs are allowed", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "metadata" }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      securityConfig: {
+        allowPrivateUrls: true,
+        websiteBlocklist: {}
+      }
+    }));
+
+    const result = await extract.run({ url: "http://169.254.169.254/latest/meta-data" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "http://169.254.169.254/latest/meta-data",
+      reason: "unsafe-url"
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks unsafe web.extract redirects before reading the redirected body", async () => {
+    const redirectedText = vi.fn();
+    const fetch = vi.fn(async (url: string) => url === "https://example.com/start"
+      ? createFetchResponse({ status: 302, statusText: "Found", location: "http://169.254.169.254/latest", body: "" })
+      : createFetchResponse({ body: "metadata body", onText: redirectedText }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "http://169.254.169.254/latest",
+      reason: "redirect-unsafe-url"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(redirectedText).not.toHaveBeenCalled();
+  });
+
+  it("blocks private web.extract redirects before reading the redirected body", async () => {
+    const redirectedText = vi.fn();
+    const fetch = vi.fn(async (url: string) => url === "https://example.com/start"
+      ? createFetchResponse({ status: 302, statusText: "Found", location: "http://localhost:8080/private", body: "" })
+      : createFetchResponse({ body: "private body", onText: redirectedText }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "http://localhost:8080/private",
+      reason: "redirect-unsafe-url"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(redirectedText).not.toHaveBeenCalled();
+  });
+
+  it("blocks secret-bearing web.extract redirects without leaking raw redirect values", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({
+      status: 302,
+      statusText: "Found",
+      location: "https://example.com/next?token=super-secret",
+      body: ""
+    }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toEqual({
+      url: "[REDACTED_URL_WITH_SECRET]",
+      reason: "redirect-secret-in-url"
+    });
+    expect(JSON.stringify(result)).not.toContain("super-secret");
+  });
+
+  it("returns deterministic metadata for web.extract redirect loops over the cap", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({
+      status: 302,
+      statusText: "Found",
+      location: "/loop",
+      body: ""
+    }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await extract.run({ url: "https://example.com/loop" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toEqual({
+      url: "https://example.com/loop",
+      reason: "too-many-redirects"
+    });
+    expect(fetch).toHaveBeenCalledTimes(11);
   });
 
   it("returns deterministic metadata when web.extract network is disabled", async () => {
@@ -119,7 +343,8 @@ describe("web and browser tools baselines", () => {
 
   it("navigates with the mock browser backend and includes backend metadata", async () => {
     const navigate = tool("browser.navigate", createWebTools({
-      browserBackend: createMockBrowserBackend({ sessionId: "nav-session", title: "Nav Title", text: "Nav text." })
+      browserBackend: createMockBrowserBackend({ sessionId: "nav-session", title: "Nav Title", text: "Nav text." }),
+      resolveHostname: publicResolver
     }));
 
     const result = await navigate.run({ url: "https://example.com/app" });
@@ -141,7 +366,8 @@ describe("web and browser tools baselines", () => {
 
   it("reports unconfigured browser.navigate without calling a backend", async () => {
     const navigate = tool("browser.navigate", createWebTools({
-      browserBackend: createUnconfiguredBrowserBackend()
+      browserBackend: createUnconfiguredBrowserBackend(),
+      resolveHostname: publicResolver
     }));
 
     const result = await navigate.run({ url: "https://example.com/app" });
@@ -151,6 +377,186 @@ describe("web and browser tools baselines", () => {
       url: "https://example.com/app",
       backend: "unconfigured"
     });
+  });
+
+  it("blocks unsafe browser.navigate URLs before backend availability checks", async () => {
+    const backend = createUnconfiguredBrowserBackend();
+    const navigate = tool("browser.navigate", createWebTools({ browserBackend: backend }));
+
+    await expect(navigate.run({ url: "http://169.254.169.254" })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/",
+        backend: "unconfigured",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(navigate.run({ url: "http://localhost:8080" })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://localhost:8080/",
+        backend: "unconfigured",
+        reason: "unsafe-url"
+      }
+    });
+  });
+
+  it("blocks secret-bearing browser.navigate URLs without leaking raw values", async () => {
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: createMockBrowserBackend()
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/?api_key=nav-secret" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toEqual({
+      url: "[REDACTED_URL_WITH_SECRET]",
+      backend: "mock",
+      reason: "secret-in-url"
+    });
+    expect(JSON.stringify(result)).not.toContain("nav-secret");
+  });
+
+  it("blocks website-policy browser.navigate URLs before backend availability checks", async () => {
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: createMockBrowserBackend(),
+      resolveHostname: publicResolver,
+      securityConfig: {
+        allowPrivateUrls: false,
+        websiteBlocklist: { domains: ["blocked.test"] }
+      }
+    }));
+
+    const result = await navigate.run({ url: "https://blocked.test/page" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "https://blocked.test/page",
+      backend: "mock",
+      reason: "website-policy",
+      host: "blocked.test",
+      matchedRule: "blocked.test"
+    });
+  });
+
+  it("blocks browser.navigate post-navigation redirects and blanks the browser session", async () => {
+    const calls: string[] = [];
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend({ sessionId: "redirect-session" }),
+      async navigate(input) {
+        calls.push(input.url);
+        return {
+          session: {
+            id: input.sessionId ?? "redirect-session",
+            backend: "mock",
+            currentUrl: input.url,
+            createdAt: "2026-04-18T00:00:00.000Z"
+          },
+          snapshot: {
+            sessionId: input.sessionId ?? "redirect-session",
+            url: input.url === "about:blank" ? "about:blank" : "http://169.254.169.254/latest",
+            text: "redirected"
+          }
+        };
+      }
+    };
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: backend,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "https://example.com/start",
+      finalUrl: "http://169.254.169.254/latest",
+      backend: "mock",
+      reason: "post-redirect-always-blocked"
+    });
+    expect(calls).toEqual(["https://example.com/start", "about:blank"]);
+  });
+
+  it("blocks browser.navigate post-navigation private redirects and blanks the browser session", async () => {
+    const calls: string[] = [];
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend({ sessionId: "private-redirect-session" }),
+      async navigate(input) {
+        calls.push(input.url);
+        return {
+          session: {
+            id: input.sessionId ?? "private-redirect-session",
+            backend: "mock",
+            currentUrl: input.url,
+            createdAt: "2026-04-18T00:00:00.000Z"
+          },
+          snapshot: {
+            sessionId: input.sessionId ?? "private-redirect-session",
+            url: input.url === "about:blank" ? "about:blank" : "http://192.168.1.1/admin",
+            text: "redirected"
+          }
+        };
+      }
+    };
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: backend,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "https://example.com/start",
+      finalUrl: "http://192.168.1.1/admin",
+      backend: "mock",
+      reason: "post-redirect-unsafe"
+    });
+    expect(calls).toEqual(["https://example.com/start", "about:blank"]);
+  });
+
+  it("blocks browser.navigate post-navigation website-policy redirects and blanks the browser session", async () => {
+    const calls: string[] = [];
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend({ sessionId: "policy-redirect-session" }),
+      async navigate(input) {
+        calls.push(input.url);
+        return {
+          session: {
+            id: input.sessionId ?? "policy-redirect-session",
+            backend: "mock",
+            currentUrl: input.url,
+            createdAt: "2026-04-18T00:00:00.000Z"
+          },
+          snapshot: {
+            sessionId: input.sessionId ?? "policy-redirect-session",
+            url: input.url === "about:blank" ? "about:blank" : "https://blocked.test/final",
+            text: "redirected"
+          }
+        };
+      }
+    };
+    const navigate = tool("browser.navigate", createWebTools({
+      browserBackend: backend,
+      resolveHostname: publicResolver,
+      securityConfig: {
+        allowPrivateUrls: false,
+        websiteBlocklist: { domains: ["blocked.test"] }
+      }
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/start" });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      url: "https://example.com/start",
+      finalUrl: "https://blocked.test/final",
+      backend: "mock",
+      reason: "post-redirect-website-policy",
+      host: "blocked.test",
+      matchedRule: "blocked.test"
+    });
+    expect(calls).toEqual(["https://example.com/start", "about:blank"]);
   });
 
   it("renders browser snapshot text and interactive elements", async () => {

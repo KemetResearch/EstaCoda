@@ -15,7 +15,8 @@ function normalizeSnapshot(result: unknown): unknown {
 
 function getTool(name: string) {
   const tool = createWebTools({
-    browserBackend: createMockBrowserBackend({ title: "Test Page", text: "Hello world." })
+    browserBackend: createMockBrowserBackend({ title: "Test Page", text: "Hello world." }),
+    resolveHostname: async () => ["93.184.216.34"]
   }).find((candidate) => candidate.name === name);
   if (tool === undefined) {
     throw new Error(`Missing tool ${name}`);
@@ -48,7 +49,7 @@ describe("web and browser golden snapshots", () => {
       headers: { get: () => "text/html" },
       text: async () => "<html><head><title>Example</title></head><body><p>Hello world</p></body></html>"
     }));
-    const tools = createWebTools({ fetch: mockFetch, enableNetwork: true });
+    const tools = createWebTools({ fetch: mockFetch, enableNetwork: true, resolveHostname: async () => ["93.184.216.34"] });
     const extractTool = tools.find((candidate) => candidate.name === "web.extract");
     if (extractTool === undefined) {
       throw new Error("Missing tool web.extract");
