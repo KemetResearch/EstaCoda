@@ -19,9 +19,13 @@ description: "Browser backend, CDP integration, and structured browser tools."
 | Local Chrome CDP | Implemented | `smoke-tested` |
 | Mock | Implemented | `smoke-tested` |
 | Browserbase | Recognized in config | `intended but not implemented` |
-| Browser Use | Recognized in config | `intended but not implemented` |
+| browser-use | Recognized in config | `intended but not implemented` |
 | Firecrawl | Recognized in config | `intended but not implemented` |
 | Camofox | Recognized in config | `intended but not implemented` |
+
+Cloud browser provider registry stubs exist for Browserbase, browser-use, Firecrawl, and Camofox, but no real cloud browser session implementation is present. Legacy `browser.backend` values `browserbase`, `firecrawl`, and `camofox` remain config-valid and return recognized-but-not-implemented status.
+
+Local CDP also has a supervised backend path. It is opt-in through the runtime/browser `supervised` option and keeps the normal unsupervised local CDP behavior unchanged unless selected.
 
 ## CDP Capabilities
 
@@ -40,6 +44,12 @@ description: "Browser backend, CDP integration, and structured browser tools."
 | Screenshot | `smoke-tested` |
 | Screenshot vision analysis | `smoke-tested` |
 | JavaScript dialog response | `smoke-tested` |
+
+The supervised local CDP backend tracks pending dialogs, recent console history, and frame navigation data in browser snapshots. It also enables supervised request interception for subresource requests and aborts metadata, private/internal, website-policy-blocked, and secret-bearing URLs before response bodies are read. This is not complete browser automation parity and does not provide socket-level DNS rebinding or TOCTOU protection.
+
+## Web Research Tools
+
+`web.search` and `web.crawl` are available as infrastructure tools backed by the web research provider registry. Hosted provider stubs exist for Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS, but those hosted API integrations are not implemented and cannot appear available in this release. `web.extract` can use the registry, and falls back to the guarded raw fetch extractor only when no explicit unavailable extract provider was configured.
 
 ## Tools
 
@@ -106,11 +116,17 @@ pnpm run dev -- browser test
 
 Website blocklist rules are normalized to lowercase hosts, strip a trailing dot, and strip a leading `www.`. Rules can be exact domains such as `example.com` or wildcard suffixes such as `*.example.com`. Shared files use one rule per line; blank lines and `#` comments are ignored, and missing shared files warn and are skipped.
 
+## Debug Telemetry
+
+Browser/web debug metadata is disabled by default. It is enabled only when `ESTACODA_BROWSER_DEBUG=true` or `ESTACODA_WEB_TOOLS_DEBUG=true`.
+
+When enabled, debug data is attached to individual tool results only. It is redacted and bounded: secret-bearing URLs, auth headers, cookies, request/response bodies, raw Runtime expressions, full page text, and large nested payloads are not stored verbatim. There is no persistent debug log, video capture, session recording, or dashboard in this release.
+
 ## Limitations
 
-- Cloud backends are not implemented.
-- Persistent dialog supervisor is missing.
+- Real hosted web research provider API calls are not implemented.
+- Real cloud browser sessions are not implemented.
 - Browser can be selected as an optional reviewed setup capability, but setup records configuration intent and does not auto-launch the browser runtime.
 - Socket-level DNS rebinding and TOCTOU protection is not implemented.
-- Browser subresource interception is not implemented yet; PR 2C is expected to cover it.
 - `Runtime.evaluate` and `Runtime.callFunctionOn` guards detect obvious literal URL usage but do not perform full JavaScript static analysis.
+- Debug telemetry is per-tool-run metadata only; there is no video, session recording, or visual dashboard.

@@ -31,8 +31,9 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `file.write` | `caution` | `live-proven` |
 | `file.replace` | `caution` | `live-proven` |
 | `file.search` | `safe` | `smoke-tested` |
-| `web.search` | `safe` | `smoke-tested` |
-| `web.extract` | `safe` | `smoke-tested` |
+| `web.search` | `read-only-network` | `smoke-tested` |
+| `web.extract` | `read-only-network` | `smoke-tested` |
+| `web.crawl` | `read-only-network` | `smoke-tested` |
 | `browser.*` | `external-side-effect` | `smoke-tested` |
 | `image.generate` | `external-side-effect` | `live-proven` |
 | `voice.speak` | `external-side-effect` | `smoke-tested` |

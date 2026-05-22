@@ -148,6 +148,29 @@ External provider observability is best-effort and metadata-only:
 
 These audit events do not include raw recalled content, raw mirrored memory content, credentials, or provider secrets. Event recording failure is non-fatal and must not block local memory prompt inclusion, `memory.curate`, recall, mirror-write behavior, provider turns, semantic compression, or memory-file compaction. Local memory remains authoritative.
 
+## Web Research Providers
+
+Web research providers are separate from LLM providers. The registry supports capability-based selection for `search`, `extract`, and `crawl`, and runtime config can name `web.backend`, `web.searchBackend`, `web.extractBackend`, or `web.crawlBackend`.
+
+Current provider state:
+
+| Provider | Capabilities declared | Status |
+|----------|-----------------------|--------|
+| Firecrawl | search, extract, crawl | Stub only; unavailable even when configured |
+| Parallel | search | Stub only; unavailable even when configured |
+| Tavily | search, extract | Stub only; unavailable even when configured |
+| Exa | search | Stub only; unavailable even when configured |
+| SearXNG | search | Stub only; unavailable even when configured |
+| Brave | search | Stub only; unavailable even when configured |
+| DDGS | search | Stub only; unavailable |
+| fetch | extract | Implemented fallback for guarded raw fetch extraction |
+
+`web.search` and `web.crawl` exist as tool infrastructure, but no hosted search/crawl API calls are implemented yet. Explicit unavailable providers do not silently fall back. `web.extract` falls back to the guarded fetch extractor only when no explicit unavailable extract provider was configured and no available extract provider was auto-detected.
+
+## Cloud Browser Providers
+
+Cloud browser providers are separate from web research providers. The registry has stubs for Browserbase, browser-use, Firecrawl, and Camofox. All are unavailable in this release and direct `createSession()` calls throw not-implemented errors. Legacy `browser.backend` values `browserbase`, `firecrawl`, and `camofox` remain accepted for compatibility and report recognized-but-not-implemented status; they do not create real cloud sessions.
+
 ## Important Distinctions
 
 - The model catalog is enriched from models.dev when cached/bundled data is available, with local fallback profiles as a safety net.
