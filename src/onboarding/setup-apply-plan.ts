@@ -1,4 +1,6 @@
 import type { SetupVerificationReport } from "./verification.js";
+import type { ProviderId } from "../contracts/provider.js";
+import { getProviderMetadata } from "../providers/provider-metadata.js";
 import type {
   SetupReviewManifest,
   SetupReviewManifestLine,
@@ -261,10 +263,13 @@ export function evaluateSetupApplyEligibility(manifest: SetupReviewManifest): Se
         if (isWorkspaceTrustBlocker(blocker) && hasWorkspaceTrustGrant(manifest)) {
           continue;
         }
-        if (isCredentialBlocker(blocker) && hasCredentialReferenceForBlocker(manifest, line, blocker)) {
+        if (isProviderRouteBlocker(blocker) && hasCompleteProviderModelRoute(manifest)) {
           continue;
         }
-        if (isProviderSetupIncompleteBlocker(blocker) && hasCompleteProviderModelRoute(manifest)) {
+        if (isHostedCredentialRequiredBlocker(blocker) && hasResolvedHostedCredentialRequirement(manifest)) {
+          continue;
+        }
+        if (isCredentialBlocker(blocker) && hasCredentialReferenceForBlocker(manifest, line, blocker)) {
           continue;
         }
         blockers.add(blocker);
@@ -500,14 +505,48 @@ function hasWorkspaceTrustGrant(manifest: SetupReviewManifest): boolean {
 }
 
 function hasCompleteProviderModelRoute(manifest: SetupReviewManifest): boolean {
-  return manifest.sections["provider-model-network"].some((line) => {
+  return selectedProviderRouteFromManifest(manifest) !== undefined;
+}
+
+type SelectedProviderRouteForApply = {
+  readonly provider: ProviderId;
+  readonly model: string;
+};
+
+function selectedProviderRouteFromManifest(manifest: SetupReviewManifest): SelectedProviderRouteForApply | undefined {
+  for (const line of manifest.sections["provider-model-network"]) {
     const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
     const model = stringReviewValue(line.review.values.model ?? line.review.values.modelId);
-    return provider !== undefined &&
+    if (
+      provider !== undefined &&
       model !== undefined &&
       provider !== "unconfigured" &&
-      model !== "unconfigured";
-  });
+      model !== "unconfigured"
+    ) {
+      return {
+        provider: provider as ProviderId,
+        model,
+      };
+    }
+  }
+  return undefined;
+}
+
+function hasResolvedHostedCredentialRequirement(manifest: SetupReviewManifest): boolean {
+  const route = selectedProviderRouteFromManifest(manifest);
+  if (route === undefined) return false;
+  if (providerUsesNoCredential(route.provider)) return true;
+  if (!providerUsesEnvCredential(route.provider)) return false;
+  return hasCredentialReferenceForSelectedProvider(manifest, route.provider);
+}
+
+function providerUsesNoCredential(provider: ProviderId): boolean {
+  const metadata = getProviderMetadata(provider);
+  return metadata.defaultAuthMethod === "none" && metadata.authMethods.includes("none");
+}
+
+function providerUsesEnvCredential(provider: ProviderId): boolean {
+  return getProviderMetadata(provider).authMethods.includes("api_key");
 }
 
 type CredentialReferenceForApply = {
@@ -535,6 +574,15 @@ function hasCredentialReferenceForBlocker(
   );
 }
 
+function hasCredentialReferenceForSelectedProvider(
+  manifest: SetupReviewManifest,
+  provider: ProviderId
+): boolean {
+  return credentialReferencesFromManifest(manifest).some((reference) =>
+    reference.provider === provider
+  );
+}
+
 function credentialReferencesFromManifest(manifest: SetupReviewManifest): CredentialReferenceForApply[] {
   return manifest.sections["secret-refs-to-store"].flatMap((line) => {
     const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
@@ -555,8 +603,22 @@ function isCredentialBlocker(blocker: string): boolean {
   return /credential|api key|env|credential pool/i.test(blocker);
 }
 
-function isProviderSetupIncompleteBlocker(blocker: string): boolean {
-  return /^Provider setup is incomplete\.$/u.test(blocker.trim());
+const PROVIDER_ROUTE_BLOCKERS = new Set([
+  "Provider setup is incomplete.",
+  "Primary provider and model are required.",
+]);
+
+function isProviderRouteBlocker(blocker: string): boolean {
+  return PROVIDER_ROUTE_BLOCKERS.has(blocker.trim());
+}
+
+const HOSTED_CREDENTIAL_REQUIRED_BLOCKERS = new Set([
+  "Hosted providers require a credential environment-variable reference.",
+  "Hosted setup requires credential environment-variable references.",
+]);
+
+function isHostedCredentialRequiredBlocker(blocker: string): boolean {
+  return HOSTED_CREDENTIAL_REQUIRED_BLOCKERS.has(blocker.trim());
 }
 
 function stringReviewValue(value: unknown): string | undefined {

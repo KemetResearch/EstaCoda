@@ -236,6 +236,134 @@ describe("setup apply plan", () => {
     expect(result.eligibility.blockers).toContain("Provider setup is incomplete.");
   });
 
+  it("suppresses provider module route blockers when the manifest includes a complete provider route", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Primary provider and model are required."),
+      providerModelRouteBundle("kimi", "kimi-k2.5"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("keeps hosted credential-required blockers blocked with a hosted route only", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Hosted providers require a credential environment-variable reference.");
+  });
+
+  it("suppresses hosted credential-required blockers with a same-provider credential reference", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+      credentialReferenceBundle("OPENAI_API_KEY", "openai"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("keeps hosted credential-required blockers blocked with a provider-unspecified credential reference", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+      credentialReferenceBundle("OPENAI_API_KEY"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Hosted providers require a credential environment-variable reference.");
+  });
+
+  it("does not suppress hosted credential-required blockers with a different-provider credential reference", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+      credentialReferenceBundle("ANTHROPIC_API_KEY", "anthropic"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Hosted providers require a credential environment-variable reference.");
+  });
+
+  it("suppresses stale hosted credential-required blockers when the manifest switches to a local provider", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("local", "ollama/auto"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("suppresses stale hosted credential-required blockers for local providers even with provider-unspecified credential refs", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("local", "ollama/auto"),
+      credentialReferenceBundle("OPENAI_API_KEY"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("keeps broken config blockers unresolved even with valid provider and credential drafts", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Broken config blocks normal apply planning."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+      credentialReferenceBundle("OPENAI_API_KEY", "openai"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Broken config blocks normal apply planning.");
+  });
+
+  it("keeps state-not-writable blockers unresolved even with valid provider and credential drafts", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("EstaCoda state directory is not writable."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+      credentialReferenceBundle("OPENAI_API_KEY", "openai"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("EstaCoda state directory is not writable.");
+  });
+
   it("keeps generic credential blockers blocked when no exact env match is available", () => {
     const manifest = buildSetupReviewManifest([
       blockerOnlyBundle("Missing credential for the active provider."),
@@ -657,7 +785,7 @@ function providerModelRouteBundle(provider: string, model: string): SetupDraftBu
   };
 }
 
-function credentialReferenceBundle(envVar: string, provider: string): SetupDraftBundle {
+function credentialReferenceBundle(envVar: string, provider?: string): SetupDraftBundle {
   const draft: SetupDraft = {
     id: `credential.${envVar}`,
     kind: "credential-reference",
