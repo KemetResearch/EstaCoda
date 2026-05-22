@@ -1,10 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TelegramAdapter, updateToChannelMessage } from "./telegram-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
 import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 
 describe("TelegramAdapter", () => {
   it("getCapabilities exists and returns correct kind", () => {
@@ -169,5 +173,109 @@ describe("TelegramAdapter", () => {
 
     expect(message?.text).toBe(value);
     expect(message?.sessionKey.platform).toBe("telegram");
+  });
+
+  it("delivers voice-hinted OGG audio as a Telegram voice bubble", async () => {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 1 } })
+      };
+    });
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-voice-"));
+    try {
+      const path = join(tempDir, "reply.ogg");
+      await writeFile(path, "audio");
+      const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+      const artifact: ArtifactRecord = {
+        id: "auto-tts-1",
+        path,
+        localPath: path,
+        kind: "audio",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "audio/ogg",
+        metadata: { deliveryHint: "voice", ephemeral: true }
+      };
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+
+      expect(calls.some((url) => url.endsWith("/sendVoice"))).toBe(true);
+      expect(calls.some((url) => url.endsWith("/sendAudio"))).toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves Telegram voice delivery for ordinary OGG audio artifacts", async () => {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 1 } })
+      };
+    });
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-durable-voice-"));
+    try {
+      const path = join(tempDir, "manual.ogg");
+      await writeFile(path, "audio");
+      const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+      const artifact: ArtifactRecord = {
+        id: "voice-manual-1",
+        path,
+        localPath: path,
+        kind: "audio",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "audio/ogg"
+      };
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+
+      expect(calls.some((url) => url.endsWith("/sendVoice"))).toBe(true);
+      expect(calls.some((url) => url.endsWith("/sendAudio"))).toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to normal audio delivery for non-compatible voice-hinted audio", async () => {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 1 } })
+      };
+    });
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-audio-"));
+    try {
+      const path = join(tempDir, "reply.mp3");
+      await writeFile(path, "audio");
+      const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+      const artifact: ArtifactRecord = {
+        id: "auto-tts-2",
+        path,
+        localPath: path,
+        kind: "audio",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "audio/mpeg",
+        metadata: { deliveryHint: "voice", ephemeral: true }
+      };
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+
+      expect(calls.some((url) => url.endsWith("/sendAudio"))).toBe(true);
+      expect(calls.some((url) => url.endsWith("/sendVoice"))).toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

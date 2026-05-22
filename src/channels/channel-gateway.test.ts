@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands, authorizeChannelMessage } from "./channel-gateway.js";
@@ -103,6 +103,7 @@ function runtimeResponse(input: {
   text: string;
   securityDecision: "allow" | "ask" | "deny";
   toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
+  artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
 }): Awaited<ReturnType<Runtime["handle"]>> {
   return {
     label: "test",
@@ -113,7 +114,7 @@ function runtimeResponse(input: {
     toolExecutions: input.toolExecutions ?? [],
     toolPlans: [],
     skillOutcomes: [],
-    artifacts: [],
+    artifacts: input.artifacts ?? [],
     context: undefined,
     projectContext: undefined,
     progress: []
@@ -266,6 +267,87 @@ function makeMessage(text: string, overrides?: Partial<ChannelMessage>): Channel
     text,
     receivedAt: new Date().toISOString(),
     ...overrides
+  };
+}
+
+function makeVoiceTranscriptMessage(text = "voice request"): ChannelMessage {
+  return makeMessage(text, {
+    metadata: {
+      voiceTranscription: {
+        injected: true,
+        count: 1,
+        transcripts: [
+          {
+            attachmentId: "voice-1",
+            text: "voice request",
+            hash: "hash",
+            timestamp: new Date().toISOString()
+          }
+        ]
+      }
+    }
+  });
+}
+
+function openAiAutoTtsConfig(overrides: {
+  autoTts?: boolean;
+  autoTtsMaxCharsPerReply?: number;
+  autoTtsMaxCharsPerHourPerChat?: number;
+} = {}) {
+  return {
+    tts: {
+      provider: "openai" as const,
+      speed: 1,
+      enabled: true,
+      openai: {
+        model: "tts-test",
+        voice: "alloy",
+        baseUrl: "https://tts.example/v1",
+        apiKeyEnv: "ESTACODA_TEST_TTS_KEY"
+      }
+    },
+    voice: {
+      autoTts: overrides.autoTts ?? true,
+      autoTtsMaxCharsPerReply: overrides.autoTtsMaxCharsPerReply,
+      autoTtsMaxCharsPerHourPerChat: overrides.autoTtsMaxCharsPerHourPerChat
+    }
+  };
+}
+
+function okTtsFetch() {
+  return vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+    text: async () => "audio"
+  }));
+}
+
+function failingTtsFetch() {
+  return vi.fn(async () => ({
+    ok: false,
+    status: 500,
+    statusText: "Server Error",
+    arrayBuffer: async () => new ArrayBuffer(0),
+    text: async () => "nope"
+  }));
+}
+
+function voiceToolExecution(): Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"][number] {
+  return {
+    tool: {
+      name: "voice.speak",
+      description: "Generate speech",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["media"],
+      progressLabel: "generating speech",
+      maxResultSizeChars: 4000
+    },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    result: { ok: true, content: "Generated speech" }
   };
 }
 
@@ -583,6 +665,182 @@ describe("ChannelGateway commands", () => {
 
     expect(result.replyText).toContain("not available until Discord voice support");
     expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  describe("auto-TTS replies", () => {
+    afterEach(() => {
+      delete process.env.ESTACODA_TEST_TTS_KEY;
+    });
+
+    async function createAutoTtsGateway(input: {
+      mode?: "off" | "voice_only" | "all";
+      globalDefault?: boolean;
+      responseText?: string;
+      artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
+      toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
+      config?: ReturnType<typeof openAiAutoTtsConfig>;
+      fetch?: ReturnType<typeof okTtsFetch>;
+      now?: () => number;
+    } = {}) {
+      process.env.ESTACODA_TEST_TTS_KEY = "test-key";
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-auto-tts-"));
+      const tempRoot = join(stateDir, "temp", "audio");
+      const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+      if (input.mode !== undefined) {
+        await voiceStateManager.setMode("telegram", "123456", input.mode);
+      }
+      const runtime = createMinimalRuntime();
+      runtime.handle = async () => runtimeResponse({
+        text: input.responseText ?? "Here is the answer.",
+        securityDecision: "allow",
+        artifacts: input.artifacts,
+        toolExecutions: input.toolExecutions
+      });
+      const fetch = input.fetch ?? okTtsFetch();
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({ ...runtime, sessionId }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        voiceStateManager,
+        voiceAutoTtsDefault: input.globalDefault ?? false,
+        autoTtsConfig: () => input.config ?? openAiAutoTtsConfig(),
+        autoTtsTempRoot: tempRoot,
+        autoTtsFetch: fetch,
+        autoTtsId: () => "auto-1",
+        autoTtsNow: input.now
+      });
+      return { adapter, gateway, fetch, tempRoot };
+    }
+
+    it("skips when chat voice mode is off", async () => {
+      const { adapter, gateway, fetch } = await createAutoTtsGateway({ mode: "off" });
+
+      await gateway.receive(makeVoiceTranscriptMessage());
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+    });
+
+    it("in voice_only fires only for incoming voice messages", async () => {
+      const voice = await createAutoTtsGateway({ mode: "voice_only" });
+      await voice.gateway.receive(makeVoiceTranscriptMessage());
+
+      expect(voice.fetch).toHaveBeenCalledTimes(1);
+      expect(voice.adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(1);
+
+      const textOnly = await createAutoTtsGateway({ mode: "voice_only" });
+      await textOnly.gateway.receive(makeMessage("plain text"));
+
+      expect(textOnly.fetch).not.toHaveBeenCalled();
+      expect(textOnly.adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+    });
+
+    it("in all fires for eligible text responses and deletes temp files after delivery", async () => {
+      const { adapter, gateway, tempRoot } = await createAutoTtsGateway({ mode: "all" });
+
+      await gateway.receive(makeMessage("hello"));
+
+      const artifacts = adapter.records.filter((record) => record.kind === "artifact");
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]?.artifact?.metadata).toMatchObject({
+        deliveryHint: "voice",
+        ephemeral: true,
+        provider: "openai",
+        model: "tts-test",
+        voice: "alloy",
+        format: "audio/mpeg"
+      });
+      await expect(readdir(join(tempRoot, "auto-tts"))).resolves.toEqual([]);
+    });
+
+    it("skips empty, error, and gateway command responses", async () => {
+      const empty = await createAutoTtsGateway({ mode: "all", responseText: "   " });
+      await empty.gateway.receive(makeMessage("hello"));
+      expect(empty.fetch).not.toHaveBeenCalled();
+
+      const error = await createAutoTtsGateway({ mode: "all", responseText: "Error: not today" });
+      await error.gateway.receive(makeMessage("hello"));
+      expect(error.fetch).not.toHaveBeenCalled();
+
+      const command = await createAutoTtsGateway({ mode: "all" });
+      await command.gateway.receive(makeMessage("/voice status"));
+      expect(command.fetch).not.toHaveBeenCalled();
+    });
+
+    it("skips when the turn already produced a TTS or voice artifact", async () => {
+      const spoke = await createAutoTtsGateway({ mode: "all", toolExecutions: [voiceToolExecution()] });
+      await spoke.gateway.receive(makeMessage("hello"));
+      expect(spoke.fetch).not.toHaveBeenCalled();
+
+      const voiceArtifact = await createAutoTtsGateway({
+        mode: "all",
+        artifacts: [{
+          id: "voice-existing",
+          path: "voice://existing",
+          kind: "audio",
+          bytes: 1,
+          createdAt: new Date().toISOString(),
+          metadata: { deliveryHint: "voice" }
+        }]
+      });
+      await voiceArtifact.gateway.receive(makeMessage("hello"));
+      expect(voiceArtifact.fetch).not.toHaveBeenCalled();
+    });
+
+    it("enforces provider cap, per-reply cap, and hourly per-chat cap", async () => {
+      const providerCap = await createAutoTtsGateway({ mode: "all", responseText: "x".repeat(4097) });
+      await providerCap.gateway.receive(makeMessage("hello"));
+      expect(providerCap.fetch).not.toHaveBeenCalled();
+
+      const perReply = await createAutoTtsGateway({
+        mode: "all",
+        responseText: "too long",
+        config: openAiAutoTtsConfig({ autoTtsMaxCharsPerReply: 3 })
+      });
+      await perReply.gateway.receive(makeMessage("hello"));
+      expect(perReply.fetch).not.toHaveBeenCalled();
+
+      const hourly = await createAutoTtsGateway({
+        mode: "all",
+        responseText: "hello",
+        config: openAiAutoTtsConfig({ autoTtsMaxCharsPerHourPerChat: 6 }),
+        now: () => 1_000
+      });
+      await hourly.gateway.receive(makeMessage("first"));
+      await hourly.gateway.receive(makeMessage("second"));
+      expect(hourly.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips when TTS provider readiness is false", async () => {
+      const missingKeyConfig = openAiAutoTtsConfig();
+      missingKeyConfig.tts.openai.apiKeyEnv = "ESTACODA_MISSING_TTS_KEY";
+      const notReady = await createAutoTtsGateway({
+        mode: "all",
+        config: missingKeyConfig
+      });
+
+      await notReady.gateway.receive(makeMessage("hello"));
+
+      expect(notReady.fetch).not.toHaveBeenCalled();
+      expect(notReady.adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+    });
+
+    it("global voice.autoTts true falls back to voice_only and TTS failures leave text intact", async () => {
+      const fallback = await createAutoTtsGateway({ globalDefault: true });
+      await fallback.gateway.receive(makeMessage("plain text"));
+      expect(fallback.fetch).not.toHaveBeenCalled();
+
+      await fallback.gateway.receive(makeVoiceTranscriptMessage());
+      expect(fallback.fetch).toHaveBeenCalledTimes(1);
+
+      const failing = await createAutoTtsGateway({ mode: "all", fetch: failingTtsFetch() as ReturnType<typeof okTtsFetch> });
+      const result = await failing.gateway.receive(makeMessage("hello"));
+      expect(result.replyText).toBe("Here is the answer.");
+      expect(failing.adapter.records.find((record) => record.kind === "text")?.text).toBe("Here is the answer.");
+      expect(failing.adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+    });
   });
 
   it("/compact runs manual session compaction and replies through the gateway", async () => {

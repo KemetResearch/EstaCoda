@@ -1073,6 +1073,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           approvalQueue: gatewayApprovalQueue,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
+          autoTtsConfig: async () => {
+            const latestConfig = await loadConfig();
+            return { tts: latestConfig.tts, voice: latestConfig.voice };
+          },
+          autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -1142,6 +1147,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           approvalQueue: gatewayApprovalQueue,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
+          autoTtsConfig: async () => {
+            const latestConfig = await loadConfig();
+            return { tts: latestConfig.tts, voice: latestConfig.voice };
+          },
+          autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
         });
 
     state.channelGateway = gateway;

@@ -718,6 +718,8 @@ describe("runGatewaySupervisor", () => {
     });
     expect(capturedOpts.voiceStateManager).toBeDefined();
     expect(capturedOpts.voiceAutoTtsDefault).toBe(false);
+    expect(capturedOpts.autoTtsConfig).toBeDefined();
+    expect(capturedOpts.autoTtsTempRoot).toContain("temp");
   });
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {

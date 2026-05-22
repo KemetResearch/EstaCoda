@@ -2,6 +2,7 @@ import { mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { FasterWhisperWorkerClient } from "./stt-local-whisper.js";
@@ -42,6 +43,10 @@ export type VoiceProviderStatus =
   | { ready: true }
   | { ready: false; reason: string };
 
+export type EphemeralSpeechArtifactResult =
+  | { ok: true; artifact: ArtifactRecord }
+  | { ok: false; content: string; metadata?: Record<string, unknown> };
+
 export function checkTtsProviderStatus(
   provider: TtsProvider,
   config: LoadedRuntimeConfig["tts"]
@@ -71,6 +76,73 @@ export function checkSttProviderStatus(
   config: LoadedRuntimeConfig["stt"]
 ): VoiceProviderStatus {
   return checkSttProviderStatusFromDispatch(provider, config);
+}
+
+export async function synthesizeSpeechToEphemeralArtifact(input: {
+  text: string;
+  tts: LoadedRuntimeConfig["tts"];
+  tempRoot: string;
+  fetch?: VoiceFetchLike;
+  id?: () => string;
+  signal?: AbortSignal;
+}): Promise<EphemeralSpeechArtifactResult> {
+  const status = checkTtsProviderStatus(input.tts.provider, input.tts);
+  if (!status.ready) {
+    return {
+      ok: false,
+      content: `Auto-TTS unavailable: ${status.reason}`,
+      metadata: { provider: input.tts.provider, reason: status.reason }
+    };
+  }
+
+  const cap = getTtsTextCap({ provider: input.tts.provider, tts: input.tts });
+  if (cap !== undefined && input.text.length > cap) {
+    return {
+      ok: false,
+      content: `Text exceeds provider max of ${cap} characters.`,
+      metadata: { provider: input.tts.provider, maxChars: cap, textChars: input.text.length }
+    };
+  }
+
+  const speech = await synthesizeSpeech({
+    text: input.text,
+    tts: input.tts,
+    fetch: input.fetch,
+    signal: input.signal
+  });
+  if (!speech.ok) {
+    return speech;
+  }
+
+  const root = join(input.tempRoot, "auto-tts");
+  await mkdir(root, { recursive: true });
+  const artifactId = safeId(input.id?.() ?? randomUUID());
+  const fileName = `${artifactId}.${extensionForMime(speech.mimeType)}`;
+  const filePath = join(root, fileName);
+  await writeFile(filePath, speech.bytes);
+  const fileStat = await stat(filePath);
+
+  return {
+    ok: true,
+    artifact: {
+      id: `auto-tts-${artifactId}`,
+      path: filePath,
+      localPath: filePath,
+      kind: "audio",
+      bytes: fileStat.size,
+      createdAt: new Date().toISOString(),
+      mimeType: speech.mimeType,
+      summary: `Auto-TTS reply generated from ${input.text.length} characters.`,
+      metadata: {
+        provider: input.tts.provider,
+        model: speech.model,
+        voice: speech.voice,
+        format: speech.mimeType,
+        deliveryHint: "voice",
+        ephemeral: true
+      }
+    }
+  };
 }
 
 export function createVoiceTools(options: VoiceToolOptions): readonly RegisteredTool[] {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DeliveryRouter } from "./delivery-router.js";
@@ -9,6 +9,7 @@ import { createFakeEmailAdapter } from "../test/fakes/fake-email-adapter.js";
 import { createFakeWhatsAppAdapter } from "../test/fakes/fake-whatsapp-adapter.js";
 import { PlainLogSurfaceAdapter } from "./surface-adapters/plain-log-surface-adapter.js";
 import type { ChannelAdapter, ChannelSessionKey } from "../contracts/channel.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 
@@ -224,6 +225,47 @@ describe("DeliveryRouter", () => {
 
       expect(results.get("discord:456")?.success).toBe(false);
       expect(results.get("telegram:123")?.success).toBe(true);
+    });
+  });
+
+  describe("voice artifact delivery", () => {
+    it("routes voice-hinted ephemeral audio as an artifact delivery object", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+      const audioPath = join(tmpDir, "reply.ogg");
+      await writeFile(audioPath, "audio");
+      const artifact: ArtifactRecord = {
+        id: "auto-tts-1",
+        path: audioPath,
+        localPath: audioPath,
+        kind: "audio",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "audio/ogg",
+        metadata: {
+          deliveryHint: "voice",
+          ephemeral: true
+        }
+      };
+
+      await router.deliverArtifact({ kind: "origin", originalSessionKey: baseSessionKey }, artifact);
+
+      expect(telegram.records).toHaveLength(1);
+      expect(telegram.records[0]?.kind).toBe("artifact");
+      expect(telegram.records[0]?.artifact).toBe(artifact);
+    });
+
+    it("does not treat arbitrary MEDIA path text as auto-TTS delivery", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      await router.deliverText([{ kind: "origin", originalSessionKey: baseSessionKey }], "MEDIA:/tmp/voice.ogg");
+
+      expect(telegram.records).toHaveLength(1);
+      expect(telegram.records[0]?.kind).toBe("text");
+      expect(telegram.records[0]?.text).toBe("MEDIA:/tmp/voice.ogg");
     });
   });
 

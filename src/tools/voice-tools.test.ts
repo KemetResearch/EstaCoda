@@ -8,6 +8,7 @@ import {
   checkSttProviderStatus,
   checkTtsProviderStatus,
   createVoiceTools,
+  synthesizeSpeechToEphemeralArtifact,
   type VoiceFetchLike
 } from "./voice-tools.js";
 
@@ -195,6 +196,44 @@ describe("voice tool readiness", () => {
     const transcribe = tools.find((tool) => tool.name === "voice.transcribe");
     expect(transcribe?.isAvailable()).toBe(true);
     expect(checkSttProviderStatus("local", stt)).toEqual({ ready: true });
+  });
+});
+
+describe("ephemeral auto-TTS helper", () => {
+  it("creates an ephemeral voice delivery artifact without recording durable artifacts", async () => {
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "sk-test", OPENAI_API_KEY: undefined }, async () => {
+      const roots = await createRoots();
+      const result = await synthesizeSpeechToEphemeralArtifact({
+        text: "hello",
+        tempRoot: roots.audioCacheRoot,
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY", model: "tts-test", voice: "alloy" }
+        },
+        fetch: fakeOpenAiSpeechFetch(),
+        id: () => "auto-1"
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.artifact).toMatchObject({
+          id: "auto-tts-auto-1",
+          kind: "audio",
+          mimeType: "audio/mpeg",
+          metadata: {
+            provider: "openai",
+            model: "tts-test",
+            voice: "alloy",
+            format: "audio/mpeg",
+            deliveryHint: "voice",
+            ephemeral: true
+          }
+        });
+        expect(await readFile(result.artifact.localPath ?? result.artifact.path)).toEqual(Buffer.from("audio"));
+      }
+    });
   });
 });
 
