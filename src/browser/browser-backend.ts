@@ -1,5 +1,7 @@
 import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
+import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
+import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -285,32 +287,6 @@ async function runCdpSessionAction<T>(input: {
   }
 }
 
-async function evaluateCdpSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot> {
-  const evaluated = await client.send("Runtime.evaluate", {
-    expression: snapshotExpression(),
-    returnByValue: true
-  }) as { result?: { value?: unknown } };
-  return parseCdpSnapshot(evaluated.result?.value, sessionId);
-}
-
-function snapshotExpression(): string {
-  return `(() => {
-    const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
-    window.__estacodaElements = candidates;
-    const label = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('name') || el.id || '').trim().slice(0, 160);
-    return JSON.stringify({
-      url: location.href,
-      title: document.title,
-      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
-      elements: candidates.map((el, index) => ({
-        ref: '@e' + (index + 1),
-        role: el.getAttribute('role') || el.tagName.toLowerCase(),
-        name: label(el)
-      }))
-    });
-  })()`;
-}
-
 async function ensureConsoleCapture(client: CdpClient): Promise<void> {
   await client.send("Runtime.evaluate", {
     expression: `(() => {
@@ -354,24 +330,6 @@ function refToIndex(ref: string | undefined): number {
     throw new Error(`Invalid browser element ref: ${ref ?? ""}`);
   }
   return Number(match[1]) - 1;
-}
-
-function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {
-  if (typeof value !== "string") {
-    return { sessionId, url: "about:blank", text: "", elements: [] };
-  }
-  try {
-    const parsed = JSON.parse(value) as BrowserSnapshot;
-    return {
-      sessionId,
-      url: parsed.url,
-      title: parsed.title,
-      text: parsed.text,
-      elements: Array.isArray(parsed.elements) ? parsed.elements : []
-    };
-  } catch {
-    return { sessionId, url: "about:blank", text: value, elements: [] };
-  }
 }
 
 function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
@@ -576,9 +534,19 @@ export function createBrowserBackendFromConfig(config: {
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
+  supervised?: boolean;
 }): BrowserBackend {
   switch (config.backend) {
     case "local-cdp":
+      if (config.supervised === true) {
+        return createSupervisedLocalCdpBrowserBackend({
+          cdpUrl: config.cdpUrl,
+          launchCommand: config.launchCommand,
+          autoLaunch: config.autoLaunch,
+          fetch: config.fetch,
+          webSocketFactory: config.webSocketFactory
+        });
+      }
       return createLocalCdpBrowserBackend({
         cdpUrl: config.cdpUrl,
         launchCommand: config.launchCommand,

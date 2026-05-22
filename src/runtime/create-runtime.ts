@@ -121,6 +121,7 @@ export type RuntimeOptions = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
+    supervised?: boolean;
   };
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
@@ -528,7 +529,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     launchCommand: options.browser?.launchCommand,
     autoLaunch: options.browser?.autoLaunch,
     fetch: options.cdpFetch,
-    webSocketFactory: options.cdpWebSocketFactory
+    webSocketFactory: options.cdpWebSocketFactory,
+    supervised: options.browser?.supervised
   });
   const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
   const externalMemoryProviders = [
