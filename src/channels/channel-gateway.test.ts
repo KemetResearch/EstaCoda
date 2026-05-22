@@ -24,6 +24,7 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { stableSessionKey } from "./channel-session-store.js";
+import { modelPickerCancelActionValue, modelPickerClearActionValue } from "./model-picker-actions.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -473,7 +474,7 @@ describe("ChannelGateway commands", () => {
     expect(hygieneRun).not.toHaveBeenCalled();
   });
 
-  it("/model renders a plain-text picker without native action buttons", async () => {
+  it("/model renders deterministic action buttons with plain-text fallback commands", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
     try {
       await writeGatewayModelConfig(tempHome, {
@@ -499,9 +500,18 @@ describe("ChannelGateway commands", () => {
       const result = await gateway.receive(makeMessage("/model"));
 
       expect(result.replyText).toContain("Session model picker");
-      expect(result.replyText).toContain("model-select local/qwen2.5:3b");
-      expect(result.replyText).toContain("model-select local/phi4:latest");
-      expect(adapter.records.at(-1)?.options?.actions).toBeUndefined();
+      const qwenIndex = result.replyText.indexOf("model-select local/qwen2.5:3b");
+      const phiIndex = result.replyText.indexOf("model-select local/phi4:latest");
+      expect(phiIndex).toBeGreaterThanOrEqual(0);
+      expect(qwenIndex).toBeGreaterThan(phiIndex);
+      const actions = adapter.records.at(-1)?.options?.actions;
+      const labels = actions?.flat().map((action) => action.label) ?? [];
+      expect(labels).toContain("local/phi4:latest");
+      expect(labels).toContain("local/qwen2.5:3b");
+      expect(labels.at(-2)).toBe("Clear");
+      expect(labels.at(-1)).toBe("Cancel");
+      expect(labels.indexOf("local/phi4:latest")).toBeLessThan(labels.indexOf("local/qwen2.5:3b"));
+      expect(JSON.stringify(actions)).not.toContain("sk-secret");
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -563,6 +573,58 @@ describe("ChannelGateway commands", () => {
     }
   });
 
+  it("model picker callbacks select, clear, cancel, and reject malformed payloads safely", async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
+    try {
+      await writeGatewayModelConfig(tempHome, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b", "phi4:latest"],
+            enableNetwork: true
+          }
+        },
+        model: { provider: "local", id: "qwen2.5:3b" }
+      });
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const db = new InMemorySessionDB();
+      const invalidate = vi.fn(async () => {});
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => {
+          await ensureSession(db, sessionId);
+          return { ...createMinimalRuntime(), sessionId, sessionDb: db };
+        },
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        runtimeCache: { invalidate } as unknown as RuntimeCache,
+        modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+
+      const picker = await gateway.receive(makeMessage("/model"));
+      const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
+      const selectPhi = actions.find((action) => action.label === "local/phi4:latest");
+      expect(selectPhi).toBeDefined();
+
+      await gateway.receive(makeMessage(selectPhi?.value ?? ""));
+      expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
+
+      await gateway.receive(makeMessage(modelPickerCancelActionValue()));
+      expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
+
+      await gateway.receive(makeMessage(modelPickerClearActionValue()));
+      expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
+      expect(invalidate).toHaveBeenCalledWith(picker.sessionId);
+
+      const malformed = await gateway.receive(makeMessage("ecmodel1:s:not-a-route"));
+      expect(malformed.replyText).toContain("Invalid model picker route.");
+      expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
+    } finally {
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("lets model control commands bypass busy-session queues", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
     const activeTurnRegistry = new ActiveTurnRegistry();
@@ -595,6 +657,17 @@ describe("ChannelGateway commands", () => {
         busyPolicyResolver: () => ({ busyPolicy: "reject", queueDepth: 1 }),
         modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
       });
+
+      const cancelResult = await gateway.receive(makeMessage(modelPickerCancelActionValue()));
+      expect(cancelResult.replyText).toContain("Model picker canceled");
+
+      const picker = await gateway.receive(makeMessage("/model"));
+      expect(picker.replyText).toContain("Session model picker");
+      const selectQwen = adapter.records.at(-1)?.options?.actions?.flat()
+        .find((action) => action.label === "local/qwen2.5:3b");
+      expect(selectQwen).toBeDefined();
+      const selectResult = await gateway.receive(makeMessage(selectQwen?.value ?? ""));
+      expect(selectResult.replyText).toContain("Session model override set");
 
       const result = await gateway.receive(busyMessage);
 

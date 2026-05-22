@@ -4,6 +4,7 @@ import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
+import { renderModelPickerActions } from "./model-picker-actions.js";
 
 describe("DiscordAdapter", () => {
   it("initializes with options", () => {
@@ -208,6 +209,48 @@ describe("DiscordAdapter", () => {
         guildId: "guild-1",
         channelId: "channel-1",
         interactionId: "interaction-1"
+      }
+    });
+  });
+
+  it("round-trips model picker buttons through Discord interaction text", async () => {
+    const adapter = new DiscordAdapter({
+      botToken: "test",
+      now: () => new Date("2025-01-01T00:00:00.000Z")
+    });
+    const received: any[] = [];
+    (adapter as any).handler = async (message: unknown) => {
+      received.push(message);
+    };
+    const value = renderModelPickerActions([
+      { label: "local/phi4:latest", modelInput: "local/phi4:latest" }
+    ])[0][0].value;
+    const deferUpdate = vi.fn(async () => undefined);
+
+    await (adapter as any).handleInteraction({
+      id: "interaction-model-1",
+      isButton: () => true,
+      customId: value,
+      user: {
+        id: "user-1",
+        username: "ada",
+        displayName: "Ada"
+      },
+      guildId: undefined,
+      channelId: "dm-1",
+      deferUpdate
+    });
+
+    expect(deferUpdate).toHaveBeenCalled();
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      channel: "discord",
+      text: value,
+      sessionKey: {
+        platform: "discord",
+        chatId: "user-1",
+        chatType: "dm",
+        userId: "user-1"
       }
     });
   });

@@ -44,6 +44,11 @@ import {
   type ApprovalActionScope
 } from "./approval-actions.js";
 import {
+  parseModelPickerAction,
+  renderModelPickerActions,
+  type ModelPickerChoice
+} from "./model-picker-actions.js";
+import {
   resolveModelSwitchRequest,
   type ModelSwitchContext
 } from "../providers/model-switch-resolver.js";
@@ -1051,6 +1056,12 @@ export class ChannelGateway {
       return this.#showModelPicker(message, adapter, sessionId);
     }
 
+    if (command.kind === "cancel") {
+      const text = "Model picker canceled.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
     if (command.kind === "clear") {
       const runtime = await this.#runtimeForSessionCommand(message, sessionId);
       try {
@@ -1125,16 +1136,18 @@ export class ChannelGateway {
       mode: "normal"
     });
     const providers = await flow.listProviderCandidates();
-    const choices: string[] = [];
+    const choices: ModelPickerChoice[] = [];
 
     for (const provider of providers) {
       const models = await flow.listModelCandidates(provider.id);
       for (const model of models) {
         if (model.executable && !model.catalogOnly) {
-          choices.push(`${model.provider}/${model.id}`);
+          const modelInput = `${model.provider}/${model.id}`;
+          choices.push({ label: modelInput, modelInput });
         }
       }
     }
+    choices.sort((a, b) => a.modelInput.localeCompare(b.modelInput));
 
     const text = choices.length === 0
       ? [
@@ -1144,11 +1157,16 @@ export class ChannelGateway {
       : [
           "Session model picker",
           "Reply with one of:",
-          ...choices.map((choice) => `model-select ${choice}`),
+          ...choices.map((choice) => `model-select ${choice.modelInput}`),
           "",
           "Clear override: model-clear"
         ].join("\n");
-    await this.#deliverText(adapter, message.sessionKey, text);
+    await this.#deliverText(
+      adapter,
+      message.sessionKey,
+      text,
+      choices.length === 0 ? undefined : { actions: renderModelPickerActions(choices) }
+    );
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
 
@@ -1182,6 +1200,24 @@ export class ChannelGateway {
       return this.#denyPending(message, adapter, {
         approvalId: approvalAction.approvalId
       });
+    }
+
+    const modelAction = parseModelPickerAction(message.text);
+    if (modelAction !== undefined) {
+      if (!modelAction.ok) {
+        const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+        const text = modelAction.reason;
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      const command: GatewayModelCommand =
+        modelAction.action.kind === "select"
+          ? { kind: "set", modelInput: modelAction.action.modelInput }
+          : modelAction.action.kind === "clear"
+            ? { kind: "clear" }
+            : { kind: "cancel" };
+      return this.#handleModelCommand(message, adapter, command);
     }
 
     const modelCommand = parseGatewayModelCommand(message.text);
@@ -2409,7 +2445,8 @@ function tokenizeCommandArgs(text: string): string[] {
 type GatewayModelCommand =
   | { kind: "show" }
   | { kind: "set"; modelInput: string }
-  | { kind: "clear" };
+  | { kind: "clear" }
+  | { kind: "cancel" };
 
 function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
   const args = tokenizeCommandArgs(text.trim());
