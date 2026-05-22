@@ -1,9 +1,10 @@
 import type { ChannelAttachment, ChannelMessage } from "../contracts/channel.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
+import { resolveAllowedPath, transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
 
 export type ChannelVoiceTranscriptionOptions = {
   stt: LoadedRuntimeConfig["stt"];
+  allowedRoots?: string[];
   fetch?: VoiceFetchLike;
 };
 
@@ -22,9 +23,16 @@ export async function injectVoiceTranscripts(
     if (path === undefined || path.length === 0) {
       continue;
     }
+    const resolvedPath = options.allowedRoots === undefined
+      ? { ok: true as const, path }
+      : await resolveAllowedPath(options.allowedRoots, path);
+    if (!resolvedPath.ok) {
+      notes.push(`[Voice transcript unavailable for ${attachmentLabel(attachment)}]\n${resolvedPath.content}`);
+      continue;
+    }
 
     const result = await transcribeAudioFile({
-      path,
+      path: resolvedPath.path,
       stt: options.stt,
       fetch: options.fetch
     });

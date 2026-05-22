@@ -992,7 +992,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           surfacePointerStore,
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
-            return injectVoiceTranscripts(message, { stt: latestConfig.stt });
+            return injectVoiceTranscripts(message, {
+              stt: latestConfig.stt,
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath]
+            });
           },
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({
@@ -1054,7 +1057,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           surfacePointerStore,
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
-            return injectVoiceTranscripts(message, { stt: latestConfig.stt });
+            return injectVoiceTranscripts(message, {
+              stt: latestConfig.stt,
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath]
+            });
           },
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({

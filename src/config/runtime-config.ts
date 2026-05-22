@@ -84,6 +84,7 @@ export type ExternalMemoryConfig = {
 
 export type TtsConfig = {
   provider?: TtsProvider;
+  enabled?: boolean;
   speed?: number;
   edge?: {
     voice?: string;
@@ -161,6 +162,7 @@ export type TtsConfig = {
 
 export type SttConfig = {
   provider?: SttProvider;
+  enabled?: boolean;
   local?: {
     model?: string;
     command?: string;
@@ -180,6 +182,12 @@ export type SttConfig = {
     apiKeyEnv?: string;
     api_key_env?: string;
   };
+};
+
+export type VoiceConfig = {
+  autoTts?: boolean;
+  autoTtsMaxCharsPerReply?: number;
+  autoTtsMaxCharsPerHourPerChat?: number;
 };
 
 export type ImageGenerationConfig = {
@@ -298,6 +306,7 @@ export type EstaCodaConfig = {
   image_gen?: ImageGenerationConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
+  voice?: VoiceConfig;
   mcpServers?: Record<string, MCPServerConfig>;
   mcp_servers?: Record<string, MCPServerConfig>;
   skills?: {
@@ -421,6 +430,7 @@ export type LoadedRuntimeConfig = {
   imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
+  voice: Required<Pick<VoiceConfig, "autoTts">> & VoiceConfig;
   mcp: {
     servers: Record<string, MCPServerConfig>;
   };
@@ -710,6 +720,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),
     stt: normalizeSttConfig(config.stt),
+    voice: normalizeVoiceConfig(config.voice),
     mcp: {
       servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, options.homeDir)
     },
@@ -795,6 +806,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     imageGen: mergeImageGenerationConfig(merged.imageGen ?? merged.image_gen, config.imageGen ?? config.image_gen),
     tts: mergeTtsConfig(merged.tts, config.tts),
     stt: mergeSttConfig(merged.stt, config.stt),
+    voice: {
+      ...(merged.voice ?? {}),
+      ...(config.voice ?? {})
+    },
     mcpServers: mergeRecordEntries(
       mergeRecordEntries(merged.mcpServers, merged.mcp_servers),
       mergeRecordEntries(config.mcpServers, config.mcp_servers)
@@ -1199,10 +1214,11 @@ function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
 }
 
 function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
-  const provider = isTtsProvider(value?.provider) ? value.provider : "edge";
+  const provider = isTtsProvider(value?.provider) ? value.provider : "openai";
   return {
     ...value,
     provider,
+    enabled: value?.enabled ?? true,
     speed: boundedNumber(value?.speed, 1, 0.25, 4),
     edge: {
       voice: value?.edge?.voice ?? "en-US-AriaNeural",
@@ -1306,6 +1322,7 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
   return {
     ...value,
     provider,
+    enabled: value?.enabled ?? true,
     local: {
       model: value?.local?.model ?? "base",
       command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND
@@ -1322,6 +1339,15 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
       model: value?.mistral?.model ?? "voxtral-mini-latest",
       apiKeyEnv: value?.mistral?.apiKeyEnv ?? value?.mistral?.api_key_env ?? "MISTRAL_API_KEY"
     }
+  };
+}
+
+function normalizeVoiceConfig(value: EstaCodaConfig["voice"]): LoadedRuntimeConfig["voice"] {
+  return {
+    ...value,
+    autoTts: value?.autoTts ?? false,
+    autoTtsMaxCharsPerReply: normalizeOptionalPositiveInteger(value?.autoTtsMaxCharsPerReply),
+    autoTtsMaxCharsPerHourPerChat: normalizeOptionalPositiveInteger(value?.autoTtsMaxCharsPerHourPerChat)
   };
 }
 

@@ -887,6 +887,35 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 });
 
 describe("loadRuntimeConfig media boundary", () => {
+  it("defaults TTS to openai and normalizes inert voice auto-TTS fields", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      voice: {
+        autoTts: true,
+        autoTtsMaxCharsPerReply: 1200,
+        autoTtsMaxCharsPerHourPerChat: 5000
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.tts.provider).toBe("openai");
+    expect(loaded.tts.enabled).toBe(true);
+    expect(loaded.stt.enabled).toBe(true);
+    expect(loaded.voice).toEqual({
+      autoTts: true,
+      autoTtsMaxCharsPerReply: 1200,
+      autoTtsMaxCharsPerHourPerChat: 5000
+    });
+  });
+
   it("keeps voice and image-generation config separate from LLM route normalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

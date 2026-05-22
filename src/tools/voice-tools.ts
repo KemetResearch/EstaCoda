@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 
 export type VoiceFetchLike = (url: string, init?: {
@@ -31,9 +31,73 @@ export type VoiceToolOptions = {
   id?: () => string;
 };
 
+export type VoiceProviderStatus =
+  | { ready: true }
+  | { ready: false; reason: string };
+
+export function checkTtsProviderStatus(
+  provider: TtsProvider,
+  config: LoadedRuntimeConfig["tts"]
+): VoiceProviderStatus {
+  if (config.enabled === false) {
+    return { ready: false, reason: "TTS disabled" };
+  }
+
+  if (provider === "openai") {
+    const apiKeyEnv = config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+    const apiKey = process.env[apiKeyEnv] ??
+      (apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+    if (apiKey === undefined || apiKey.length === 0) {
+      return {
+        ready: false,
+        reason: `Missing ${apiKeyEnv}${apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
+      };
+    }
+    return { ready: true };
+  }
+
+  return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 0` };
+}
+
+export function checkSttProviderStatus(
+  provider: SttProvider,
+  config: LoadedRuntimeConfig["stt"]
+): VoiceProviderStatus {
+  if (config.enabled === false) {
+    return { ready: false, reason: "STT disabled" };
+  }
+
+  if (provider === "openai" || provider === "groq") {
+    const apiKeyEnv = provider === "openai"
+      ? (config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY")
+      : (config.groq?.apiKeyEnv ?? "GROQ_API_KEY");
+    const apiKey = process.env[apiKeyEnv] ??
+      (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+    if (apiKey === undefined || apiKey.length === 0) {
+      return {
+        ready: false,
+        reason: `Missing ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
+      };
+    }
+    return { ready: true };
+  }
+
+  if (provider === "local") {
+    const command = config.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND;
+    if (command === undefined || command.trim().length === 0) {
+      return { ready: false, reason: "Local STT command not configured" };
+    }
+    return { ready: true };
+  }
+
+  return { ready: false, reason: `${provider} STT is not implemented in v0.1.0 Stage 0` };
+}
+
 export function createVoiceTools(options: VoiceToolOptions): readonly RegisteredTool[] {
   const tts = options.tts ?? defaultTts();
   const stt = options.stt ?? defaultStt();
+  const ttsStatus = checkTtsProviderStatus(tts.provider, tts);
+  const sttStatus = checkSttProviderStatus(stt.provider, stt);
   const roots = [options.workspaceRoot, options.audioCacheRoot, ...(options.allowedRoots ?? [])]
     .filter((root): root is string => root !== undefined && root.length > 0);
 
@@ -57,11 +121,19 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
       toolsets: ["media", "core"],
       progressLabel: "generating speech",
       maxResultSizeChars: 4000,
-      isAvailable: () => true,
+      isAvailable: () => ttsStatus.ready,
       run: async (input: { text?: string; voice?: string; model?: string; format?: string }, context) => {
         const text = input.text?.trim();
         if (text === undefined || text.length === 0) {
           return { ok: false, content: "voice.speak requires text." };
+        }
+        const status = checkTtsProviderStatus(tts.provider, tts);
+        if (!status.ready) {
+          return {
+            ok: false,
+            content: `voice.speak unavailable: ${status.reason}`,
+            metadata: { provider: tts.provider, reason: status.reason }
+          };
         }
 
         const result = await synthesizeSpeech({
@@ -127,8 +199,16 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
       toolsets: ["media", "research"],
       progressLabel: "transcribing audio",
       maxResultSizeChars: 8000,
-      isAvailable: () => true,
+      isAvailable: () => sttStatus.ready,
       run: async (input: { path?: string; language?: string; prompt?: string; model?: string }, context) => {
+        const status = checkSttProviderStatus(stt.provider, stt);
+        if (!status.ready) {
+          return {
+            ok: false,
+            content: `voice.transcribe unavailable: ${status.reason}`,
+            metadata: { provider: stt.provider, reason: status.reason }
+          };
+        }
         const path = await resolveAllowedPath(roots, input.path);
         if (!path.ok) {
           return path;
@@ -219,6 +299,18 @@ async function synthesizeSpeech(input: {
   | { ok: true; bytes: Buffer; mimeType: string; model: string; voice: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
+  const status = checkTtsProviderStatus(input.tts.provider, input.tts);
+  if (!status.ready) {
+    return {
+      ok: false,
+      content: `TTS provider unavailable: ${status.reason}`,
+      metadata: {
+        provider: input.tts.provider,
+        reason: status.reason
+      }
+    };
+  }
+
   if (input.tts.provider !== "openai") {
     return {
       ok: false,
@@ -310,6 +402,18 @@ export async function transcribeAudioFile(input: {
   | { ok: true; text: string; model: string; language?: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
+  const status = checkSttProviderStatus(input.stt.provider, input.stt);
+  if (!status.ready) {
+    return {
+      ok: false,
+      content: `STT provider unavailable: ${status.reason}`,
+      metadata: {
+        provider: input.stt.provider,
+        reason: status.reason
+      }
+    };
+  }
+
   if (input.stt.provider === "local") {
     return transcribeWithLocalCommand(input);
   }
@@ -489,7 +593,7 @@ type ResolvedPath =
   | { ok: true; content: ""; path: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> };
 
-async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
+export async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
   if (typeof path !== "string" || path.length === 0) {
     return errorResult("path must be a non-empty string");
   }
@@ -579,8 +683,15 @@ function truncateSummary(value: string, maxChars = 240): string {
 
 function defaultTts(): LoadedRuntimeConfig["tts"] {
   return {
-    provider: "edge",
-    speed: 1
+    provider: "openai",
+    speed: 1,
+    openai: {
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      baseUrl: "https://api.openai.com/v1",
+      speed: 1,
+      apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY"
+    }
   };
 }
 

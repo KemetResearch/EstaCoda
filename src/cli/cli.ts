@@ -43,6 +43,7 @@ import { collectSetupEntryState } from "../onboarding/setup-entry-state.js";
 import { collectSetupRoute } from "../onboarding/setup-router.js";
 import { renderSetupRouteSummary } from "../onboarding/setup-state-renderer.js";
 import { runSetupVerification } from "../onboarding/verification.js";
+import { checkSttProviderStatus, checkTtsProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
@@ -2166,15 +2167,15 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "EstaCoda voice",
-        "Hermes-aligned voice stack: TTS output plus STT transcription.",
+        "Hermes-aligned voice stack: TTS output plus STT transcription. Only ready providers are exposed to runtime tools.",
         "  estacoda voice status",
-        "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
         "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
+        "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
         "  estacoda voice setup --stt-provider local --stt-model base",
         "",
         "Defaults:",
-        "  TTS: edge, no API key",
-        "  STT: local Whisper, model base",
+        "  TTS: openai, gpt-4o-mini-tts, VOICE_TOOLS_OPENAI_KEY or OPENAI_API_KEY",
+        "  STT: local command, model base",
         "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
     };
@@ -2368,21 +2369,32 @@ function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<Retur
 function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   const ttsKey = ttsApiKeyEnv(config.tts.provider, config);
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
+  const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
+  const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
 
   return [
     "EstaCoda voice",
     `TTS provider: ${config.tts.provider}`,
+    `TTS readiness: ${formatVoiceReadiness(ttsStatus)}`,
     `TTS model: ${ttsModel(config.tts.provider, config)}`,
     `TTS voice: ${ttsVoice(config.tts.provider, config)}`,
     `TTS speed: ${config.tts.speed}`,
     `TTS API key: ${ttsKey === undefined ? "none" : ttsKey}`,
     `STT provider: ${config.stt.provider}`,
+    `STT readiness: ${formatVoiceReadiness(sttStatus)}`,
     `STT model: ${sttModel(config.stt.provider, config)}`,
-    `STT command: ${config.stt.local?.command ?? "auto"}`,
+    `STT command: ${config.stt.local?.command ?? "not configured"}`,
     `STT API key: ${sttKey === undefined ? "none" : sttKey}`,
+    `Auto-TTS replies: ${config.voice.autoTts ? "enabled" : "disabled"}`,
+    `Auto-TTS max chars/reply: ${config.voice.autoTtsMaxCharsPerReply ?? "unset"}`,
+    `Auto-TTS max chars/hour/chat: ${config.voice.autoTtsMaxCharsPerHourPerChat ?? "unset"}`,
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
     "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral"
   ].join("\n");
+}
+
+function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
+  return status.ready ? "ready" : `not ready (${status.reason})`;
 }
 
 function ttsModel(provider: TtsProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {

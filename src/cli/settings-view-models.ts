@@ -34,7 +34,7 @@ export function buildSettingsOverviewViewModel(config: LoadedRuntimeConfig): Vie
           kv("Profile", `${config.profile.mode} (${config.profile.responseLanguage})`),
           kv("UI", `${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`),
           kv("Workflow learning", config.skills.autonomy),
-          kv("Voice", `TTS ${config.tts.provider}, STT ${config.stt.provider}`),
+          kv("Voice", `TTS ${config.tts.provider}, STT ${config.stt.provider}, auto-TTS ${config.voice.autoTts ? "on" : "off"}`),
           kv("Web extraction", config.web.enableNetwork ? "enabled" : "disabled"),
           kv("Browser backend", config.browser.backend),
           kv("MCP servers", Object.keys(config.mcp.servers).length),
@@ -60,7 +60,7 @@ export function buildSettingsOverviewViewModel(config: LoadedRuntimeConfig): Vie
         items: [
           listItem("estacoda setup --advanced --provider <provider> --model <model>"),
           listItem("estacoda local setup --base-url http://localhost:11434/v1 --model <model>"),
-          listItem("estacoda voice setup --tts-provider edge --stt-provider local"),
+          listItem("estacoda voice setup --tts-provider openai --stt-provider local"),
           listItem("estacoda image setup --provider fal --api-key-env FAL_KEY"),
           listItem("estacoda security setup --mode adaptive"),
           listItem("estacoda settings skills --autonomy suggest"),
