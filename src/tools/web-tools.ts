@@ -736,7 +736,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined): Register
     toolsets: ["web", "research"],
     progressLabel: "searching web",
     maxResultSizeChars: 8000,
-    isAvailable: () => true,
+    isAvailable: async () => (await selectWebResearchProvider("search", webConfig)).availability.available,
     run: async (input: { query?: string; maxResults?: number }, context) => {
       const query = input.query?.trim();
       if (query === undefined || query.length === 0) {
@@ -813,7 +813,7 @@ function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: 
     toolsets: ["web", "research"],
     progressLabel: "crawling web",
     maxResultSizeChars: 12000,
-    isAvailable: () => true,
+    isAvailable: async () => (await selectWebResearchProvider("crawl", webConfig)).availability.available,
     run: async (input: { url?: string; text?: string; maxPages?: number; maxContentChars?: number }, context) => {
       const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
       if (url === undefined) {

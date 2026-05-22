@@ -108,6 +108,7 @@ describe("web and browser tools baselines", () => {
   it("reports unavailable web.search when no backend is configured", async () => {
     const search = tool("web.search", createWebTools());
 
+    await expect(search.isAvailable()).resolves.toBe(false);
     const result = await search.run({ query: "estacoda" });
 
     expect(result).toMatchObject({
@@ -132,6 +133,7 @@ describe("web and browser tools baselines", () => {
     });
     const search = tool("web.search", createWebTools({ webConfig: { searchBackend: "offline-search" } }));
 
+    await expect(search.isAvailable()).resolves.toBe(false);
     const result = await search.run({ query: "estacoda" });
 
     expect(result).toMatchObject({
@@ -160,6 +162,7 @@ describe("web and browser tools baselines", () => {
     });
     const search = tool("web.search", createWebTools({ webConfig: { searchBackend: "mock-search" } }));
 
+    await expect(search.isAvailable()).resolves.toBe(true);
     const result = await search.run({ query: "estacoda" });
 
     expect(result.ok).toBe(true);
@@ -179,6 +182,7 @@ describe("web and browser tools baselines", () => {
   it("reports unavailable web.crawl when no backend is configured", async () => {
     const crawl = tool("web.crawl", createWebTools({ resolveHostname: publicResolver }));
 
+    await expect(crawl.isAvailable()).resolves.toBe(false);
     const result = await crawl.run({ url: "https://example.com" });
 
     expect(result).toMatchObject({
@@ -212,6 +216,7 @@ describe("web and browser tools baselines", () => {
       resolveHostname: publicResolver
     }));
 
+    await expect(crawl.isAvailable()).resolves.toBe(true);
     const result = await crawl.run({ url: "https://example.com" });
 
     expect(result.ok).toBe(true);
