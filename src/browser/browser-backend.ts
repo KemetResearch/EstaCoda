@@ -2,6 +2,7 @@ import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserC
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
+import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
 
@@ -562,10 +563,57 @@ export function createBrowserBackendFromConfig(config: {
         webSocketFactory: config.webSocketFactory
       });
     case "unconfigured":
+      if (config.cloudProvider !== undefined) {
+        return createCloudProviderStatusBackend({
+          backend: "unconfigured",
+          cloudProvider: config.cloudProvider
+        });
+      }
       return createUnconfiguredBrowserBackend();
+    case "browserbase":
+    case "firecrawl":
+    case "camofox":
+      return createCloudProviderStatusBackend({
+        backend: config.backend,
+        cloudProvider: config.cloudProvider ?? config.backend
+      });
     default:
       return createUnconfiguredBrowserBackend({
         reason: `${config.backend} browser backend is recognized but not implemented in this release.`
       });
   }
+}
+
+function createCloudProviderStatusBackend(config: {
+  backend: "browserbase" | "firecrawl" | "camofox" | "unconfigured";
+  cloudProvider: string;
+}): BrowserBackend {
+  registerDefaultBrowserProviders();
+
+  const status = async (): Promise<BrowserBackendStatus> => {
+    const selection = await selectBrowserProvider({
+      backend: config.backend,
+      cloudProvider: config.cloudProvider
+    });
+    const providerLabel = selection.providerName ?? config.cloudProvider;
+    const reason = selection.availability.available
+      ? `${providerLabel} browser provider is available, but cloud browser sessions are not implemented in this release.`
+      : selection.availability.reason ?? `${providerLabel} browser provider is unavailable.`;
+
+    return {
+      backend: config.backend,
+      available: false,
+      reason
+    };
+  };
+
+  return {
+    kind: config.backend,
+    isAvailable: async () => false,
+    status,
+    async navigate(input) {
+      const current = await status();
+      throw new Error(current.reason ?? `No cloud browser backend is configured for ${input.url}.`);
+    }
+  };
 }
