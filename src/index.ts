@@ -198,6 +198,10 @@ async function main(): Promise<void> {
       telegramReady: latestConfig.channels.telegram.ready,
       enableWebNetwork: latestConfig.web.enableNetwork,
       webMaxContentChars: latestConfig.web.maxContentChars,
+      securityConfig: {
+        allowPrivateUrls: latestConfig.security.allowPrivateUrls,
+        websiteBlocklist: latestConfig.security.websiteBlocklist
+      },
       securityMode: latestConfig.security.approvalMode,
       securityAssessor: latestConfig.security.assessor,
       approvalController: cliApprovalController,

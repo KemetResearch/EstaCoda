@@ -139,6 +139,10 @@ export function buildGatewayCronRuntimeOptions(input: {
     telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
     webMaxContentChars: latestConfig.web.maxContentChars,
+    securityConfig: {
+      allowPrivateUrls: latestConfig.security.allowPrivateUrls,
+      websiteBlocklist: latestConfig.security.websiteBlocklist
+    },
     disableCronTools: true,
     disabledToolsets: ["cron", "messaging", "clarify"],
   };
@@ -590,6 +594,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       telegramReady: latestConfig.channels.telegram.ready,
       enableWebNetwork: latestConfig.web.enableNetwork,
       webMaxContentChars: latestConfig.web.maxContentChars,
+      securityConfig: {
+        allowPrivateUrls: latestConfig.security.allowPrivateUrls,
+        websiteBlocklist: latestConfig.security.websiteBlocklist
+      },
       trustStorePath: tsp,
     });
   };

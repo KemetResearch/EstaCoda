@@ -140,6 +140,7 @@ export type RuntimeOptions = {
   currentPlatform?: string;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
+  securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   securityPolicy?: SecurityPolicy;
   securityMode?: import("../contracts/security.js").SecurityApprovalMode;
   securityAssessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
@@ -203,6 +204,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     webFetch: input.webFetch,
     enableWebNetwork: input.enableWebNetwork,
     webMaxContentChars: input.webMaxContentChars,
+    securityConfig: input.securityConfig,
     voiceFetch: input.voiceFetch,
     tts: input.tts,
     stt: input.stt,
@@ -575,6 +577,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     webFetch: options.webFetch,
     enableWebNetwork: options.enableWebNetwork,
     webMaxContentChars: options.webMaxContentChars,
+    securityConfig: options.securityConfig,
     voiceFetch: options.voiceFetch,
     tts: options.tts,
     stt: options.stt,

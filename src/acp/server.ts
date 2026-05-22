@@ -779,6 +779,10 @@ export class AcpServer {
       telegramReady: config.channels.telegram.ready,
       enableWebNetwork: config.web.enableNetwork,
       webMaxContentChars: config.web.maxContentChars,
+      securityConfig: {
+        allowPrivateUrls: config.security.allowPrivateUrls,
+        websiteBlocklist: config.security.websiteBlocklist
+      },
       securityPolicy: createAcpSecurityPolicy(options.grants, {
         allowEditorRead: this.#clientFsReadText,
         mode: config.security.approvalMode,

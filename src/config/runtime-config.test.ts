@@ -16,6 +16,25 @@ function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
+async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
+  const previous = process.env.ESTACODA_ALLOW_PRIVATE_URLS;
+  if (value === undefined) {
+    delete process.env.ESTACODA_ALLOW_PRIVATE_URLS;
+  } else {
+    process.env.ESTACODA_ALLOW_PRIVATE_URLS = value;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ESTACODA_ALLOW_PRIVATE_URLS;
+    } else {
+      process.env.ESTACODA_ALLOW_PRIVATE_URLS = previous;
+    }
+  }
+}
+
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
     const result = normalizeAuxiliaryModels({});
@@ -375,6 +394,112 @@ describe("loadRuntimeConfig external memory", () => {
         path: "memory.jsonl",
         maxEntries: 50
       }
+    });
+  });
+});
+
+describe("loadRuntimeConfig browser security", () => {
+  async function loadSecurityConfig(config: Record<string, unknown>) {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ...config
+    }));
+
+    return await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+  }
+
+  it("defaults allowPrivateUrls to false", async () => {
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      const loaded = await loadSecurityConfig({});
+      expect(loaded.security.allowPrivateUrls).toBe(false);
+    });
+  });
+
+  it("loads canonical security.allowPrivateUrls", async () => {
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      const loaded = await loadSecurityConfig({
+        security: { allowPrivateUrls: true }
+      });
+      expect(loaded.security.allowPrivateUrls).toBe(true);
+    });
+  });
+
+  it("loads deprecated browser.allowPrivateUrls alias", async () => {
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      const loaded = await loadSecurityConfig({
+        browser: { allowPrivateUrls: true }
+      });
+      expect(loaded.security.allowPrivateUrls).toBe(true);
+    });
+  });
+
+  it("prefers canonical security.allowPrivateUrls over browser alias unless env is present", async () => {
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      const loaded = await loadSecurityConfig({
+        security: { allowPrivateUrls: false },
+        browser: { allowPrivateUrls: true }
+      });
+      expect(loaded.security.allowPrivateUrls).toBe(false);
+    });
+
+    await withAllowPrivateUrlsEnv("on", async () => {
+      const loaded = await loadSecurityConfig({
+        security: { allowPrivateUrls: false },
+        browser: { allowPrivateUrls: false }
+      });
+      expect(loaded.security.allowPrivateUrls).toBe(true);
+    });
+  });
+
+  it("accepts env true values", async () => {
+    for (const value of ["1", "true", "yes", "on"]) {
+      await withAllowPrivateUrlsEnv(value, async () => {
+        const loaded = await loadSecurityConfig({});
+        expect(loaded.security.allowPrivateUrls).toBe(true);
+      });
+    }
+  });
+
+  it("accepts env false values", async () => {
+    for (const value of ["0", "false", "no", "off"]) {
+      await withAllowPrivateUrlsEnv(value, async () => {
+        const loaded = await loadSecurityConfig({
+          security: { allowPrivateUrls: true }
+        });
+        expect(loaded.security.allowPrivateUrls).toBe(false);
+      });
+    }
+  });
+
+  it("rejects invalid env and config string values", async () => {
+    await withAllowPrivateUrlsEnv("maybe", async () => {
+      await expect(loadSecurityConfig({})).rejects.toThrow("ESTACODA_ALLOW_PRIVATE_URLS must be a boolean value");
+    });
+
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      await expect(loadSecurityConfig({
+        security: { allowPrivateUrls: "maybe" }
+      })).rejects.toThrow("security.allowPrivateUrls must be a boolean value");
+    });
+  });
+
+  it("exposes website blocklist config", async () => {
+    await withAllowPrivateUrlsEnv(undefined, async () => {
+      const loaded = await loadSecurityConfig({
+        security: {
+          websiteBlocklist: {
+            domains: ["example.com"],
+            sharedFiles: ["/tmp/example-blocklist.txt"]
+          }
+        }
+      });
+
+      expect(loaded.security.websiteBlocklist).toEqual({
+        domains: ["example.com"],
+        sharedFiles: ["/tmp/example-blocklist.txt"]
+      });
     });
   });
 });

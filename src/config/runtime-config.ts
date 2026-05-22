@@ -45,6 +45,7 @@ import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-regis
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
 import { redactObject } from "../utils/redaction.js";
+import type { WebsitePolicyConfig } from "../browser/website-policy.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -285,6 +286,7 @@ export type EstaCodaConfig = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch?: boolean;
+    allowPrivateUrls?: boolean | string;
   };
   imageGen?: ImageGenerationConfig;
   image_gen?: ImageGenerationConfig;
@@ -308,6 +310,8 @@ export type EstaCodaConfig = {
   };
   security?: {
     approvalMode?: SecurityApprovalMode | "manual" | "smart" | "off";
+    allowPrivateUrls?: boolean | string;
+    websiteBlocklist?: WebsitePolicyConfig;
     assessor?: SecurityAssessorConfig;
     approvals?: {
       mode?: SecurityApprovalMode | "manual" | "smart" | "off";
@@ -424,6 +428,8 @@ export type LoadedRuntimeConfig = {
   };
   security: {
     approvalMode: SecurityApprovalMode;
+    allowPrivateUrls: boolean;
+    websiteBlocklist: WebsitePolicyConfig;
     assessor: {
       enabled: boolean;
       provider?: ProviderId;
@@ -696,6 +702,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     profile: normalizeProfileConfig(config.profile),
     security: {
       approvalMode: normalizeSecurityApprovalMode(config.security?.approvalMode ?? config.security?.approvals?.mode),
+      allowPrivateUrls: normalizeAllowPrivateUrls(config),
+      websiteBlocklist: config.security?.websiteBlocklist ?? {},
       assessor: {
         enabled: config.security?.assessor?.enabled === true,
         provider: config.security?.assessor?.provider,
@@ -791,6 +799,11 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     security: {
       ...(merged.security ?? {}),
       approvalMode: config.security?.approvalMode ?? merged.security?.approvalMode,
+      allowPrivateUrls: config.security?.allowPrivateUrls ?? merged.security?.allowPrivateUrls,
+      websiteBlocklist: {
+        ...(merged.security?.websiteBlocklist ?? {}),
+        ...(config.security?.websiteBlocklist ?? {})
+      },
       assessor: {
         ...(merged.security?.assessor ?? {}),
         ...(config.security?.assessor ?? {})
@@ -1060,6 +1073,39 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
       ? value.responseLanguage
       : "match-user"
   };
+}
+
+function normalizeAllowPrivateUrls(config: EstaCodaConfig): boolean {
+  const envValue = process.env.ESTACODA_ALLOW_PRIVATE_URLS;
+  if (envValue !== undefined) {
+    return parseBooleanFlag(envValue, "ESTACODA_ALLOW_PRIVATE_URLS");
+  }
+
+  if (config.security?.allowPrivateUrls !== undefined) {
+    return parseBooleanFlag(config.security.allowPrivateUrls, "security.allowPrivateUrls");
+  }
+
+  if (config.browser?.allowPrivateUrls !== undefined) {
+    return parseBooleanFlag(config.browser.allowPrivateUrls, "browser.allowPrivateUrls");
+  }
+
+  return false;
+}
+
+function parseBooleanFlag(value: boolean | string, path: string): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`${path} must be a boolean value: 1, true, yes, on, 0, false, no, or off`);
 }
 
 export function normalizeSessionCompressionConfig(
