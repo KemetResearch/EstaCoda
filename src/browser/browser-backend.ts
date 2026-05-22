@@ -1,4 +1,11 @@
 import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
+import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
+import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
+import type { ResolveHostnameFn } from "./url-safety.js";
+
+export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
 export type UnconfiguredBrowserBackendOptions = {
   reason?: string;
@@ -76,32 +83,6 @@ export type LocalCdpBrowserBackendOptions = {
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
 };
-
-export type CdpFetchLike = (url: string, init?: {
-  method?: string;
-  signal?: AbortSignal;
-}) => Promise<{
-  ok: boolean;
-  status: number;
-  statusText: string;
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-}>;
-
-export type CdpWebSocketEvent = {
-  data?: unknown;
-};
-
-export type CdpWebSocketLike = {
-  readonly readyState?: number;
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: "open" | "message" | "error" | "close", listener: (event: CdpWebSocketEvent) => void, options?: {
-    once?: boolean;
-  }): void;
-};
-
-export type CdpWebSocketFactory = (url: string) => CdpWebSocketLike;
 
 export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOptions = {}): BrowserBackend {
   const endpoint = normalizeCdpUrl(options.cdpUrl);
@@ -308,32 +289,6 @@ async function runCdpSessionAction<T>(input: {
   }
 }
 
-async function evaluateCdpSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot> {
-  const evaluated = await client.send("Runtime.evaluate", {
-    expression: snapshotExpression(),
-    returnByValue: true
-  }) as { result?: { value?: unknown } };
-  return parseCdpSnapshot(evaluated.result?.value, sessionId);
-}
-
-function snapshotExpression(): string {
-  return `(() => {
-    const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
-    window.__estacodaElements = candidates;
-    const label = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('name') || el.id || '').trim().slice(0, 160);
-    return JSON.stringify({
-      url: location.href,
-      title: document.title,
-      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
-      elements: candidates.map((el, index) => ({
-        ref: '@e' + (index + 1),
-        role: el.getAttribute('role') || el.tagName.toLowerCase(),
-        name: label(el)
-      }))
-    });
-  })()`;
-}
-
 async function ensureConsoleCapture(client: CdpClient): Promise<void> {
   await client.send("Runtime.evaluate", {
     expression: `(() => {
@@ -377,24 +332,6 @@ function refToIndex(ref: string | undefined): number {
     throw new Error(`Invalid browser element ref: ${ref ?? ""}`);
   }
   return Number(match[1]) - 1;
-}
-
-function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {
-  if (typeof value !== "string") {
-    return { sessionId, url: "about:blank", text: "", elements: [] };
-  }
-  try {
-    const parsed = JSON.parse(value) as BrowserSnapshot;
-    return {
-      sessionId,
-      url: parsed.url,
-      title: parsed.title,
-      text: parsed.text,
-      elements: Array.isArray(parsed.elements) ? parsed.elements : []
-    };
-  } catch {
-    return { sessionId, url: "about:blank", text: value, elements: [] };
-  }
 }
 
 function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
@@ -533,153 +470,6 @@ async function createCdpTarget(input: {
   };
 }
 
-async function connectCdp(input: {
-  webSocketUrl: string;
-  webSocketFactory: CdpWebSocketFactory | undefined;
-}): Promise<CdpClient> {
-  const factory = input.webSocketFactory ?? ((url) => {
-    if (typeof WebSocket === "undefined") {
-      throw new Error("WebSocket is not available in this runtime.");
-    }
-
-    return new WebSocket(url) as unknown as CdpWebSocketLike;
-  });
-  const socket = factory(input.webSocketUrl);
-
-  await new Promise<void>((resolve, reject) => {
-    if (socket.readyState === 1) {
-      resolve();
-      return;
-    }
-
-    const timeout = setTimeout(() => reject(new Error("Timed out while connecting to CDP WebSocket.")), 5_000);
-    socket.addEventListener("open", () => {
-      clearTimeout(timeout);
-      resolve();
-    }, {
-      once: true
-    });
-    socket.addEventListener("error", () => {
-      clearTimeout(timeout);
-      reject(new Error("CDP WebSocket connection failed."));
-    }, {
-      once: true
-    });
-  });
-
-  return new CdpClient(socket);
-}
-
-class CdpClient {
-  #nextId = 1;
-  #pending = new Map<number, {
-    resolve(value: unknown): void;
-    reject(error: Error): void;
-  }>();
-  #eventWaiters = new Map<string, Array<() => void>>();
-
-  constructor(private readonly socket: CdpWebSocketLike) {
-    this.socket.addEventListener("message", (event) => {
-      this.#handleMessage(event.data);
-    });
-    this.socket.addEventListener("close", () => {
-      this.#rejectAll(new Error("CDP WebSocket closed."));
-    });
-    this.socket.addEventListener("error", () => {
-      this.#rejectAll(new Error("CDP WebSocket errored."));
-    });
-  }
-
-  send(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    const id = this.#nextId++;
-
-    return new Promise((resolve, reject) => {
-      this.#pending.set(id, {
-        resolve,
-        reject
-      });
-      this.socket.send(JSON.stringify({
-        id,
-        method,
-        params
-      }));
-    });
-  }
-
-  waitFor(method: string, timeoutMs: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`Timed out waiting for ${method}.`));
-      }, timeoutMs);
-      const waiter = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      const waiters = this.#eventWaiters.get(method) ?? [];
-
-      waiters.push(waiter);
-      this.#eventWaiters.set(method, waiters);
-    });
-  }
-
-  close(): void {
-    this.socket.close();
-  }
-
-  #handleMessage(raw: unknown): void {
-    const text = typeof raw === "string" ? raw : raw instanceof ArrayBuffer ? new TextDecoder().decode(raw) : String(raw ?? "");
-
-    if (text.length === 0) {
-      return;
-    }
-
-    const message = JSON.parse(text) as {
-      id?: number;
-      method?: string;
-      result?: unknown;
-      error?: {
-        message?: string;
-      };
-    };
-
-    if (message.id !== undefined) {
-      const pending = this.#pending.get(message.id);
-
-      if (pending === undefined) {
-        return;
-      }
-
-      this.#pending.delete(message.id);
-
-      if (message.error !== undefined) {
-        pending.reject(new Error(message.error.message ?? "CDP command failed."));
-        return;
-      }
-
-      pending.resolve(message.result);
-      return;
-    }
-
-    if (message.method !== undefined) {
-      const waiters = this.#eventWaiters.get(message.method) ?? [];
-
-      this.#eventWaiters.delete(message.method);
-
-      for (const waiter of waiters) {
-        waiter();
-      }
-    }
-  }
-
-  #rejectAll(error: Error): void {
-    for (const pending of this.#pending.values()) {
-      pending.reject(error);
-    }
-
-    this.#pending.clear();
-  }
-}
-
 async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpFetchLike | undefined): Promise<BrowserBackendStatus> {
   if (endpoint === undefined) {
     return {
@@ -741,14 +531,29 @@ function normalizeCdpUrl(value: string | undefined): string | undefined {
 
 export function createBrowserBackendFromConfig(config: {
   backend: "local-cdp" | "browserbase" | "firecrawl" | "camofox" | "mock" | "unconfigured";
+  cloudProvider?: string;
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
+  supervised?: boolean;
+  securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
+  resolveHostname?: ResolveHostnameFn;
 }): BrowserBackend {
   switch (config.backend) {
     case "local-cdp":
+      if (config.supervised === true) {
+        return createSupervisedLocalCdpBrowserBackend({
+          cdpUrl: config.cdpUrl,
+          launchCommand: config.launchCommand,
+          autoLaunch: config.autoLaunch,
+          fetch: config.fetch,
+          webSocketFactory: config.webSocketFactory,
+          securityConfig: config.securityConfig,
+          resolveHostname: config.resolveHostname
+        });
+      }
       return createLocalCdpBrowserBackend({
         cdpUrl: config.cdpUrl,
         launchCommand: config.launchCommand,
@@ -760,7 +565,7 @@ export function createBrowserBackendFromConfig(config: {
       return createUnconfiguredBrowserBackend();
     default:
       return createUnconfiguredBrowserBackend({
-        reason: `${config.backend} browser backend is not implemented in v2 yet.`
+        reason: `${config.backend} browser backend is recognized but not implemented in this release.`
       });
   }
 }

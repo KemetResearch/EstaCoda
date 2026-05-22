@@ -3,16 +3,27 @@ import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
+import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { analyzeImageWithVision } from "./vision-tools.js";
+import {
+  registerDefaultWebResearchProviders,
+  selectWebResearchProvider
+} from "./web-research-registry.js";
+import type { WebResearchConfig, WebResearchProvider } from "./web-research-provider.js";
 
 export type WebToolOptions = {
   fetch?: FetchLike;
   browserBackend?: BrowserBackend;
   enableNetwork?: boolean;
   maxContentChars?: number;
+  webConfig?: WebResearchConfig;
   workspaceRoot?: string;
+  securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
+  resolveHostname?: ResolveHostnameFn;
   visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
     ok: boolean;
     content: string;
@@ -23,6 +34,7 @@ export type WebToolOptions = {
 export type FetchLike = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
+  redirect?: "manual" | "follow" | "error";
   signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
@@ -35,12 +47,24 @@ export type FetchLike = (url: string, init?: {
 }>;
 
 const DEFAULT_MAX_CONTENT_CHARS = 24_000;
+const MAX_WEB_EXTRACT_REDIRECTS = 10;
+const CDP_URL_PARAMETER_METHODS = new Map<string, string>([
+  ["Page.navigate", "url"],
+  ["Target.createTarget", "url"]
+]);
+const CDP_RUNTIME_METHODS = new Set(["Runtime.evaluate", "Runtime.callFunctionOn"]);
+const CDP_NETWORK_EXPRESSION_PATTERN = /\b(?:fetch|XMLHttpRequest|sendBeacon|WebSocket|EventSource)\b/u;
+const CDP_NAVIGATION_EXPRESSION_PATTERN = /\b(?:location\.(?:href|assign|replace)|(?:window|document|self|top|parent)\.location|window\.open|open\s*\()/u;
+const CDP_URL_LITERAL_PATTERN = /https?:\/\/[^\s"'<>\\)]+/giu;
 
 export function createWebTools(options: WebToolOptions = {}): readonly RegisteredTool[] {
+  registerDefaultWebResearchProviders();
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
+  const urlGuard = createUrlGuard(options);
 
   return [
+    createWebSearchTool(options.webConfig),
     {
       name: "web.extract",
       description: "Fetch and extract readable text from a URL for research workflows.",
@@ -58,37 +82,107 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       maxResultSizeChars: maxContentChars,
       isAvailable: () => true,
       run: async (input: { url?: string; text?: string; maxContentChars?: number }, context) => {
+        const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
         if (url === undefined) {
-          return {
+          debug.log("web.extract.blocked", { reason: "missing-url" });
+          return withDebug({
             ok: false,
             content: "No URL found for web.extract.",
             metadata: {
               reason: "missing-url"
             }
-          };
+          }, debug);
+        }
+        debug.log("web.extract.start", { url });
+
+        const secretFailure = blockSecretUrl(url, "secret-in-url");
+        if (secretFailure !== undefined) {
+          debug.log("web.extract.blocked", { reason: "secret-in-url", url });
+          return withDebug(secretFailure, debug);
         }
 
         if (options.enableNetwork !== true) {
-          return {
+          debug.log("web.extract.blocked", { reason: "network-disabled", url });
+          return withDebug({
             ok: false,
-            content: `web.extract is ready for ${url}, but network fetching is not enabled for this runtime.`,
+            content: `web.extract is ready for ${redactUrlForMetadata(url)}, but network fetching is not enabled for this runtime.`,
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               reason: "network-disabled"
             }
-          };
+          }, debug);
+        }
+
+        const guardFailure = await urlGuard(url, {
+          unsafeReason: "unsafe-url",
+          policyReason: "website-policy"
+        });
+        if (guardFailure !== undefined) {
+          debug.log("web.extract.blocked", { reason: guardFailure.metadata.reason, url });
+          return withDebug(guardFailure, debug);
+        }
+
+        const providerSelection = await selectWebResearchProvider("extract", options.webConfig);
+        debug.log("web.extract.provider", {
+          provider: providerSelection.providerName,
+          fallback: providerSelection.fallback,
+          available: providerSelection.availability.available,
+          reason: providerSelection.availability.reason
+        });
+        if (!providerSelection.availability.available) {
+          return withDebug(unavailableWebResearchResult("web.extract", "extract", providerSelection), debug);
+        }
+
+        if (!providerSelection.fallback && providerSelection.providerName !== "fetch") {
+          if (providerSelection.provider?.extract === undefined) {
+            return withDebug(unavailableWebResearchResult("web.extract", "extract", {
+              ...providerSelection,
+              availability: {
+                available: false,
+                reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web extract.`
+              }
+            }), debug);
+          }
+
+          const providerResult = await providerSelection.provider.extract(url, {
+            maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+            signal: context?.signal
+          }).catch((error: unknown) => ({ error }));
+          if ("error" in providerResult) {
+            debug.log("web.extract.provider_failed", { provider: providerSelection.providerName, url });
+            return withDebug({
+              ok: false,
+              content: providerResult.error instanceof Error ? providerResult.error.message : "web.extract provider failed.",
+              metadata: {
+                url: redactUrlForMetadata(url),
+                provider: providerSelection.providerName,
+                reason: "provider-failed"
+              }
+            }, debug);
+          }
+
+          debug.log("web.extract.complete", {
+            provider: providerSelection.providerName,
+            url: providerResult.url,
+            status: providerResult.status,
+            contentLength: providerResult.content.length
+          });
+          return withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult), debug);
         }
 
         return extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
           maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+          guardUrl: urlGuard,
+          debug,
           signal: context?.signal
         });
       }
     },
+    createWebCrawlTool(options.webConfig, urlGuard),
     {
       name: "browser.status",
       description: "Check configured browser backend availability and endpoint details.",
@@ -275,27 +369,53 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         },
         required: ["method"]
       },
-      riskClass: "read-only-network",
+      riskClass: "external-side-effect",
       toolsets: ["browser", "web", "research"],
       progressLabel: "running browser CDP command",
       maxResultSizeChars: 8000,
       isAvailable: () => browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
+        const debug = createBrowserDebugSession();
         if (browserBackend.cdp === undefined) {
-          return unsupportedBrowserTool(browserBackend, "browser.cdp");
+          return withDebug(unsupportedBrowserTool(browserBackend, "browser.cdp"), debug);
+        }
+        debug.log("browser.cdp.start", {
+          backend: browserBackend.kind,
+          method: input.method,
+          params: input.params
+        });
+        const guardFailure = await guardBrowserCdpInput(input, urlGuard, browserBackend.kind);
+        if (guardFailure !== undefined) {
+          debug.log("browser.cdp.blocked", {
+            backend: browserBackend.kind,
+            method: input.method,
+            reason: guardFailure.metadata.reason,
+            url: guardFailure.metadata.url
+          });
+          return withDebug(guardFailure, debug);
         }
         const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
         if (typeof result === "object" && result !== null && "error" in result) {
-          return {
+          debug.log("browser.cdp.error", {
+            backend: browserBackend.kind,
+            method: input.method,
+            error: result.error instanceof Error ? result.error.message : "Browser CDP command failed."
+          });
+          return withDebug({
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser CDP command failed.",
             metadata: { backend: browserBackend.kind }
-          };
+          }, debug);
         }
+        debug.log("browser.cdp.complete", {
+          backend: browserBackend.kind,
+          method: input.method,
+          responseShape: describeValueShape(result)
+        });
         return {
           ok: true,
           content: JSON.stringify(result, null, 2),
-          metadata: { backend: browserBackend.kind, result: result as Record<string, unknown> }
+          metadata: withDebugMetadata({ backend: browserBackend.kind, result: result as Record<string, unknown> }, debug)
         };
       }
     },
@@ -422,43 +542,64 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       maxResultSizeChars: 4000,
       isAvailable: () => browserBackend.isAvailable(),
       run: async (input: { url?: string; text?: string }, context) => {
+        const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
         if (url === undefined) {
-          return {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "missing-url" });
+          return withDebug({
             ok: false,
             content: "No URL found for browser.navigate.",
             metadata: {
               reason: "missing-url",
               backend: "unconfigured"
             }
-          };
+          }, debug);
+        }
+        debug.log("browser.navigate.start", { backend: browserBackend.kind, requestedUrl: url });
+
+        const secretFailure = blockSecretUrl(url, "secret-in-url", { backend: browserBackend.kind });
+        if (secretFailure !== undefined) {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "secret-in-url", requestedUrl: url });
+          return withDebug(secretFailure, debug);
+        }
+
+        const guardFailure = await urlGuard(url, {
+          unsafeReason: "unsafe-url",
+          policyReason: "website-policy",
+          metadata: { backend: browserBackend.kind }
+        });
+        if (guardFailure !== undefined) {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: guardFailure.metadata.reason, requestedUrl: url });
+          return withDebug(guardFailure, debug);
         }
 
         if (!(await browserBackend.isAvailable())) {
-          return {
+          debug.log("browser.navigate.unavailable", { backend: browserBackend.kind, requestedUrl: url });
+          return withDebug({
             ok: false,
             content: [
-              `Browser navigation requested for ${url}.`,
+              `Browser navigation requested for ${redactUrlForMetadata(url)}.`,
               "No browser backend is configured yet. Next backends to wire: local CDP, Firecrawl, Browserbase/Camofox."
             ].join("\n"),
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind
             }
-          };
+          }, debug);
         }
 
         if (context?.signal?.aborted === true) {
-          return {
+          debug.log("browser.navigate.blocked", { backend: browserBackend.kind, reason: "cancelled", requestedUrl: url });
+          return withDebug({
             ok: false,
             content: "Browser navigation cancelled.",
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind,
               reason: "cancelled"
             }
-          };
+          }, debug);
         }
 
         const result = await browserBackend.navigate({ url, signal: context?.signal }).catch((error: unknown) => ({
@@ -466,17 +607,46 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         }));
 
         if ("error" in result) {
-          return {
+          debug.log("browser.navigate.error", {
+            backend: browserBackend.kind,
+            requestedUrl: url,
+            error: result.error instanceof Error ? result.error.message : "Browser navigation failed."
+          });
+          return withDebug({
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser navigation failed.",
             metadata: {
-              url,
+              url: redactUrlForMetadata(url),
               backend: browserBackend.kind,
               reason: "navigation-failed"
             }
-          };
+          }, debug);
         }
 
+        const postNavigationFailure = await checkPostNavigationUrl({
+          requestedUrl: url,
+          result,
+          browserBackend,
+          guardUrl: urlGuard,
+          signal: context?.signal
+        });
+        if (postNavigationFailure !== undefined) {
+          debug.log("browser.navigate.blocked", {
+            backend: browserBackend.kind,
+            sessionId: result.session.id,
+            requestedUrl: url,
+            finalUrl: result.snapshot.url,
+            reason: postNavigationFailure.metadata.reason
+          });
+          return withDebug(postNavigationFailure, debug);
+        }
+
+        debug.log("browser.navigate.complete", {
+          backend: result.session.backend,
+          sessionId: result.session.id,
+          requestedUrl: url,
+          finalUrl: result.snapshot.url
+        });
         return {
           ok: true,
           content: [
@@ -488,10 +658,11 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             renderBrowserSnapshot(result.snapshot)
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
-            url,
+            url: redactUrlForMetadata(url),
             backend: result.session.backend,
             session: result.session,
-            snapshot: result.snapshot
+            snapshot: result.snapshot,
+            ...debugMetadata(debug)
           }
         };
       }
@@ -510,7 +681,9 @@ export const webToolProvider: SessionToolProvider = {
       browserBackend: requireProviderDependency("web", "browserBackend", ctx.browserBackend),
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
+      webConfig: ctx.webConfig,
       workspaceRoot: ctx.workspaceRoot,
+      securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
         allowedRoots: [channelMediaRoot],
@@ -529,6 +702,213 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
     throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
   }
   return value;
+}
+
+function createWebSearchTool(webConfig: WebResearchConfig | undefined): RegisteredTool {
+  return {
+    name: "web.search",
+    description: "Search the web using a configured research provider.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        maxResults: { type: "number" }
+      },
+      required: ["query"]
+    },
+    riskClass: "read-only-network",
+    toolsets: ["web", "research"],
+    progressLabel: "searching web",
+    maxResultSizeChars: 8000,
+    isAvailable: () => true,
+    run: async (input: { query?: string; maxResults?: number }, context) => {
+      const query = input.query?.trim();
+      if (query === undefined || query.length === 0) {
+        return {
+          ok: false,
+          content: "No query found for web.search.",
+          metadata: { reason: "missing-query" }
+        };
+      }
+
+      const providerSelection = await selectWebResearchProvider("search", webConfig);
+      if (!providerSelection.availability.available) {
+        return unavailableWebResearchResult("web.search", "search", providerSelection);
+      }
+
+      if (providerSelection.provider?.search === undefined) {
+        return unavailableWebResearchResult("web.search", "search", {
+          ...providerSelection,
+          availability: {
+            available: false,
+            reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web search.`
+          }
+        });
+      }
+
+      const results = await providerSelection.provider.search(query, {
+        maxResults: input.maxResults,
+        signal: context?.signal
+      }).catch((error: unknown) => ({ error }));
+      if ("error" in results) {
+        return {
+          ok: false,
+          content: results.error instanceof Error ? results.error.message : "web.search provider failed.",
+          metadata: {
+            provider: providerSelection.providerName,
+            reason: "provider-failed"
+          }
+        };
+      }
+
+      const bounded = results.slice(0, Math.max(1, Math.min(input.maxResults ?? 10, 20)));
+      return {
+        ok: true,
+        content: bounded.length === 0
+          ? "No web search results found."
+          : bounded.map((result, index) => [
+            `${index + 1}. ${truncate(result.title, 200)}`,
+            result.url,
+            result.snippet === undefined ? undefined : truncate(result.snippet, 500)
+          ].filter((line) => line !== undefined).join("\n")).join("\n\n"),
+        metadata: {
+          provider: providerSelection.providerName,
+          results: bounded
+        }
+      };
+    }
+  };
+}
+
+function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: UrlGuard): RegisteredTool {
+  return {
+    name: "web.crawl",
+    description: "Crawl a URL using a configured research provider.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        text: { type: "string" },
+        maxPages: { type: "number" },
+        maxContentChars: { type: "number" }
+      }
+    },
+    riskClass: "read-only-network",
+    toolsets: ["web", "research"],
+    progressLabel: "crawling web",
+    maxResultSizeChars: 12000,
+    isAvailable: () => true,
+    run: async (input: { url?: string; text?: string; maxPages?: number; maxContentChars?: number }, context) => {
+      const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
+      if (url === undefined) {
+        return {
+          ok: false,
+          content: "No URL found for web.crawl.",
+          metadata: { reason: "missing-url" }
+        };
+      }
+
+      const secretFailure = blockSecretUrl(url, "secret-in-url");
+      if (secretFailure !== undefined) {
+        return secretFailure;
+      }
+
+      const guardFailure = await guardUrl(url, {
+        unsafeReason: "unsafe-url",
+        policyReason: "website-policy"
+      });
+      if (guardFailure !== undefined) {
+        return guardFailure;
+      }
+
+      const providerSelection = await selectWebResearchProvider("crawl", webConfig);
+      if (!providerSelection.availability.available) {
+        return unavailableWebResearchResult("web.crawl", "crawl", providerSelection);
+      }
+
+      if (providerSelection.provider?.crawl === undefined) {
+        return unavailableWebResearchResult("web.crawl", "crawl", {
+          ...providerSelection,
+          availability: {
+            available: false,
+            reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web crawl.`
+          }
+        });
+      }
+
+      const result = await providerSelection.provider.crawl(url, {
+        maxPages: input.maxPages,
+        maxContentChars: input.maxContentChars,
+        signal: context?.signal
+      }).catch((error: unknown) => ({ error }));
+      if ("error" in result) {
+        return {
+          ok: false,
+          content: result.error instanceof Error ? result.error.message : "web.crawl provider failed.",
+          metadata: {
+            url: redactUrlForMetadata(url),
+            provider: providerSelection.providerName,
+            reason: "provider-failed"
+          }
+        };
+      }
+
+      const pages = result.pages.slice(0, Math.max(1, Math.min(input.maxPages ?? 10, 20)));
+      return {
+        ok: true,
+        content: pages.length === 0
+          ? `No pages crawled for ${redactUrlForMetadata(result.url)}.`
+          : pages.map((page, index) => [
+            `${index + 1}. ${page.title ?? page.url}`,
+            page.url,
+            truncate(page.content, input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS)
+          ].join("\n")).join("\n\n"),
+        metadata: {
+          provider: providerSelection.providerName,
+          url: redactUrlForMetadata(result.url),
+          pages
+        }
+      };
+    }
+  };
+}
+
+function unavailableWebResearchResult(
+  toolName: string,
+  capability: string,
+  selection: Awaited<ReturnType<typeof selectWebResearchProvider>>
+) {
+  return {
+    ok: false,
+    content: `${toolName} is unavailable: ${selection.availability.reason ?? `No available web ${capability} provider configured.`}`,
+    metadata: {
+      provider: selection.providerName,
+      capability,
+      reason: selection.availability.reason ?? `No available web ${capability} provider configured.`,
+      explicit: selection.explicit,
+      fallback: selection.fallback
+    }
+  };
+}
+
+function formatWebExtractProviderResult(
+  provider: WebResearchProvider,
+  result: import("./web-research-provider.js").WebExtractResult
+) {
+  return {
+    ok: result.status === undefined || (result.status >= 200 && result.status < 400),
+    content: [
+      `URL: ${result.url}`,
+      result.title === undefined ? undefined : `Title: ${result.title}`,
+      result.status === undefined ? undefined : `Status: ${result.status}`,
+      "",
+      result.content
+    ].filter((line) => line !== undefined).join("\n"),
+    metadata: {
+      ...result,
+      provider: provider.name
+    }
+  };
 }
 
 function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {
@@ -606,6 +986,41 @@ function createBrowserActionTool(input: {
   };
 }
 
+function withDebug<T extends { metadata?: Record<string, unknown> }>(result: T, debug: BrowserDebugSession): T {
+  if (!debug.enabled) {
+    return result;
+  }
+  return {
+    ...result,
+    metadata: withDebugMetadata(result.metadata ?? {}, debug)
+  };
+}
+
+function withDebugMetadata(metadata: Record<string, unknown>, debug: BrowserDebugSession): Record<string, unknown> {
+  return {
+    ...metadata,
+    ...debugMetadata(debug)
+  };
+}
+
+function debugMetadata(debug: BrowserDebugSession): Record<string, unknown> {
+  if (!debug.enabled) {
+    return {};
+  }
+  const events = debug.flush();
+  return events.length === 0 ? {} : { debug: events };
+}
+
+function describeValueShape(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { type: "array", length: value.length };
+  }
+  if (value !== null && typeof value === "object") {
+    return { type: "object", keys: Object.keys(value).slice(0, 20) };
+  }
+  return { type: typeof value };
+}
+
 async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: string): Promise<{ path: string; bytes: number }> {
   const root = workspaceRoot ?? process.cwd();
   const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
@@ -617,8 +1032,30 @@ async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: 
 
 function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
   const elements = snapshot.elements ?? [];
+  const pendingDialogs = snapshot.pendingDialogs ?? [];
+  const frameTree = snapshot.frameTree ?? [];
+  const consoleHistory = snapshot.consoleHistory ?? [];
   return [
     snapshot.text,
+    pendingDialogs.length === 0 ? undefined : "",
+    pendingDialogs.length === 0 ? undefined : "Pending dialogs:",
+    ...pendingDialogs.slice(0, 5).map((dialog) => {
+      const prompt = dialog.defaultPrompt === undefined ? "" : ` default=${dialog.defaultPrompt}`;
+      return `${dialog.id} ${dialog.type}: ${dialog.message}${prompt}`.slice(0, 500);
+    }),
+    frameTree.length === 0 ? undefined : "",
+    frameTree.length === 0 ? undefined : "Frames:",
+    ...frameTree.slice(0, 10).map((frame) => {
+      const parent = frame.parentFrameId === undefined ? "" : ` parent=${frame.parentFrameId}`;
+      const oopif = frame.isOopif ? " oopif" : "";
+      return `${frame.frameId} ${frame.url} origin=${frame.origin}${parent}${oopif}`.slice(0, 500);
+    }),
+    consoleHistory.length === 0 ? undefined : "",
+    consoleHistory.length === 0 ? undefined : "Console:",
+    ...consoleHistory.slice(-10).map((entry) => {
+      const timestamp = entry.timestamp === undefined ? "" : ` ${entry.timestamp}`;
+      return `[${entry.level}]${timestamp} ${entry.text}`.trim().slice(0, 500);
+    }),
     elements.length === 0 ? undefined : "",
     elements.length === 0 ? undefined : "Interactive elements:",
     ...elements.map((element) => `${element.ref} ${element.role ?? "element"} ${element.name ?? ""}`.trim())
@@ -636,35 +1073,228 @@ function unsupportedBrowserTool(browserBackend: BrowserBackend, tool: string) {
   };
 }
 
+type UrlGuardFailure = {
+  ok: false;
+  content: string;
+  metadata: Record<string, unknown>;
+};
+
+type UrlGuard = (
+  url: string,
+  reasons: {
+    unsafeReason: string;
+    policyReason: string;
+    metadata?: Record<string, unknown>;
+  }
+) => Promise<UrlGuardFailure | undefined>;
+
+function createUrlGuard(options: WebToolOptions): UrlGuard {
+  const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
+  const allowPrivateUrls = options.securityConfig?.allowPrivateUrls === true;
+  return async (url, reasons) => {
+    if (!await isSafeUrl(url, {
+      allowPrivateUrls,
+      resolveHostname: options.resolveHostname
+    })) {
+      return {
+        ok: false,
+        content: "Blocked unsafe URL.",
+        metadata: {
+          url: redactUrlForMetadata(url),
+          ...(reasons.metadata ?? {}),
+          reason: reasons.unsafeReason
+        }
+      };
+    }
+
+    const websiteAccess = checkWebsiteAccess(url, websitePolicy);
+    if (websiteAccess?.allowed === false) {
+      return {
+        ok: false,
+        content: "Blocked by website policy.",
+        metadata: {
+          url: redactUrlForMetadata(url),
+          ...(reasons.metadata ?? {}),
+          reason: reasons.policyReason,
+          host: websiteAccess.host,
+          matchedRule: websiteAccess.matchedRule
+        }
+      };
+    }
+
+    return undefined;
+  };
+}
+
+function blockSecretUrl(
+  url: string,
+  reason: string,
+  metadata: Record<string, unknown> = {}
+): UrlGuardFailure | undefined {
+  if (scanUrlForSecrets(url) === undefined) {
+    return undefined;
+  }
+
+  return {
+    ok: false,
+    content: "Blocked URL containing a secret.",
+    metadata: {
+      ...metadata,
+      url: redactUrlForMetadata(url),
+      reason
+    }
+  };
+}
+
+async function guardBrowserCdpInput(
+  input: BrowserActionInput,
+  guardUrl: UrlGuard,
+  backend: BrowserBackend["kind"]
+): Promise<UrlGuardFailure | undefined> {
+  const method = input.method ?? "";
+  const metadata = { backend, method };
+  const urlParamName = CDP_URL_PARAMETER_METHODS.get(method);
+  const explicitUrl = urlParamName === undefined ? undefined : input.params?.[urlParamName];
+  if (typeof explicitUrl === "string") {
+    return guardCdpUrl(explicitUrl, guardUrl, metadata);
+  }
+
+  if (!CDP_RUNTIME_METHODS.has(method)) {
+    return undefined;
+  }
+
+  return guardCdpRuntimeExpression(input.params, guardUrl, metadata);
+}
+
+async function guardCdpUrl(
+  url: string,
+  guardUrl: UrlGuard,
+  metadata: Record<string, unknown>
+): Promise<UrlGuardFailure | undefined> {
+  const secretFailure = blockSecretUrl(url, "secret-in-url", metadata);
+  if (secretFailure !== undefined) {
+    return secretFailure;
+  }
+
+  return guardUrl(url, {
+    unsafeReason: "unsafe-url",
+    policyReason: "website-policy",
+    metadata
+  });
+}
+
+async function guardCdpRuntimeExpression(
+  params: Record<string, unknown> | undefined,
+  guardUrl: UrlGuard,
+  metadata: Record<string, unknown>
+): Promise<UrlGuardFailure | undefined> {
+  const texts = collectStrings(params ?? {});
+  const literalUrls = unique(texts.flatMap(extractUrlLiterals));
+  for (const url of literalUrls) {
+    const secretFailure = blockSecretUrl(url, "secret-in-url", metadata);
+    if (secretFailure !== undefined) {
+      return secretFailure;
+    }
+  }
+
+  if (!texts.some(isGuardableCdpRuntimeExpression)) {
+    return undefined;
+  }
+
+  if (literalUrls.length === 0) {
+    return {
+      ok: false,
+      content: "Blocked network-capable CDP expression.",
+      metadata: {
+        ...metadata,
+        reason: "cdp-network-expression-unchecked"
+      }
+    };
+  }
+
+  for (const url of literalUrls) {
+    const guardFailure = await guardUrl(url, {
+      unsafeReason: "unsafe-url",
+      policyReason: "website-policy",
+      metadata
+    });
+    if (guardFailure !== undefined) {
+      return guardFailure;
+    }
+  }
+
+  return undefined;
+}
+
+function collectStrings(value: unknown, depth = 0): string[] {
+  if (depth > 6) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectStrings(entry, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap((entry) => collectStrings(entry, depth + 1));
+  }
+  return [];
+}
+
+function isGuardableCdpRuntimeExpression(text: string): boolean {
+  return CDP_NETWORK_EXPRESSION_PATTERN.test(text) || CDP_NAVIGATION_EXPRESSION_PATTERN.test(text);
+}
+
+function extractUrlLiterals(text: string): string[] {
+  CDP_URL_LITERAL_PATTERN.lastIndex = 0;
+  return Array.from(text.matchAll(CDP_URL_LITERAL_PATTERN), (match) => trimUrlLiteral(match[0]));
+}
+
+function trimUrlLiteral(url: string): string {
+  return url.replace(/[.,;]+$/u, "");
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
 async function extractWithFetch(input: {
   url: string;
   fetch: FetchLike;
   maxContentChars: number;
+  guardUrl: UrlGuard;
+  debug: BrowserDebugSession;
   signal?: AbortSignal;
 }) {
   const { signal, cleanup } = createTimeoutSignal(30_000, input.signal);
 
   try {
-    const response = await input.fetch(input.url, {
-      method: "GET",
-      headers: {
-        "user-agent": "EstaCoda/2 web.extract"
-      },
+    const { response, url, redirectCount } = await fetchWithGuardedRedirects(input.url, {
+      fetch: input.fetch,
+      guardUrl: input.guardUrl,
       signal
     });
     const raw = await response.text();
     const contentType = response.headers.get("content-type") ?? undefined;
     const extracted = extractReadableText(raw, contentType);
     const result: WebExtractionResult = {
-      url: input.url,
+      url,
       title: extractTitle(raw),
       content: truncate(extracted, input.maxContentChars),
       contentType,
       status: response.status,
       source: "fetch"
     };
+    input.debug.log("web.extract.complete", {
+      provider: "fetch",
+      url,
+      status: response.status,
+      redirectCount,
+      contentLength: result.content.length
+    });
 
-    return {
+    return withDebug({
       ok: response.ok,
       content: [
         `URL: ${result.url}`,
@@ -674,19 +1304,176 @@ async function extractWithFetch(input: {
         result.content
       ].filter((line) => line !== undefined).join("\n"),
       metadata: result
-    };
+    }, input.debug);
   } catch (error) {
-    return {
+    if (isUrlGuardFailure(error)) {
+      input.debug.log("web.extract.blocked", {
+        provider: "fetch",
+        reason: error.metadata.reason,
+        url: error.metadata.url
+      });
+      return withDebug(error, input.debug);
+    }
+    input.debug.log("web.extract.error", {
+      provider: "fetch",
+      url: input.url,
+      reason: "fetch-failed",
+      error: error instanceof Error ? error.message : "web.extract failed."
+    });
+    return withDebug({
       ok: false,
       content: error instanceof Error ? error.message : "web.extract failed.",
       metadata: {
-        url: input.url,
+        url: redactUrlForMetadata(input.url),
         reason: "fetch-failed"
       }
-    };
+    }, input.debug);
   } finally {
     cleanup();
   }
+}
+
+async function fetchWithGuardedRedirects(
+  startUrl: string,
+  input: {
+    fetch: FetchLike;
+    guardUrl: UrlGuard;
+    signal: AbortSignal;
+  }
+): Promise<{
+  response: Awaited<ReturnType<FetchLike>>;
+  url: string;
+  redirectCount: number;
+}> {
+  let currentUrl = startUrl;
+  for (let redirectCount = 0; redirectCount <= MAX_WEB_EXTRACT_REDIRECTS; redirectCount++) {
+    const response = await input.fetch(currentUrl, {
+      method: "GET",
+      headers: {
+        "user-agent": "EstaCoda/2 web.extract"
+      },
+      redirect: "manual",
+      signal: input.signal
+    });
+
+    const location = response.headers.get("location");
+    if (!isRedirectStatus(response.status) || location === null) {
+      return { response, url: currentUrl, redirectCount };
+    }
+
+    if (redirectCount >= MAX_WEB_EXTRACT_REDIRECTS) {
+      throw createRedirectFailure(currentUrl, "too-many-redirects");
+    }
+
+    const nextUrl = resolveRedirectUrl(location, currentUrl);
+    if (nextUrl === undefined) {
+      throw createRedirectFailure(currentUrl, "redirect-unsafe-url");
+    }
+
+    const secretFailure = blockSecretUrl(nextUrl, "redirect-secret-in-url");
+    if (secretFailure !== undefined) {
+      throw secretFailure;
+    }
+
+    const guardFailure = await input.guardUrl(nextUrl, {
+      unsafeReason: "redirect-unsafe-url",
+      policyReason: "redirect-website-policy"
+    });
+    if (guardFailure !== undefined) {
+      throw guardFailure;
+    }
+
+    currentUrl = nextUrl;
+  }
+
+  throw createRedirectFailure(currentUrl, "too-many-redirects");
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function resolveRedirectUrl(location: string, currentUrl: string): string | undefined {
+  try {
+    return normalizeUrl(new URL(location, currentUrl).toString());
+  } catch {
+    return undefined;
+  }
+}
+
+function createRedirectFailure(url: string, reason: string): UrlGuardFailure {
+  return {
+    ok: false,
+    content: "Blocked web.extract redirect.",
+    metadata: {
+      url: redactUrlForMetadata(url),
+      reason
+    }
+  };
+}
+
+function isUrlGuardFailure(value: unknown): value is UrlGuardFailure {
+  return typeof value === "object" &&
+    value !== null &&
+    (value as { ok?: unknown }).ok === false &&
+    typeof (value as { metadata?: unknown }).metadata === "object";
+}
+
+async function checkPostNavigationUrl(input: {
+  requestedUrl: string;
+  result: import("../contracts/browser.js").BrowserNavigateResult;
+  browserBackend: BrowserBackend;
+  guardUrl: UrlGuard;
+  signal?: AbortSignal;
+}): Promise<UrlGuardFailure | undefined> {
+  const finalUrl = normalizeUrl(input.result.snapshot.url);
+  if (finalUrl === undefined || finalUrl === input.requestedUrl) {
+    return undefined;
+  }
+
+  const baseMetadata = {
+    backend: input.result.session.backend,
+    url: redactUrlForMetadata(input.requestedUrl),
+    finalUrl: redactUrlForMetadata(input.result.snapshot.url)
+  };
+
+  const secretFailure = blockSecretUrl(finalUrl, "post-redirect-secret-in-url", baseMetadata);
+  if (secretFailure !== undefined) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return secretFailure;
+  }
+
+  if (isAlwaysBlockedUrl(finalUrl)) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return {
+      ok: false,
+      content: "Blocked browser navigation to an always-blocked redirect target.",
+      metadata: {
+        ...baseMetadata,
+        reason: "post-redirect-always-blocked"
+      }
+    };
+  }
+
+  const guardFailure = await input.guardUrl(finalUrl, {
+    unsafeReason: "post-redirect-unsafe",
+    policyReason: "post-redirect-website-policy",
+    metadata: baseMetadata
+  });
+  if (guardFailure !== undefined) {
+    await blankBrowserSession(input.browserBackend, input.result.session.id, input.signal);
+    return guardFailure;
+  }
+
+  return undefined;
+}
+
+async function blankBrowserSession(browserBackend: BrowserBackend, sessionId: string, signal: AbortSignal | undefined): Promise<void> {
+  await browserBackend.navigate({
+    url: "about:blank",
+    sessionId,
+    signal
+  }).catch(() => undefined);
 }
 
 export function extractFirstUrl(text: string): string | undefined {

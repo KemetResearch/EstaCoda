@@ -20,6 +20,7 @@ export type RuntimeFingerprint = {
   securityAssessorProvider?: string;
   securityAssessorModel?: string;
   securityAssessorTimeoutMs: number;
+  securityUrlPolicyHash: string;
   approvalControllerPresent: boolean;
   explicitSecurityPolicyPresent: boolean;
 
@@ -37,6 +38,7 @@ export type RuntimeFingerprint = {
   browserHash: string;
   enableWebNetwork: boolean;
   webMaxContentChars: number;
+  webResearchHash: string;
   compressionConfigHash: string;
   externalMemoryConfigHash: string;
   disableCronTools: boolean;
@@ -98,6 +100,10 @@ export function computeRuntimeFingerprint(
     securityAssessorProvider: config.security.assessor.provider,
     securityAssessorModel: config.security.assessor.model,
     securityAssessorTimeoutMs: config.security.assessor.timeoutMs,
+    securityUrlPolicyHash: stableJsonHash({
+      allowPrivateUrls: config.security.allowPrivateUrls,
+      websiteBlocklist: config.security.websiteBlocklist,
+    }),
     approvalControllerPresent: options.approvalControllerPresent,
     explicitSecurityPolicyPresent: options.explicitSecurityPolicyPresent,
     workspaceRoot: options.workspaceRoot,
@@ -111,6 +117,12 @@ export function computeRuntimeFingerprint(
     browserHash: stableJsonHash(config.browser),
     enableWebNetwork: config.web.enableNetwork,
     webMaxContentChars: config.web.maxContentChars ?? 0,
+    webResearchHash: stableJsonHash({
+      backend: config.web.backend,
+      searchBackend: config.web.searchBackend,
+      extractBackend: config.web.extractBackend,
+      crawlBackend: config.web.crawlBackend
+    }),
     compressionConfigHash: stableJsonHash(config.compression),
     externalMemoryConfigHash: stableJsonHash(config.externalMemory),
     disableCronTools: options.disableCronTools,

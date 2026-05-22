@@ -6,6 +6,13 @@ export type BrowserBackendKind =
   | "mock"
   | "unconfigured";
 
+export type BrowserCloudProviderKind =
+  | "browserbase"
+  | "browser-use"
+  | "firecrawl"
+  | "camofox"
+  | (string & {});
+
 export type BrowserSession = {
   id: string;
   backend: BrowserBackendKind;
@@ -31,6 +38,24 @@ export type BrowserSnapshot = {
     ref: string;
     role?: string;
     name?: string;
+  }>;
+  pendingDialogs?: Array<{
+    id: string;
+    type: string;
+    message: string;
+    defaultPrompt?: string;
+  }>;
+  frameTree?: Array<{
+    frameId: string;
+    url: string;
+    origin: string;
+    parentFrameId?: string;
+    isOopif: boolean;
+  }>;
+  consoleHistory?: Array<{
+    level: string;
+    text: string;
+    timestamp?: string;
   }>;
 };
 

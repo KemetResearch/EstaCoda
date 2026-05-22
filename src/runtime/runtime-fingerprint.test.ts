@@ -46,6 +46,8 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
     profile: { mode: "focused", responseLanguage: "en" },
     security: {
       approvalMode: "adaptive",
+      allowPrivateUrls: false,
+      websiteBlocklist: {},
       assessor: { enabled: false, timeoutMs: 30_000 },
     },
     channels: {
@@ -432,6 +434,43 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("security allow-private URL policy change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        security: {
+          ...base.security,
+          allowPrivateUrls: true,
+        },
+      }),
+      opts
+    );
+    expect(fp2.securityUrlPolicyHash).not.toBe(fp1.securityUrlPolicyHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("security website blocklist policy change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        security: {
+          ...base.security,
+          websiteBlocklist: {
+            domains: ["blocked.test", "*.internal.test"],
+            sharedFiles: ["/policy/shared-blocklist.txt"],
+          },
+        },
+      }),
+      opts
+    );
+    expect(fp2.securityUrlPolicyHash).not.toBe(fp1.securityUrlPolicyHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
   it("MCP config change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig();
     const opts = fakeOptions();
@@ -492,6 +531,20 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("browser cloud provider change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        browser: { ...base.browser, cloudProvider: "browserbase" },
+      }),
+      opts
+    );
+    expect(fp2.browserHash).not.toBe(fp1.browserHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
   it("web config change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig();
     const opts = fakeOptions();
@@ -504,6 +557,26 @@ describe("computeRuntimeFingerprint", () => {
     );
     expect(fp2.enableWebNetwork).toBe(false);
     expect(fp2.webMaxContentChars).toBe(1000);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("web research backend config change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        web: {
+          ...base.web,
+          backend: "firecrawl",
+          searchBackend: "tavily",
+          extractBackend: "fetch",
+          crawlBackend: "firecrawl",
+        },
+      }),
+      opts
+    );
+    expect(fp2.webResearchHash).not.toBe(fp1.webResearchHash);
     expect(fp1).not.toEqual(fp2);
   });
 

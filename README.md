@@ -92,7 +92,8 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - **DeliveryRouter** — normalized delivery path for all channels: local, origin, Telegram, Discord, WhatsApp, Email, silent.
 - MCP client for stdio and HTTP servers, including reload semantics.
 - ACP stdio server foundation for editor clients.
-- Browser automation through a local Chrome DevTools Protocol backend.
+- Browser automation through a local Chrome DevTools Protocol backend, with guarded URL handling for `web.extract`, `browser.navigate`, and URL-capable `browser.cdp` methods. The supervised local CDP backend is opt-in and adds dialog, console, frame, lifecycle, and subresource request-guard scaffolding for local CDP sessions.
+- Web research and cloud browser provider registries are present as infrastructure. Hosted web research providers and cloud browser providers are stubs/unavailable in this release; no real hosted search/crawl APIs or cloud browser sessions are implemented.
 - **Cron jobs (v0.9 hardened)** — persistent store, prompt scanning, script-backed jobs, tick locking, per-job duplicate prevention, execution history in SQLite, failure classification, delivery routing, recursion guard.
 - Voice/TTS/STT configuration foundation and audio artifacts.
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.

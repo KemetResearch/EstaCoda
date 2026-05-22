@@ -35,7 +35,8 @@ Default: `adaptive`
 
 | Class | Examples | Gating |
 |-------|----------|--------|
-| `safe` | File reads, web search | None |
+| `safe` | File reads | None |
+| `read-only-network` | Web search/extract/crawl, browser snapshots/navigation reads | Network-aware read-only policy |
 | `caution` | File writes, edits | Adaptive or strict |
 | `external-side-effect` | Network POSTs, external APIs | Usually gated |
 | `irreversible` | Deletes, deployments, sends | Always gated |
@@ -112,6 +113,25 @@ Persistent approvals do not override hardline command blocks. The hardline check
 - Obvious risk classes still trigger approval logic.
 - Trust is global directory-owned state persisted per workspace root in `~/.estacoda/trust.json`.
 - Trust does not control config loading. Runtime config always comes from the selected profile.
+
+## Browser And Web URL Safety
+
+Network-capable browser and web tools enforce a separate URL-safety floor before the normal tool result is returned. Private and internal URLs are blocked by default, including loopback, RFC1918, link-local, multicast, unspecified, reserved, CGNAT, and equivalent IPv6 ranges. Cloud metadata endpoints are always blocked, even when private URLs are otherwise allowed.
+
+The canonical config key is `security.allowPrivateUrls`; `browser.allowPrivateUrls` is a deprecated alias only. `ESTACODA_ALLOW_PRIVATE_URLS` overrides config and accepts `1`, `true`, `yes`, and `on` for true, and `0`, `false`, `no`, and `off` for false. Any other value fails config loading instead of silently changing the safety posture.
+
+`security.websiteBlocklist` supports exact domain rules and wildcard suffix rules such as `*.example.com`. Rules may be configured inline in `domains` or loaded from `sharedFiles`; shared files use one rule per line, ignore blanks and `#` comments, and missing files warn and are skipped. The blocklist policy is enabled when at least one normalized rule is loaded.
+
+Current protection coverage:
+
+- `web.extract` guards the initial URL and every manual redirect before reading the response body.
+- `browser.navigate` guards the initial URL and checks the final post-navigation URL, with best-effort cleanup to `about:blank` when a redirect lands on a blocked target.
+- `browser.cdp` is an `external-side-effect` tool. URL-capable CDP methods including `Page.navigate`, `Target.createTarget`, `Runtime.evaluate`, and `Runtime.callFunctionOn` apply URL-safety, secret scanning, and website-policy checks to explicit URLs and obvious network/navigation literal URL expressions.
+- Supervised local CDP request interception aborts metadata, private/internal, website-policy-blocked, and secret-bearing browser subresource requests. It does not proxy content and does not read response bodies.
+
+Browser/web debug telemetry is disabled by default and is enabled only with `ESTACODA_BROWSER_DEBUG=true` or `ESTACODA_WEB_TOOLS_DEBUG=true`. Debug data is attached to individual tool results only and is redacted before storage or return, including secret-bearing URLs, auth headers, cookies, request/response bodies, raw Runtime expressions, full page text, and oversized nested payloads.
+
+Known limits: there is no socket-level DNS rebinding or TOCTOU protection, runtime-expression guarding is not full JavaScript static analysis, and debug telemetry is not persistent session recording, video capture, or a dashboard.
 
 ## Channel Security Model
 
