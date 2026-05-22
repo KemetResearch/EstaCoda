@@ -63,7 +63,7 @@ function fakeOpenAiSpeechFetch(bytes = Buffer.from("audio")): VoiceFetchLike {
 }
 
 describe("voice tool readiness", () => {
-  it("does not advertise edge TTS as available in Stage 0", async () => {
+  it("does not advertise edge TTS as available in Stage 1", async () => {
     const roots = await createRoots();
     const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
     const tools = createVoiceTools({
@@ -77,7 +77,7 @@ describe("voice tool readiness", () => {
     expect(speak?.isAvailable()).toBe(false);
     expect(checkTtsProviderStatus("edge", tts)).toEqual({
       ready: false,
-      reason: "edge TTS is not implemented in v0.1.0 Stage 0"
+      reason: "edge TTS is not implemented in v0.1.0 Stage 1"
     });
   });
 
@@ -100,6 +100,51 @@ describe("voice tool readiness", () => {
       const speak = tools.find((tool) => tool.name === "voice.speak");
       expect(speak?.isAvailable()).toBe(true);
       expect(checkTtsProviderStatus("openai", tts)).toEqual({ ready: true });
+    });
+  });
+
+  it("advertises Stage 1 hosted TTS providers when their key is present", async () => {
+    await withEnv({
+      ELEVENLABS_API_KEY: "eleven-key",
+      MINIMAX_API_KEY: "minimax-key",
+      GEMINI_API_KEY: "gemini-key",
+      XAI_API_KEY: "xai-key"
+    }, async () => {
+      expect(checkTtsProviderStatus("elevenlabs", {
+        provider: "elevenlabs",
+        enabled: true,
+        speed: 1,
+        elevenlabs: { apiKeyEnv: "ELEVENLABS_API_KEY" }
+      })).toEqual({ ready: true });
+      expect(checkTtsProviderStatus("minimax", {
+        provider: "minimax",
+        enabled: true,
+        speed: 1,
+        minimax: { apiKeyEnv: "MINIMAX_API_KEY" }
+      })).toEqual({ ready: true });
+      expect(checkTtsProviderStatus("gemini", {
+        provider: "gemini",
+        enabled: true,
+        speed: 1,
+        gemini: { apiKeyEnv: "GEMINI_API_KEY" }
+      })).toEqual({ ready: true });
+      expect(checkTtsProviderStatus("xai", {
+        provider: "xai",
+        enabled: true,
+        speed: 1,
+        xai: { apiKeyEnv: "XAI_API_KEY" }
+      })).toEqual({ ready: true });
+    });
+  });
+
+  it("keeps unimplemented TTS providers unavailable", () => {
+    expect(checkTtsProviderStatus("mistral", { provider: "mistral", enabled: true, speed: 1 })).toEqual({
+      ready: false,
+      reason: "mistral TTS is not implemented in v0.1.0 Stage 1"
+    });
+    expect(checkTtsProviderStatus("neutts", { provider: "neutts", enabled: true, speed: 1 })).toEqual({
+      ready: false,
+      reason: "neutts TTS is not implemented in v0.1.0 Stage 1"
     });
   });
 
@@ -151,6 +196,86 @@ describe("voice tool readiness", () => {
     expect(transcribe?.isAvailable()).toBe(true);
     expect(checkSttProviderStatus("local", stt)).toEqual({ ready: true });
   });
+});
+
+describe("voice tool text caps", () => {
+  const hostedProviders = [
+    {
+      provider: "openai" as const,
+      env: { VOICE_TOOLS_OPENAI_KEY: "openai-key", OPENAI_API_KEY: undefined },
+      tts: {
+        provider: "openai" as const,
+        enabled: true,
+        speed: 1,
+        openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+      },
+      cap: 4096
+    },
+    {
+      provider: "elevenlabs" as const,
+      env: { ELEVENLABS_API_KEY: "eleven-key" },
+      tts: {
+        provider: "elevenlabs" as const,
+        enabled: true,
+        speed: 1,
+        elevenlabs: { apiKeyEnv: "ELEVENLABS_API_KEY", modelId: "eleven_turbo_v2_5" }
+      },
+      cap: 2000
+    },
+    {
+      provider: "minimax" as const,
+      env: { MINIMAX_API_KEY: "minimax-key" },
+      tts: {
+        provider: "minimax" as const,
+        enabled: true,
+        speed: 1,
+        minimax: { apiKeyEnv: "MINIMAX_API_KEY" }
+      },
+      cap: 4096
+    },
+    {
+      provider: "gemini" as const,
+      env: { GEMINI_API_KEY: "gemini-key" },
+      tts: {
+        provider: "gemini" as const,
+        enabled: true,
+        speed: 1,
+        gemini: { apiKeyEnv: "GEMINI_API_KEY" }
+      },
+      cap: 4096
+    },
+    {
+      provider: "xai" as const,
+      env: { XAI_API_KEY: "xai-key" },
+      tts: {
+        provider: "xai" as const,
+        enabled: true,
+        speed: 1,
+        xai: { apiKeyEnv: "XAI_API_KEY" }
+      },
+      cap: 4096
+    }
+  ];
+
+  for (const { provider, env, tts, cap } of hostedProviders) {
+    it(`rejects oversized input for ${provider}`, async () => {
+      await withEnv(env, async () => {
+        const roots = await createRoots();
+        const speak = createVoiceTools({
+          ...roots,
+          artifactStore: artifactStore(),
+          tts,
+          fetch: async () => {
+            throw new Error("fetch should not be called for oversized TTS input");
+          }
+        }).find((tool) => tool.name === "voice.speak");
+
+        const result = await speak!.run({ text: "x".repeat(cap + 1) });
+        expect(result.ok).toBe(false);
+        expect(result.content).toBe(`Text exceeds provider max of ${cap} characters.`);
+      });
+    });
+  }
 });
 
 describe("voice tool execution boundaries", () => {

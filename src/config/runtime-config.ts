@@ -138,6 +138,7 @@ export type TtsConfig = {
     sample_rate?: number;
     bitRate?: number;
     bit_rate?: number;
+    speed?: number;
     baseUrl?: string;
     base_url?: string;
     apiKeyEnv?: string;
@@ -1259,6 +1260,7 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
       language: value?.xai?.language ?? "en",
       sampleRate: value?.xai?.sampleRate ?? value?.xai?.sample_rate ?? 24_000,
       bitRate: value?.xai?.bitRate ?? value?.xai?.bit_rate ?? 128_000,
+      speed: boundedNumber(value?.xai?.speed, 1, 0.5, 2),
       baseUrl: value?.xai?.baseUrl ?? value?.xai?.base_url ?? "https://api.x.ai/v1",
       apiKeyEnv: value?.xai?.apiKeyEnv ?? value?.xai?.api_key_env ?? "XAI_API_KEY"
     },

@@ -916,6 +916,44 @@ describe("loadRuntimeConfig media boundary", () => {
     });
   });
 
+  it("normalizes xAI native TTS config without adding a model field", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      tts: {
+        provider: "xai",
+        xai: {
+          voice_id: "nova",
+          language: "en-US",
+          sample_rate: 48_000,
+          bit_rate: 192_000,
+          base_url: "https://api.x.ai/v1",
+          api_key_env: "CUSTOM_XAI_KEY",
+          speed: 1.4
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.tts.xai).toEqual({
+      voiceId: "nova",
+      language: "en-US",
+      sampleRate: 48_000,
+      bitRate: 192_000,
+      baseUrl: "https://api.x.ai/v1",
+      apiKeyEnv: "CUSTOM_XAI_KEY",
+      speed: 1.4
+    });
+    expect(loaded.tts.xai).not.toHaveProperty("model");
+  });
+
   it("keeps voice and image-generation config separate from LLM route normalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

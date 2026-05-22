@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
+import { validateAudioInput } from "./audio-validation.js";
+import { getTtsTextCap, synthesizeSpeech } from "./tts-providers.js";
 
 export type VoiceFetchLike = (url: string, init?: {
   method?: string;
@@ -43,20 +45,20 @@ export function checkTtsProviderStatus(
     return { ready: false, reason: "TTS disabled" };
   }
 
-  if (provider === "openai") {
-    const apiKeyEnv = config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+  const apiKeyEnv = ttsApiKeyEnv(provider, config);
+  if (apiKeyEnv !== undefined) {
     const apiKey = process.env[apiKeyEnv] ??
-      (apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+      (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
     if (apiKey === undefined || apiKey.length === 0) {
       return {
         ready: false,
-        reason: `Missing ${apiKeyEnv}${apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
+        reason: `Missing ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
       };
     }
     return { ready: true };
   }
 
-  return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 0` };
+  return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 1` };
 }
 
 export function checkSttProviderStatus(
@@ -133,6 +135,14 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
             ok: false,
             content: `voice.speak unavailable: ${status.reason}`,
             metadata: { provider: tts.provider, reason: status.reason }
+          };
+        }
+        const cap = getTtsTextCap({ provider: tts.provider, tts, model: input.model });
+        if (cap !== undefined && text.length > cap) {
+          return {
+            ok: false,
+            content: `Text exceeds provider max of ${cap} characters.`,
+            metadata: { provider: tts.provider, maxChars: cap, textChars: text.length }
           };
         }
 
@@ -287,98 +297,6 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
   return value;
 }
 
-async function synthesizeSpeech(input: {
-  text: string;
-  voice?: string;
-  model?: string;
-  format?: string;
-  tts: LoadedRuntimeConfig["tts"];
-  fetch?: VoiceFetchLike;
-  signal?: AbortSignal;
-}): Promise<
-  | { ok: true; bytes: Buffer; mimeType: string; model: string; voice: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> }
-> {
-  const status = checkTtsProviderStatus(input.tts.provider, input.tts);
-  if (!status.ready) {
-    return {
-      ok: false,
-      content: `TTS provider unavailable: ${status.reason}`,
-      metadata: {
-        provider: input.tts.provider,
-        reason: status.reason
-      }
-    };
-  }
-
-  if (input.tts.provider !== "openai") {
-    return {
-      ok: false,
-      content: [
-        `TTS execution for ${input.tts.provider} is not enabled yet.`,
-        "Configured providers are visible through estacoda voice status.",
-        "This first execution pass supports OpenAI-compatible TTS."
-      ].join("\n"),
-      metadata: {
-        provider: input.tts.provider
-      }
-    };
-  }
-
-  const apiKeyEnv = input.tts.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
-  const apiKey = process.env[apiKeyEnv] ?? (apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-  if (apiKey === undefined || apiKey.length === 0) {
-    return {
-      ok: false,
-      content: `Missing TTS API key. Export ${apiKeyEnv}${apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
-      metadata: {
-        provider: "openai",
-        apiKeyEnv
-      }
-    };
-  }
-
-  const model = input.model ?? input.tts.openai?.model ?? "gpt-4o-mini-tts";
-  const voice = input.voice ?? input.tts.openai?.voice ?? "alloy";
-  const responseFormat = normalizeAudioFormat(input.format);
-  const baseUrl = (input.tts.openai?.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  const response = await (input.fetch ?? globalVoiceFetch)(`${baseUrl}/audio/speech`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: input.text,
-      response_format: responseFormat,
-      speed: input.tts.openai?.speed ?? input.tts.speed
-    }),
-    signal: input.signal
-  });
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      content: `TTS request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
-      metadata: {
-        provider: "openai",
-        model,
-        voice
-      }
-    };
-  }
-
-  return {
-    ok: true,
-    bytes: Buffer.from(await response.arrayBuffer()),
-    mimeType: mimeForAudioFormat(responseFormat),
-    model,
-    voice
-  };
-}
-
 async function globalVoiceFetch(url: string, init?: Parameters<VoiceFetchLike>[1]): ReturnType<VoiceFetchLike> {
   const response = await fetch(url, init as RequestInit);
   return {
@@ -412,6 +330,11 @@ export async function transcribeAudioFile(input: {
         reason: status.reason
       }
     };
+  }
+
+  const audioValidation = await validateAudioInput(input.path);
+  if (!audioValidation.ok) {
+    return audioValidation;
   }
 
   if (input.stt.provider === "local") {
@@ -635,27 +558,6 @@ function tryJson(value: string): any {
   }
 }
 
-function normalizeAudioFormat(value: string | undefined): "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" {
-  return value === "opus" || value === "aac" || value === "flac" || value === "wav" || value === "pcm" ? value : "mp3";
-}
-
-function mimeForAudioFormat(format: ReturnType<typeof normalizeAudioFormat>): string {
-  switch (format) {
-    case "opus":
-      return "audio/ogg";
-    case "aac":
-      return "audio/aac";
-    case "flac":
-      return "audio/flac";
-    case "wav":
-      return "audio/wav";
-    case "pcm":
-      return "audio/L16";
-    case "mp3":
-      return "audio/mpeg";
-  }
-}
-
 function extensionForMime(mimeType: string): string {
   switch (mimeType) {
     case "audio/ogg":
@@ -670,6 +572,26 @@ function extensionForMime(mimeType: string): string {
       return "pcm";
     default:
       return "mp3";
+  }
+}
+
+function ttsApiKeyEnv(provider: TtsProvider, config: LoadedRuntimeConfig["tts"]): string | undefined {
+  switch (provider) {
+    case "openai":
+      return config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+    case "elevenlabs":
+      return config.elevenlabs?.apiKeyEnv ?? "ELEVENLABS_API_KEY";
+    case "minimax":
+      return config.minimax?.apiKeyEnv ?? "MINIMAX_API_KEY";
+    case "gemini":
+      return config.gemini?.apiKeyEnv ?? "GEMINI_API_KEY";
+    case "xai":
+      return config.xai?.apiKeyEnv ?? "XAI_API_KEY";
+    case "edge":
+    case "mistral":
+    case "neutts":
+    case "kittentts":
+      return undefined;
   }
 }
 
