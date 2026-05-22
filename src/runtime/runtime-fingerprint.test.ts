@@ -546,6 +546,26 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("web research backend config change changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        web: {
+          ...base.web,
+          backend: "firecrawl",
+          searchBackend: "tavily",
+          extractBackend: "fetch",
+          crawlBackend: "firecrawl",
+        },
+      }),
+      opts
+    );
+    expect(fp2.webResearchHash).not.toBe(fp1.webResearchHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
   it("compression config change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig();
     const opts = fakeOptions();

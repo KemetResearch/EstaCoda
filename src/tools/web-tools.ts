@@ -8,12 +8,18 @@ import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets,
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { analyzeImageWithVision } from "./vision-tools.js";
+import {
+  registerDefaultWebResearchProviders,
+  selectWebResearchProvider
+} from "./web-research-registry.js";
+import type { WebResearchConfig, WebResearchProvider } from "./web-research-provider.js";
 
 export type WebToolOptions = {
   fetch?: FetchLike;
   browserBackend?: BrowserBackend;
   enableNetwork?: boolean;
   maxContentChars?: number;
+  webConfig?: WebResearchConfig;
   workspaceRoot?: string;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
@@ -51,11 +57,13 @@ const CDP_NAVIGATION_EXPRESSION_PATTERN = /\b(?:location\.(?:href|assign|replace
 const CDP_URL_LITERAL_PATTERN = /https?:\/\/[^\s"'<>\\)]+/giu;
 
 export function createWebTools(options: WebToolOptions = {}): readonly RegisteredTool[] {
+  registerDefaultWebResearchProviders();
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
   const urlGuard = createUrlGuard(options);
 
   return [
+    createWebSearchTool(options.webConfig),
     {
       name: "web.extract",
       description: "Fetch and extract readable text from a URL for research workflows.",
@@ -109,6 +117,41 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return guardFailure;
         }
 
+        const providerSelection = await selectWebResearchProvider("extract", options.webConfig);
+        if (!providerSelection.availability.available) {
+          return unavailableWebResearchResult("web.extract", "extract", providerSelection);
+        }
+
+        if (!providerSelection.fallback && providerSelection.providerName !== "fetch") {
+          if (providerSelection.provider?.extract === undefined) {
+            return unavailableWebResearchResult("web.extract", "extract", {
+              ...providerSelection,
+              availability: {
+                available: false,
+                reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web extract.`
+              }
+            });
+          }
+
+          const providerResult = await providerSelection.provider.extract(url, {
+            maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+            signal: context?.signal
+          }).catch((error: unknown) => ({ error }));
+          if ("error" in providerResult) {
+            return {
+              ok: false,
+              content: providerResult.error instanceof Error ? providerResult.error.message : "web.extract provider failed.",
+              metadata: {
+                url: redactUrlForMetadata(url),
+                provider: providerSelection.providerName,
+                reason: "provider-failed"
+              }
+            };
+          }
+
+          return formatWebExtractProviderResult(providerSelection.provider, providerResult);
+        }
+
         return extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
@@ -118,6 +161,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         });
       }
     },
+    createWebCrawlTool(options.webConfig, urlGuard),
     {
       name: "browser.status",
       description: "Check configured browser backend availability and endpoint details.",
@@ -568,6 +612,7 @@ export const webToolProvider: SessionToolProvider = {
       browserBackend: requireProviderDependency("web", "browserBackend", ctx.browserBackend),
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
+      webConfig: ctx.webConfig,
       workspaceRoot: ctx.workspaceRoot,
       securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
@@ -588,6 +633,213 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
     throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
   }
   return value;
+}
+
+function createWebSearchTool(webConfig: WebResearchConfig | undefined): RegisteredTool {
+  return {
+    name: "web.search",
+    description: "Search the web using a configured research provider.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        maxResults: { type: "number" }
+      },
+      required: ["query"]
+    },
+    riskClass: "read-only-network",
+    toolsets: ["web", "research"],
+    progressLabel: "searching web",
+    maxResultSizeChars: 8000,
+    isAvailable: () => true,
+    run: async (input: { query?: string; maxResults?: number }, context) => {
+      const query = input.query?.trim();
+      if (query === undefined || query.length === 0) {
+        return {
+          ok: false,
+          content: "No query found for web.search.",
+          metadata: { reason: "missing-query" }
+        };
+      }
+
+      const providerSelection = await selectWebResearchProvider("search", webConfig);
+      if (!providerSelection.availability.available) {
+        return unavailableWebResearchResult("web.search", "search", providerSelection);
+      }
+
+      if (providerSelection.provider?.search === undefined) {
+        return unavailableWebResearchResult("web.search", "search", {
+          ...providerSelection,
+          availability: {
+            available: false,
+            reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web search.`
+          }
+        });
+      }
+
+      const results = await providerSelection.provider.search(query, {
+        maxResults: input.maxResults,
+        signal: context?.signal
+      }).catch((error: unknown) => ({ error }));
+      if ("error" in results) {
+        return {
+          ok: false,
+          content: results.error instanceof Error ? results.error.message : "web.search provider failed.",
+          metadata: {
+            provider: providerSelection.providerName,
+            reason: "provider-failed"
+          }
+        };
+      }
+
+      const bounded = results.slice(0, Math.max(1, Math.min(input.maxResults ?? 10, 20)));
+      return {
+        ok: true,
+        content: bounded.length === 0
+          ? "No web search results found."
+          : bounded.map((result, index) => [
+            `${index + 1}. ${truncate(result.title, 200)}`,
+            result.url,
+            result.snippet === undefined ? undefined : truncate(result.snippet, 500)
+          ].filter((line) => line !== undefined).join("\n")).join("\n\n"),
+        metadata: {
+          provider: providerSelection.providerName,
+          results: bounded
+        }
+      };
+    }
+  };
+}
+
+function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: UrlGuard): RegisteredTool {
+  return {
+    name: "web.crawl",
+    description: "Crawl a URL using a configured research provider.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        text: { type: "string" },
+        maxPages: { type: "number" },
+        maxContentChars: { type: "number" }
+      }
+    },
+    riskClass: "read-only-network",
+    toolsets: ["web", "research"],
+    progressLabel: "crawling web",
+    maxResultSizeChars: 12000,
+    isAvailable: () => true,
+    run: async (input: { url?: string; text?: string; maxPages?: number; maxContentChars?: number }, context) => {
+      const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
+      if (url === undefined) {
+        return {
+          ok: false,
+          content: "No URL found for web.crawl.",
+          metadata: { reason: "missing-url" }
+        };
+      }
+
+      const secretFailure = blockSecretUrl(url, "secret-in-url");
+      if (secretFailure !== undefined) {
+        return secretFailure;
+      }
+
+      const guardFailure = await guardUrl(url, {
+        unsafeReason: "unsafe-url",
+        policyReason: "website-policy"
+      });
+      if (guardFailure !== undefined) {
+        return guardFailure;
+      }
+
+      const providerSelection = await selectWebResearchProvider("crawl", webConfig);
+      if (!providerSelection.availability.available) {
+        return unavailableWebResearchResult("web.crawl", "crawl", providerSelection);
+      }
+
+      if (providerSelection.provider?.crawl === undefined) {
+        return unavailableWebResearchResult("web.crawl", "crawl", {
+          ...providerSelection,
+          availability: {
+            available: false,
+            reason: `Provider ${providerSelection.providerName ?? "unknown"} does not support web crawl.`
+          }
+        });
+      }
+
+      const result = await providerSelection.provider.crawl(url, {
+        maxPages: input.maxPages,
+        maxContentChars: input.maxContentChars,
+        signal: context?.signal
+      }).catch((error: unknown) => ({ error }));
+      if ("error" in result) {
+        return {
+          ok: false,
+          content: result.error instanceof Error ? result.error.message : "web.crawl provider failed.",
+          metadata: {
+            url: redactUrlForMetadata(url),
+            provider: providerSelection.providerName,
+            reason: "provider-failed"
+          }
+        };
+      }
+
+      const pages = result.pages.slice(0, Math.max(1, Math.min(input.maxPages ?? 10, 20)));
+      return {
+        ok: true,
+        content: pages.length === 0
+          ? `No pages crawled for ${redactUrlForMetadata(result.url)}.`
+          : pages.map((page, index) => [
+            `${index + 1}. ${page.title ?? page.url}`,
+            page.url,
+            truncate(page.content, input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS)
+          ].join("\n")).join("\n\n"),
+        metadata: {
+          provider: providerSelection.providerName,
+          url: redactUrlForMetadata(result.url),
+          pages
+        }
+      };
+    }
+  };
+}
+
+function unavailableWebResearchResult(
+  toolName: string,
+  capability: string,
+  selection: Awaited<ReturnType<typeof selectWebResearchProvider>>
+) {
+  return {
+    ok: false,
+    content: `${toolName} is unavailable: ${selection.availability.reason ?? `No available web ${capability} provider configured.`}`,
+    metadata: {
+      provider: selection.providerName,
+      capability,
+      reason: selection.availability.reason ?? `No available web ${capability} provider configured.`,
+      explicit: selection.explicit,
+      fallback: selection.fallback
+    }
+  };
+}
+
+function formatWebExtractProviderResult(
+  provider: WebResearchProvider,
+  result: import("./web-research-provider.js").WebExtractResult
+) {
+  return {
+    ok: result.status === undefined || (result.status >= 200 && result.status < 400),
+    content: [
+      `URL: ${result.url}`,
+      result.title === undefined ? undefined : `Title: ${result.title}`,
+      result.status === undefined ? undefined : `Status: ${result.status}`,
+      "",
+      result.content
+    ].filter((line) => line !== undefined).join("\n"),
+    metadata: {
+      ...result,
+      provider: provider.name
+    }
+  };
 }
 
 function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {

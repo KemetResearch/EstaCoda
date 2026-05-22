@@ -779,6 +779,12 @@ export class AcpServer {
       telegramReady: config.channels.telegram.ready,
       enableWebNetwork: config.web.enableNetwork,
       webMaxContentChars: config.web.maxContentChars,
+      webConfig: {
+        backend: config.web.backend,
+        searchBackend: config.web.searchBackend,
+        extractBackend: config.web.extractBackend,
+        crawlBackend: config.web.crawlBackend
+      },
       securityConfig: {
         allowPrivateUrls: config.security.allowPrivateUrls,
         websiteBlocklist: config.security.websiteBlocklist

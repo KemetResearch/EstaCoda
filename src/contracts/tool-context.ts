@@ -51,6 +51,7 @@ export type SessionToolContext = {
   cdpWebSocketFactory?: import("../browser/browser-backend.js").CdpWebSocketFactory;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
+  webConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   voiceFetch?: import("../tools/voice-tools.js").VoiceFetchLike;
   tts?: import("../config/runtime-config.js").LoadedRuntimeConfig["tts"];

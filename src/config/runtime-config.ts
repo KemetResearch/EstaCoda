@@ -277,6 +277,10 @@ export type EstaCodaConfig = {
   web?: {
     enableNetwork?: boolean;
     maxContentChars?: number;
+    backend?: string;
+    searchBackend?: string;
+    extractBackend?: string;
+    crawlBackend?: string;
   };
   compression?: Partial<SessionCompressionConfig>;
   externalMemory?: Partial<ExternalMemoryConfig>;
@@ -397,6 +401,10 @@ export type LoadedRuntimeConfig = {
   web: {
     enableNetwork: boolean;
     maxContentChars?: number;
+    backend?: string;
+    searchBackend?: string;
+    extractBackend?: string;
+    crawlBackend?: string;
   };
   compression: SessionCompressionConfig;
   externalMemory: ExternalMemoryConfig;
@@ -677,7 +685,11 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     auxiliaryModels: normalizeAuxiliaryModels(config.auxiliaryModels),
     web: {
       enableNetwork: config.web?.enableNetwork ?? false,
-      maxContentChars: config.web?.maxContentChars
+      maxContentChars: config.web?.maxContentChars,
+      backend: config.web?.backend,
+      searchBackend: config.web?.searchBackend,
+      extractBackend: config.web?.extractBackend,
+      crawlBackend: config.web?.crawlBackend
     },
     compression: normalizeSessionCompressionConfig(config.compression),
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),

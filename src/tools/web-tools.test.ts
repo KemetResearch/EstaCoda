@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserActionInput, BrowserBackend } from "../contracts/browser.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { createWebTools, type FetchLike } from "./web-tools.js";
+import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
+import type { WebResearchProvider } from "./web-research-provider.js";
 
 const expectedToolNames = [
+  "web.search",
   "web.extract",
+  "web.crawl",
   "browser.status",
   "browser.snapshot",
   "browser.click",
@@ -93,10 +97,134 @@ describe("web and browser tools baselines", () => {
   afterEach(async () => {
     await Promise.all(tempRoots.map((path) => rm(path, { recursive: true, force: true })));
     tempRoots = [];
+    resetWebResearchProvidersForTest();
   });
 
   it("exposes the expected browser and web tool names", () => {
     expect(createWebTools().map((candidate) => candidate.name)).toEqual(expectedToolNames);
+  });
+
+  it("reports unavailable web.search when no backend is configured", async () => {
+    const search = tool("web.search", createWebTools());
+
+    const result = await search.run({ query: "estacoda" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        capability: "search",
+        reason: "No available web search provider configured.",
+        explicit: false,
+        fallback: false
+      }
+    });
+  });
+
+  it("returns explicit web.search provider unavailable reasons without calling the provider", async () => {
+    const searchImpl = vi.fn();
+    registerWebResearchProvider({
+      name: "offline-search",
+      displayName: "Offline Search",
+      capabilities: { search: true },
+      getAvailability: () => ({ available: false, reason: "offline search" }),
+      search: searchImpl
+    });
+    const search = tool("web.search", createWebTools({ webConfig: { searchBackend: "offline-search" } }));
+
+    const result = await search.run({ query: "estacoda" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        provider: "offline-search",
+        capability: "search",
+        reason: "offline search",
+        explicit: true
+      }
+    });
+    expect(searchImpl).not.toHaveBeenCalled();
+  });
+
+  it("formats web.search results from an available provider", async () => {
+    registerWebResearchProvider({
+      name: "mock-search",
+      displayName: "Mock Search",
+      capabilities: { search: true },
+      getAvailability: () => ({ available: true }),
+      search: async () => [{
+        title: "Example Result",
+        url: "https://example.com/result",
+        snippet: "Example snippet"
+      }]
+    });
+    const search = tool("web.search", createWebTools({ webConfig: { searchBackend: "mock-search" } }));
+
+    const result = await search.run({ query: "estacoda" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("1. Example Result");
+    expect(result.content).toContain("https://example.com/result");
+    expect(result.content).toContain("Example snippet");
+    expect(result.metadata).toMatchObject({
+      provider: "mock-search",
+      results: [{
+        title: "Example Result",
+        url: "https://example.com/result",
+        snippet: "Example snippet"
+      }]
+    });
+  });
+
+  it("reports unavailable web.crawl when no backend is configured", async () => {
+    const crawl = tool("web.crawl", createWebTools({ resolveHostname: publicResolver }));
+
+    const result = await crawl.run({ url: "https://example.com" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        capability: "crawl",
+        reason: "No available web crawl provider configured.",
+        explicit: false,
+        fallback: false
+      }
+    });
+  });
+
+  it("formats web.crawl pages from an available provider", async () => {
+    registerWebResearchProvider({
+      name: "mock-crawl",
+      displayName: "Mock Crawl",
+      capabilities: { crawl: true },
+      getAvailability: () => ({ available: true }),
+      crawl: async () => ({
+        url: "https://example.com",
+        pages: [{
+          url: "https://example.com",
+          title: "Home",
+          content: "Crawled content"
+        }]
+      })
+    });
+    const crawl = tool("web.crawl", createWebTools({
+      webConfig: { crawlBackend: "mock-crawl" },
+      resolveHostname: publicResolver
+    }));
+
+    const result = await crawl.run({ url: "https://example.com" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("1. Home");
+    expect(result.content).toContain("Crawled content");
+    expect(result.metadata).toMatchObject({
+      provider: "mock-crawl",
+      url: "https://example.com/",
+      pages: [{
+        url: "https://example.com",
+        title: "Home",
+        content: "Crawled content"
+      }]
+    });
   });
 
   it("extracts readable content with the fetch fallback", async () => {
@@ -121,6 +249,60 @@ describe("web and browser tools baselines", () => {
       source: "fetch"
     });
     expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET", redirect: "manual" }));
+  });
+
+  it("does not silently fall back when explicit web.extract provider is unavailable", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
+    const extractImpl = vi.fn();
+    registerWebResearchProvider({
+      name: "offline-extract",
+      displayName: "Offline Extract",
+      capabilities: { extract: true },
+      getAvailability: () => ({ available: false, reason: "offline extract" }),
+      extract: extractImpl
+    } satisfies WebResearchProvider);
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver,
+      webConfig: { extractBackend: "offline-extract" }
+    }));
+
+    const result = await extract.run({ url: "https://example.com/article" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        provider: "offline-extract",
+        capability: "extract",
+        reason: "offline extract",
+        explicit: true,
+        fallback: false
+      }
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(extractImpl).not.toHaveBeenCalled();
+  });
+
+  it("uses the guarded fetch fallback when web.extract explicitly selects fetch", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({
+      body: "<html><body>explicit fetch</body></html>"
+    }));
+    const extract = tool("web.extract", createWebTools({
+      fetch,
+      enableNetwork: true,
+      resolveHostname: publicResolver,
+      webConfig: { extractBackend: "fetch" }
+    }));
+
+    const result = await extract.run({ url: "https://example.com/article" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("explicit fetch");
+    expect(result.metadata).toMatchObject({
+      url: "https://example.com/article",
+      source: "fetch"
+    });
   });
 
   it("allows ordinary public URLs with mocked fetch", async () => {
