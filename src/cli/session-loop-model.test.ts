@@ -161,6 +161,25 @@ describe("session-loop /model", () => {
     });
     const sessionDb = new InMemorySessionDB();
     await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    await sessionDb.setSessionModelOverride("test-session", {
+      route: {
+        provider: "local",
+        id: "qwen2.5:3b",
+        baseUrl: "http://localhost:11434/v1",
+        authMethod: "none",
+        apiMode: "custom_openai_compatible"
+      },
+      modelProfile: {
+        id: "qwen2.5:3b",
+        provider: "local",
+        contextWindowTokens: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      },
+      setAt: "2026-01-01T00:00:00.000Z",
+      source: "cli"
+    });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -279,6 +298,25 @@ describe("session-loop /model", () => {
       await writeProfileConfig(tempHome, originalConfig);
       const sessionDb = new InMemorySessionDB();
       await sessionDb.createSession({ id: "test-session", profileId: "default" });
+      await sessionDb.setSessionModelOverride("test-session", {
+        route: {
+          provider: "local",
+          id: "qwen2.5:3b",
+          baseUrl: "http://localhost:11434/v1",
+          authMethod: "none",
+          apiMode: "custom_openai_compatible"
+        },
+        modelProfile: {
+          id: "qwen2.5:3b",
+          provider: "local",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        },
+        setAt: "2026-01-01T00:00:00.000Z",
+        source: "cli"
+      });
       const runtime = fakeRuntime({
         provider: "local",
         model: "qwen2.5:3b",
@@ -305,6 +343,7 @@ describe("session-loop /model", () => {
       expect(missingResult).toBe(false);
       expect(outputChunks.join("")).toContain("estacoda model setup openai");
       expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(originalConfig);
+      await expect(sessionDb.getSessionModelOverride("test-session")).resolves.toBeDefined();
 
       outputChunks = [];
       process.env.OPENAI_API_KEY = "sk-secret-session-global";
@@ -327,6 +366,7 @@ describe("session-loop /model", () => {
       expect(outputChunks.join("")).not.toContain("sk-secret-session-global");
       expect(JSON.stringify(JSON.parse(readFileSync(configPath, "utf8")))).not.toContain("sk-secret-session-global");
       expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(originalConfig);
+      await expect(sessionDb.getSessionModelOverride("test-session")).resolves.toBeDefined();
     } finally {
       if (originalOpenAiKey === undefined) {
         delete process.env.OPENAI_API_KEY;

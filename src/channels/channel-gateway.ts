@@ -44,12 +44,15 @@ import {
   type ApprovalActionScope
 } from "./approval-actions.js";
 import {
+  MODEL_PICKER_MAX_CHOICE_ACTIONS,
+  modelPickerProviderActionKey,
+  modelPickerSelectActionKey,
   parseModelPickerAction,
-  renderModelPickerActions,
-  type ModelPickerChoice
+  renderModelPickerActions
 } from "./model-picker-actions.js";
 import {
   applyModelSwitchPrimaryRoute,
+  resolveEffectiveSessionModelOverride,
   resolveModelSwitchRequest,
   type ModelSwitchContext
 } from "../providers/model-switch-resolver.js";
@@ -1122,6 +1125,14 @@ export class ChannelGateway {
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
+    if (command.scope === "session" && !command.modelInput.includes("/")) {
+      const flow = await this.#createGatewayModelFlow(context);
+      const provider = (await flow.listProviderCandidates()).find((candidate) => candidate.id === command.modelInput.trim());
+      if (provider !== undefined) {
+        return this.#showModelProviderPicker(message, adapter, sessionId, provider.id);
+      }
+    }
+
     const resolution = await resolveModelSwitchRequest({
       modelInput: command.modelInput,
       source: "gateway"
@@ -1154,6 +1165,12 @@ export class ChannelGateway {
 
       const targetPath = resolveProfileStateHome({ homeDir: context.homeDir, profileId: this.#profileId }).configPath;
       await saveRuntimeConfig(targetPath, applyModelSwitchPrimaryRoute(context.config, resolution.route));
+      const runtime = await this.#runtimeForSessionCommand(message, sessionId);
+      try {
+        await runtime.sessionDb.clearSessionModelOverride(sessionId);
+      } finally {
+        await runtime.dispose();
+      }
       await this.#refreshAllCachedRuntimes("Gateway global model set");
 
       const text = [
@@ -1214,7 +1231,105 @@ export class ChannelGateway {
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
-    const flow = await createProviderModelSelectionFlow({
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const choices = providers.map((provider) => ({
+      label: provider.displayName,
+      actionKey: modelPickerProviderActionKey(provider.id),
+      kind: "provider" as const
+    }));
+    const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
+    const truncated = choices.length > renderedChoices.length;
+    const currentModel = await this.#describeCurrentModelSelection(sessionId, message, context);
+
+    const text = providers.length === 0
+      ? [
+          "No configured runnable model providers are available for this gateway session.",
+          "Run estacoda model setup from a terminal to configure credentials."
+        ].join("\n")
+      : [
+          "Session model picker",
+          `Current: ${currentModel}`,
+          "Choose a provider:",
+          ...providers.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((provider) => `model-select ${provider.id}`),
+          truncated
+            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${providers.length} providers. Reply with model-select <provider>/<model> for hidden choices.`
+            : undefined,
+          "",
+          "Clear override: model-clear",
+          "Direct set: model-select <provider>/<model>"
+        ].filter((line) => line !== undefined).join("\n");
+    await this.#deliverText(
+      adapter,
+      message.sessionKey,
+      text,
+      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+    );
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #showModelProviderPicker(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    sessionId: string,
+    providerId: string
+  ): Promise<ChannelGatewayResult> {
+    const context = await this.#loadModelSwitchContext();
+    if (context === undefined) {
+      const text = "Gateway model switching is unavailable in this process.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const provider = providers.find((candidate) => candidate.id === providerId);
+    if (provider === undefined) {
+      const text = [
+        `Model provider is not available: ${providerId}`,
+        "Run /model to see configured runnable providers."
+      ].join("\n");
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const models = await this.#listRunnableModelChoices(flow, provider.id);
+    const choices = models.map((model) => ({
+      label: model.id,
+      actionKey: modelPickerSelectActionKey(model.provider, model.id),
+      kind: "select" as const
+    }));
+    const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
+    const truncated = choices.length > renderedChoices.length;
+
+    const text = choices.length === 0
+      ? [
+          `No runnable models are configured for ${provider.displayName}.`,
+          `Run estacoda model setup ${provider.id} from a terminal.`
+        ].join("\n")
+      : [
+          `Session model picker: ${provider.displayName}`,
+          "Choose a model:",
+          ...models.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((model) => `model-select ${model.provider}/${model.id}`),
+          truncated
+            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${models.length} models. Reply with model-select ${provider.id}/<model> for hidden choices.`
+            : undefined,
+          "",
+          "Clear override: model-clear",
+          "Cancel: reply /model to choose another provider."
+        ].filter((line) => line !== undefined).join("\n");
+
+    await this.#deliverText(
+      adapter,
+      message.sessionKey,
+      text,
+      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+    );
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #createGatewayModelFlow(context: ModelSwitchContext) {
+    return createProviderModelSelectionFlow({
       config: context.config,
       providerRegistry: context.providerRegistry,
       homeDir: context.homeDir,
@@ -1222,39 +1337,66 @@ export class ChannelGateway {
       allowNetwork: false,
       mode: "normal"
     });
-    const providers = await flow.listProviderCandidates();
-    const choices: ModelPickerChoice[] = [];
+  }
 
+  async #listRunnableModelChoices(
+    flow: Awaited<ReturnType<typeof createProviderModelSelectionFlow>>,
+    providerId: string
+  ) {
+    const models = await flow.listModelCandidates(providerId);
+    return models
+      .filter((model) => model.executable && !model.catalogOnly)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async #describeCurrentModelSelection(
+    sessionId: string,
+    message: ChannelMessage,
+    context: ModelSwitchContext
+  ): Promise<string> {
+    let runtime: Runtime | undefined;
+    try {
+      runtime = await this.#runtimeForSessionCommand(message, sessionId);
+      const stored = await runtime.sessionDb.getSessionModelOverride(sessionId);
+      const effective = await resolveEffectiveSessionModelOverride(stored, context);
+      if (effective?.ok === true) {
+        return `${effective.route.provider}/${effective.route.id} (session)`;
+      }
+    } catch (error) {
+      this.#logWarning?.(
+        `Gateway model picker current override read failed for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      await runtime?.dispose();
+    }
+
+    const provider = context.config.model?.provider;
+    const id = context.config.model?.id;
+    return provider !== undefined && id !== undefined ? `${provider}/${id} (global)` : "not configured";
+  }
+
+  async #resolveProviderActionKey(actionKey: string, context: ModelSwitchContext): Promise<string | undefined> {
+    const flow = await this.#createGatewayModelFlow(context);
+    const matches = (await flow.listProviderCandidates())
+      .filter((provider) => modelPickerProviderActionKey(provider.id) === actionKey);
+    return matches.length === 1 ? matches[0]?.id : undefined;
+  }
+
+  async #resolveModelActionKey(actionKey: string, context: ModelSwitchContext): Promise<string | undefined> {
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const matches: string[] = [];
     for (const provider of providers) {
-      const models = await flow.listModelCandidates(provider.id);
+      const models = await this.#listRunnableModelChoices(flow, provider.id);
       for (const model of models) {
-        if (model.executable && !model.catalogOnly) {
-          const modelInput = `${model.provider}/${model.id}`;
-          choices.push({ label: modelInput, modelInput });
+        if (modelPickerSelectActionKey(model.provider, model.id) === actionKey) {
+          matches.push(`${model.provider}/${model.id}`);
         }
       }
     }
-    choices.sort((a, b) => a.modelInput.localeCompare(b.modelInput));
-
-    const text = choices.length === 0
-      ? [
-          "No configured runnable models are available for this gateway session.",
-          "Run estacoda model setup from a terminal to configure credentials."
-        ].join("\n")
-      : [
-          "Session model picker",
-          "Reply with one of:",
-          ...choices.map((choice) => `model-select ${choice.modelInput}`),
-          "",
-          "Clear override: model-clear"
-        ].join("\n");
-    await this.#deliverText(
-      adapter,
-      message.sessionKey,
-      text,
-      choices.length === 0 ? undefined : { actions: renderModelPickerActions(choices) }
-    );
-    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   async #loadModelSwitchContext(): Promise<ModelSwitchContext | undefined> {
@@ -1291,19 +1433,43 @@ export class ChannelGateway {
 
     const modelAction = parseModelPickerAction(message.text);
     if (modelAction !== undefined) {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       if (!modelAction.ok) {
-        const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
         const text = modelAction.reason;
         await this.#deliverText(adapter, message.sessionKey, text);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
-      const command: GatewayModelCommand =
-        modelAction.action.kind === "select"
-          ? { kind: "set", scope: "session", modelInput: modelAction.action.modelInput }
-          : modelAction.action.kind === "clear"
-            ? { kind: "clear", scope: "session" }
-            : { kind: "cancel" };
+      if (modelAction.action.kind === "provider") {
+        const context = await this.#loadModelSwitchContext();
+        const providerId = context === undefined
+          ? undefined
+          : await this.#resolveProviderActionKey(modelAction.action.actionKey, context);
+        if (providerId === undefined) {
+          const text = "Model picker action is no longer available. Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
+        return this.#showModelProviderPicker(message, adapter, sessionId, providerId);
+      }
+
+      let command: GatewayModelCommand;
+      if (modelAction.action.kind === "select") {
+        const context = await this.#loadModelSwitchContext();
+        const modelInput = context === undefined
+          ? undefined
+          : await this.#resolveModelActionKey(modelAction.action.actionKey, context);
+        if (modelInput === undefined) {
+          const text = "Model picker action is no longer available. Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
+        command = { kind: "set", scope: "session", modelInput };
+      } else {
+        command = modelAction.action.kind === "clear"
+          ? { kind: "clear", scope: "session" }
+          : { kind: "cancel" };
+      }
       return this.#handleModelCommand(message, adapter, command);
     }
 

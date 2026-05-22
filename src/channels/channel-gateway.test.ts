@@ -474,7 +474,7 @@ describe("ChannelGateway commands", () => {
     expect(hygieneRun).not.toHaveBeenCalled();
   });
 
-  it("/model renders deterministic action buttons with plain-text fallback commands", async () => {
+  it("/model renders a provider-first picker, then provider-scoped model choices", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
     try {
       await writeGatewayModelConfig(tempHome, {
@@ -500,18 +500,32 @@ describe("ChannelGateway commands", () => {
       const result = await gateway.receive(makeMessage("/model"));
 
       expect(result.replyText).toContain("Session model picker");
-      const qwenIndex = result.replyText.indexOf("model-select local/qwen2.5:3b");
-      const phiIndex = result.replyText.indexOf("model-select local/phi4:latest");
-      expect(phiIndex).toBeGreaterThanOrEqual(0);
-      expect(qwenIndex).toBeGreaterThan(phiIndex);
+      expect(result.replyText).toContain("Current: local/qwen2.5:3b (global)");
+      expect(result.replyText).toContain("Choose a provider:");
+      expect(result.replyText).toContain("model-select local");
+      expect(result.replyText).toContain("Direct set: model-select <provider>/<model>");
+      expect(result.replyText).not.toContain("model-select local/qwen2.5:3b");
       const actions = adapter.records.at(-1)?.options?.actions;
       const labels = actions?.flat().map((action) => action.label) ?? [];
-      expect(labels).toContain("local/phi4:latest");
-      expect(labels).toContain("local/qwen2.5:3b");
+      expect(labels).toContain("Local");
       expect(labels.at(-2)).toBe("Clear");
       expect(labels.at(-1)).toBe("Cancel");
-      expect(labels.indexOf("local/phi4:latest")).toBeLessThan(labels.indexOf("local/qwen2.5:3b"));
+      const values = actions?.flat().map((action) => action.value) ?? [];
+      expect(values.every((value) => value.length <= 64)).toBe(true);
       expect(JSON.stringify(actions)).not.toContain("sk-secret");
+
+      const localAction = actions?.flat().find((action) => action.label === "Local");
+      expect(localAction).toBeDefined();
+      const providerResult = await gateway.receive(makeMessage(localAction?.value ?? ""));
+      expect(providerResult.replyText).toContain("Session model picker: Local");
+      const qwenIndex = providerResult.replyText.indexOf("model-select local/qwen2.5:3b");
+      const phiIndex = providerResult.replyText.indexOf("model-select local/phi4:latest");
+      expect(phiIndex).toBeGreaterThanOrEqual(0);
+      expect(qwenIndex).toBeGreaterThan(phiIndex);
+      const modelLabels = adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label) ?? [];
+      expect(modelLabels).toContain("phi4:latest");
+      expect(modelLabels).toContain("qwen2.5:3b");
+      expect(modelLabels).not.toContain("Local");
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -596,25 +610,33 @@ describe("ChannelGateway commands", () => {
         }
       });
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const db = new InMemorySessionDB();
       const disposeAll = vi.fn(async () => {});
       const gateway = new ChannelGateway({
         adapters: [adapter],
-        runtimeForSession: async ({ sessionId }) => ({
-          ...createMinimalRuntime(),
-          sessionId,
-          isWorkspaceTrusted: async () => true
-        }),
+        runtimeForSession: async ({ sessionId }) => {
+          await ensureSession(db, sessionId);
+          return {
+            ...createMinimalRuntime(),
+            sessionId,
+            sessionDb: db,
+            isWorkspaceTrusted: async () => true
+          };
+        },
         sessionStore: new InMemoryChannelSessionStore(),
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         trustedWorkspace: true,
         runtimeCache: { disposeAll } as unknown as RuntimeCache,
         modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
       });
+      const sessionId = await gateway.receive(makeMessage("/model local/qwen2.5:3b")).then((result) => result.sessionId);
+      expect(await db.getSessionModelOverride(sessionId)).toBeDefined();
 
       const setResult = await gateway.receive(makeMessage("/model --global local/phi4:latest"));
 
       expect(setResult.replyText).toContain("Global primary model set: local/phi4:latest");
       expect(setResult.replyText).toContain("Scope: global");
+      expect(await db.getSessionModelOverride(sessionId)).toBeUndefined();
       expect(disposeAll).toHaveBeenCalledTimes(1);
       const afterSet = JSON.parse(await readFile(configPath, "utf8"));
       expect(afterSet.model.provider).toBe("local");
@@ -653,18 +675,45 @@ describe("ChannelGateway commands", () => {
       await writeGatewayModelConfig(tempHome, originalConfig);
       delete process.env.OPENAI_API_KEY;
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const db = new InMemorySessionDB();
+      const store = new InMemoryChannelSessionStore();
       const gateway = new ChannelGateway({
         adapters: [adapter],
-        runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }),
-        sessionStore: new InMemoryChannelSessionStore(),
+        runtimeForSession: async ({ sessionId }) => {
+          await ensureSession(db, sessionId);
+          return { ...createMinimalRuntime(), sessionId, sessionDb: db };
+        },
+        sessionStore: store,
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         trustedWorkspace: true,
         modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+      const sessionId = await store.getOrCreateSessionId(makeMessage("seed").sessionKey);
+      await ensureSession(db, sessionId);
+      await db.setSessionModelOverride(sessionId, {
+        route: {
+          provider: "local",
+          id: "qwen2.5:3b",
+          baseUrl: "http://localhost:11434/v1",
+          apiMode: "custom_openai_compatible",
+          authMethod: "none"
+        },
+        modelProfile: {
+          id: "qwen2.5:3b",
+          provider: "local",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        },
+        setAt: "2026-01-01T00:00:00.000Z",
+        source: "gateway"
       });
 
       const missingResult = await gateway.receive(makeMessage("/model --global openai/gpt-4o"));
       expect(missingResult.replyText).toContain("Run estacoda model setup openai from a terminal");
       expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(originalConfig);
+      expect(await db.getSessionModelOverride(sessionId)).toBeDefined();
 
       process.env.OPENAI_API_KEY = "sk-secret-gateway-global";
       const untrustedGateway = new ChannelGateway({
@@ -755,12 +804,26 @@ describe("ChannelGateway commands", () => {
       });
 
       const picker = await gateway.receive(makeMessage("/model"));
+      const providerActions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
+      const localProvider = providerActions.find((action) => action.label === "Local");
+      expect(localProvider).toBeDefined();
+
+      await gateway.receive(makeMessage(localProvider?.value ?? ""));
       const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
-      const selectPhi = actions.find((action) => action.label === "local/phi4:latest");
+      const selectPhi = actions.find((action) => action.label === "phi4:latest");
       expect(selectPhi).toBeDefined();
 
       await gateway.receive(makeMessage(selectPhi?.value ?? ""));
-      expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
+      const callbackOverride = await db.getSessionModelOverride(picker.sessionId);
+      expect(callbackOverride?.route.id).toBe("phi4:latest");
+
+      await gateway.receive(makeMessage("model-clear"));
+      await gateway.receive(makeMessage("model-select local/phi4:latest"));
+      const typedOverride = await db.getSessionModelOverride(picker.sessionId);
+      expect(typedOverride?.route).toMatchObject({
+        provider: callbackOverride?.route.provider,
+        id: callbackOverride?.route.id
+      });
 
       await gateway.receive(makeMessage(modelPickerCancelActionValue()));
       expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
@@ -769,9 +832,60 @@ describe("ChannelGateway commands", () => {
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
       expect(invalidate).toHaveBeenCalledWith(picker.sessionId);
 
-      const malformed = await gateway.receive(makeMessage("ecmodel1:s:not-a-route"));
-      expect(malformed.replyText).toContain("Invalid model picker route.");
+      const malformed = await gateway.receive(makeMessage("ecmodel1:s:not.a.route"));
+      expect(malformed.replyText).toContain("Invalid model picker action key.");
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
+    } finally {
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps long model callback payloads compact and truncates oversized pickers with plain-text fallback", async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
+    try {
+      const longModel = `000-really-long-model-${"x".repeat(140)}`;
+      await writeGatewayModelConfig(tempHome, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: [longModel, ...Array.from({ length: 24 }, (_, index) => `model-${String(index).padStart(2, "0")}`)],
+            enableNetwork: true
+          }
+        },
+        model: { provider: "local", id: longModel }
+      });
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const db = new InMemorySessionDB();
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => {
+          await ensureSession(db, sessionId);
+          return { ...createMinimalRuntime(), sessionId, sessionDb: db };
+        },
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+
+      await gateway.receive(makeMessage("/model"));
+      const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
+        .find((action) => action.label === "Local");
+      expect(localProvider).toBeDefined();
+      const modelPicker = await gateway.receive(makeMessage(localProvider?.value ?? ""));
+
+      expect(modelPicker.replyText).toContain("Showing 20 of");
+      expect(modelPicker.replyText).toContain("Reply with model-select local/<model> for hidden choices.");
+      const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
+      expect(actions).toHaveLength(22);
+      expect(actions.every((action) => action.value.length <= 64)).toBe(true);
+      expect(JSON.stringify(actions.map((action) => action.value))).not.toContain(longModel);
+
+      const longAction = actions.find((action) => action.label === longModel);
+      expect(longAction).toBeDefined();
+      const selected = await gateway.receive(makeMessage(longAction?.value ?? ""));
+      expect(selected.replyText).toContain(`Session model override set: local/${longModel}`);
+      expect((await db.getSessionModelOverride(selected.sessionId))?.route.id).toBe(longModel);
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -815,8 +929,13 @@ describe("ChannelGateway commands", () => {
 
       const picker = await gateway.receive(makeMessage("/model"));
       expect(picker.replyText).toContain("Session model picker");
+      const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
+        .find((action) => action.label === "Local");
+      expect(localProvider).toBeDefined();
+      const providerResult = await gateway.receive(makeMessage(localProvider?.value ?? ""));
+      expect(providerResult.replyText).toContain("Session model picker: Local");
       const selectQwen = adapter.records.at(-1)?.options?.actions?.flat()
-        .find((action) => action.label === "local/qwen2.5:3b");
+        .find((action) => action.label === "qwen2.5:3b");
       expect(selectQwen).toBeDefined();
       const selectResult = await gateway.receive(makeMessage(selectQwen?.value ?? ""));
       expect(selectResult.replyText).toContain("Session model override set");
@@ -825,6 +944,9 @@ describe("ChannelGateway commands", () => {
 
       expect(result.replyText).toContain("Session model override cleared");
       expect(result.replyText).not.toContain("busy");
+
+      const normalTurn = await gateway.receive(makeMessage("please do normal work"));
+      expect(normalTurn.sessionId).toBe("");
     } finally {
       if (active.ok) {
         activeTurnRegistry.endTurn(activeTurnKey, active.turnId);

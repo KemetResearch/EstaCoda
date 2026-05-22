@@ -1,16 +1,17 @@
-import type { EstaCodaConfig } from "../config/runtime-config.js";
+import type { EstaCodaConfig, ModelAliasDefinition } from "../config/runtime-config.js";
 import {
   applyRegisterProviderConfig,
   applyRegisterProviderModel,
   applySetPreferredModelRoute
 } from "../config/provider-config-mutations.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
-import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderApiMode, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionModelOverride } from "../contracts/session.js";
 import { createModelSelectionCatalog } from "./model-selection-catalog.js";
 import { normalizeModelInput } from "./model-normalization.js";
 import {
   buildResolvedModelRoute,
+  getProviderMetadata,
   validateResolvedRouteForModelSwitch
 } from "./provider-metadata.js";
 import type { ProviderRegistry } from "./provider-registry.js";
@@ -128,13 +129,17 @@ export async function resolveEffectiveSessionModelOverride(
     return undefined;
   }
 
-  const storedRoute = sessionOverrideToResolvedRoute(override);
-  const gate = validateResolvedRouteForModelSwitch(storedRoute);
+  const configuredRoute = findCurrentConfiguredOverrideRoute(override, context.config);
+  if (configuredRoute === undefined) {
+    return { ok: false, override, message: "Stored model override is no longer present in the active provider config." };
+  }
+
+  const gate = validateResolvedRouteForModelSwitch(configuredRoute);
   if (!gate.ok) {
     return { ok: false, override, message: gate.reason };
   }
 
-  const selected = await resolveExecutableRoute(storedRoute, context, {
+  const selected = await resolveExecutableRoute(configuredRoute, context, {
     routeMetadataIsAuthoritative: true
   });
   if (!selected.ok) {
@@ -146,6 +151,83 @@ export async function resolveEffectiveSessionModelOverride(
     override,
     route: selected.route
   };
+}
+
+function findCurrentConfiguredOverrideRoute(
+  override: SessionModelOverride,
+  config: EstaCodaConfig
+): ResolvedModelRoute | undefined {
+  const stored = override.route;
+  const alias = findMatchingAliasRoute(override, config);
+  if (alias !== undefined) {
+    return alias;
+  }
+
+  const providerConfig = config.providers?.[stored.provider];
+  if (providerConfig === undefined) {
+    return undefined;
+  }
+
+  const primaryMatches = config.model?.provider === stored.provider && config.model?.id === stored.id;
+  const fallback = (config.model?.fallbacks ?? []).find((route) =>
+    route.provider === stored.provider &&
+    route.id === stored.id &&
+    (route.baseUrl === undefined || route.baseUrl === stored.baseUrl)
+  );
+  const providerModelMatches = providerConfig.models?.includes(stored.id) ?? false;
+  if (!primaryMatches && fallback === undefined && !providerModelMatches) {
+    return undefined;
+  }
+
+  return buildResolvedModelRoute({
+    provider: stored.provider,
+    model: stored.id,
+    profile: override.modelProfile,
+    baseUrl: fallback?.baseUrl ?? providerConfig.baseUrl,
+    apiKeyEnv: fallback?.apiKeyEnv ?? providerConfig.apiKeyEnv,
+    contextWindowTokens: fallback?.contextWindowTokens ?? stored.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
+    apiMode: providerConfig.apiMode,
+    authMethod: providerConfig.authMethod
+  });
+}
+
+function findMatchingAliasRoute(
+  override: SessionModelOverride,
+  config: EstaCodaConfig
+): ResolvedModelRoute | undefined {
+  const aliases = {
+    ...(config.model_aliases ?? {}),
+    ...(config.modelAliases ?? {})
+  };
+  for (const alias of Object.values(aliases)) {
+    if (!aliasMatchesOverride(alias, override)) {
+      continue;
+    }
+    const providerConfig = config.providers?.[alias.provider];
+    const meta = getProviderMetadata(alias.provider);
+    return buildResolvedModelRoute({
+      provider: alias.provider,
+      model: alias.model,
+      profile: override.modelProfile,
+      baseUrl: alias.baseUrl ?? providerConfig?.baseUrl ?? meta.defaultBaseUrl,
+      apiKeyEnv: alias.apiKeyEnv ?? providerConfig?.apiKeyEnv ?? meta.defaultApiKeyEnv,
+      contextWindowTokens: override.route.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
+      apiMode: (alias.apiMode as ProviderApiMode | undefined) ?? providerConfig?.apiMode ?? meta.apiMode,
+      authMethod: providerConfig?.authMethod ?? meta.defaultAuthMethod
+    });
+  }
+  return undefined;
+}
+
+function aliasMatchesOverride(alias: ModelAliasDefinition, override: SessionModelOverride): alias is ModelAliasDefinition & {
+  provider: ProviderId;
+  model: string;
+} {
+  return alias.provider === override.route.provider &&
+    alias.model === override.route.id &&
+    (alias.baseUrl === undefined || alias.baseUrl === override.route.baseUrl) &&
+    (alias.apiKeyEnv === undefined || alias.apiKeyEnv === override.route.apiKeyEnv) &&
+    (alias.apiMode === undefined || alias.apiMode === override.route.apiMode);
 }
 
 export function sessionOverrideToResolvedRoute(override: SessionModelOverride): ResolvedModelRoute {

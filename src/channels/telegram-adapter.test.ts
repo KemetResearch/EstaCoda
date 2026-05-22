@@ -4,7 +4,7 @@ import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
-import { renderModelPickerActions } from "./model-picker-actions.js";
+import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
 
 describe("TelegramAdapter", () => {
   it("getCapabilities exists and returns correct kind", () => {
@@ -144,7 +144,7 @@ describe("TelegramAdapter", () => {
 
   it("round-trips model picker actions through Telegram callback text", () => {
     const value = renderModelPickerActions([
-      { label: "local/phi4:latest", modelInput: "local/phi4:latest" }
+      { label: "phi4:latest", actionKey: modelPickerSelectActionKey("local", "phi4:latest"), kind: "select" }
     ])[0][0].value;
     const message = updateToChannelMessage({
       update_id: 43,

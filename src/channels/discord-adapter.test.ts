@@ -4,7 +4,7 @@ import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
-import { renderModelPickerActions } from "./model-picker-actions.js";
+import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
 
 describe("DiscordAdapter", () => {
   it("initializes with options", () => {
@@ -223,7 +223,7 @@ describe("DiscordAdapter", () => {
       received.push(message);
     };
     const value = renderModelPickerActions([
-      { label: "local/phi4:latest", modelInput: "local/phi4:latest" }
+      { label: "phi4:latest", actionKey: modelPickerSelectActionKey("local", "phi4:latest"), kind: "select" }
     ])[0][0].value;
     const deferUpdate = vi.fn(async () => undefined);
 

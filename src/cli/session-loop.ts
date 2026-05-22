@@ -803,6 +803,7 @@ async function handleGlobalModelSet(
   }).configPath;
   const mutated = applyModelSwitchPrimaryRoute(context.config, resolution.route);
   await saveRuntimeConfig(targetPath, mutated);
+  await input.runtime.sessionDb.clearSessionModelOverride(input.runtime.sessionId);
 
   const refreshed = await refreshCurrentRuntime(input);
   if (refreshed === undefined) {
