@@ -4,8 +4,15 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
+import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
+import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
+import {
+  applyModelSwitchPrimaryRoute,
+  resolveEffectiveSessionModelOverride,
+  resolveModelSwitchRequest
+} from "../providers/model-switch-resolver.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -37,11 +44,13 @@ import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/vie
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { saveRuntimeConfig } from "../config/runtime-config.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
   refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
+  modelSwitchContext?: () => Promise<ModelSwitchContext>;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   prompt?: Prompt;
@@ -231,6 +240,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           renderer,
           refreshRuntime: options.refreshRuntime,
           switchRuntime: options.switchRuntime,
+          modelSwitchContext: options.modelSwitchContext,
+          prompt,
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir
         });
@@ -381,6 +392,8 @@ export async function handleSlashCommand(input: {
   runtime: Runtime;
   refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
+  modelSwitchContext?: () => Promise<ModelSwitchContext>;
+  prompt?: Prompt;
   output: NodeJS.WritableStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   workspaceRoot?: string;
@@ -401,19 +414,64 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(input.runtime.getStatus())}\n\n`);
       return false;
     case "model": {
-      if (args[0] === "set" && args[1] !== undefined) {
-        /**
-         * Deprecated/rejected compatibility path.
-         *
-         * Persistent model switching is handled by bare `estacoda model`.
-         * Session-scoped switching belongs to the later `/model` session override work.
-         *
-         * Do not implement new switching behavior here.
-         */
-        input.output.write(
-          "Session-scoped model switching is not supported. Persistent `estacoda model set` is deprecated and disabled. Use `estacoda model setup local` or `estacoda model setup custom` to configure a model endpoint.\n\n"
-        );
+      const modelCommand = parseSessionModelCommand(args);
+      if (modelCommand.kind === "clear" && modelCommand.scope === "global") {
+        input.output.write([
+          "Clearing the global primary model is not supported from /model --global.",
+          "Use estacoda model setup from a terminal to choose a new primary model.",
+          ""
+        ].join("\n"));
         return false;
+      }
+
+      if (modelCommand.kind === "clear") {
+        await input.runtime.sessionDb.clearSessionModelOverride(input.runtime.sessionId);
+        const refreshed = await refreshCurrentRuntime(input);
+        if (refreshed === undefined) {
+          input.output.write("Cleared the session model override.\nScope: session\nStart a new turn after refreshing the session to use the configured primary model.\n\n");
+          return false;
+        }
+        return {
+          runtime: refreshed,
+          notice: (runtime) => [
+            "Cleared the session model override.",
+            "Scope: session",
+            "The configured primary route is active again.",
+            "",
+            runtime.describe()
+          ].join("\n")
+        };
+      }
+
+      if (modelCommand.kind === "set") {
+        const modelInput = modelCommand.modelInput;
+        if (modelInput.trim().length === 0) {
+          input.output.write(modelCommand.scope === "global"
+            ? "Usage: /model --global <model-or-alias>\nAlso accepted: /model set --global <model-or-alias>\n\n"
+            : "Usage: /model set <model-or-alias>\n\n");
+          return false;
+        }
+        return modelCommand.scope === "global"
+          ? handleGlobalModelSet(input, modelInput)
+          : handleSessionModelSet(input, modelInput);
+      }
+
+      if (input.modelSwitchContext !== undefined) {
+        const context = await input.modelSwitchContext();
+        const stale = await resolveEffectiveSessionModelOverride(
+          await input.runtime.sessionDb.getSessionModelOverride(input.runtime.sessionId),
+          context
+        );
+        if (stale !== undefined && !stale.ok) {
+          input.output.write(`Session model override ignored: ${stale.message}\n\n`);
+        }
+      }
+
+      if (input.modelSwitchContext !== undefined && input.prompt?.select !== undefined) {
+        const pickerResult = await handleSessionModelPicker(input);
+        if (pickerResult !== undefined) {
+          return pickerResult;
+        }
       }
 
       input.output.write(`${input.renderer.render(input.runtime.getModelInfo())}\n\n`);
@@ -640,6 +698,208 @@ export async function handleSlashCommand(input: {
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
   }
+}
+
+type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
+type SlashCommandRuntimeRefresh = Exclude<Awaited<ReturnType<typeof handleSlashCommand>>, boolean>;
+
+type SessionModelCommand =
+  | { kind: "show"; scope: "session" | "global" }
+  | { kind: "set"; scope: "session" | "global"; modelInput: string }
+  | { kind: "clear"; scope: "session" | "global" };
+
+function parseSessionModelCommand(args: string[]): SessionModelCommand {
+  const scope = args.includes("--global") ? "global" : "session";
+  const normalized = args.filter((arg) => arg !== "--global");
+  const subcommand = normalized[0];
+
+  if (subcommand === undefined) {
+    return { kind: "show", scope };
+  }
+  if (subcommand === "clear") {
+    return { kind: "clear", scope };
+  }
+  if (subcommand === "set") {
+    return { kind: "set", scope, modelInput: normalized.slice(1).join(" ") };
+  }
+  return { kind: "set", scope, modelInput: normalized.join(" ") };
+}
+
+async function handleSessionModelSet(
+  input: HandleSlashCommandInput,
+  modelInput: string
+): Promise<boolean | SlashCommandRuntimeRefresh> {
+  if (input.modelSwitchContext === undefined) {
+    input.output.write("This session cannot change model overrides here.\n\n");
+    return false;
+  }
+
+  const context = await input.modelSwitchContext();
+  const resolution = await resolveModelSwitchRequest({
+    modelInput,
+    source: "cli"
+  }, context);
+
+  if (!resolution.ok) {
+    input.output.write(`${resolution.message}\n${resolution.guidance}\n\n`);
+    return false;
+  }
+
+  await input.runtime.sessionDb.setSessionModelOverride(input.runtime.sessionId, resolution.override);
+  const refreshed = await refreshCurrentRuntime(input);
+  if (refreshed === undefined) {
+    input.output.write(`Session model override set: ${resolution.displayName}\nScope: session\nRefresh this session before the next turn uses the override.\n\n`);
+    return false;
+  }
+
+  return {
+    runtime: refreshed,
+    notice: (runtime) => [
+      `Session model override set: ${resolution.displayName}`,
+      "Scope: session",
+      "Fallback routes unchanged.",
+      "",
+      runtime.describe()
+    ].join("\n")
+  };
+}
+
+async function handleGlobalModelSet(
+  input: HandleSlashCommandInput,
+  modelInput: string
+): Promise<boolean | SlashCommandRuntimeRefresh> {
+  if (input.modelSwitchContext === undefined) {
+    input.output.write("This session cannot change global model config here.\n\n");
+    return false;
+  }
+
+  const context = await input.modelSwitchContext();
+  const resolution = await resolveModelSwitchRequest({
+    modelInput,
+    source: "cli"
+  }, context);
+
+  if (!resolution.ok) {
+    input.output.write(`${resolution.message}\n${resolution.guidance}\n\n`);
+    return false;
+  }
+
+  const trusted = typeof input.runtime.isWorkspaceTrusted === "function"
+    ? await input.runtime.isWorkspaceTrusted()
+    : false;
+  if (!trusted) {
+    input.output.write([
+      "Global model changes require a trusted workspace/profile.",
+      `Run estacoda model setup ${resolution.route.provider} from a terminal, or trust this workspace before using /model --global.`,
+      ""
+    ].join("\n"));
+    return false;
+  }
+
+  const profileId = await runtimeProfileId(input.runtime);
+  const targetPath = resolveProfileStateHome({
+    homeDir: input.homeDir ?? homedir(),
+    profileId
+  }).configPath;
+  const mutated = applyModelSwitchPrimaryRoute(context.config, resolution.route);
+  await saveRuntimeConfig(targetPath, mutated);
+
+  const refreshed = await refreshCurrentRuntime(input);
+  if (refreshed === undefined) {
+    input.output.write(`Global primary model set: ${resolution.displayName}\nScope: global\nFallback routes unchanged.\nRefresh this session before the next turn uses the new primary route.\n\n`);
+    return false;
+  }
+
+  return {
+    runtime: refreshed,
+    notice: (runtime) => [
+      `Global primary model set: ${resolution.displayName}`,
+      "Scope: global",
+      "Fallback routes unchanged.",
+      "",
+      runtime.describe()
+    ].join("\n")
+  };
+}
+
+async function handleSessionModelPicker(
+  input: HandleSlashCommandInput
+): Promise<boolean | SlashCommandRuntimeRefresh | undefined> {
+  if (input.modelSwitchContext === undefined || input.prompt?.select === undefined) {
+    return undefined;
+  }
+
+  const context = await input.modelSwitchContext();
+  const flow = await createProviderModelSelectionFlow({
+    config: context.config,
+    providerRegistry: context.providerRegistry,
+    homeDir: context.homeDir,
+    modelsDevOptions: context.modelsDevOptions,
+    allowNetwork: false,
+    mode: "normal"
+  });
+
+  const providers = await flow.listProviderCandidates();
+  if (providers.length === 0) {
+    input.output.write("No configured runnable model providers are ready. Run estacoda model setup from a terminal.\n\n");
+    return false;
+  }
+
+  const cancel = "__cancel__";
+  const provider = await input.prompt.select<string>({
+    title: "Choose session model provider",
+    options: [
+      ...providers.map((candidate) => ({
+        value: candidate.id,
+        label: candidate.displayName,
+        description: candidate.baseUrl ?? candidate.id
+      })),
+      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+    ],
+    fallbackPrompt: "Provider number > ",
+    selectedLabel: "Provider"
+  });
+  if (provider === cancel) {
+    input.output.write("No changes were made.\n\n");
+    return false;
+  }
+
+  const models = await flow.listModelCandidates(provider);
+  if (models.length === 0) {
+    input.output.write(`No runnable models are configured for ${provider}. Run estacoda model setup ${provider} from a terminal.\n\n`);
+    return false;
+  }
+
+  const model = await input.prompt.select<string>({
+    title: "Choose session model",
+    options: [
+      ...models.map((candidate) => ({
+        value: candidate.id,
+        label: candidate.id,
+        description: [
+          candidate.profile.supportsTools ? "tools" : undefined,
+          candidate.profile.supportsVision ? "vision" : undefined,
+          `${candidate.profile.contextWindowTokens} tokens`
+        ].filter((part) => part !== undefined).join(" · ")
+      })),
+      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+    ],
+    fallbackPrompt: "Model number > ",
+    selectedLabel: "Model"
+  });
+  if (model === cancel) {
+    input.output.write("No changes were made.\n\n");
+    return false;
+  }
+
+  return handleSessionModelSet(input, `${provider}/${model}`);
+}
+
+async function refreshCurrentRuntime(input: HandleSlashCommandInput): Promise<Runtime | undefined> {
+  if (input.switchRuntime !== undefined) {
+    return input.switchRuntime(input.runtime.sessionId);
+  }
+  return input.refreshRuntime?.({ preserveSession: true });
 }
 
 async function handleTaskFlowCommand(input: {

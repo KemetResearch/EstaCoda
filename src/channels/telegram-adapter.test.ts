@@ -4,6 +4,7 @@ import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
+import { renderModelPickerActions } from "./model-picker-actions.js";
 
 describe("TelegramAdapter", () => {
   it("getCapabilities exists and returns correct kind", () => {
@@ -139,5 +140,34 @@ describe("TelegramAdapter", () => {
       userId: "user-1",
       chatType: "dm"
     });
+  });
+
+  it("round-trips model picker actions through Telegram callback text", () => {
+    const value = renderModelPickerActions([
+      { label: "local/phi4:latest", modelInput: "local/phi4:latest" }
+    ])[0][0].value;
+    const message = updateToChannelMessage({
+      update_id: 43,
+      callback_query: {
+        id: "callback-2",
+        data: value,
+        from: {
+          id: "user-1",
+          first_name: "Ada",
+          username: "ada"
+        },
+        message: {
+          message_id: 8,
+          date: 1700000000,
+          chat: {
+            id: "chat-1",
+            type: "private"
+          }
+        }
+      }
+    });
+
+    expect(message?.text).toBe(value);
+    expect(message?.sessionKey.platform).toBe("telegram");
   });
 });

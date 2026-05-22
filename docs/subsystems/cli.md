@@ -143,6 +143,11 @@ In-session commands:
 | `/session recall <query>` | Summarize historical session matches |
 | `/sessions recall <query>` | Alias for session recall where supported |
 | `/compact [topic]` | Compact this in-session context through semantic session compression |
+| `/model` | Show ready/runnable model choices for this session |
+| `/model <provider>/<model>` | Set a session-scoped model override |
+| `/model set <provider>/<model>` | Compatibility syntax for the same session-scoped override |
+| `/model clear` | Clear the session-scoped model override |
+| `/model --global <provider>/<model>` | Persist the selected route as the profile primary model after trust checks |
 | `/switch <session-id>` | Switch to another session |
 | `/reset` | Start fresh session |
 | `/trust` | Show workspace trust status |
@@ -158,6 +163,14 @@ In-session commands:
 | `/exit` | Exit session |
 
 Interactive `/compact [topic]` is semantic session compression for the current session, but it is non-rotating in this implementation. Gateway `/compact` has separate adoption logic and can preserve the parent transcript by switching the channel to a compacted child session.
+
+### In-Session Model Switching
+
+`/model` inside an active CLI session is session-scoped by default. `/model <provider>/<model>` writes a model override for the active session only, and `/model set <provider>/<model>` is compatibility syntax for the same session-scoped behavior. It does not resurrect the old persistent `estacoda model set` command. `/model clear` removes the session override and returns the session to the configured primary route.
+
+The picker only presents ready, runnable model choices. Providers missing credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
+
+`/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are explicit global forms. They persist the selected route as the profile-level primary model only after the existing local workspace/profile trust path authorizes the write. They do not collect credentials. `/model --global clear` is rejected because clearing the profile primary route has no product-defined meaning. Use `estacoda model setup` for credentials and primary setup, and `estacoda model fallback` for fallback route management.
 
 ## Interactive Approval Prompt
 

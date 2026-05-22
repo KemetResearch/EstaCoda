@@ -74,6 +74,8 @@ State ownership after the C2 profile overhaul:
 
 Trust is orthogonal to profiles: a profile selects configuration, credentials, memory, skills, cron state, and gateway state, while workspace trust gates local behavior for a directory.
 
+Session model overrides are runtime inputs layered over the selected profile config. CLI and gateway `/model <provider>/<model>` commands are scoped to the active session/conversation by default, persist with that session, and are revalidated during runtime construction. Invalid or stale overrides are ignored non-fatally and the configured profile primary route is used. The explicit `/model --global <provider>/<model>` form mutates only the selected profile's primary route after the relevant trust and authorization checks pass. It preserves fallback routes and auxiliary routes.
+
 ### Security And Approval Wiring
 
 `createRuntime` composes the active `SecurityPolicy` and optional `WorkspaceApprovalController`. The security policy produces deterministic `allow` / `ask` / `deny` assessments; the controller layers one-time, session, and persistent approval grants around that policy without overriding the hardline command floor.
@@ -89,7 +91,7 @@ CLI runtime and gateway runtime use the same smart approval configuration shape:
 
 The route key is `assessor`. Runtime route construction uses `resolveAuxiliaryModelRoute("assessor", ...)`; there is no `approval` auxiliary route and no legacy provider/model smart-assessor fallback. The smart assessor uses `executeAuxiliaryTask(...)` with `tools: []` and fails safe to manual approval on missing route, timeout, provider failure, malformed output, or ambiguous output.
 
-Gateway runtime construction receives the gateway-owned security policy and approval controller context. `ChannelGateway` remains the orchestrator for remote approval resolution and runtime-cache invalidation; adapters do not mutate approval state.
+Gateway runtime construction receives the gateway-owned security policy and approval controller context. `ChannelGateway` remains the orchestrator for remote approval resolution and runtime-cache invalidation; adapters do not mutate approval state. Gateway global model switching writes profile config only when channel authorization, runtime workspace/profile trust, and profile config path proof are available; otherwise it returns terminal guidance and does not write.
 
 ### Created subsystems
 

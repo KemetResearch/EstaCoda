@@ -67,6 +67,16 @@ Config should not use legacy auxiliary names such as `models.auxiliary`, `auxili
 
 Config Part 2 consumes the Providers Pass D auxiliary route contract. It does not add a second auxiliary resolver architecture.
 
+## Session Model Switching
+
+Active CLI and gateway sessions support `/model` as a scoped model switcher. By default, `/model <provider>/<model>` writes a session or conversation override only. `/model set <provider>/<model>` is compatibility syntax for the same scoped override; it is not the old persistent `estacoda model set` mutation path. `/model clear` removes the scoped override.
+
+The same model-switch resolver validates CLI typed commands, gateway typed commands, plain-text picker selections, and picker action callbacks. It accepts only already configured runnable routes, preserves direct alias route metadata such as `baseUrl`, `apiKeyEnv`, `apiMode`, and `authMethod` when available, and rejects missing credentials with terminal setup guidance. It does not collect credentials or OAuth tokens inside active sessions or chats.
+
+Scoped overrides persist with the session and are revalidated whenever a runtime is constructed. If the stored route becomes stale, non-runnable, catalog-only, media-only, credential-missing, or otherwise invalid, the override is ignored non-fatally and the configured primary route is used. No raw secrets are stored in session override state or picker action payloads. Fallback routes and auxiliary routes are preserved.
+
+`/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are the explicit persistent forms. They mutate only the profile-level primary model route after the required local or gateway trust/authorization checks pass. `/model --global clear` is rejected. `estacoda model set ...` remains deprecated and disabled; `estacoda model setup` and `estacoda model fallback` remain the supported full setup surfaces for credential collection, provider setup, and fallback route management.
+
 ## Memory-Related Routes
 
 Memory Hardening uses distinct auxiliary route names:
