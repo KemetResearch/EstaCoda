@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
-import type { BrowserBackendKind } from "../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type {
   AuxiliaryModelConfig,
   AuxiliaryModelSlotConfig,
@@ -287,6 +287,7 @@ export type EstaCodaConfig = {
   external_memory?: Partial<ExternalMemoryConfig>;
   browser?: {
     backend?: BrowserBackendKind;
+    cloudProvider?: BrowserCloudProviderKind;
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch?: boolean;
@@ -410,6 +411,7 @@ export type LoadedRuntimeConfig = {
   externalMemory: ExternalMemoryConfig;
   browser: {
     backend: BrowserBackendKind;
+    cloudProvider?: BrowserCloudProviderKind;
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
@@ -485,6 +487,7 @@ export type WebSetupInput = {
 
 export type BrowserSetupInput = {
   backend?: BrowserBackendKind;
+  cloudProvider?: BrowserCloudProviderKind;
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
@@ -695,6 +698,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
     browser: {
       backend: config.browser?.backend ?? "unconfigured",
+      cloudProvider: config.browser?.cloudProvider,
       cdpUrl: config.browser?.cdpUrl,
       launchCommand: config.browser?.launchCommand,
       autoLaunch: config.browser?.autoLaunch ?? false
@@ -1801,6 +1805,7 @@ export async function setupBrowserConfig(options: {
   const config = patchConfig(existing.config, {
     browser: {
       backend: options.input.backend ?? "local-cdp",
+      cloudProvider: options.input.cloudProvider,
       cdpUrl: options.input.cdpUrl,
       launchCommand: options.input.launchCommand,
       autoLaunch: options.input.autoLaunch ?? false

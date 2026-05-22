@@ -120,6 +120,7 @@ export type RuntimeOptions = {
   browserBackend?: BrowserBackend;
   browser?: {
     backend: "local-cdp" | "browserbase" | "firecrawl" | "camofox" | "mock" | "unconfigured";
+    cloudProvider?: string;
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
@@ -556,6 +557,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       })
       : createBrowserBackendFromConfig({
         backend: options.browser?.backend ?? "unconfigured",
+        cloudProvider: options.browser?.cloudProvider,
         cdpUrl: options.browser?.cdpUrl,
         launchCommand: options.browser?.launchCommand,
         autoLaunch: options.browser?.autoLaunch,

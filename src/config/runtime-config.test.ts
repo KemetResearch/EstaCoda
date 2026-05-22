@@ -504,6 +504,36 @@ describe("loadRuntimeConfig browser security", () => {
   });
 });
 
+describe("loadRuntimeConfig browser provider compatibility", () => {
+  async function loadBrowserConfig(config: Record<string, unknown>) {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ...config
+    }));
+
+    return await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+  }
+
+  it("loads legacy browser backend values and separate cloud provider config", async () => {
+    for (const backend of ["browserbase", "firecrawl", "camofox"] as const) {
+      const loaded = await loadBrowserConfig({
+        browser: {
+          backend,
+          cloudProvider: "browser-use"
+        }
+      });
+
+      expect(loaded.browser).toMatchObject({
+        backend,
+        cloudProvider: "browser-use",
+        autoLaunch: false
+      });
+    }
+  });
+});
+
 describe("loadRuntimeConfig channel readiness", () => {
   it("discord ready = enabled && botTokenEnv present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));

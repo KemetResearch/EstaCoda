@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createBrowserBackendFromConfig,
   createLocalCdpBrowserBackend,
   createMockBrowserBackend,
   createUnconfiguredBrowserBackend,
@@ -96,6 +97,23 @@ describe("browser backend baselines", () => {
       reason: "No backend in this test."
     });
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("No backend in this test.");
+  });
+
+  it("keeps legacy cloud backend values recognized but unavailable", async () => {
+    for (const backendKind of ["browserbase", "firecrawl", "camofox"] as const) {
+      const backend = createBrowserBackendFromConfig({ backend: backendKind });
+
+      expect(backend.kind).toBe("unconfigured");
+      expect(backend.isAvailable()).toBe(false);
+      expect(await backend.status()).toEqual({
+        backend: "unconfigured",
+        available: false,
+        reason: `${backendKind} browser backend is recognized but not implemented in this release.`
+      });
+      await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow(
+        `${backendKind} browser backend is recognized but not implemented in this release.`
+      );
+    }
   });
 
   it("checks local CDP availability with a successful mocked fetch", async () => {

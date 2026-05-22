@@ -6,6 +6,13 @@ export type BrowserBackendKind =
   | "mock"
   | "unconfigured";
 
+export type BrowserCloudProviderKind =
+  | "browserbase"
+  | "browser-use"
+  | "firecrawl"
+  | "camofox"
+  | (string & {});
+
 export type BrowserSession = {
   id: string;
   backend: BrowserBackendKind;

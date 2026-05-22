@@ -531,6 +531,7 @@ function normalizeCdpUrl(value: string | undefined): string | undefined {
 
 export function createBrowserBackendFromConfig(config: {
   backend: "local-cdp" | "browserbase" | "firecrawl" | "camofox" | "mock" | "unconfigured";
+  cloudProvider?: string;
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
@@ -564,7 +565,7 @@ export function createBrowserBackendFromConfig(config: {
       return createUnconfiguredBrowserBackend();
     default:
       return createUnconfiguredBrowserBackend({
-        reason: `${config.backend} browser backend is not implemented in v2 yet.`
+        reason: `${config.backend} browser backend is recognized but not implemented in this release.`
       });
   }
 }
