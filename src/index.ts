@@ -291,16 +291,25 @@ async function main(): Promise<void> {
     const result = await handleSlashCommand({
       text: argv.join(" "),
       runtime,
+      refreshRuntime: async (options) => buildRuntime({
+        sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),
+        sessionDb: await openLocalSessionDb()
+      }),
+      modelSwitchContext,
       output,
       renderer: { render: renderPlain },
-      workspaceRoot
+      workspaceRoot,
+      homeDir: stateHome.homeDir
     });
 
     if (typeof result !== "boolean") {
-      chunks.push(result.notice(runtime));
+      chunks.push(result.notice(result.runtime));
     }
 
     console.log(chunks.join(""));
+    if (typeof result !== "boolean" && result.runtime !== runtime) {
+      await result.runtime.dispose();
+    }
     await runtime.dispose();
     process.exit(0);
   }

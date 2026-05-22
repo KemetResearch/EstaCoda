@@ -1001,16 +1001,18 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             };
           },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
-            return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
+            const latestConfig = await loadConfig();
+            return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
               sessionId,
               securityPolicy,
               metadata,
             });
           },
           modelSwitchContext: async () => {
+            const latestConfig = await loadConfig();
             return {
-              config: config.config,
-              providerRegistry: config.providerRegistry,
+              config: latestConfig.config,
+              providerRegistry: latestConfig.providerRegistry,
               homeDir
             };
           },
@@ -1061,16 +1063,18 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             };
           },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
-            return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
+            const latestConfig = await loadConfig();
+            return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
               sessionId,
               securityPolicy,
               metadata,
             });
           },
           modelSwitchContext: async () => {
+            const latestConfig = await loadConfig();
             return {
-              config: config.config,
-              providerRegistry: config.providerRegistry,
+              config: latestConfig.config,
+              providerRegistry: latestConfig.providerRegistry,
               homeDir
             };
           },

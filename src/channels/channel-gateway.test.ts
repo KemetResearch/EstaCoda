@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands, authorizeChannelMessage } from "./channel-gateway.js";
@@ -569,6 +569,158 @@ describe("ChannelGateway commands", () => {
       expect(invalidate).toHaveBeenCalledWith(setResult.sessionId);
       expect(invalidate).toHaveBeenCalledTimes(4);
     } finally {
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("persists gateway /model --global only when authorized and workspace trust is proven", async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
+    try {
+      const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+      await writeGatewayModelConfig(tempHome, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b", "phi4:latest"],
+            enableNetwork: true
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b",
+          fallbacks: [{ provider: "local", id: "qwen2.5:3b" }]
+        },
+        auxiliaryModels: {
+          assessor: { provider: "local", id: "qwen2.5:3b" }
+        }
+      });
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const disposeAll = vi.fn(async () => {});
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          sessionId,
+          isWorkspaceTrusted: async () => true
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        trustedWorkspace: true,
+        runtimeCache: { disposeAll } as unknown as RuntimeCache,
+        modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+
+      const setResult = await gateway.receive(makeMessage("/model --global local/phi4:latest"));
+
+      expect(setResult.replyText).toContain("Global primary model set: local/phi4:latest");
+      expect(setResult.replyText).toContain("Scope: global");
+      expect(disposeAll).toHaveBeenCalledTimes(1);
+      const afterSet = JSON.parse(await readFile(configPath, "utf8"));
+      expect(afterSet.model.provider).toBe("local");
+      expect(afterSet.model.id).toBe("phi4:latest");
+      expect(afterSet.model.fallbacks).toEqual([{ provider: "local", id: "qwen2.5:3b" }]);
+      expect(afterSet.auxiliaryModels.assessor).toEqual({ provider: "local", id: "qwen2.5:3b" });
+
+      const compatibilityResult = await gateway.receive(makeMessage("/model set --global local/qwen2.5:3b"));
+      expect(compatibilityResult.replyText).toContain("Scope: global");
+      expect(JSON.parse(await readFile(configPath, "utf8")).model.id).toBe("qwen2.5:3b");
+      expect(disposeAll).toHaveBeenCalledTimes(2);
+
+      const clearResult = await gateway.receive(makeMessage("/model --global clear"));
+      expect(clearResult.replyText).toContain("Clearing the global primary model is not supported");
+      expect(JSON.parse(await readFile(configPath, "utf8")).model.id).toBe("qwen2.5:3b");
+    } finally {
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects gateway global writes without proven trust or credentials and does not store secrets", async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-gateway-model-"));
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    try {
+      const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+      const originalConfig = {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"],
+            apiKeyEnv: "OPENAI_API_KEY"
+          }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      };
+      await writeGatewayModelConfig(tempHome, originalConfig);
+      delete process.env.OPENAI_API_KEY;
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        trustedWorkspace: true,
+        modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+
+      const missingResult = await gateway.receive(makeMessage("/model --global openai/gpt-4o"));
+      expect(missingResult.replyText).toContain("Run estacoda model setup openai from a terminal");
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(originalConfig);
+
+      process.env.OPENAI_API_KEY = "sk-secret-gateway-global";
+      const untrustedGateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        trustedWorkspace: false,
+        modelSwitchContext: () => gatewayModelSwitchContext(tempHome)
+      });
+
+      const untrustedResult = await untrustedGateway.receive(makeMessage("/model openai/gpt-4o --global"));
+      expect(untrustedResult.replyText).toContain("Run estacoda model setup openai from a terminal");
+      expect(untrustedResult.replyText).not.toContain("sk-secret-gateway-global");
+      expect(JSON.stringify(JSON.parse(await readFile(configPath, "utf8")))).not.toContain("sk-secret-gateway-global");
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(originalConfig);
+
+      await writeGatewayModelConfig(tempHome, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b", "phi4:latest"],
+            enableNetwork: true
+          }
+        },
+        model: { provider: "local", id: "qwen2.5:3b" }
+      });
+      const configWithoutHome = JSON.parse(await readFile(configPath, "utf8"));
+      const disposeAll = vi.fn(async () => {});
+      const missingPathGateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          sessionId,
+          isWorkspaceTrusted: async () => true
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        runtimeCache: { disposeAll } as unknown as RuntimeCache,
+        modelSwitchContext: async () => {
+          const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+          return { config: loaded.config, providerRegistry: loaded.providerRegistry };
+        }
+      });
+
+      const missingPathResult = await missingPathGateway.receive(makeMessage("/model --global local/phi4:latest"));
+      expect(missingPathResult.replyText).toContain("Gateway cannot prove the profile config location");
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(configWithoutHome);
+      expect(disposeAll).not.toHaveBeenCalled();
+    } finally {
+      if (originalOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalOpenAiKey;
+      }
       await rm(tempHome, { recursive: true, force: true });
     }
   });

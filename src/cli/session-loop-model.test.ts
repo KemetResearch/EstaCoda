@@ -139,6 +139,203 @@ describe("session-loop /model", () => {
     expect(override?.source).toBe("cli");
   });
 
+  it("/model --global persists only the profile primary route after local trust", async () => {
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: {
+        provider: "local",
+        id: "qwen2.5:3b",
+        fallbacks: [{ provider: "local", id: "qwen2.5:3b" }]
+      },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "qwen2.5:3b" }
+      }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    runtime.isWorkspaceTrusted = async () => true;
+    const refreshed = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+
+    const result = await handleSlashCommand({
+      text: "/model --global local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).not.toBe(false);
+    const after = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(after.model.provider).toBe("local");
+    expect(after.model.id).toBe("phi4:latest");
+    expect(after.model.fallbacks).toEqual([{ provider: "local", id: "qwen2.5:3b" }]);
+    expect(after.auxiliaryModels.assessor).toEqual({ provider: "local", id: "qwen2.5:3b" });
+    await expect(sessionDb.getSessionModelOverride("test-session")).resolves.toBeUndefined();
+  });
+
+  it("/model set --global parses --global before normalization and rejects global clear", async () => {
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    runtime.isWorkspaceTrusted = async () => true;
+    const modelSwitchContext = async () => {
+      const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+      return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+    };
+
+    const setResult = await handleSlashCommand({
+      text: "/model set --global local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      modelSwitchContext,
+      switchRuntime: async () => runtime,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(setResult).not.toBe(false);
+    expect(JSON.parse(readFileSync(configPath, "utf8")).model.id).toBe("phi4:latest");
+    outputChunks = [];
+
+    const clearResult = await handleSlashCommand({
+      text: "/model --global clear",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      modelSwitchContext,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(clearResult).toBe(false);
+    expect(outputChunks.join("")).toContain("Clearing the global primary model is not supported");
+    expect(JSON.parse(readFileSync(configPath, "utf8")).model.id).toBe("phi4:latest");
+  });
+
+  it("/model --global rejects missing credentials and untrusted workspaces without mutating config", async () => {
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+      const originalConfig = {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"],
+            apiKeyEnv: "OPENAI_API_KEY"
+          }
+        },
+        model: { provider: "openai", id: "gpt-4o" }
+      };
+      await writeProfileConfig(tempHome, originalConfig);
+      const sessionDb = new InMemorySessionDB();
+      await sessionDb.createSession({ id: "test-session", profileId: "default" });
+      const runtime = fakeRuntime({
+        provider: "local",
+        model: "qwen2.5:3b",
+        contextWindowTokens: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }, sessionDb);
+      runtime.isWorkspaceTrusted = async () => true;
+
+      const missingResult = await handleSlashCommand({
+        text: "/model --global openai/gpt-4o",
+        runtime,
+        output,
+        renderer: { render: renderPlain },
+        modelSwitchContext: async () => {
+          const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+          return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+        },
+        workspaceRoot: tempHome,
+        homeDir: tempHome
+      });
+
+      expect(missingResult).toBe(false);
+      expect(outputChunks.join("")).toContain("estacoda model setup openai");
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(originalConfig);
+
+      outputChunks = [];
+      process.env.OPENAI_API_KEY = "sk-secret-session-global";
+      runtime.isWorkspaceTrusted = async () => false;
+      const untrustedResult = await handleSlashCommand({
+        text: "/model openai/gpt-4o --global",
+        runtime,
+        output,
+        renderer: { render: renderPlain },
+        modelSwitchContext: async () => {
+          const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+          return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+        },
+        workspaceRoot: tempHome,
+        homeDir: tempHome
+      });
+
+      expect(untrustedResult).toBe(false);
+      expect(outputChunks.join("")).toContain("Global model changes require a trusted workspace/profile");
+      expect(outputChunks.join("")).not.toContain("sk-secret-session-global");
+      expect(JSON.stringify(JSON.parse(readFileSync(configPath, "utf8")))).not.toContain("sk-secret-session-global");
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(originalConfig);
+    } finally {
+      if (originalOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalOpenAiKey;
+      }
+    }
+  });
+
   it("/model set does not write provider config", async () => {
     const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
     mkdirSync(dirname(configPath), { recursive: true });

@@ -49,10 +49,13 @@ import {
   type ModelPickerChoice
 } from "./model-picker-actions.js";
 import {
+  applyModelSwitchPrimaryRoute,
   resolveModelSwitchRequest,
   type ModelSwitchContext
 } from "../providers/model-switch-resolver.js";
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
+import { saveRuntimeConfig } from "../config/runtime-config.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
@@ -387,6 +390,22 @@ export class ChannelGateway {
     } catch (error) {
       this.#logWarning?.(
         `${reason} cache invalidate failed for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  async #refreshAllCachedRuntimes(reason: string): Promise<void> {
+    if (this.#runtimeCache === undefined) {
+      return;
+    }
+
+    try {
+      await this.#runtimeCache.disposeAll();
+    } catch (error) {
+      this.#logWarning?.(
+        `${reason} cache disposeAll failed: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
@@ -1063,6 +1082,15 @@ export class ChannelGateway {
     }
 
     if (command.kind === "clear") {
+      if (command.scope === "global") {
+        const text = [
+          "Clearing the global primary model is not supported from /model --global.",
+          "Use estacoda model setup from a terminal to choose a new primary model."
+        ].join("\n");
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
       const runtime = await this.#runtimeForSessionCommand(message, sessionId);
       try {
         await runtime.sessionDb.clearSessionModelOverride(sessionId);
@@ -1070,13 +1098,19 @@ export class ChannelGateway {
         await runtime.dispose();
       }
       await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override clear");
-      const text = "Session model override cleared. Future gateway turns will use the configured primary route.";
+      const text = [
+        "Session model override cleared.",
+        "Scope: session",
+        "Future gateway turns will use the configured primary route."
+      ].join("\n");
       await this.#deliverText(adapter, message.sessionKey, text);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     if (command.modelInput.trim().length === 0) {
-      const text = "Usage: /model <provider>/<model>\nAlso accepted: /model set <provider>/<model>";
+      const text = command.scope === "global"
+        ? "Usage: /model --global <provider>/<model>\nAlso accepted: /model set --global <provider>/<model>"
+        : "Usage: /model <provider>/<model>\nAlso accepted: /model set <provider>/<model>";
       await this.#deliverText(adapter, message.sessionKey, text);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
@@ -1098,6 +1132,39 @@ export class ChannelGateway {
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
+    if (command.scope === "global") {
+      const trustProof = await this.#proveWorkspaceTrustForGlobalModelWrite(message, sessionId);
+      if (!trustProof.ok) {
+        const text = [
+          "Global model changes require an authorized channel and a trusted workspace/profile.",
+          `Run estacoda model setup ${resolution.route.provider} from a terminal to change the profile primary model.`
+        ].join("\n");
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      if (context.homeDir === undefined) {
+        const text = [
+          "Gateway cannot prove the profile config location for a safe global model write.",
+          `Run estacoda model setup ${resolution.route.provider} from a terminal to change the profile primary model.`
+        ].join("\n");
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      const targetPath = resolveProfileStateHome({ homeDir: context.homeDir, profileId: this.#profileId }).configPath;
+      await saveRuntimeConfig(targetPath, applyModelSwitchPrimaryRoute(context.config, resolution.route));
+      await this.#refreshAllCachedRuntimes("Gateway global model set");
+
+      const text = [
+        `Global primary model set: ${resolution.displayName}`,
+        "Scope: global",
+        "Fallback routes remain unchanged."
+      ].join("\n");
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
     const runtime = await this.#runtimeForSessionCommand(message, sessionId);
     try {
       await runtime.sessionDb.setSessionModelOverride(sessionId, resolution.override);
@@ -1108,11 +1175,31 @@ export class ChannelGateway {
 
     const text = [
       `Session model override set: ${resolution.displayName}`,
-      "Scope: this gateway session only.",
+      "Scope: session",
       "Fallback routes remain unchanged."
     ].join("\n");
     await this.#deliverText(adapter, message.sessionKey, text);
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #proveWorkspaceTrustForGlobalModelWrite(
+    message: ChannelMessage,
+    sessionId: string
+  ): Promise<{ ok: true } | { ok: false }> {
+    let runtime: Runtime | undefined;
+    try {
+      runtime = await this.#runtimeForSessionCommand(message, sessionId);
+      return await runtime.isWorkspaceTrusted() ? { ok: true } : { ok: false };
+    } catch (error) {
+      this.#logWarning?.(
+        `Gateway global model trust proof failed for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return { ok: false };
+    } finally {
+      await runtime?.dispose();
+    }
   }
 
   async #showModelPicker(
@@ -1213,9 +1300,9 @@ export class ChannelGateway {
 
       const command: GatewayModelCommand =
         modelAction.action.kind === "select"
-          ? { kind: "set", modelInput: modelAction.action.modelInput }
+          ? { kind: "set", scope: "session", modelInput: modelAction.action.modelInput }
           : modelAction.action.kind === "clear"
-            ? { kind: "clear" }
+            ? { kind: "clear", scope: "session" }
             : { kind: "cancel" };
       return this.#handleModelCommand(message, adapter, command);
     }
@@ -2444,8 +2531,8 @@ function tokenizeCommandArgs(text: string): string[] {
 
 type GatewayModelCommand =
   | { kind: "show" }
-  | { kind: "set"; modelInput: string }
-  | { kind: "clear" }
+  | { kind: "set"; scope: "session" | "global"; modelInput: string }
+  | { kind: "clear"; scope: "session" | "global" }
   | { kind: "cancel" };
 
 function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
@@ -2457,27 +2544,30 @@ function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined
 
   const token = rawToken.toLowerCase().replace(/@[\w_]+$/u, "");
   if (token === "model-clear") {
-    return { kind: "clear" };
+    return { kind: "clear", scope: "session" };
   }
   if (token === "model-select") {
-    return { kind: "set", modelInput: args.slice(1).join(" ") };
+    return { kind: "set", scope: "session", modelInput: args.slice(1).join(" ") };
   }
   if (token !== "/model") {
     return undefined;
   }
 
-  const subcommand = args[1]?.toLowerCase();
+  const modelArgs = args.slice(1);
+  const scope = modelArgs.includes("--global") ? "global" : "session";
+  const normalized = modelArgs.filter((arg) => arg !== "--global");
+  const subcommand = normalized[0]?.toLowerCase();
   if (subcommand === undefined) {
     return { kind: "show" };
   }
   if (subcommand === "clear") {
-    return { kind: "clear" };
+    return { kind: "clear", scope };
   }
   if (subcommand === "set") {
-    return { kind: "set", modelInput: args.slice(2).join(" ") };
+    return { kind: "set", scope, modelInput: normalized.slice(1).join(" ") };
   }
 
-  return { kind: "set", modelInput: args.slice(1).join(" ") };
+  return { kind: "set", scope, modelInput: normalized.join(" ") };
 }
 
 export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {

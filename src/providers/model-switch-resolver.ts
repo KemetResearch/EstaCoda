@@ -1,7 +1,8 @@
 import type { EstaCodaConfig } from "../config/runtime-config.js";
 import {
   applyRegisterProviderConfig,
-  applyRegisterProviderModel
+  applyRegisterProviderModel,
+  applySetPreferredModelRoute
 } from "../config/provider-config-mutations.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
@@ -157,6 +158,32 @@ export function sessionOverrideToResolvedRoute(override: SessionModelOverride): 
     contextWindowTokens: override.route.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
     apiMode: override.route.apiMode,
     authMethod: override.route.authMethod
+  });
+}
+
+export function applyModelSwitchPrimaryRoute(
+  config: EstaCodaConfig,
+  route: ResolvedModelRoute
+): EstaCodaConfig {
+  let mutated = applyRegisterProviderConfig(config, {
+    provider: route.provider,
+    baseUrl: route.baseUrl,
+    apiKeyEnv: route.apiKeyEnv,
+    apiMode: route.apiMode,
+    authMethod: route.authMethod
+  });
+
+  mutated = applyRegisterProviderModel(mutated, {
+    provider: route.provider,
+    models: [route.id]
+  });
+
+  return applySetPreferredModelRoute(mutated, {
+    provider: route.provider,
+    model: route.id,
+    baseUrl: route.baseUrl,
+    apiKeyEnv: route.apiKeyEnv,
+    contextWindowTokens: route.contextWindowTokens ?? route.profile.contextWindowTokens
   });
 }
 

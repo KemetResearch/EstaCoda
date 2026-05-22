@@ -9,6 +9,7 @@ import { renderSessionRecallResult } from "../session/session-recall-service.js"
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 import {
+  applyModelSwitchPrimaryRoute,
   resolveEffectiveSessionModelOverride,
   resolveModelSwitchRequest
 } from "../providers/model-switch-resolver.js";
@@ -43,6 +44,7 @@ import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/vie
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { saveRuntimeConfig } from "../config/runtime-config.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -412,17 +414,28 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(input.runtime.getStatus())}\n\n`);
       return false;
     case "model": {
-      if (args[0] === "clear") {
+      const modelCommand = parseSessionModelCommand(args);
+      if (modelCommand.kind === "clear" && modelCommand.scope === "global") {
+        input.output.write([
+          "Clearing the global primary model is not supported from /model --global.",
+          "Use estacoda model setup from a terminal to choose a new primary model.",
+          ""
+        ].join("\n"));
+        return false;
+      }
+
+      if (modelCommand.kind === "clear") {
         await input.runtime.sessionDb.clearSessionModelOverride(input.runtime.sessionId);
         const refreshed = await refreshCurrentRuntime(input);
         if (refreshed === undefined) {
-          input.output.write("Cleared the session model override. Start a new turn after refreshing the session to use the configured primary model.\n\n");
+          input.output.write("Cleared the session model override.\nScope: session\nStart a new turn after refreshing the session to use the configured primary model.\n\n");
           return false;
         }
         return {
           runtime: refreshed,
           notice: (runtime) => [
             "Cleared the session model override.",
+            "Scope: session",
             "The configured primary route is active again.",
             "",
             runtime.describe()
@@ -430,13 +443,17 @@ export async function handleSlashCommand(input: {
         };
       }
 
-      if (args[0] === "set" || args[0] !== undefined) {
-        const modelInput = (args[0] === "set" ? args.slice(1) : args).join(" ");
+      if (modelCommand.kind === "set") {
+        const modelInput = modelCommand.modelInput;
         if (modelInput.trim().length === 0) {
-          input.output.write("Usage: /model set <model-or-alias>\n\n");
+          input.output.write(modelCommand.scope === "global"
+            ? "Usage: /model --global <model-or-alias>\nAlso accepted: /model set --global <model-or-alias>\n\n"
+            : "Usage: /model set <model-or-alias>\n\n");
           return false;
         }
-        return handleSessionModelSet(input, modelInput);
+        return modelCommand.scope === "global"
+          ? handleGlobalModelSet(input, modelInput)
+          : handleSessionModelSet(input, modelInput);
       }
 
       if (input.modelSwitchContext !== undefined) {
@@ -686,6 +703,28 @@ export async function handleSlashCommand(input: {
 type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
 type SlashCommandRuntimeRefresh = Exclude<Awaited<ReturnType<typeof handleSlashCommand>>, boolean>;
 
+type SessionModelCommand =
+  | { kind: "show"; scope: "session" | "global" }
+  | { kind: "set"; scope: "session" | "global"; modelInput: string }
+  | { kind: "clear"; scope: "session" | "global" };
+
+function parseSessionModelCommand(args: string[]): SessionModelCommand {
+  const scope = args.includes("--global") ? "global" : "session";
+  const normalized = args.filter((arg) => arg !== "--global");
+  const subcommand = normalized[0];
+
+  if (subcommand === undefined) {
+    return { kind: "show", scope };
+  }
+  if (subcommand === "clear") {
+    return { kind: "clear", scope };
+  }
+  if (subcommand === "set") {
+    return { kind: "set", scope, modelInput: normalized.slice(1).join(" ") };
+  }
+  return { kind: "set", scope, modelInput: normalized.join(" ") };
+}
+
 async function handleSessionModelSet(
   input: HandleSlashCommandInput,
   modelInput: string
@@ -718,6 +757,64 @@ async function handleSessionModelSet(
     notice: (runtime) => [
       `Session model override set: ${resolution.displayName}`,
       "Scope: session",
+      "Fallback routes unchanged.",
+      "",
+      runtime.describe()
+    ].join("\n")
+  };
+}
+
+async function handleGlobalModelSet(
+  input: HandleSlashCommandInput,
+  modelInput: string
+): Promise<boolean | SlashCommandRuntimeRefresh> {
+  if (input.modelSwitchContext === undefined) {
+    input.output.write("This session cannot change global model config here.\n\n");
+    return false;
+  }
+
+  const context = await input.modelSwitchContext();
+  const resolution = await resolveModelSwitchRequest({
+    modelInput,
+    source: "cli"
+  }, context);
+
+  if (!resolution.ok) {
+    input.output.write(`${resolution.message}\n${resolution.guidance}\n\n`);
+    return false;
+  }
+
+  const trusted = typeof input.runtime.isWorkspaceTrusted === "function"
+    ? await input.runtime.isWorkspaceTrusted()
+    : false;
+  if (!trusted) {
+    input.output.write([
+      "Global model changes require a trusted workspace/profile.",
+      `Run estacoda model setup ${resolution.route.provider} from a terminal, or trust this workspace before using /model --global.`,
+      ""
+    ].join("\n"));
+    return false;
+  }
+
+  const profileId = await runtimeProfileId(input.runtime);
+  const targetPath = resolveProfileStateHome({
+    homeDir: input.homeDir ?? homedir(),
+    profileId
+  }).configPath;
+  const mutated = applyModelSwitchPrimaryRoute(context.config, resolution.route);
+  await saveRuntimeConfig(targetPath, mutated);
+
+  const refreshed = await refreshCurrentRuntime(input);
+  if (refreshed === undefined) {
+    input.output.write(`Global primary model set: ${resolution.displayName}\nScope: global\nFallback routes unchanged.\nRefresh this session before the next turn uses the new primary route.\n\n`);
+    return false;
+  }
+
+  return {
+    runtime: refreshed,
+    notice: (runtime) => [
+      `Global primary model set: ${resolution.displayName}`,
+      "Scope: global",
       "Fallback routes unchanged.",
       "",
       runtime.describe()
