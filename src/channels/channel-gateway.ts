@@ -43,6 +43,11 @@ import {
   renderApprovalActions,
   type ApprovalActionScope
 } from "./approval-actions.js";
+import {
+  resolveModelSwitchRequest,
+  type ModelSwitchContext
+} from "../providers/model-switch-resolver.js";
+import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
@@ -104,6 +109,7 @@ export type ChannelGatewayOptions = {
   hookRegistry?: HookRegistry;
   /** Phase 7F: optional gateway-only pre-runtime session hygiene. */
   sessionHygieneService?: Pick<SessionHygieneService, "run">;
+  modelSwitchContext?: () => Promise<ModelSwitchContext>;
   logWarning?: (message: string) => void;
 };
 
@@ -241,6 +247,7 @@ export class ChannelGateway {
   // Stage 8B
   readonly #hookRegistry: HookRegistry | undefined;
   readonly #sessionHygieneService: Pick<SessionHygieneService, "run"> | undefined;
+  readonly #modelSwitchContext: (() => Promise<ModelSwitchContext>) | undefined;
   readonly #abortReasonByKey = new Map<string, string>();
 
   constructor(options: ChannelGatewayOptions) {
@@ -277,6 +284,7 @@ export class ChannelGateway {
     // Stage 8B
     this.#hookRegistry = options.hookRegistry;
     this.#sessionHygieneService = options.sessionHygieneService;
+    this.#modelSwitchContext = options.modelSwitchContext;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -1010,6 +1018,148 @@ export class ChannelGateway {
     });
   }
 
+  async #runtimeForSessionCommand(message: ChannelMessage, sessionId: string): Promise<Runtime> {
+    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
+    return this.#runtimeForSession({
+      sessionId,
+      sessionKey: normalizedSessionKey,
+      channel: message.channel,
+      securityPolicy: this.#securityPolicyFor(
+        normalizedSessionKey,
+        sessionId,
+        await this.#approvalStore.listForSession(normalizedSessionKey)
+      ),
+      metadata: {
+        surfaceType: message.sessionKey.platform,
+        chatId: message.sessionKey.chatId,
+        userId: message.sender.id,
+        sessionId,
+        origin: "command"
+      }
+    });
+  }
+
+  async #handleModelCommand(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    command: GatewayModelCommand
+  ): Promise<ChannelGatewayResult> {
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+    this.#sessionIdByTurnKey.set(stableSessionKey(message.sessionKey, this.#sessionPolicy), sessionId);
+
+    if (command.kind === "show") {
+      return this.#showModelPicker(message, adapter, sessionId);
+    }
+
+    if (command.kind === "clear") {
+      const runtime = await this.#runtimeForSessionCommand(message, sessionId);
+      try {
+        await runtime.sessionDb.clearSessionModelOverride(sessionId);
+      } finally {
+        await runtime.dispose();
+      }
+      await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override clear");
+      const text = "Session model override cleared. Future gateway turns will use the configured primary route.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command.modelInput.trim().length === 0) {
+      const text = "Usage: /model <provider>/<model>\nAlso accepted: /model set <provider>/<model>";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const context = await this.#loadModelSwitchContext();
+    if (context === undefined) {
+      const text = "Gateway model switching is unavailable in this process.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const resolution = await resolveModelSwitchRequest({
+      modelInput: command.modelInput,
+      source: "gateway"
+    }, context);
+    if (!resolution.ok) {
+      const text = `${resolution.message}\n${resolution.guidance}`;
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const runtime = await this.#runtimeForSessionCommand(message, sessionId);
+    try {
+      await runtime.sessionDb.setSessionModelOverride(sessionId, resolution.override);
+    } finally {
+      await runtime.dispose();
+    }
+    await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override set");
+
+    const text = [
+      `Session model override set: ${resolution.displayName}`,
+      "Scope: this gateway session only.",
+      "Fallback routes remain unchanged."
+    ].join("\n");
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #showModelPicker(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    sessionId: string
+  ): Promise<ChannelGatewayResult> {
+    const context = await this.#loadModelSwitchContext();
+    if (context === undefined) {
+      const text = "Gateway model switching is unavailable in this process.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const flow = await createProviderModelSelectionFlow({
+      config: context.config,
+      providerRegistry: context.providerRegistry,
+      homeDir: context.homeDir,
+      modelsDevOptions: context.modelsDevOptions,
+      allowNetwork: false,
+      mode: "normal"
+    });
+    const providers = await flow.listProviderCandidates();
+    const choices: string[] = [];
+
+    for (const provider of providers) {
+      const models = await flow.listModelCandidates(provider.id);
+      for (const model of models) {
+        if (model.executable && !model.catalogOnly) {
+          choices.push(`${model.provider}/${model.id}`);
+        }
+      }
+    }
+
+    const text = choices.length === 0
+      ? [
+          "No configured runnable models are available for this gateway session.",
+          "Run estacoda model setup from a terminal to configure credentials."
+        ].join("\n")
+      : [
+          "Session model picker",
+          "Reply with one of:",
+          ...choices.map((choice) => `model-select ${choice}`),
+          "",
+          "Clear override: model-clear"
+        ].join("\n");
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #loadModelSwitchContext(): Promise<ModelSwitchContext | undefined> {
+    if (this.#modelSwitchContext === undefined) {
+      return undefined;
+    }
+
+    return this.#modelSwitchContext();
+  }
+
   #isAbortError(err: unknown): boolean {
     if (err instanceof Error) {
       return err.name === "AbortError" ||
@@ -1034,6 +1184,11 @@ export class ChannelGateway {
       });
     }
 
+    const modelCommand = parseGatewayModelCommand(message.text);
+    if (modelCommand !== undefined) {
+      return this.#handleModelCommand(message, adapter, modelCommand);
+    }
+
     const command = parseGatewayCommand(message.text);
 
     if (command === undefined) {
@@ -1045,6 +1200,9 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
+        "/model - choose a session model",
+        "/model <provider>/<model> - set the model for this session",
+        "/model clear - clear this session model override",
         "/memory - inspect promoted memory conclusions",
         "/sessions - list recent sessions for this chat",
         "/switch <session-id> - switch this chat to a specific session",
@@ -2248,6 +2406,43 @@ function tokenizeCommandArgs(text: string): string[] {
   return [...matches].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
 }
 
+type GatewayModelCommand =
+  | { kind: "show" }
+  | { kind: "set"; modelInput: string }
+  | { kind: "clear" };
+
+function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
+  const args = tokenizeCommandArgs(text.trim());
+  const rawToken = args[0];
+  if (rawToken === undefined) {
+    return undefined;
+  }
+
+  const token = rawToken.toLowerCase().replace(/@[\w_]+$/u, "");
+  if (token === "model-clear") {
+    return { kind: "clear" };
+  }
+  if (token === "model-select") {
+    return { kind: "set", modelInput: args.slice(1).join(" ") };
+  }
+  if (token !== "/model") {
+    return undefined;
+  }
+
+  const subcommand = args[1]?.toLowerCase();
+  if (subcommand === undefined) {
+    return { kind: "show" };
+  }
+  if (subcommand === "clear") {
+    return { kind: "clear" };
+  }
+  if (subcommand === "set") {
+    return { kind: "set", modelInput: args.slice(2).join(" ") };
+  }
+
+  return { kind: "set", modelInput: args.slice(1).join(" ") };
+}
+
 export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {
   allowed: boolean;
   message: string;
@@ -2462,6 +2657,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
   return [
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
+    { command: "/model", description: "Choose a session model" },
     { command: "/memory", description: "Inspect promoted memory conclusions" },
     { command: "/sessions", description: "List recent chat sessions" },
     { command: "/switch", description: "Switch to an existing session" },

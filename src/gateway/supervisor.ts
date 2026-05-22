@@ -17,6 +17,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
+import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
@@ -532,7 +533,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   process.on("SIGINT", state.onSigint);
   process.on("SIGTERM", state.onSigterm);
 
-  const createGatewayRuntime = (
+  const createGatewayRuntime = async (
     latestConfig: LoadedRuntimeConfig,
     db: SQLiteSessionDB,
     hd: string,
@@ -543,10 +544,26 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       metadata?: Record<string, unknown>;
     }
   ): Promise<Runtime> => {
+    let effectiveModel = latestConfig.model;
+    let effectivePrimaryRoute = latestConfig.primaryModelRoute;
+
+    const storedOverride = await db.getSessionModelOverride(input.sessionId).catch(() => undefined);
+    const effectiveOverride = await resolveEffectiveSessionModelOverride(storedOverride, {
+      config: latestConfig.config,
+      providerRegistry: latestConfig.providerRegistry,
+      homeDir: hd
+    });
+    if (effectiveOverride?.ok === true) {
+      effectiveModel = effectiveOverride.route.profile;
+      effectivePrimaryRoute = effectiveOverride.route;
+    } else if (effectiveOverride?.ok === false) {
+      logWarning(`Gateway session model override ignored for ${input.sessionId}: ${effectiveOverride.message}`);
+    }
+
     return createRuntime({
       tokens: runtimeTokens,
-      model: latestConfig.model,
-      primaryModelRoute: latestConfig.primaryModelRoute,
+      model: effectiveModel,
+      primaryModelRoute: effectivePrimaryRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
       workspaceRoot: options.workspaceRoot,
       homeDir: hd,
@@ -990,6 +1007,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               metadata,
             });
           },
+          modelSwitchContext: async () => {
+            return {
+              config: config.config,
+              providerRegistry: config.providerRegistry,
+              homeDir
+            };
+          },
           sessionHygieneService,
           hookRegistry,
           logWarning,
@@ -1042,6 +1066,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               securityPolicy,
               metadata,
             });
+          },
+          modelSwitchContext: async () => {
+            return {
+              config: config.config,
+              providerRegistry: config.providerRegistry,
+              homeDir
+            };
           },
           sessionHygieneService,
           hookRegistry,
