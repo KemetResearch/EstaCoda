@@ -53,6 +53,22 @@ const CDP_URL_PARAMETER_METHODS = new Map<string, string>([
   ["Target.createTarget", "url"]
 ]);
 const CDP_RUNTIME_METHODS = new Set(["Runtime.evaluate", "Runtime.callFunctionOn"]);
+const CDP_READ_ONLY_METHODS = new Set([
+  "Accessibility.getFullAXTree",
+  "Browser.getVersion",
+  "DOM.describeNode",
+  "DOM.getDocument",
+  "DOM.getOuterHTML",
+  "DOM.querySelector",
+  "DOM.querySelectorAll",
+  "Network.getResponseBody",
+  "Page.captureScreenshot",
+  "Page.getFrameTree",
+  "Page.getNavigationHistory",
+  "Performance.getMetrics",
+  "Runtime.getProperties",
+  "Target.getTargets"
+]);
 const CDP_NETWORK_EXPRESSION_PATTERN = /\b(?:fetch|XMLHttpRequest|sendBeacon|WebSocket|EventSource)\b/u;
 const CDP_NAVIGATION_EXPRESSION_PATTERN = /\b(?:location\.(?:href|assign|replace)|(?:window|document|self|top|parent)\.location|window\.open|open\s*\()/u;
 const CDP_URL_LITERAL_PATTERN = /https?:\/\/[^\s"'<>\\)]+/giu;
@@ -370,7 +386,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         required: ["method"]
       },
       riskClass: "external-side-effect",
-      toolsets: ["browser", "web", "research"],
+      toolsets: ["dangerous"],
       progressLabel: "running browser CDP command",
       maxResultSizeChars: 8000,
       isAvailable: () => browserBackend.isAvailable(),
@@ -1160,7 +1176,17 @@ async function guardBrowserCdpInput(
   }
 
   if (!CDP_RUNTIME_METHODS.has(method)) {
-    return undefined;
+    if (CDP_READ_ONLY_METHODS.has(method)) {
+      return undefined;
+    }
+    return {
+      ok: false,
+      content: "Blocked raw CDP method that is not on the read-only allowlist.",
+      metadata: {
+        ...metadata,
+        reason: "cdp-method-not-allowlisted"
+      }
+    };
   }
 
   return guardCdpRuntimeExpression(input.params, guardUrl, metadata);

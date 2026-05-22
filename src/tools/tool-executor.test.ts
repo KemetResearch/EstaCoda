@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import type { SecurityPolicy, SecurityRequest } from "../contracts/security.js";
+import { describe, expect, it, vi } from "vitest";
+import { capabilityFirstDefaults, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -536,5 +536,46 @@ describe("ToolExecutor command environment", () => {
     expect(record?.result).toBeUndefined();
     expect(observedRequest?.environmentType).toBe("host");
     expect(observedRequest?.riskClass).toBe("destructive-local");
+  });
+});
+
+describe("ToolExecutor browser CDP gating", () => {
+  it("requires approval for raw browser.cdp even when the default policy allows other active external side effects", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "ran" }));
+    const cdpTool: RegisteredTool = {
+      name: "browser.cdp",
+      description: "raw cdp",
+      inputSchema: {
+        type: "object",
+        properties: {
+          method: { type: "string" },
+          params: { type: "object" }
+        },
+        required: ["method"]
+      },
+      riskClass: "external-side-effect",
+      toolsets: ["dangerous"],
+      progressLabel: "running cdp",
+      maxResultSizeChars: 1000,
+      isAvailable: () => true,
+      run
+    };
+    const { executor } = await setupExecutor({
+      policy: capabilityFirstDefaults,
+      tools: [cdpTool]
+    });
+
+    const record = await executor.executeTool({
+      tool: "browser.cdp",
+      input: {
+        method: "Input.dispatchKeyEvent",
+        params: { type: "keyDown", key: "Enter" }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(record?.decision).toBe("ask");
+    expect(run).not.toHaveBeenCalled();
   });
 });

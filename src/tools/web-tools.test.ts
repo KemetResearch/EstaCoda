@@ -872,7 +872,7 @@ describe("web and browser tools baselines", () => {
     const cdp = tool("browser.cdp");
 
     expect(cdp.riskClass).toBe("external-side-effect");
-    expect(cdp.toolsets).toContain("browser");
+    expect(cdp.toolsets).toEqual(["dangerous"]);
   });
 
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
@@ -1240,6 +1240,25 @@ describe("web and browser tools baselines", () => {
       }
     });
     expect(calls).toHaveLength(1);
+  });
+
+  it("blocks raw browser.cdp methods that are not clearly read-only", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        backend: "mock",
+        method: "Input.dispatchKeyEvent",
+        reason: "cdp-method-not-allowlisted"
+      }
+    });
+    expect(calls).toEqual([]);
   });
 
   it("renders browser snapshot text and interactive elements", async () => {

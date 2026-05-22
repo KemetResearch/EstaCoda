@@ -612,9 +612,7 @@ describe("createRuntime MCP trust gating", () => {
               "sessionId",
             ],
             "toolsets": [
-              "browser",
-              "web",
-              "research",
+              "dangerous",
             ],
           },
           {
