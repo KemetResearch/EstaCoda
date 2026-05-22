@@ -345,6 +345,15 @@ Channel-specific commands available in gateway:
 - `/deny` — deny the current pending approval for this chat
 - `/revoke <approval-id>` — revoke a persistent channel approval
 - `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
+- `/model` — show ready/runnable model choices for this gateway conversation
+- `/model <provider>/<model>` — set a conversation-scoped model override
+- `/model set <provider>/<model>` — compatibility syntax for the same conversation-scoped override
+- `/model clear` — clear the conversation-scoped model override
+- `/model --global <provider>/<model>` — persist the selected route as the profile primary model only when channel authorization, workspace/profile trust, and profile config path proof are available
+
+Gateway `/model` also supports plain-text fallback commands for channels without native actions: `model-select <provider>/<model>` and `model-clear`. Telegram and Discord render model picker actions where their adapters support actions; those callback payloads contain route/model identifiers, not raw credentials. Model control commands, including picker callbacks, bypass busy-session queues so the operator can change or clear model state while a conversation is active. Normal user turns still follow the configured busy-session policy.
+
+Gateway `--global` writes fail closed. If channel authorization, runtime workspace/profile trust, or profile config path proof is missing, the gateway returns terminal setup guidance and writes nothing. Successful global writes invalidate cached gateway runtimes that could still hold the old primary route. Gateway sessions do not collect credentials or OAuth tokens; use `estacoda model setup` from a terminal for credentials and primary setup, and `estacoda model fallback` for fallback route management. `/model --global clear` is rejected.
 
 ## Limitations
 
