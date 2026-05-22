@@ -264,6 +264,9 @@ export function evaluateSetupApplyEligibility(manifest: SetupReviewManifest): Se
         if (isCredentialBlocker(blocker) && hasCredentialReferenceForBlocker(manifest, line, blocker)) {
           continue;
         }
+        if (isProviderSetupIncompleteBlocker(blocker) && hasCompleteProviderModelRoute(manifest)) {
+          continue;
+        }
         blockers.add(blocker);
         unresolvedLineBlockers.push(blocker);
       }
@@ -496,6 +499,17 @@ function hasWorkspaceTrustGrant(manifest: SetupReviewManifest): boolean {
   return manifest.sections["workspace-trust-grants"].length > 0;
 }
 
+function hasCompleteProviderModelRoute(manifest: SetupReviewManifest): boolean {
+  return manifest.sections["provider-model-network"].some((line) => {
+    const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
+    const model = stringReviewValue(line.review.values.model ?? line.review.values.modelId);
+    return provider !== undefined &&
+      model !== undefined &&
+      provider !== "unconfigured" &&
+      model !== "unconfigured";
+  });
+}
+
 type CredentialReferenceForApply = {
   readonly envVar: string;
   readonly provider?: string;
@@ -539,6 +553,10 @@ function isWorkspaceTrustBlocker(blocker: string): boolean {
 
 function isCredentialBlocker(blocker: string): boolean {
   return /credential|api key|env|credential pool/i.test(blocker);
+}
+
+function isProviderSetupIncompleteBlocker(blocker: string): boolean {
+  return /^Provider setup is incomplete\.$/u.test(blocker.trim());
 }
 
 function stringReviewValue(value: unknown): string | undefined {

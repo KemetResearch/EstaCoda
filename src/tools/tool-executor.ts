@@ -14,7 +14,15 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
-const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|token|secret|credential/i;
+const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|passwd|token|secret|credential|authorization|(?:^|[_-])auth(?:$|[_-])/i;
+const REDACTED_SECRET_VALUE = "[REDACTED]";
+const REDACTED_SECRET_URL = "[REDACTED_URL_WITH_SECRET]";
+const REDACTED_CDP_EXPRESSION = "[REDACTED_CDP_EXPRESSION]";
+const REDACTED_PROVIDER_ARGUMENTS = "[REDACTED_PROVIDER_ARGUMENTS]";
+const SENSITIVE_QUERY_PARAM_RE = /(?:^|[?&;\s])(?:token|access_token|refresh_token|id_token|api_key|key|password|passwd|secret|client_secret|auth|authorization)=/iu;
+const SENSITIVE_FIELD_VALUE_RE = /(?:^|["'{,\s])(?:apiKey|api[_-]?key|key|token|access_token|refresh_token|id_token|password|passwd|secret|client_secret|credential|auth|authorization)["']?\s*[:=]\s*["']?[^"',\s}]+/iu;
+const AUTH_VALUE_RE = /\b(?:authorization\s*:\s*)?(?:bearer|basic)\s+[\w.\-~+/]+=*/iu;
+const TOKEN_PREFIX_RE = /\b(?:sk-ant-|sk-proj-|sk-|ghp_|github_pat_)[A-Za-z0-9_\-]+/u;
 
 export type ToolExecutionRequest = {
   toolset: ToolsetName;
@@ -102,20 +110,22 @@ export class ToolExecutor {
 
     const environmentType = request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
     const riskClass = classifyEffectiveRisk(tool, request.input, environmentType);
+    const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
     const validationError = validateToolInput(tool, request.input);
     if (validationError !== undefined) {
       const result: ToolResult = {
         ok: false,
         content: `Invalid tool input: ${validationError}`
       };
+      const storedResult = redactToolResultForPersistence(truncateToolResultForStorage(result));
       await this.#sessionDb.appendEvent(request.sessionId, {
-      kind: "tool-result",
-      tool: tool.name,
-      result: truncateToolResultForStorage(result),
-      toolCallId: request.toolCallId,
-      toolCallName: request.toolCallName,
-      providerNativeToolCall: request.providerNativeToolCall
-    });
+        kind: "tool-result",
+        tool: tool.name,
+        result: storedResult,
+        toolCallId: request.toolCallId,
+        toolCallName: request.toolCallName,
+        providerNativeToolCall: persistedCall.providerNativeToolCall
+      });
 
       return {
         tool: toDefinition(tool),
@@ -131,11 +141,13 @@ export class ToolExecutor {
 
     const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = summarizeSecurityTarget(tool.name, request.input);
+    const persistedTargetKey = redactPersistedString(targetKey);
+    const persistedTargetSummary = redactPersistedString(targetSummary);
     const securityRequest = {
       riskClass,
       toolName: tool.name,
-      targetKey,
-      targetSummary,
+      targetKey: persistedTargetKey,
+      targetSummary: persistedTargetSummary,
       command: typeof request.input.command === "string" ? request.input.command : undefined,
       environmentType,
       description: `run tool ${tool.name}`,
@@ -151,8 +163,8 @@ export class ToolExecutor {
       kind: "security-assessed",
       tool: tool.name,
       riskClass,
-      targetKey,
-      targetSummary,
+      targetKey: persistedTargetKey,
+      targetSummary: persistedTargetSummary,
       assessment
     });
     this.#trajectoryRecorder.record("progress", {
@@ -193,14 +205,14 @@ export class ToolExecutor {
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-called",
       tool: tool.name,
-      input: redactSensitiveFields(request.input),
+      input: persistedCall.input,
       toolCallId: request.toolCallId,
       toolCallName: request.toolCallName,
-      providerNativeToolCall: request.providerNativeToolCall
+      providerNativeToolCall: persistedCall.providerNativeToolCall
     });
     this.#trajectoryRecorder.record("tool-call", {
       tool: tool.name,
-      input: redactSensitiveFields(request.input)
+      input: persistedCall.input
     });
 
     let result: ToolResult;
@@ -235,14 +247,14 @@ export class ToolExecutor {
       }
     }
 
-    const storedResult = truncateToolResultForStorage(result);
+    const storedResult = redactToolResultForPersistence(truncateToolResultForStorage(result));
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-result",
       tool: tool.name,
       result: storedResult,
       toolCallId: request.toolCallId,
       toolCallName: request.toolCallName,
-      providerNativeToolCall: request.providerNativeToolCall
+      providerNativeToolCall: persistedCall.providerNativeToolCall
     });
     await this.#sessionDb.appendMessage({
       sessionId: request.sessionId,
@@ -252,14 +264,14 @@ export class ToolExecutor {
         tool: tool.name,
         tool_call_id: request.toolCallId,
         tool_call_name: request.toolCallName,
-        provider_native_tool_call: request.providerNativeToolCall,
+        provider_native_tool_call: persistedCall.providerNativeToolCall,
         ok: result.ok,
         truncated: storedResult.metadata?.truncatedForStorage
       }
     });
     this.#trajectoryRecorder.record("tool-result", {
       tool: tool.name,
-      result
+      result: storedResult
     });
 
     return {
@@ -463,11 +475,37 @@ function summarizeSecurityTarget(toolName: string, input: Record<string, unknown
   return undefined;
 }
 
-function redactSensitiveFields(input: Record<string, unknown>): Record<string, unknown> {
-  return redactValue(input) as Record<string, unknown>;
+function redactToolCallForPersistence(
+  toolName: string,
+  input: Record<string, unknown>,
+  providerNativeToolCall: unknown
+): {
+  input: Record<string, unknown>;
+  providerNativeToolCall: unknown;
+} {
+  return {
+    input: redactToolInputForPersistence(toolName, input),
+    providerNativeToolCall: redactProviderNativeToolCallForPersistence(toolName, providerNativeToolCall)
+  };
+}
+
+function redactToolInputForPersistence(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+  const redacted = redactValue(input) as Record<string, unknown>;
+  return redactCdpInputForPersistence(toolName, redacted);
+}
+
+function redactToolResultForPersistence(result: ToolResult): ToolResult {
+  return {
+    ...result,
+    content: redactPersistedText(result.content),
+    metadata: result.metadata === undefined ? undefined : redactValue(result.metadata) as ToolResult["metadata"]
+  };
 }
 
 function redactValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return redactPersistedText(value);
+  }
   if (value === null || typeof value !== "object") {
     return value;
   }
@@ -477,14 +515,142 @@ function redactValue(value: unknown): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (SENSITIVE_KEY_RE.test(key)) {
-      result[key] = "[REDACTED]";
+      result[key] = REDACTED_SECRET_VALUE;
     } else if (typeof val === "object" && val !== null) {
       result[key] = redactValue(val);
+    } else if (typeof val === "string") {
+      result[key] = redactPersistedText(val);
     } else {
       result[key] = val;
     }
   }
   return result;
+}
+
+function redactProviderNativeToolCallForPersistence(toolName: string, value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+  return redactProviderNativeValue(toolName, value);
+}
+
+function redactProviderNativeValue(toolName: string, value: unknown): unknown {
+  if (typeof value === "string") {
+    return redactPersistedText(value);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactProviderNativeValue(toolName, entry));
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isProviderArgumentKey(key)) {
+      result[key] = redactProviderArgumentPayload(toolName, entry);
+    } else if (SENSITIVE_KEY_RE.test(key)) {
+      result[key] = REDACTED_SECRET_VALUE;
+    } else {
+      result[key] = redactProviderNativeValue(toolName, entry);
+    }
+  }
+  return result;
+}
+
+function isProviderArgumentKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "arguments" || normalized === "args";
+}
+
+function redactProviderArgumentPayload(toolName: string, value: unknown): unknown {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (isObjectRecord(parsed)) {
+        return JSON.stringify(redactToolInputForPersistence(toolName, parsed));
+      }
+      return JSON.stringify(redactValue(parsed));
+    } catch {
+      return REDACTED_PROVIDER_ARGUMENTS;
+    }
+  }
+
+  if (isObjectRecord(value)) {
+    return redactToolInputForPersistence(toolName, value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactValue(entry));
+  }
+
+  return redactValue(value);
+}
+
+function redactCdpInputForPersistence(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+  if (toolName !== "browser.cdp" || !isObjectRecord(input.params) || typeof input.method !== "string") {
+    return input;
+  }
+
+  if (input.method === "Runtime.evaluate") {
+    return {
+      ...input,
+      params: redactRuntimeExpressionFields(input.params, ["expression"])
+    };
+  }
+
+  if (input.method === "Runtime.callFunctionOn") {
+    return {
+      ...input,
+      params: redactRuntimeExpressionFields(input.params, ["functionDeclaration", "expression"])
+    };
+  }
+
+  return input;
+}
+
+function redactRuntimeExpressionFields(params: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const result = { ...params };
+  for (const key of keys) {
+    if (typeof result[key] === "string") {
+      result[key] = REDACTED_CDP_EXPRESSION;
+    }
+  }
+  return result;
+}
+
+function redactPersistedString(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return redactPersistedText(value);
+}
+
+function redactPersistedText(value: string): string {
+  return shouldRedactSecretBearingString(value) ? REDACTED_SECRET_URL : value;
+}
+
+function shouldRedactSecretBearingString(value: string): boolean {
+  return SENSITIVE_QUERY_PARAM_RE.test(value) ||
+    SENSITIVE_FIELD_VALUE_RE.test(value) ||
+    AUTH_VALUE_RE.test(value) ||
+    TOKEN_PREFIX_RE.test(value) ||
+    containsUrlUserInfoCredentials(value);
+}
+
+function containsUrlUserInfoCredentials(value: string): boolean {
+  const urls = value.match(/https?:\/\/[^\s"'<>\\)]+/giu) ?? [];
+  for (const rawUrl of urls) {
+    try {
+      const url = new URL(rawUrl);
+      if (url.username.length > 0 || url.password.length > 0) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 function truncateSecuritySummary(value: string): string {

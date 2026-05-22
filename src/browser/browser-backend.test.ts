@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { BrowserProvider } from "./browser-provider.js";
 import {
   createBrowserBackendFromConfig,
   createLocalCdpBrowserBackend,
@@ -6,6 +7,7 @@ import {
   createUnconfiguredBrowserBackend,
   type CdpFetchLike
 } from "./browser-backend.js";
+import { registerBrowserProvider, resetBrowserProvidersForTest } from "./browser-registry.js";
 
 function createCdpFetch(input: {
   ok: boolean;
@@ -23,6 +25,11 @@ function createCdpFetch(input: {
 }
 
 describe("browser backend baselines", () => {
+  afterEach(() => {
+    resetBrowserProvidersForTest();
+    vi.unstubAllEnvs();
+  });
+
   it("returns stable shapes from every mock backend method", async () => {
     const backend = createMockBrowserBackend({
       sessionId: "session-1",
@@ -103,17 +110,81 @@ describe("browser backend baselines", () => {
     for (const backendKind of ["browserbase", "firecrawl", "camofox"] as const) {
       const backend = createBrowserBackendFromConfig({ backend: backendKind });
 
-      expect(backend.kind).toBe("unconfigured");
-      expect(backend.isAvailable()).toBe(false);
-      expect(await backend.status()).toEqual({
-        backend: "unconfigured",
+      expect(backend.kind).toBe(backendKind);
+      await expect(backend.isAvailable()).resolves.toBe(false);
+      expect(await backend.status()).toMatchObject({
+        backend: backendKind,
         available: false,
-        reason: `${backendKind} browser backend is recognized but not implemented in this release.`
       });
-      await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow(
-        `${backendKind} browser backend is recognized but not implemented in this release.`
-      );
+      await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow();
     }
+  });
+
+  it("surfaces cloud provider missing env and not-implemented reasons", async () => {
+    const missing = createBrowserBackendFromConfig({
+      backend: "unconfigured",
+      cloudProvider: "browserbase"
+    });
+
+    await expect(missing.status()).resolves.toMatchObject({
+      backend: "unconfigured",
+      available: false,
+      reason: "BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID are missing."
+    });
+
+    vi.stubEnv("BROWSERBASE_API_KEY", "test-key");
+    vi.stubEnv("BROWSERBASE_PROJECT_ID", "test-project");
+    const configured = createBrowserBackendFromConfig({
+      backend: "unconfigured",
+      cloudProvider: "browserbase"
+    });
+
+    await expect(configured.status()).resolves.toMatchObject({
+      backend: "unconfigured",
+      available: false,
+      reason: "Browserbase provider is registered but not yet implemented."
+    });
+  });
+
+  it("surfaces unknown cloud provider status", async () => {
+    const backend = createBrowserBackendFromConfig({
+      backend: "unconfigured",
+      cloudProvider: "unknown-cloud"
+    });
+
+    await expect(backend.status()).resolves.toEqual({
+      backend: "unconfigured",
+      available: false,
+      reason: "Unknown browser provider: unknown-cloud."
+    });
+  });
+
+  it("does not call createSession for unavailable cloud providers", async () => {
+    const createSession = vi.fn<BrowserProvider["createSession"]>(async () => ({
+      sessionName: "should-not-run",
+      providerSessionId: "provider-session",
+      cdpUrl: "wss://example.test/cdp",
+      features: {}
+    }));
+    registerBrowserProvider({
+      name: "offline-provider",
+      displayName: "Offline Provider",
+      getAvailability: () => ({ available: false, reason: "offline provider" }),
+      createSession,
+      closeSession: () => false,
+      emergencyCleanup: () => undefined
+    });
+    const backend = createBrowserBackendFromConfig({
+      backend: "unconfigured",
+      cloudProvider: "offline-provider"
+    });
+
+    await expect(backend.status()).resolves.toMatchObject({
+      available: false,
+      reason: "offline provider"
+    });
+    await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("offline provider");
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("checks local CDP availability with a successful mocked fetch", async () => {

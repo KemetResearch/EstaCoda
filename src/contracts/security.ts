@@ -110,6 +110,10 @@ export async function assessSecurityPolicy(
 
 export const capabilityFirstDefaults: SecurityPolicy = {
   decide(request) {
+    if (request.toolName === "browser.cdp") {
+      return "ask";
+    }
+
     if (request.riskClass === "read-only-local" && request.context.trustedWorkspace) {
       return "allow";
     }

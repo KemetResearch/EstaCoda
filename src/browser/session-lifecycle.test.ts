@@ -186,6 +186,7 @@ describe("BrowserSessionLifecycle", () => {
     const lifecycle = new BrowserSessionLifecycle({ onCleanup: vi.fn() });
     const exitBefore = process.listenerCount("exit");
     const sigintBefore = process.listenerCount("SIGINT");
+    const sigtermBefore = process.listenerCount("SIGTERM");
 
     const unregister = registerEmergencyCleanup(lifecycle);
     const secondUnregister = registerEmergencyCleanup(lifecycle);
@@ -193,10 +194,12 @@ describe("BrowserSessionLifecycle", () => {
     expect(secondUnregister).toBe(unregister);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore + 1);
+    expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
 
     unregister();
     expect(process.listenerCount("exit")).toBe(exitBefore);
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
+    expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
   });
 
   it("SIGINT emergency handler does not call process.exit()", async () => {
@@ -214,6 +217,39 @@ describe("BrowserSessionLifecycle", () => {
 
     expect(onCleanup).toHaveBeenCalledWith("session-1");
     expect(processExit).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it("SIGTERM emergency handler invokes bounded cleanup idempotently", async () => {
+    const onCleanup = vi.fn(async () => undefined);
+    const lifecycle = new BrowserSessionLifecycle({ onCleanup });
+    lifecycle.register("session-1", {});
+    const before = new Set(process.listeners("SIGTERM"));
+    const unregister = registerEmergencyCleanup(lifecycle);
+    const added = process.listeners("SIGTERM").find((listener) => !before.has(listener));
+
+    expect(added).toBeDefined();
+    (added as () => void)();
+    (added as () => void)();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onCleanup).toHaveBeenCalledTimes(1);
+    expect(onCleanup).toHaveBeenCalledWith("session-1");
+    unregister();
+  });
+
+  it("exit emergency handler is sync-only and does not start async cleanup", () => {
+    const onCleanup = vi.fn();
+    const lifecycle = new BrowserSessionLifecycle({ onCleanup });
+    lifecycle.register("session-1", {});
+    const before = new Set(process.listeners("exit"));
+    const unregister = registerEmergencyCleanup(lifecycle);
+    const added = process.listeners("exit").find((listener) => !before.has(listener));
+
+    expect(added).toBeDefined();
+    (added as () => void)();
+
+    expect(onCleanup).not.toHaveBeenCalled();
     unregister();
   });
 });

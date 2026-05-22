@@ -209,6 +209,33 @@ describe("setup apply plan", () => {
     expect(result.kind).toBe("apply-plan-ready");
   });
 
+  it("suppresses an incomplete provider setup blocker when the manifest includes a complete provider route", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Provider setup is incomplete."),
+      providerModelRouteBundle("openai", "gpt-5.5"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+  });
+
+  it("keeps incomplete provider setup blocked when the provider route is not complete", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Provider setup is incomplete."),
+      providerModelRouteBundle("unconfigured", "unconfigured"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.eligibility.blockers).toContain("Provider setup is incomplete.");
+  });
+
   it("keeps generic credential blockers blocked when no exact env match is available", () => {
     const manifest = buildSetupReviewManifest([
       blockerOnlyBundle("Missing credential for the active provider."),
@@ -571,6 +598,60 @@ function blockerOnlyBundle(blocker: string): SetupDraftBundle {
     metadata: {
       draftCount: 0,
       requiresReviewCount: 0,
+      readOnlyCount: 0,
+    },
+  };
+}
+
+function providerModelRouteBundle(provider: string, model: string): SetupDraftBundle {
+  const draft: SetupDraft = {
+    id: `provider-route.${provider}.${model}`,
+    kind: "provider-model-route",
+    source: {
+      kind: "setup-editor",
+      sectionId: "model-route",
+      actionId: "repair-primary-provider",
+    },
+    riskSurface: "provider-selection",
+    target: {
+      kind: "config-scope",
+      scope: ["provider.route"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    },
+    review: {
+      copyKey: "setupDrafts.review",
+      summaryKey: "setupDrafts.providerModelRoute.summary",
+      redacted: true,
+      values: {
+        provider,
+        model,
+      },
+    },
+    applyIntent: {
+      kind: "dry-run-apply-intent",
+      effect: "config-patch",
+      dryRunOnly: true,
+      writesConfig: false,
+      writesTrustStore: false,
+    },
+    preserveUnrelatedConfig: true,
+    requiresReview: true,
+    readOnly: false,
+    blockers: [],
+    warnings: [],
+  };
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-editor-plan-session",
+    sourceId: `provider-route:${provider}:${model}`,
+    drafts: [draft],
+    blockers: [],
+    warnings: [],
+    safeToApplyLater: true,
+    metadata: {
+      draftCount: 1,
+      requiresReviewCount: 1,
       readOnlyCount: 0,
     },
   };

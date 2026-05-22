@@ -19,7 +19,11 @@ export type WebsitePolicyConfig = {
   sharedFiles?: string[];
 };
 
-const policyCache = new Map<string, WebsiteBlocklistPolicy>();
+const WEBSITE_BLOCKLIST_CACHE_TTL_MS = 30_000;
+const policyCache = new Map<string, {
+  loadedAt: number;
+  policy: WebsiteBlocklistPolicy;
+}>();
 
 export function loadWebsiteBlocklist(config: WebsitePolicyConfig): WebsiteBlocklistPolicy {
   const domains = Array.isArray(config?.domains) ? config.domains : [];
@@ -29,8 +33,8 @@ export function loadWebsiteBlocklist(config: WebsitePolicyConfig): WebsiteBlockl
     sharedFiles
   });
   const cached = policyCache.get(cacheKey);
-  if (cached !== undefined) {
-    return cached;
+  if (cached !== undefined && Date.now() - cached.loadedAt < WEBSITE_BLOCKLIST_CACHE_TTL_MS) {
+    return cached.policy;
   }
 
   const warnings: string[] = [];
@@ -65,7 +69,10 @@ export function loadWebsiteBlocklist(config: WebsitePolicyConfig): WebsiteBlockl
     wildcardDomains,
     warnings
   };
-  policyCache.set(cacheKey, policy);
+  policyCache.set(cacheKey, {
+    loadedAt: Date.now(),
+    policy
+  });
   return policy;
 }
 

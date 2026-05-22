@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,6 +9,11 @@ import {
 } from "./website-policy.js";
 
 describe("website policy", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    resetWebsiteBlocklistCache();
+  });
+
   it("keeps missing config disabled", () => {
     const policy = loadWebsiteBlocklist({});
     expect(policy.enabled).toBe(false);
@@ -38,7 +43,9 @@ describe("website policy", () => {
     expect(policy.warnings).toEqual([`Missing website blocklist file: ${join(dir, "missing.txt")}`]);
   });
 
-  it("reuses cached policies until reset", async () => {
+  it("reuses cached policies within the TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00.000Z"));
     resetWebsiteBlocklistCache();
     const dir = await mkdtemp(join(tmpdir(), "estacoda-policy-test-"));
     const file = join(dir, "blocklist.txt");
@@ -51,6 +58,41 @@ describe("website policy", () => {
     expect(cached).toBe(first);
     expect(cached.exactDomains.has("first.test")).toBe(true);
     expect(cached.exactDomains.has("second.test")).toBe(false);
+  });
+
+  it("reloads changed shared file rules after the TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00.000Z"));
+    resetWebsiteBlocklistCache();
+    const dir = await mkdtemp(join(tmpdir(), "estacoda-policy-test-"));
+    const file = join(dir, "blocklist.txt");
+    await writeFile(file, "first.test\n");
+
+    loadWebsiteBlocklist({ sharedFiles: [file] });
+    await writeFile(file, "second.test\n");
+    vi.advanceTimersByTime(30_001);
+    const refreshed = loadWebsiteBlocklist({ sharedFiles: [file] });
+
+    expect(refreshed.exactDomains.has("first.test")).toBe(false);
+    expect(refreshed.exactDomains.has("second.test")).toBe(true);
+  });
+
+  it("refreshes missing-file warnings after the TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00.000Z"));
+    resetWebsiteBlocklistCache();
+    const dir = await mkdtemp(join(tmpdir(), "estacoda-policy-test-"));
+    const file = join(dir, "blocklist.txt");
+
+    const missing = loadWebsiteBlocklist({ sharedFiles: [file] });
+    expect(missing.warnings).toEqual([`Missing website blocklist file: ${file}`]);
+
+    await writeFile(file, "later.test\n");
+    vi.advanceTimersByTime(30_001);
+    const refreshed = loadWebsiteBlocklist({ sharedFiles: [file] });
+
+    expect(refreshed.warnings).toEqual([]);
+    expect(refreshed.exactDomains.has("later.test")).toBe(true);
   });
 
   it("loads fresh policy after cache reset", async () => {
