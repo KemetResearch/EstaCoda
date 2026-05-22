@@ -676,8 +676,30 @@ async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: 
 
 function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
   const elements = snapshot.elements ?? [];
+  const pendingDialogs = snapshot.pendingDialogs ?? [];
+  const frameTree = snapshot.frameTree ?? [];
+  const consoleHistory = snapshot.consoleHistory ?? [];
   return [
     snapshot.text,
+    pendingDialogs.length === 0 ? undefined : "",
+    pendingDialogs.length === 0 ? undefined : "Pending dialogs:",
+    ...pendingDialogs.slice(0, 5).map((dialog) => {
+      const prompt = dialog.defaultPrompt === undefined ? "" : ` default=${dialog.defaultPrompt}`;
+      return `${dialog.id} ${dialog.type}: ${dialog.message}${prompt}`.slice(0, 500);
+    }),
+    frameTree.length === 0 ? undefined : "",
+    frameTree.length === 0 ? undefined : "Frames:",
+    ...frameTree.slice(0, 10).map((frame) => {
+      const parent = frame.parentFrameId === undefined ? "" : ` parent=${frame.parentFrameId}`;
+      const oopif = frame.isOopif ? " oopif" : "";
+      return `${frame.frameId} ${frame.url} origin=${frame.origin}${parent}${oopif}`.slice(0, 500);
+    }),
+    consoleHistory.length === 0 ? undefined : "",
+    consoleHistory.length === 0 ? undefined : "Console:",
+    ...consoleHistory.slice(-10).map((entry) => {
+      const timestamp = entry.timestamp === undefined ? "" : ` ${entry.timestamp}`;
+      return `[${entry.level}]${timestamp} ${entry.text}`.trim().slice(0, 500);
+    }),
     elements.length === 0 ? undefined : "",
     elements.length === 0 ? undefined : "Interactive elements:",
     ...elements.map((element) => `${element.ref} ${element.role ?? "element"} ${element.name ?? ""}`.trim())

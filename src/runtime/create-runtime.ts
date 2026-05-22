@@ -530,7 +530,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     autoLaunch: options.browser?.autoLaunch,
     fetch: options.cdpFetch,
     webSocketFactory: options.cdpWebSocketFactory,
-    supervised: options.browser?.supervised
+    supervised: options.browser?.supervised,
+    securityConfig: options.securityConfig
   });
   const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
   const externalMemoryProviders = [

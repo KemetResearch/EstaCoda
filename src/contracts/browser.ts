@@ -32,6 +32,24 @@ export type BrowserSnapshot = {
     role?: string;
     name?: string;
   }>;
+  pendingDialogs?: Array<{
+    id: string;
+    type: string;
+    message: string;
+    defaultPrompt?: string;
+  }>;
+  frameTree?: Array<{
+    frameId: string;
+    url: string;
+    origin: string;
+    parentFrameId?: string;
+    isOopif: boolean;
+  }>;
+  consoleHistory?: Array<{
+    level: string;
+    text: string;
+    timestamp?: string;
+  }>;
 };
 
 export type BrowserActionInput = {

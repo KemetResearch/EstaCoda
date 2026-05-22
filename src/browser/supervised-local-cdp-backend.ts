@@ -1,12 +1,15 @@
 import type {
   BrowserActionInput,
   BrowserBackend,
+  BrowserConsoleEntry,
   BrowserBackendStatus,
   BrowserNavigateInput,
   BrowserNavigateResult,
   BrowserScreenshotResult
 } from "../contracts/browser.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { CdpFetchLike, CdpWebSocketFactory } from "./cdp-client.js";
+import type { ResolveHostnameFn } from "./url-safety.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 
 export type SupervisedLocalCdpBackendOptions = {
@@ -15,6 +18,8 @@ export type SupervisedLocalCdpBackendOptions = {
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
+  securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
+  resolveHostname?: ResolveHostnameFn;
 };
 
 type SupervisedSession = {
@@ -61,6 +66,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         : new CDPSupervisor({
           webSocketUrl: target.webSocketDebuggerUrl,
           webSocketFactory: options.webSocketFactory,
+          requestInterception: {
+            allowPrivateUrls: options.securityConfig?.allowPrivateUrls,
+            websiteBlocklist: options.securityConfig?.websiteBlocklist,
+            resolveHostname: options.resolveHostname
+          }
         });
 
       await supervisor.start();
@@ -139,6 +149,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }) as { result?: { value?: unknown } };
       return parseJsonArray(evaluated.result?.value);
     },
+    console: async (input = {}): Promise<BrowserConsoleEntry[]> => {
+      const session = getSession(input);
+      return session.supervisor.consoleHistory({ clear: input.clear });
+    },
     cdp: async (input) => {
       const session = getSession(input);
       if (input.method === undefined || input.method.trim().length === 0) {
@@ -159,6 +173,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         mimeType: "image/png",
         base64: result.data
       } satisfies BrowserScreenshotResult;
+    },
+    dialog: async (input = {}) => {
+      const session = getSession(input);
+      await session.supervisor.respondToDialog({
+        accept: input.action !== "dismiss",
+        promptText: input.promptText
+      });
+      return session.supervisor.getSnapshot(session.id);
     }
   };
 }

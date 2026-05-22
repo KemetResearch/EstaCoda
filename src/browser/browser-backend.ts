@@ -1,7 +1,9 @@
 import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
+import type { ResolveHostnameFn } from "./url-safety.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -535,6 +537,8 @@ export function createBrowserBackendFromConfig(config: {
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
   supervised?: boolean;
+  securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
+  resolveHostname?: ResolveHostnameFn;
 }): BrowserBackend {
   switch (config.backend) {
     case "local-cdp":
@@ -544,7 +548,9 @@ export function createBrowserBackendFromConfig(config: {
           launchCommand: config.launchCommand,
           autoLaunch: config.autoLaunch,
           fetch: config.fetch,
-          webSocketFactory: config.webSocketFactory
+          webSocketFactory: config.webSocketFactory,
+          securityConfig: config.securityConfig,
+          resolveHostname: config.resolveHostname
         });
       }
       return createLocalCdpBrowserBackend({

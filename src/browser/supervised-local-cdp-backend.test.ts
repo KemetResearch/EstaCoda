@@ -55,6 +55,10 @@ class FakeCdpSocket implements CdpWebSocketLike {
     return { ok: true, method };
   }
 
+  emitMessage(message: unknown): void {
+    this.#emit("message", { data: JSON.stringify(message) });
+  }
+
   #emit(type: string, event: CdpWebSocketEvent): void {
     for (const listener of this.#listeners.get(type) ?? []) {
       listener(event);
@@ -207,6 +211,35 @@ describe("supervised local CDP backend", () => {
     });
   });
 
+  it("snapshot() includes pending dialogs, frame tree, and console history from the supervisor", async () => {
+    const socket = new FakeCdpSocket();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    socket.emitMessage({
+      method: "Page.javascriptDialogOpening",
+      params: { type: "alert", message: "Careful" }
+    });
+    socket.emitMessage({
+      method: "Runtime.consoleAPICalled",
+      params: { type: "warn", timestamp: 0, args: [{ value: "Heads up" }] }
+    });
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "frame-1", url: "https://frame.test/app" } }
+    });
+
+    await expect(backend.snapshot?.({ sessionId: "session-1" })).resolves.toMatchObject({
+      pendingDialogs: [{ id: "dialog-1", type: "alert", message: "Careful" }],
+      consoleHistory: [{ level: "warn", text: "Heads up", timestamp: "1970-01-01T00:00:00.000Z" }],
+      frameTree: [{ frameId: "frame-1", url: "https://frame.test/app", origin: "https://frame.test", isOopif: false }]
+    });
+  });
+
   it("pins invalid and missing session behavior", async () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
@@ -241,10 +274,27 @@ describe("supervised local CDP backend", () => {
     });
   });
 
-  it("does not expose unsupported PR 2C dialog or console fallback paths", () => {
-    const backend = createSupervisedLocalCdpBrowserBackend();
+  it("dialog() delegates to the persistent supervisor", async () => {
+    const socket = new FakeCdpSocket();
+    const webSocketFactory = vi.fn(() => socket);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory
+    });
 
-    expect(backend.dialog).toBeUndefined();
-    expect(backend.console).toBeUndefined();
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.dialog?.({ sessionId: "session-1", action: "dismiss" })).resolves.toMatchObject({
+      sessionId: "session-1",
+      url: "https://example.com/final"
+    });
+
+    expect(webSocketFactory).toHaveBeenCalledTimes(1);
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "Page.handleJavaScriptDialog",
+        params: { accept: false, promptText: "" }
+      })
+    ]));
   });
 });

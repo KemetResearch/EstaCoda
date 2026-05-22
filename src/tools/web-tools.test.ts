@@ -925,6 +925,38 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("renders browser snapshot observability sections when present", async () => {
+    const browserBackend: BrowserBackend = {
+      kind: "mock",
+      isAvailable: () => true,
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async () => {
+        throw new Error("not used");
+      },
+      snapshot: async () => ({
+        sessionId: "session-1",
+        url: "https://example.com",
+        text: "Page text.",
+        pendingDialogs: [{ id: "dialog-1", type: "alert", message: "Careful" }],
+        frameTree: [{ frameId: "frame-1", url: "https://frame.test/app", origin: "https://frame.test", isOopif: false }],
+        consoleHistory: [{ level: "warn", text: "Heads up", timestamp: "1970-01-01T00:00:00.000Z" }],
+        elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+      })
+    };
+    const snapshot = tool("browser.snapshot", createWebTools({ browserBackend }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Pending dialogs:");
+    expect(result.content).toContain("dialog-1 alert: Careful");
+    expect(result.content).toContain("Frames:");
+    expect(result.content).toContain("frame-1 https://frame.test/app origin=https://frame.test");
+    expect(result.content).toContain("Console:");
+    expect(result.content).toContain("[warn] 1970-01-01T00:00:00.000Z Heads up");
+    expect(result.content).toContain("Interactive elements:");
+  });
+
   it("returns ok false for browser.click with an invalid ref", async () => {
     const click = tool("browser.click", createWebTools({
       browserBackend: createInvalidRefBackend()
