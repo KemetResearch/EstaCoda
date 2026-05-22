@@ -19,6 +19,7 @@ type EmergencyRegistration = {
 
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 300_000;
 const CLEANUP_INTERVAL_MS = 60_000;
+const EMERGENCY_CLEANUP_TIMEOUT_MS = 5_000;
 const emergencyRegistrations = new WeakMap<BrowserSessionLifecycle, EmergencyRegistration>();
 
 export class BrowserSessionLifecycle {
@@ -131,22 +132,46 @@ export function registerEmergencyCleanup(lifecycle: BrowserSessionLifecycle): ()
     return existing.unregister;
   }
 
-  const cleanup = (): void => {
-    void lifecycle.cleanupAll();
+  let signalCleanup: Promise<void> | undefined;
+  const cleanupOnExit = (): void => {
+    // Node's exit event cannot await async cleanup; the reliable path is runtime.dispose()
+    // or the bounded signal handlers below.
+    lifecycle.stop();
   };
-  const sigint = (): void => {
-    void lifecycle.cleanupAll();
+  const cleanupOnSignal = (): void => {
+    signalCleanup ??= cleanupAllWithTimeout(lifecycle).finally(() => {
+      signalCleanup = undefined;
+    });
   };
-  process.on("exit", cleanup);
-  process.on("SIGINT", sigint);
+  process.on("exit", cleanupOnExit);
+  process.on("SIGINT", cleanupOnSignal);
+  process.on("SIGTERM", cleanupOnSignal);
 
   const unregister = (): void => {
-    process.off("exit", cleanup);
-    process.off("SIGINT", sigint);
+    process.off("exit", cleanupOnExit);
+    process.off("SIGINT", cleanupOnSignal);
+    process.off("SIGTERM", cleanupOnSignal);
     emergencyRegistrations.delete(lifecycle);
   };
   emergencyRegistrations.set(lifecycle, { unregister });
   return unregister;
+}
+
+async function cleanupAllWithTimeout(lifecycle: BrowserSessionLifecycle): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      lifecycle.cleanupAll(),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, EMERGENCY_CLEANUP_TIMEOUT_MS);
+        timeout.unref?.();
+      })
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 async function readOwnerStatus(socketDir: string, sessionId: string): Promise<"live" | "dead" | "unknown"> {
