@@ -6,6 +6,7 @@ import type { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
 import { checkSttProviderStatus, isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { isGatewayFasterWhisperDownloadDenied } from "../tools/stt-providers.js";
 import { resolveAllowedPath, transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
+import type { VoiceStateManager, TranscriptRecord } from "../gateway/voice-state.js";
 
 export type VoiceTranscriptionAuditEvent = {
   timestamp: string;
@@ -27,7 +28,15 @@ export type ChannelVoiceTranscriptionOptions = {
   allowedRoots?: string[];
   fetch?: VoiceFetchLike;
   localWhisper?: FasterWhisperWorkerClient;
+  voiceStateManager?: VoiceStateManager;
   audit?: (event: VoiceTranscriptionAuditEvent) => void | Promise<void>;
+};
+
+type InjectedTranscript = {
+  attachmentId: string;
+  text: string;
+  hash: string;
+  timestamp: string;
 };
 
 export async function injectVoiceTranscripts(
@@ -40,6 +49,8 @@ export async function injectVoiceTranscripts(
   }
 
   const notes: string[] = [];
+  const consumedAttachmentIds = new Set<string>();
+  const transcriptMetadata: InjectedTranscript[] = [];
   for (const attachment of attachments) {
     const path = attachment.localPath ?? attachment.path;
     if (path === undefined || path.length === 0) {
@@ -87,25 +98,40 @@ export async function injectVoiceTranscripts(
       gateway: true
     });
     if (result.ok) {
-      notes.push(`[Voice transcript from ${attachmentLabel(attachment)}]\n${result.text}`);
+      consumedAttachmentIds.add(attachment.id);
+      if (options.voiceStateManager?.isDuplicateTranscript(message.sessionKey.platform, message.sessionKey.chatId, result.text) === true) {
+        continue;
+      }
+      const record = options.voiceStateManager?.recordTranscript(message.sessionKey.platform, message.sessionKey.chatId, result.text) ??
+        fallbackTranscriptRecord(result.text);
+      notes.push(`[Voice message transcript]\n${result.text}`);
+      transcriptMetadata.push({
+        attachmentId: attachment.id,
+        text: result.text,
+        hash: record.hash,
+        timestamp: record.timestamp
+      });
     } else {
       await emitAudit(options, auditEvent("fail", options.stt, attachment, resolvedPath.path, result.content));
       notes.push(`[Voice transcript unavailable for ${attachmentLabel(attachment)}]\n${result.content}`);
     }
   }
 
-  if (notes.length === 0) {
+  if (notes.length === 0 && consumedAttachmentIds.size === 0) {
     return message;
   }
+  const remainingAttachments = (message.attachments ?? []).filter((attachment) => !consumedAttachmentIds.has(attachment.id));
 
   return {
     ...message,
     text: [message.text.trim(), ...notes].filter((part) => part.length > 0).join("\n\n"),
+    attachments: remainingAttachments,
     metadata: {
       ...(message.metadata ?? {}),
       voiceTranscription: {
         injected: true,
-        count: notes.length
+        count: notes.length,
+        ...(transcriptMetadata.length > 0 ? { transcripts: transcriptMetadata } : {})
       }
     }
   };
@@ -152,4 +178,13 @@ async function emitAudit(
 
 function hashPath(path: string): string {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
+}
+
+function fallbackTranscriptRecord(text: string): TranscriptRecord {
+  const hash = createHash("sha256").update(text.trim().toLowerCase()).digest("hex").slice(0, 16);
+  return {
+    normalized: text,
+    hash,
+    timestamp: new Date().toISOString()
+  };
 }

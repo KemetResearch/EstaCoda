@@ -25,6 +25,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { stableSessionKey } from "./channel-session-store.js";
 import { modelPickerCancelActionValue, modelPickerClearActionValue } from "./model-picker-actions.js";
+import { VoiceStateManager } from "../gateway/voice-state.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -444,6 +445,146 @@ function compactResult(overrides: {
 }
 
 describe("ChannelGateway commands", () => {
+  it("/voice on sets voice_only for the chat without invoking runtime", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const result = await gateway.receive(makeMessage("/voice on"));
+
+    expect(result.replyText).toContain("voice_only");
+    expect(await voiceStateManager.getMode("telegram", "123456")).toBe("voice_only");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("/voice status reports current mode", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-status-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    await voiceStateManager.setMode("telegram", "123456", "all");
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const result = await gateway.receive(makeMessage("/voice status"));
+
+    expect(result.replyText).toContain("Voice status");
+    expect(result.replyText).toContain("Mode: all");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("/voice commands recover from malformed profile-local voice state", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-corrupt-"));
+    const voicePath = join(stateDir, "gateway", "voice-mode.json");
+    await mkdir(join(stateDir, "gateway"), { recursive: true });
+    await writeFile(voicePath, "{ broken", "utf8");
+    const voiceStateManager = new VoiceStateManager({ path: voicePath });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const status = await gateway.receive(makeMessage("/voice status"));
+    const set = await gateway.receive(makeMessage("/voice on"));
+
+    expect(status.replyText).toContain("Mode: off");
+    expect(set.replyText).toContain("voice_only");
+    expect(await voiceStateManager.getMode("telegram", "123456")).toBe("voice_only");
+    expect(JSON.parse(await readFile(voicePath, "utf8"))).toMatchObject({
+      version: 1,
+      modes: {
+        "telegram:123456": "voice_only"
+      }
+    });
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("/voice all and /voice tts set all while /voice voice aliases voice_only", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-alias-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    await gateway.receive(makeMessage("/voice all"));
+    expect(await voiceStateManager.getMode("telegram", "123456")).toBe("all");
+    await gateway.receive(makeMessage("/voice voice"));
+    expect(await voiceStateManager.getMode("telegram", "123456")).toBe("voice_only");
+    await gateway.receive(makeMessage("/voice tts"));
+    expect(await voiceStateManager.getMode("telegram", "123456")).toBe("all");
+  });
+
+  it("handles group /voice commands only after existing auth gating", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-group-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["allowed-user"] } },
+      voiceStateManager
+    });
+
+    const denied = await gateway.receive(makeMessage("/voice on", {
+      sessionKey: { platform: "telegram", chatId: "group-1", chatType: "group", userId: "blocked-user" },
+      sender: { id: "blocked-user" }
+    }));
+    expect(denied.replyText).toContain("not paired");
+    expect(await voiceStateManager.getMode("telegram", "group-1")).toBeUndefined();
+
+    const allowed = await gateway.receive(makeMessage("/voice on", {
+      sessionKey: { platform: "telegram", chatId: "group-1", chatType: "group", userId: "allowed-user" },
+      sender: { id: "allowed-user" }
+    }));
+    expect(allowed.replyText).toContain("voice_only");
+    expect(await voiceStateManager.getMode("telegram", "group-1")).toBe("voice_only");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("/voice channel stays explicitly unavailable before Discord voice support", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-channel-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const result = await gateway.receive(makeMessage("/voice channel"));
+
+    expect(result.replyText).toContain("not available until Discord voice support");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
   it("/compact runs manual session compaction and replies through the gateway", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
     const calls: Array<{ sessionId?: string; focusTopic?: string; preserveTranscript?: boolean }> = [];

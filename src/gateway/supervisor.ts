@@ -63,6 +63,7 @@ import {
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { GatewayApprovalQueue } from "./approval-queue.js";
+import { VoiceStateManager } from "./voice-state.js";
 import {
   HookRegistry,
   type GatewayHookEventName,
@@ -776,6 +777,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
     const handoffStore = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
     const surfacePointerStore = new FileSurfacePointerStore({ path: join(profilePaths.gatewayStatePath, "surface-pointers.json") });
+    const voiceStateManager = new VoiceStateManager({ path: join(profilePaths.gatewayStatePath, "voice-mode.json") });
 
     // 8. Adapter instantiation
     const adapters: ChannelAdapter[] = [];
@@ -1018,6 +1020,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              voiceStateManager,
               audit: voiceAudit
             });
           },
@@ -1068,6 +1071,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          voiceStateManager,
+          voiceAutoTtsDefault: config.voice.autoTts,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -1084,6 +1089,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              voiceStateManager,
               audit: voiceAudit
             });
           },
@@ -1134,6 +1140,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          voiceStateManager,
+          voiceAutoTtsDefault: config.voice.autoTts,
         });
 
     state.channelGateway = gateway;

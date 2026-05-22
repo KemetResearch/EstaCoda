@@ -716,6 +716,8 @@ describe("runGatewaySupervisor", () => {
       baseUrl: "https://custom.example/v1",
       apiKeyEnv: "CUSTOM_API_KEY"
     });
+    expect(capturedOpts.voiceStateManager).toBeDefined();
+    expect(capturedOpts.voiceAutoTtsDefault).toBe(false);
   });
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {

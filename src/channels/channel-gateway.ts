@@ -59,6 +59,7 @@ import {
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
+import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
@@ -122,6 +123,8 @@ export type ChannelGatewayOptions = {
   sessionHygieneService?: Pick<SessionHygieneService, "run">;
   modelSwitchContext?: () => Promise<ModelSwitchContext>;
   logWarning?: (message: string) => void;
+  voiceStateManager?: VoiceStateManager;
+  voiceAutoTtsDefault?: boolean;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -260,6 +263,8 @@ export class ChannelGateway {
   readonly #sessionHygieneService: Pick<SessionHygieneService, "run"> | undefined;
   readonly #modelSwitchContext: (() => Promise<ModelSwitchContext>) | undefined;
   readonly #abortReasonByKey = new Map<string, string>();
+  readonly #voiceStateManager: VoiceStateManager | undefined;
+  readonly #voiceAutoTtsDefault: boolean;
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -296,6 +301,8 @@ export class ChannelGateway {
     this.#hookRegistry = options.hookRegistry;
     this.#sessionHygieneService = options.sessionHygieneService;
     this.#modelSwitchContext = options.modelSwitchContext;
+    this.#voiceStateManager = options.voiceStateManager;
+    this.#voiceAutoTtsDefault = options.voiceAutoTtsDefault ?? false;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -1478,6 +1485,11 @@ export class ChannelGateway {
       return this.#handleModelCommand(message, adapter, modelCommand);
     }
 
+    const voiceCommand = parseGatewayVoiceCommand(message.text);
+    if (voiceCommand !== undefined) {
+      return this.#handleVoiceCommand(message, adapter, voiceCommand);
+    }
+
     const command = parseGatewayCommand(message.text);
 
     if (command === undefined) {
@@ -1503,6 +1515,7 @@ export class ChannelGateway {
         "/trust - trust this workspace for local read/write work",
         "/untrust - revoke workspace trust for this chat session",
         "/workspace.trust.status - show current workspace trust state",
+        "/voice on|all|off|status - control voice reply mode for this chat",
         "/yolo - toggle YOLO/open mode for this chat session",
         "/cron <command> - manage scheduled tasks",
         "/commands - show the Telegram command menu",
@@ -2254,6 +2267,42 @@ export class ChannelGateway {
     return undefined;
   }
 
+  async #handleVoiceCommand(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    command: GatewayVoiceCommand
+  ): Promise<ChannelGatewayResult> {
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+    if (this.#voiceStateManager === undefined) {
+      const text = "Voice controls are not configured on this gateway.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command.kind === "unsupported") {
+      const text = "Discord voice channel controls are not available until Discord voice support is implemented.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command.kind === "status") {
+      const explicitMode = await this.#voiceStateManager.getMode(message.sessionKey.platform, message.sessionKey.chatId);
+      const mode = explicitMode ?? (this.#voiceAutoTtsDefault ? "voice_only" : "off");
+      const text = [
+        "Voice status",
+        `Mode: ${mode}`,
+        explicitMode === undefined ? `Source: default (${this.#voiceAutoTtsDefault ? "voice_only" : "off"})` : "Source: chat"
+      ].join("\n");
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    await this.#voiceStateManager.setMode(message.sessionKey.platform, message.sessionKey.chatId, command.mode);
+    const text = `Voice mode set to ${command.mode}.`;
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
   async #rejectCompactIfSessionBusy(
     message: ChannelMessage,
     adapter: ChannelAdapter
@@ -2701,6 +2750,11 @@ type GatewayModelCommand =
   | { kind: "clear"; scope: "session" | "global" }
   | { kind: "cancel" };
 
+type GatewayVoiceCommand =
+  | { kind: "status" }
+  | { kind: "set"; mode: VoiceMode }
+  | { kind: "unsupported" };
+
 function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
   const args = tokenizeCommandArgs(text.trim());
   const rawToken = args[0];
@@ -2734,6 +2788,36 @@ function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined
   }
 
   return { kind: "set", scope, modelInput: normalized.join(" ") };
+}
+
+function parseGatewayVoiceCommand(text: string): GatewayVoiceCommand | undefined {
+  const args = tokenizeCommandArgs(text.trim());
+  const rawToken = args[0];
+  if (rawToken === undefined) {
+    return undefined;
+  }
+  const token = rawToken.toLowerCase().replace(/@[\w_]+$/u, "");
+  if (token !== "/voice") {
+    return undefined;
+  }
+  const subcommand = args[1]?.toLowerCase() ?? "status";
+  switch (subcommand) {
+    case "on":
+    case "voice":
+      return { kind: "set", mode: "voice_only" };
+    case "all":
+    case "tts":
+      return { kind: "set", mode: "all" };
+    case "off":
+      return { kind: "set", mode: "off" };
+    case "status":
+      return { kind: "status" };
+    case "channel":
+    case "leave":
+      return { kind: "unsupported" };
+    default:
+      return { kind: "status" };
+  }
 }
 
 export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {
@@ -2961,6 +3045,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/trust", description: "Trust this workspace" },
     { command: "/untrust", description: "Revoke workspace trust" },
     { command: "/workspace.trust.status", description: "Show workspace trust state" },
+    { command: "/voice", description: "Control voice reply mode" },
     { command: "/yolo", description: "Toggle YOLO/open mode for this chat" },
     { command: "/cron", description: "Manage scheduled tasks" },
     { command: "/resume", description: "Show the latest interrupted turn" },

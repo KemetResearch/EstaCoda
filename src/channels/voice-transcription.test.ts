@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChannelMessage } from "../contracts/channel.js";
 import { injectVoiceTranscripts } from "./voice-transcription.js";
+import { VoiceStateManager } from "../gateway/voice-state.js";
 
 function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
@@ -64,7 +65,7 @@ describe("injectVoiceTranscripts", () => {
     expect(result.metadata?.voiceTranscription).toEqual({ injected: true, count: 1 });
   });
 
-  it("injects transcript text for ready audio attachments inside allowed roots", async () => {
+  it("formats transcript text and removes the original audio attachment from model context", async () => {
     const roots = await createRoots();
     const audio = join(roots.mediaRoot, "voice.ogg");
     await writeFile(audio, "audio");
@@ -72,6 +73,7 @@ describe("injectVoiceTranscripts", () => {
     const result = await injectVoiceTranscripts(message({
       text: "Please summarize this.",
       attachments: [
+        { id: "file-1", kind: "file", status: "ready", localPath: join(roots.mediaRoot, "file.txt") },
         { id: "voice-1", kind: "audio", status: "ready", localPath: audio, originalName: "voice.ogg" }
       ]
     }), {
@@ -79,8 +81,20 @@ describe("injectVoiceTranscripts", () => {
       allowedRoots: [roots.mediaRoot, roots.audioRoot]
     });
 
-    expect(result.text).toBe("Please summarize this.\n\n[Voice transcript from voice.ogg]\ntranscript");
-    expect(result.metadata?.voiceTranscription).toEqual({ injected: true, count: 1 });
+    expect(result.text).toBe("Please summarize this.\n\n[Voice message transcript]\ntranscript");
+    expect(result.attachments?.map((attachment) => attachment.id)).toEqual(["file-1"]);
+    expect(result.metadata?.voiceTranscription).toMatchObject({
+      injected: true,
+      count: 1,
+      transcripts: [
+        expect.objectContaining({
+          attachmentId: "voice-1",
+          text: "transcript",
+          hash: expect.any(String),
+          timestamp: expect.any(String)
+        })
+      ]
+    });
   });
 
   it("continues with unavailable transcript notes when STT execution fails", async () => {
@@ -176,8 +190,44 @@ describe("injectVoiceTranscripts", () => {
       localWhisper: { transcribe } as any
     });
 
-    expect(result.text).toContain("[Voice transcript from voice.ogg]\nmanaged transcript");
+    expect(result.text).toContain("[Voice message transcript]\nmanaged transcript");
+    expect(result.attachments).toEqual([]);
     expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses duplicate successful transcripts for the same chat", async () => {
+    const roots = await createRoots();
+    const audioOne = join(roots.mediaRoot, "voice-1.ogg");
+    const audioTwo = join(roots.mediaRoot, "voice-2.ogg");
+    await writeFile(audioOne, "audio");
+    await writeFile(audioTwo, "audio");
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-voice-dedupe-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+
+    const first = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audioOne }
+      ]
+    }), {
+      stt: { provider: "local", enabled: true, local: { command: "printf 'Please summarize this deployment plan.'" } },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      voiceStateManager
+    });
+    const second = await injectVoiceTranscripts(message({
+      text: "next",
+      attachments: [
+        { id: "voice-2", kind: "voice", status: "ready", localPath: audioTwo }
+      ]
+    }), {
+      stt: { provider: "local", enabled: true, local: { command: "printf 'please summarize this deployment plan'" } },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      voiceStateManager
+    });
+
+    expect(first.text).toContain("[Voice message transcript]");
+    expect(second.text).toBe("next");
+    expect(second.attachments).toEqual([]);
+    expect(second.metadata?.voiceTranscription).toEqual({ injected: true, count: 0 });
   });
 
   it("denies gateway faster-whisper when hfHome hub exists but the selected model is absent", async () => {
