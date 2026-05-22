@@ -1,0 +1,84 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`web and browser golden snapshots > browser.navigate output matches golden > browser-navigate-mock 1`] = `
+{
+  "content": "Browser: mock
+Session: mock-browser-session
+URL: https://example.com/
+Title: Test Page
+
+Hello world.
+
+Interactive elements:
+@e1 button Mock Button",
+  "metadata": {
+    "backend": "mock",
+    "session": {
+      "backend": "mock",
+      "createdAt": "<timestamp>",
+      "currentUrl": "https://example.com/",
+      "id": "<session-id>",
+    },
+    "snapshot": {
+      "elements": [
+        {
+          "name": "Mock Button",
+          "ref": "@e1",
+          "role": "button",
+        },
+      ],
+      "sessionId": "<session-id>",
+      "text": "Hello world.",
+      "title": "Test Page",
+      "url": "https://example.com/",
+    },
+    "url": "https://example.com/",
+  },
+  "ok": true,
+}
+`;
+
+exports[`web and browser golden snapshots > browser.snapshot output matches golden > browser-snapshot-mock 1`] = `
+{
+  "content": "Hello world.
+
+Interactive elements:
+@e1 button Mock Button",
+  "metadata": {
+    "backend": "mock",
+    "snapshot": {
+      "elements": [
+        {
+          "name": "Mock Button",
+          "ref": "@e1",
+          "role": "button",
+        },
+      ],
+      "sessionId": "<session-id>",
+      "text": "Hello world.",
+      "title": "Test Page",
+      "url": "mock://browser",
+    },
+  },
+  "ok": true,
+}
+`;
+
+exports[`web and browser golden snapshots > web.extract output matches golden > web-extract-mock 1`] = `
+{
+  "content": "URL: https://example.com/
+Title: Example
+Status: 200 OK
+
+Example Hello world",
+  "metadata": {
+    "content": "Example Hello world",
+    "contentType": "text/html",
+    "source": "fetch",
+    "status": 200,
+    "title": "Example",
+    "url": "https://example.com/",
+  },
+  "ok": true,
+}
+`;
