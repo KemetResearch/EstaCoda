@@ -8,6 +8,7 @@ import type { ModelProfile } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
@@ -113,6 +114,7 @@ async function createAgentLoop(input: {
   sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
   compressionConfig?: SessionCompressionConfig;
   memoryProvider?: MemoryProvider;
+  trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -148,6 +150,7 @@ async function createAgentLoop(input: {
     sessionId,
     sessionRuntimeContext,
     trajectoryRecorder,
+    trajectoryStore: input.trajectoryStore,
     profileId: "default"
   });
   const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
@@ -219,7 +222,8 @@ async function createAgentLoop(input: {
     executeSkillWorkflow: input.executeSkillWorkflow,
     sessionDb,
     sessionId,
-    sessionRuntimeContext
+    sessionRuntimeContext,
+    trajectoryRecorder
   };
 }
 
@@ -259,6 +263,55 @@ describe("AgentLoop provider availability gating", () => {
     expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
     expect(executeSkillWorkflow).not.toHaveBeenCalled();
     expect(response.toolExecutions).toHaveLength(0);
+  });
+
+  it("persists the trajectory snapshot when a turn returns successfully", async () => {
+    const saveTrajectory = vi.fn(async () => undefined);
+    const { loop, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      trajectoryStore: { saveTrajectory }
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(saveTrajectory).toHaveBeenCalledTimes(1);
+    expect(saveTrajectory).toHaveBeenCalledWith(expect.objectContaining({
+      id: trajectoryRecorder.trajectoryId,
+      outcome: {
+        success: true,
+        summary: "Turn completed."
+      },
+      events: expect.arrayContaining([
+        expect.objectContaining({ kind: "assistant-output" }),
+        expect.objectContaining({ kind: "session-end" })
+      ])
+    }));
+  });
+
+  it("does not fail a completed turn when final trajectory persistence fails", async () => {
+    const saveTrajectory = vi.fn(async () => {
+      throw new Error("database locked");
+    });
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      trajectoryStore: { saveTrajectory }
+    });
+
+    await expect(loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    })).resolves.toMatchObject({
+      label: "Test",
+      text: expect.any(String)
+    });
+    expect(saveTrajectory).toHaveBeenCalledTimes(1);
   });
 
   it("rotates session context before provider turn and appends final response to the child", async () => {

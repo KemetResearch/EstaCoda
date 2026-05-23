@@ -254,9 +254,12 @@ export class AgentLoop {
         resumeNote
       }, input.onEvent);
 
-      return cancelledResponse({
+      return await this.#completeAndReturn(cancelledResponse({
         label: this.#responseLabel,
         resumeNote
+      }), {
+        success: false,
+        summary: "Turn cancelled before start."
       });
     }
     const expandedContext = await this.#contextReferenceExpander?.expand(effectiveText);
@@ -337,9 +340,12 @@ export class AgentLoop {
         resumeNote
       }, input.onEvent);
 
-      return cancelledResponse({
+      return await this.#completeAndReturn(cancelledResponse({
         label: this.#responseLabel,
         resumeNote
+      }), {
+        success: false,
+        summary: "Turn cancelled before routing."
       });
     }
 
@@ -395,7 +401,7 @@ export class AgentLoop {
         text: route.attachmentFailureResponse
       });
 
-      return {
+      return await this.#completeAndReturn({
         label: this.#responseLabel,
         text: route.attachmentFailureResponse,
         matchedSkills: [],
@@ -413,7 +419,10 @@ export class AgentLoop {
             .filter((attachment) => attachment.status !== undefined && attachment.status !== "ready")
             .map((attachment) => `attachment: ${attachment.id} (${attachment.status})`)
         ]
-      };
+      }, {
+        success: false,
+        summary: "Attachment preflight failed."
+      });
     }
 
     await emit(input.onEvent, {
@@ -657,7 +666,10 @@ export class AgentLoop {
         channel: input.channel
       });
 
-      return response;
+      return await this.#completeAndReturn(response, {
+        success: false,
+        summary: "Turn cancelled during provider/tool loop."
+      });
     }
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
       selectedSkill,
@@ -783,7 +795,7 @@ export class AgentLoop {
 
     await this.#promoteRepeatedPreferences(effectiveText, userInputEvent.id);
 
-    return response;
+    return await this.#completeAndReturn(response, outcomeFromResponse(response));
   }
 
 
@@ -1076,6 +1088,15 @@ export class AgentLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
+  async #completeAndReturn<T extends AgentLoopResponse>(response: T, outcome: {
+    success: boolean;
+    summary: string;
+    userAccepted?: boolean;
+  }): Promise<T> {
+    await this.#runRecorder.completeTrajectory(outcome, { bestEffort: true });
+    return response;
+  }
+
 
 
 }
@@ -1196,8 +1217,32 @@ function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined)
   return "workspace-write";
 }
 
+function outcomeFromResponse(response: AgentLoopResponse): {
+  success: boolean;
+  summary: string;
+} {
+  if (response.providerExecution?.ok === false) {
+    return {
+      success: false,
+      summary: "Provider turn failed; fallback response returned."
+    };
+  }
 
+  const failedTools = response.toolExecutions.filter((execution) =>
+    execution.decision !== "allow" || execution.result?.ok === false
+  ).length;
+  if (failedTools > 0) {
+    return {
+      success: false,
+      summary: `${failedTools} tool execution(s) failed or were blocked.`
+    };
+  }
 
+  return {
+    success: true,
+    summary: "Turn completed."
+  };
+}
 
 function isResumeRequest(text: string): boolean {
   return /^(resume|resume that|continue|continue that|pick up where we left off)\b/iu.test(text.trim());
