@@ -790,6 +790,123 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(clearIndex).toBeLessThan(assistantIndex);
   });
 
+  it("clears the readline echo before rendering the submitted user prompt rail", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ hello");
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("clears every wrapped readline echo row before the submitted user prompt rail", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 20,
+    } as unknown as NodeJS.WritableStream;
+    const longText = "this is a deliberately long prompt";
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: longText },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = [longText, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ this is a delib...");
+    const chromeClearIndex = rendered.lastIndexOf("\x1b[3A\x1b[2K\x1b[3B", userRailIndex);
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(chromeClearIndex).toBeGreaterThan(-1);
+    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("uses the raw echoed readline text when clearing trailing-space wraps", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 20,
+    } as unknown as NodeJS.WritableStream;
+    const rawText = "x".padEnd(35, " ");
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "x" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = [rawText, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ x");
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
   it("updates chrome status rail from live context usage events", async () => {
     const outputChunks: string[] = [];
     const output = {

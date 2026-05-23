@@ -42,6 +42,7 @@ import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
@@ -75,6 +76,13 @@ export type SessionLoopOptions = {
 };
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
+
+type SubmittedCliInput = {
+  text: string;
+  echoedPromptPrefix: string;
+  echoedText: string;
+  clearSubmittedPrompt: boolean;
+};
 
 export class ToolActivityAnimator {
   readonly #output: NodeJS.WritableStream;
@@ -220,7 +228,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         runtime,
         homeDir: options.homeDir
       });
-      const text = await readNextCliInput({
+      const submittedInput = await readNextCliInput({
         voiceMode,
         prompt,
         promptPrefix,
@@ -232,9 +240,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         workspaceRoot: options.workspaceRoot,
         cliVoice: options.cliVoice
       });
+      const text = submittedInput.text;
 
       if (chrome.enabled) {
-        chrome.clearChrome();
+        chrome.clearChrome(submittedPromptLineCount(renderer.capabilities, submittedInput));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -302,6 +311,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       const userPromptRailText = renderer.render(userPromptRail);
       if (chrome.enabled) {
         await chrome.suspendChromeForTranscript(() => {
+          clearSubmittedPromptEcho(output, renderer.capabilities, submittedInput);
           output.write(`${userPromptRailText}\n`);
         });
       } else {
@@ -470,15 +480,30 @@ async function readNextCliInput(input: {
   homeDir?: string;
   workspaceRoot?: string;
   cliVoice?: SessionLoopOptions["cliVoice"];
-}): Promise<string> {
+}): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
-    return (await input.prompt(colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor))).trim();
+    const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
+    const rawText = await input.prompt(echoedPromptPrefix);
+    const text = rawText.trim();
+    return {
+      text,
+      echoedPromptPrefix,
+      echoedText: rawText,
+      clearSubmittedPrompt: text.length > 0
+    };
   }
 
   const promptPrefix = `${input.promptPrefix}[voice:${input.voiceMode}] `;
-  const typed = (await input.prompt(colorPromptPrefix(promptPrefix, input.renderer.tokens, input.useColor))).trim();
+  const echoedPromptPrefix = colorPromptPrefix(promptPrefix, input.renderer.tokens, input.useColor);
+  const rawTyped = await input.prompt(echoedPromptPrefix);
+  const typed = rawTyped.trim();
   if (typed.length > 0) {
-    return typed;
+    return {
+      text: typed,
+      echoedPromptPrefix,
+      echoedText: rawTyped,
+      clearSubmittedPrompt: true
+    };
   }
 
   const profileId = await runtimeProfileId(input.runtime);
@@ -515,11 +540,53 @@ async function readNextCliInput(input: {
   });
   if (!captured.ok) {
     input.output.write(`CLI voice unavailable: ${captured.content}\n`);
-    return "";
+    return {
+      text: "",
+      echoedPromptPrefix,
+      echoedText: "",
+      clearSubmittedPrompt: false
+    };
   }
 
   input.output.write(`Transcript: ${captured.transcript}\n`);
-  return captured.transcript.trim();
+  return {
+    text: captured.transcript.trim(),
+    echoedPromptPrefix,
+    echoedText: "",
+    clearSubmittedPrompt: false
+  };
+}
+
+function clearSubmittedPromptEcho(
+  output: NodeJS.WritableStream,
+  capabilities: TerminalCapabilities,
+  submittedInput: SubmittedCliInput
+): void {
+  if (
+    submittedInput.clearSubmittedPrompt !== true ||
+    !capabilities.isTTY ||
+    capabilities.isCI ||
+    capabilities.isDumb
+  ) {
+    return;
+  }
+
+  const lineCount = submittedPromptLineCount(capabilities, submittedInput);
+  let sequence = "";
+  for (let index = 0; index < lineCount; index += 1) {
+    sequence += "\x1b[1A\x1b[2K";
+  }
+  sequence += "\r";
+  output.write(sequence);
+}
+
+function submittedPromptLineCount(
+  capabilities: TerminalCapabilities,
+  submittedInput: SubmittedCliInput
+): number {
+  const terminalWidth = Math.max(1, capabilities.terminalWidth);
+  const visibleWidth = measureVisibleWidth(`${submittedInput.echoedPromptPrefix}${submittedInput.echoedText}`);
+  return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
 }
 
 async function playCliResponseIfEnabled(input: {

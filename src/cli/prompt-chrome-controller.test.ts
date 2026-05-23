@@ -155,6 +155,15 @@ describe("PromptChromeController — chrome lifecycle", () => {
     expect(chunks).toEqual(["\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[2B"]);
   });
 
+  it("clearChrome can account for wrapped submitted prompt rows", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
+    chunks.length = 0;
+    ctrl.clearChrome(3);
+    expect(chunks).toEqual(["\x1b[4A\x1b[2K\x1b[4B"]);
+  });
+
   it("clearChrome is a no-op when not active", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
