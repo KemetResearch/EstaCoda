@@ -837,6 +837,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 allowedChannels: discord.allowedChannels,
                 freeResponseChannels: discord.freeResponseChannels,
                 mediaRoot,
+                voiceChannel: discord.voiceChannel,
+                voiceTempRoot: join(profilePaths.tempPath, "audio"),
               })
             : new DiscordAdapter({
                 botToken: botToken!,
@@ -845,6 +847,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 allowedChannels: discord.allowedChannels,
                 freeResponseChannels: discord.freeResponseChannels,
                 mediaRoot,
+                voiceChannel: discord.voiceChannel,
+                voiceTempRoot: join(profilePaths.tempPath, "audio"),
               });
           router.registerAdapter(adapter);
           adapters.push(adapter);
@@ -1019,7 +1023,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
-              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               voiceStateManager,
               audit: voiceAudit
             });
@@ -1093,7 +1097,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
-              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               voiceStateManager,
               audit: voiceAudit
             });

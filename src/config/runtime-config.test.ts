@@ -595,6 +595,46 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("normalizes Discord voice channel config as disabled by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.discord.voiceChannel).toEqual({
+      enabled: false,
+      autoJoinOnCommand: true
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes explicit Discord voice channel enablement", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        discord: {
+          enabled: true,
+          botTokenEnv: "DISCORD_BOT_TOKEN",
+          voiceChannel: { enabled: true, autoJoinOnCommand: false }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.discord.voiceChannel).toEqual({
+      enabled: true,
+      autoJoinOnCommand: false
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("email ready = enabled && required config present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

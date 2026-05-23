@@ -5,6 +5,7 @@ import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
 import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
+import { DiscordVoiceBridge } from "./discord-voice-bridge.js";
 
 describe("DiscordAdapter", () => {
   it("initializes with options", () => {
@@ -254,7 +255,73 @@ describe("DiscordAdapter", () => {
       }
     });
   });
+
+  it("adds GuildVoiceStates intent only when Discord voice channels are enabled", async () => {
+    const plainFactory = vi.fn((() => fakeDiscordClient()) as any);
+    const plain = new DiscordAdapter({ botToken: "test", clientFactory: plainFactory as any });
+    await plain.start(async () => undefined);
+    expect((plainFactory.mock.calls[0][0] as any).intents).not.toContain(1 << 7);
+    await plain.stop();
+
+    const voiceFactory = vi.fn((() => fakeDiscordClient()) as any);
+    const voice = new DiscordAdapter({
+      botToken: "test",
+      clientFactory: voiceFactory as any,
+      voiceChannel: { enabled: true, autoJoinOnCommand: true },
+      voiceTempRoot: "/tmp/estacoda-discord-voice-test"
+    });
+    await voice.start(async () => undefined);
+    expect((voiceFactory.mock.calls[0][0] as any).intents).toContain(1 << 7);
+    await voice.stop();
+  });
+
+  it("leaves Discord voice connections on adapter stop", async () => {
+    const leaveAll = vi.fn(async () => undefined);
+    const bridge = { leaveAll } as unknown as DiscordVoiceBridge;
+    const adapter = new DiscordAdapter({
+      botToken: "test",
+      clientFactory: (() => fakeDiscordClient()) as any,
+      voiceChannel: { enabled: true, autoJoinOnCommand: true },
+      voiceBridge: bridge
+    });
+
+    await adapter.start(async () => undefined);
+    await adapter.stop();
+
+    expect(leaveAll).toHaveBeenCalled();
+  });
+
+  it("does not load optional Discord voice dependencies during normal text startup", async () => {
+    const loadDependencies = vi.fn(async () => ({
+      ok: false as const,
+      missing: ["@discordjs/voice"],
+      installHint: "install voice deps"
+    }));
+    const adapter = new DiscordAdapter({
+      botToken: "test",
+      clientFactory: (() => fakeDiscordClient()) as any,
+      voiceChannel: { enabled: true, autoJoinOnCommand: true },
+      voiceTempRoot: "/tmp/estacoda-discord-voice-test",
+      voiceDependencyLoader: loadDependencies
+    });
+
+    await adapter.start(async () => undefined);
+
+    expect(loadDependencies).not.toHaveBeenCalled();
+    await adapter.stop();
+  });
 });
+
+function fakeDiscordClient() {
+  return {
+    on: vi.fn(),
+    login: vi.fn(async () => undefined),
+    destroy: vi.fn(),
+    channels: { fetch: vi.fn() },
+    guilds: { cache: { get: vi.fn() }, fetch: vi.fn() },
+    user: { id: "bot-1" }
+  };
+}
 
 function chunkDiscordText(text: string, maxLen: number): string[] {
   if (text.length <= maxLen) return [text];

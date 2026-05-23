@@ -2460,8 +2460,22 @@ export class ChannelGateway {
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
-    if (command.kind === "unsupported") {
-      const text = "Discord voice channel controls are not available until Discord voice support is implemented.";
+    if (command.kind === "channel" || command.kind === "leave") {
+      if (message.sessionKey.platform !== "discord") {
+        const text = "Discord voice channel controls are available only from Discord.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+      const capability = command.kind === "channel"
+        ? adapter.joinVoiceChannelForMessage
+        : adapter.leaveVoiceChannelForMessage;
+      if (capability === undefined) {
+        const text = "Discord voice channel controls are not available on this adapter.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+      const result = await capability.call(adapter, message);
+      const text = result.content;
       await this.#deliverText(adapter, message.sessionKey, text);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
@@ -2934,7 +2948,8 @@ type GatewayModelCommand =
 type GatewayVoiceCommand =
   | { kind: "status" }
   | { kind: "set"; mode: VoiceMode }
-  | { kind: "unsupported" };
+  | { kind: "channel" }
+  | { kind: "leave" };
 
 function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
   const args = tokenizeCommandArgs(text.trim());
@@ -2994,8 +3009,9 @@ function parseGatewayVoiceCommand(text: string): GatewayVoiceCommand | undefined
     case "status":
       return { kind: "status" };
     case "channel":
+      return { kind: "channel" };
     case "leave":
-      return { kind: "unsupported" };
+      return { kind: "leave" };
     default:
       return { kind: "status" };
   }

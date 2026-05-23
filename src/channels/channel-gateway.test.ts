@@ -26,6 +26,7 @@ import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-
 import { stableSessionKey } from "./channel-session-store.js";
 import { modelPickerCancelActionValue, modelPickerClearActionValue } from "./model-picker-actions.js";
 import { VoiceStateManager } from "../gateway/voice-state.js";
+import { AdapterResilienceSupervisor } from "../gateway/adapter-resilience.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -648,7 +649,7 @@ describe("ChannelGateway commands", () => {
     expect(runtimeForSession).not.toHaveBeenCalled();
   });
 
-  it("/voice channel stays explicitly unavailable before Discord voice support", async () => {
+  it("/voice channel remains Discord-only on other platforms", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
     const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-channel-"));
     const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
@@ -663,7 +664,120 @@ describe("ChannelGateway commands", () => {
 
     const result = await gateway.receive(makeMessage("/voice channel"));
 
-    expect(result.replyText).toContain("not available until Discord voice support");
+    expect(result.replyText).toContain("available only from Discord");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("delegates /voice channel to Discord voice capability methods without invoking runtime", async () => {
+    const records: string[] = [];
+    const joinVoiceChannelForMessage = vi.fn(async () => ({
+      ok: true,
+      content: "Joined Discord voice channel General."
+    }));
+    const adapter = {
+      kind: "discord",
+      delivery: {
+        sendText: async (_sessionKey: ChannelSessionKey, text: string) => {
+          records.push(text);
+        }
+      },
+      joinVoiceChannelForMessage
+    } as any;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-channel-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { discord: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const message = makeMessage("/voice channel", {
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "channel-1", chatType: "channel", userId: "user-1" },
+      metadata: { guildId: "guild-1", channelId: "channel-1" }
+    });
+    const result = await gateway.receive(message);
+
+    expect(result.replyText).toContain("Joined Discord voice channel");
+    expect(records).toContain(result.replyText);
+    expect(joinVoiceChannelForMessage).toHaveBeenCalledWith(message);
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("delegates /voice leave to Discord voice capability methods without invoking runtime", async () => {
+    const leaveVoiceChannelForMessage = vi.fn(async () => ({
+      ok: true,
+      content: "Left the Discord voice channel."
+    }));
+    const adapter = {
+      kind: "discord",
+      delivery: {
+        sendText: async () => undefined
+      },
+      leaveVoiceChannelForMessage
+    } as any;
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-leave-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { discord: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+
+    const message = makeMessage("/voice leave", {
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "channel-1", chatType: "channel", userId: "user-1" },
+      metadata: { guildId: "guild-1", channelId: "channel-1" }
+    });
+    const result = await gateway.receive(message);
+
+    expect(result.replyText).toContain("Left the Discord voice channel");
+    expect(leaveVoiceChannelForMessage).toHaveBeenCalledWith(message);
+    expect(runtimeForSession).not.toHaveBeenCalled();
+  });
+
+  it("delegates /voice channel and /voice leave through the production resilience wrapper", async () => {
+    const joinVoiceChannelForMessage = vi.fn(async () => ({
+      ok: true,
+      content: "Joined Discord voice channel General."
+    }));
+    const leaveVoiceChannelForMessage = vi.fn(async () => ({
+      ok: true,
+      content: "Left the Discord voice channel."
+    }));
+    const wrapped = new AdapterResilienceSupervisor({
+      kind: "discord",
+      delivery: { sendText: async () => undefined },
+      joinVoiceChannelForMessage,
+      leaveVoiceChannelForMessage
+    } as any);
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-wrapper-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+    const gateway = new ChannelGateway({
+      adapters: [wrapped],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { discord: { allowedUserIds: ["user-1"] } },
+      voiceStateManager
+    });
+    const base = {
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "channel-1", chatType: "channel", userId: "user-1" } as ChannelSessionKey,
+      metadata: { guildId: "guild-1", channelId: "channel-1" }
+    };
+
+    await gateway.receive(makeMessage("/voice channel", base));
+    await gateway.receive(makeMessage("/voice leave", base));
+
+    expect(joinVoiceChannelForMessage).toHaveBeenCalledTimes(1);
+    expect(leaveVoiceChannelForMessage).toHaveBeenCalledTimes(1);
     expect(runtimeForSession).not.toHaveBeenCalled();
   });
 

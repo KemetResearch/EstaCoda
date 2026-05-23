@@ -412,6 +412,10 @@ export type DiscordChannelConfig = {
   allowedGuilds?: string[];
   allowedChannels?: string[];
   freeResponseChannels?: string[];
+  voiceChannel?: {
+    enabled?: boolean;
+    autoJoinOnCommand?: boolean;
+  };
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
 };
@@ -796,6 +800,10 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       },
       discord: {
         ...discord,
+        voiceChannel: {
+          enabled: discord.voiceChannel?.enabled === true,
+          autoJoinOnCommand: discord.voiceChannel?.autoJoinOnCommand ?? true,
+        },
         ready: discord.enabled === true && discordMissing.length === 0,
         missing: discordMissing.length === 0 ? undefined : discordMissing,
         busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),

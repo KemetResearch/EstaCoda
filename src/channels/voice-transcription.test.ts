@@ -230,6 +230,44 @@ describe("injectVoiceTranscripts", () => {
     expect(second.metadata?.voiceTranscription).toEqual({ injected: true, count: 0 });
   });
 
+  it("applies duplicate suppression to Discord voice-channel transcripts", async () => {
+    const roots = await createRoots();
+    const audioOne = join(roots.mediaRoot, "discord-voice-1.wav");
+    const audioTwo = join(roots.mediaRoot, "discord-voice-2.wav");
+    await writeFile(audioOne, "audio");
+    await writeFile(audioTwo, "audio");
+    const stateDir = await mkdtemp(join(tmpdir(), "estacoda-voice-dedupe-discord-"));
+    const voiceStateManager = new VoiceStateManager({ path: join(stateDir, "gateway", "voice-mode.json") });
+    const base = message({
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "discord-chat-1", accountId: "guild-1", userId: "user-1" },
+      metadata: { guildId: "guild-1", channelId: "discord-chat-1", voiceChannel: true }
+    });
+
+    const first = await injectVoiceTranscripts({
+      ...base,
+      attachments: [{ id: "voice-1", kind: "voice", status: "ready", localPath: audioOne }]
+    }, {
+      stt: { provider: "local", enabled: true, local: { command: "printf 'Please summarize this deployment plan.'" } },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      voiceStateManager
+    });
+    const second = await injectVoiceTranscripts({
+      ...base,
+      id: "message-2",
+      attachments: [{ id: "voice-2", kind: "voice", status: "ready", localPath: audioTwo }]
+    }, {
+      stt: { provider: "local", enabled: true, local: { command: "printf 'please summarize this deployment plan'" } },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      voiceStateManager
+    });
+
+    expect(first.text).toContain("[Voice message transcript]");
+    expect(second.text).toBe("");
+    expect(second.attachments).toEqual([]);
+    expect(second.metadata?.voiceTranscription).toEqual({ injected: true, count: 0 });
+  });
+
   it("denies gateway faster-whisper when hfHome hub exists but the selected model is absent", async () => {
     const roots = await createRoots();
     const hfHome = await mkdtemp(join(tmpdir(), "estacoda-fw-gateway-cache-"));
