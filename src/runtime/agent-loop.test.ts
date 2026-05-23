@@ -423,6 +423,81 @@ describe("AgentLoop provider availability gating", () => {
     ]));
   });
 
+  it("keeps successful preflight compression when session-compacted event emission fails", async () => {
+    const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => ({
+      didCompress: true,
+      originalSessionId: input.sessionId,
+      activeSessionId: input.sessionId,
+      rotated: false,
+      messages: await sessionDb.listMessages(input.sessionId),
+      diagnostics: {
+        shouldCompress: true,
+        reason: "compressed",
+        summaryFormatVersion: "v1",
+        preTokens: 1_000,
+        postTokens: 100,
+        estimatedSavingsTokens: 900,
+        estimatedSavingsRatio: 0.9,
+        sourceMessageCount: 2,
+        summarizedMessageCount: 1,
+        protectedMessageCount: 1,
+        protectedFirstN: 0,
+        protectedLastN: 1,
+        protectedSpans: [],
+        protectedCategories: [],
+        summaryChars: 7,
+        prunedToolResults: 0,
+        prunedToolResultChars: 0,
+        protectedToolResultsKept: 0,
+        scopeKey: "default",
+        lastCompressionSavingsPct: 90,
+        ineffectiveCompressionCount: 0,
+        recentSavingsRatios: [0.9],
+        warnings: [],
+        eventWarnings: [],
+        fallbackUsed: false
+      },
+      userFacingMessage: "Session history compacted"
+    }));
+    const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "user",
+      content: "older history ".repeat(200)
+    });
+
+    await expect(loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        if (event.kind === "session-compacted") {
+          throw new Error("rail sink unavailable");
+        }
+      }
+    })).resolves.toMatchObject({
+      label: "Test",
+      text: expect.any(String)
+    });
+
+    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({
+      preflightCompression: expect.objectContaining({
+        triggered: true,
+        fallbackUsed: false
+      })
+    }));
+  });
+
   it("does not inject session recall for ordinary turns", async () => {
     const recall = vi.fn();
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({

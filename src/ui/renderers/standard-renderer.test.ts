@@ -1294,12 +1294,15 @@ describe("StandardRenderer — prompt chrome rails", () => {
       turnState: "idle",
       contextUsage: { filled: 32700, total: 128000 },
       sessionElapsedMs: 58000,
+      currentTurnSeconds: 312,
+      showTurnState: false,
     });
     const out = r.render(vm);
     expect(out).toContain("deepseek-reasoner");
     expect(out).toContain("context 32.7k/128k");
     expect(out).toContain("◷ 58s");
-    expect(out).toContain("idle");
+    expect(out).toContain("⧖ 5m 12s");
+    expect(out).not.toContain("idle");
     expect(out.split("\n")).toHaveLength(1);
   });
 

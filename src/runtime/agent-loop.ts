@@ -586,7 +586,7 @@ export class AgentLoop {
     });
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
-    const preflightCompression = await this.#compactBeforeProviderTurn(input.signal);
+    const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText,
@@ -890,7 +890,10 @@ export class AgentLoop {
     return result.context;
   }
 
-  async #compactBeforeProviderTurn(signal: AbortSignal | undefined): Promise<PromptSemanticCompressionReport | undefined> {
+  async #compactBeforeProviderTurn(
+    signal: AbortSignal | undefined,
+    onEvent: RuntimeEventSink | undefined
+  ): Promise<PromptSemanticCompressionReport | undefined> {
     if (
       !this.#providerTurnLoop.canRunProvider() ||
       this.#sessionCompressionService === undefined ||
@@ -928,6 +931,20 @@ export class AgentLoop {
       });
       if (result.rotated) {
         this.#sessionRuntimeContext?.rotateSession(result.activeSessionId);
+      }
+      if (result.didCompress) {
+        try {
+          await emit(onEvent, {
+            kind: "session-compacted",
+            originalSessionId: result.originalSessionId,
+            activeSessionId: result.activeSessionId,
+            rotated: result.rotated,
+            trigger: "auto",
+            postTokens: result.diagnostics.postTokens
+          });
+        } catch {
+          // Compaction already succeeded; rail notification must not turn it into a compression failure.
+        }
       }
       return compressionReportFromResult(result);
     } catch (error) {

@@ -64,6 +64,7 @@ export type SessionLoopOptions = {
   output?: NodeJS.WritableStream;
   prompt?: Prompt;
   close?: () => void;
+  now?: () => number;
   workspaceRoot?: string;
   homeDir?: string;
   locale?: import("../contracts/ui.js").UiLocale;
@@ -76,6 +77,15 @@ export type SessionLoopOptions = {
 };
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
+type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
+
+type StatusRailTiming = {
+  readonly now: () => number;
+  readonly sessionStartedAtMs: number;
+  readonly mode: StatusRailTimerMode;
+  readonly activeTurnStartedAtMs?: number;
+  readonly lastCompletedTurnSeconds?: number;
+};
 
 type SubmittedCliInput = {
   text: string;
@@ -174,6 +184,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   let runtime = options.runtime;
+  const now = options.now ?? (() => Date.now());
+  const sessionStartedAtMs = now();
   let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
   });
@@ -206,6 +218,33 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   try {
     let pendingSlashCompletion: SlashMenuViewModel | undefined;
     let latestContextUsage: ContextUsageSnapshot | undefined;
+    let timerMode: StatusRailTimerMode = "idle";
+    let activeTurnStartedAtMs: number | undefined;
+    let lastCompletedTurnSeconds: number | undefined;
+    let pendingCompactionPostTokens: number | undefined;
+    const resetTurnRailState = () => {
+      timerMode = "idle";
+      activeTurnStartedAtMs = undefined;
+      lastCompletedTurnSeconds = undefined;
+      pendingCompactionPostTokens = undefined;
+    };
+    const railTiming = (): StatusRailTiming => ({
+      now,
+      sessionStartedAtMs,
+      mode: timerMode,
+      activeTurnStartedAtMs,
+      lastCompletedTurnSeconds
+    });
+    const applyCompactionRailReset = (postTokens?: number) => {
+      resetTurnRailState();
+      const contextWindow = modelContextWindow(runtime);
+      if (postTokens === undefined) {
+        latestContextUsage = undefined;
+        return;
+      }
+      const total = contextWindow ?? latestContextUsage?.total;
+      latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
+    };
     const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
     const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
     output.write(`${startupText}\n\n`);
@@ -218,7 +257,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       if (chrome.enabled) {
-        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage));
+        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -283,13 +322,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           modelSwitchContext: options.modelSwitchContext,
           prompt,
           workspaceRoot: options.workspaceRoot,
-          homeDir: options.homeDir
+          homeDir: options.homeDir,
+          onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
         });
 
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
           runtime = shouldExit.runtime;
           latestContextUsage = undefined;
+          resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
           });
@@ -322,6 +363,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       while (retryText !== undefined) {
         output.write("\n");
         activeTurn = new AbortController();
+        const turnStartedAtMs = now();
+        activeTurnStartedAtMs = turnStartedAtMs;
+        lastCompletedTurnSeconds = undefined;
+        timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
 
@@ -336,9 +381,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => {
               const activeSpinner = buildActiveTurnSpinnerViewModel({ phase: p });
-              const statusRail = latestContextUsage === undefined
-                ? undefined
-                : buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage).statusRail;
+              const statusRail = buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming()).statusRail;
               return [
                 statusRail === undefined ? undefined : renderer.render(statusRail),
                 renderer.render(activeSpinner)
@@ -379,6 +422,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   renderSpinner(turnOutput.spinnerPhase);
                 }
               }
+              if (event.kind === "session-compacted") {
+                pendingCompactionPostTokens = event.postTokens;
+                const contextWindow = modelContextWindow(runtime);
+                const total = contextWindow ?? latestContextUsage?.total;
+                latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
+                if (chrome.enabled && turnOutput.spinnerPhase !== undefined) {
+                  renderSpinner(turnOutput.spinnerPhase);
+                }
+              }
               const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
@@ -387,10 +439,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           })
           .finally(() => {
             activeTurn = undefined;
+            activeTurnStartedAtMs = undefined;
             clearSpinner();
             currentAnimator?.dispose();
             currentAnimator = undefined;
           });
+        if (pendingCompactionPostTokens !== undefined) {
+          applyCompactionRailReset(pendingCompactionPostTokens);
+          pendingCompactionPostTokens = undefined;
+        } else {
+          lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
+          timerMode = "last-turn";
+        }
 
         const assistantVm = buildAssistantResponseViewModel({
           label: response.label,
@@ -628,6 +688,7 @@ export async function handleSlashCommand(input: {
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   workspaceRoot?: string;
   homeDir?: string;
+  onSessionCompacted?: (result: { readonly postTokens: number }) => void;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
   const resolved = commandRegistry.resolve(command);
@@ -834,7 +895,13 @@ export async function handleSlashCommand(input: {
       input.output.write(`${await renderSessionSearch(input.runtime, args.join(" "))}\n\n`);
       return false;
     case "compact":
-      input.output.write(`${await renderSessionCompaction(input.runtime, args.join(" "))}\n\n`);
+      {
+        const result = await renderSessionCompaction(input.runtime, args.join(" "));
+        if (result.didCompress && result.postTokens !== undefined) {
+          input.onSessionCompacted?.({ postTokens: result.postTokens });
+        }
+        input.output.write(`${result.output}\n\n`);
+      }
       return false;
     case "switch": {
       const target = args[0];
@@ -1766,22 +1833,31 @@ async function renderSessionRecall(runtime: Runtime, query: string): Promise<str
   return renderSessionRecallResult(await runtime.recallSession(normalizedQuery));
 }
 
-async function renderSessionCompaction(runtime: Runtime, focusTopic: string): Promise<string> {
+async function renderSessionCompaction(
+  runtime: Runtime,
+  focusTopic: string
+): Promise<{ readonly output: string; readonly didCompress: boolean; readonly postTokens?: number }> {
   const topic = focusTopic.trim();
   if (runtime.compactSession === undefined) {
-    return "Session compaction is not available in this runtime.";
+    return { output: "Session compaction is not available in this runtime.", didCompress: false };
   }
 
   try {
     const normalizedTopic = topic.length === 0 ? undefined : topic;
-    return renderSessionCompactionResult(await runtime.compactSession({
+    const result = await runtime.compactSession({
       focusTopic: normalizedTopic,
       preserveTranscript: false
-    }), {
-      focusTopic: normalizedTopic
     });
+    return {
+      output: renderSessionCompactionResult(result, { focusTopic: normalizedTopic }),
+      didCompress: result.didCompress,
+      postTokens: result.diagnostics.postTokens
+    };
   } catch (error) {
-    return `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+    return {
+      output: `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      didCompress: false
+    };
   }
 }
 
@@ -1914,6 +1990,8 @@ export function renderRuntimeEvent(
       return undefined;
     case "context-usage":
       return undefined;
+    case "session-compacted":
+      return undefined;
     case "agent-cancelled":
       animator?.cancel();
       clearActiveSpinnerLine();
@@ -1939,27 +2017,61 @@ function buildPromptChromeState(
   renderer: SessionRenderer,
   activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
   slashMenu?: SlashMenuViewModel,
-  contextUsage?: ContextUsageSnapshot
+  contextUsage?: ContextUsageSnapshot,
+  timing?: StatusRailTiming
 ) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
   const modelId = modelInfo?.kind === "kv"
     ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
     : "unknown";
-  const contextWindow = modelInfo?.kind === "kv"
-    ? Number(modelInfo.entries.find((e) => e.key === "context window")?.value)
-    : Number.NaN;
+  const contextWindow = modelContextWindow(runtime, modelInfo);
+  const sessionElapsedMs = timing === undefined
+    ? undefined
+    : Math.max(0, timing.now() - timing.sessionStartedAtMs);
+  const currentTurnSeconds = currentTurnSecondsForTiming(timing);
+  const showTurnState = timing === undefined || timing.mode === "idle";
 
   return {
     statusRail: buildSessionStatusRailViewModel({
       modelLabel: modelId,
       turnState: "idle",
-      contextUsage: contextUsage ?? (Number.isFinite(contextWindow) && contextWindow > 0
+      showTurnState,
+      sessionElapsedMs,
+      currentTurnSeconds,
+      contextUsage: contextUsage ?? (contextWindow !== undefined
         ? { filled: 0, total: contextWindow }
         : undefined),
     }),
     activeSpinner,
     slashMenu,
   };
+}
+
+function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {
+  if (timing === undefined) {
+    return undefined;
+  }
+  if (timing.mode === "active-turn" && timing.activeTurnStartedAtMs !== undefined) {
+    return elapsedSeconds(timing.activeTurnStartedAtMs, timing.now());
+  }
+  if (timing.mode === "last-turn") {
+    return timing.lastCompletedTurnSeconds;
+  }
+  return undefined;
+}
+
+function elapsedSeconds(startedAtMs: number, finishedAtMs: number): number {
+  return Math.max(0, Math.floor((finishedAtMs - startedAtMs) / 1000));
+}
+
+function modelContextWindow(
+  runtime: Runtime,
+  modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined
+): number | undefined {
+  const contextWindow = modelInfo?.kind === "kv"
+    ? Number(modelInfo.entries.find((e) => e.key === "context window")?.value)
+    : Number.NaN;
+  return Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : undefined;
 }
 
 export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
