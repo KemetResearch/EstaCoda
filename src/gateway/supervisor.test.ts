@@ -12,6 +12,7 @@ import {
   runGatewayApprovalResolutionTick,
   buildRuntimeCacheState,
   buildGatewayCronRuntimeOptions,
+  createVoiceTranscriptionAudit,
   type SupervisorInternalState,
 } from "./supervisor.js";
 import { readGatewayPid } from "./pid-file.js";
@@ -39,6 +40,45 @@ function createFakeConfig(tmpDir: string, channels: Record<string, unknown>) {
     homeDir: tmpDir,
   };
 }
+
+describe("gateway STT preprocess audit", () => {
+  it("emits hook events, JSONL, and warnings without full private paths", async () => {
+    const homeDir = await makeTempDir();
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    const hookRegistry = new HookRegistry();
+    const hooks: unknown[] = [];
+    hookRegistry.on("gateway:stt:preprocess", (event) => {
+      hooks.push(event.payload);
+    });
+    const warnings: string[] = [];
+    const audit = createVoiceTranscriptionAudit({
+      profilePaths,
+      hookRegistry,
+      logWarning: (message) => warnings.push(message)
+    });
+
+    await audit({
+      timestamp: "2026-05-22T00:00:00.000Z",
+      outcome: "deny",
+      provider: "local",
+      reason: "blocked",
+      attachment: {
+        id: "voice-1",
+        kind: "voice",
+        bytes: 10,
+        pathHash: "abc123"
+      }
+    });
+
+    const jsonl = await readFile(join(profilePaths.gatewayStatePath, "logs", "voice-stt-preprocess.jsonl"), "utf8");
+    expect(hooks).toEqual([
+      expect.objectContaining({ outcome: "deny", provider: "local", reason: "blocked" })
+    ]);
+    expect(jsonl).toContain("\"pathHash\":\"abc123\"");
+    expect(jsonl).not.toContain(homeDir);
+    expect(warnings[0]).toContain("[voice-stt-preprocess]");
+  });
+});
 
 function fakeAdapter(kind: string, pollCount = 0) {
   return {
@@ -676,6 +716,10 @@ describe("runGatewaySupervisor", () => {
       baseUrl: "https://custom.example/v1",
       apiKeyEnv: "CUSTOM_API_KEY"
     });
+    expect(capturedOpts.voiceStateManager).toBeDefined();
+    expect(capturedOpts.voiceAutoTtsDefault).toBe(false);
+    expect(capturedOpts.autoTtsConfig).toBeDefined();
+    expect(capturedOpts.autoTtsTempRoot).toContain("temp");
   });
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {
@@ -1023,6 +1067,103 @@ describe("runGatewaySupervisor", () => {
     const discordPolicy = capturedOpts.busyPolicyResolver("discord");
     expect(discordPolicy.busyPolicy).toBe("interrupt");
     expect(discordPolicy.queueDepth).toBe(2);
+  });
+
+  it("passes normalized Discord voice-channel options and temp root to the adapter", async () => {
+    const previousToken = process.env.DISCORD_BOT_TOKEN;
+    process.env.DISCORD_BOT_TOKEN = "token";
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        discord: {
+          enabled: true,
+          botTokenEnv: "DISCORD_BOT_TOKEN",
+          voiceChannel: { enabled: true, autoJoinOnCommand: true }
+        }
+      },
+    }));
+    let capturedDiscordOptions: any;
+
+    try {
+      await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createDiscordAdapter: (input: any) => {
+            capturedDiscordOptions = input;
+            return { kind: "discord", start: async () => {}, stop: async () => {} } as any;
+          },
+          createChannelGateway: () => ({ start: async () => {}, stop: async () => {}, hasPendingWork: () => false }) as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(capturedDiscordOptions.voiceChannel).toEqual({
+        enabled: true,
+        autoJoinOnCommand: true
+      });
+      expect(capturedDiscordOptions.voiceTempRoot).toBe(join(profilePaths.tempPath, "audio"));
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.DISCORD_BOT_TOKEN;
+      } else {
+        process.env.DISCORD_BOT_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("allows Discord voice receive temp audio through gateway transcription preprocessing", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { command: "printf transcript" }
+      }
+    }));
+    let capturedGatewayOptions: any;
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          capturedGatewayOptions = input;
+          return { start: async () => {}, stop: async () => {}, hasPendingWork: () => false } as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+    const audioDir = join(profilePaths.tempPath, "audio", "discord-voice");
+    await mkdir(audioDir, { recursive: true });
+    const audioPath = join(audioDir, "voice.wav");
+    await writeFile(audioPath, Buffer.from("RIFF....WAVEfmt data"));
+
+    const processed = await capturedGatewayOptions.preprocessMessage({
+      id: "discord-voice-1",
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "channel-1", accountId: "guild-1", userId: "user-1" },
+      text: "",
+      sender: { id: "user-1" },
+      receivedAt: "2026-01-01T00:00:00.000Z",
+      metadata: { guildId: "guild-1", channelId: "channel-1", voiceChannel: true },
+      attachments: [{
+        id: "voice-1",
+        kind: "voice",
+        status: "ready",
+        localPath: audioPath,
+        mimeType: "audio/wav",
+        bytes: 20,
+      }]
+    });
+
+    expect(processed.text).toContain("[Voice message transcript]\ntranscript");
+    expect(processed.attachments).toEqual([]);
   });
 });
 

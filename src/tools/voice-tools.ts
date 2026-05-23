@@ -1,11 +1,18 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ArtifactRecord } from "../contracts/artifact.js";
+import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
+import type { FasterWhisperWorkerClient } from "./stt-local-whisper.js";
+import {
+  checkSttProviderStatus as checkSttProviderStatusFromDispatch,
+  computeSttRiskClass,
+  transcribeSpeech
+} from "./stt-providers.js";
+import { getTtsTextCap, synthesizeSpeech } from "./tts-providers.js";
+import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
 
 export type VoiceFetchLike = (url: string, init?: {
   method?: string;
@@ -29,11 +36,130 @@ export type VoiceToolOptions = {
   stt?: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
   id?: () => string;
+  localWhisper?: FasterWhisperWorkerClient;
+  tempRoot?: string;
 };
+
+export type VoiceProviderStatus =
+  | { ready: true }
+  | { ready: false; reason: string };
+
+export type EphemeralSpeechArtifactResult =
+  | { ok: true; artifact: ArtifactRecord }
+  | { ok: false; content: string; metadata?: Record<string, unknown> };
+
+export function checkTtsProviderStatus(
+  provider: TtsProvider,
+  config: LoadedRuntimeConfig["tts"]
+): VoiceProviderStatus {
+  if (config.enabled === false) {
+    return { ready: false, reason: "TTS disabled" };
+  }
+
+  const apiKeyEnv = ttsApiKeyEnv(provider, config);
+  if (apiKeyEnv !== undefined) {
+    if (provider === "openai") {
+      const credential = resolveOpenAiAudioCredential(apiKeyEnv);
+      if (!credential.ok) {
+        return {
+          ready: false,
+          reason: `Missing ${formatMissingOpenAiAudioCredential(credential.missingApiKeyEnvs)}`
+        };
+      }
+      return { ready: true };
+    }
+    const apiKey = process.env[apiKeyEnv];
+    if (apiKey === undefined || apiKey.length === 0) {
+      return {
+        ready: false,
+        reason: `Missing ${apiKeyEnv}`
+      };
+    }
+    return { ready: true };
+  }
+
+  return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 1` };
+}
+
+export function checkSttProviderStatus(
+  provider: SttProvider,
+  config: LoadedRuntimeConfig["stt"]
+): VoiceProviderStatus {
+  return checkSttProviderStatusFromDispatch(provider, config);
+}
+
+export async function synthesizeSpeechToEphemeralArtifact(input: {
+  text: string;
+  tts: LoadedRuntimeConfig["tts"];
+  tempRoot: string;
+  fetch?: VoiceFetchLike;
+  id?: () => string;
+  signal?: AbortSignal;
+}): Promise<EphemeralSpeechArtifactResult> {
+  const status = checkTtsProviderStatus(input.tts.provider, input.tts);
+  if (!status.ready) {
+    return {
+      ok: false,
+      content: `Auto-TTS unavailable: ${status.reason}`,
+      metadata: { provider: input.tts.provider, reason: status.reason }
+    };
+  }
+
+  const cap = getTtsTextCap({ provider: input.tts.provider, tts: input.tts });
+  if (cap !== undefined && input.text.length > cap) {
+    return {
+      ok: false,
+      content: `Text exceeds provider max of ${cap} characters.`,
+      metadata: { provider: input.tts.provider, maxChars: cap, textChars: input.text.length }
+    };
+  }
+
+  const speech = await synthesizeSpeech({
+    text: input.text,
+    tts: input.tts,
+    fetch: input.fetch,
+    signal: input.signal
+  });
+  if (!speech.ok) {
+    return speech;
+  }
+
+  const root = join(input.tempRoot, "auto-tts");
+  await mkdir(root, { recursive: true });
+  const artifactId = safeId(input.id?.() ?? randomUUID());
+  const fileName = `${artifactId}.${extensionForMime(speech.mimeType)}`;
+  const filePath = join(root, fileName);
+  await writeFile(filePath, speech.bytes);
+  const fileStat = await stat(filePath);
+
+  return {
+    ok: true,
+    artifact: {
+      id: `auto-tts-${artifactId}`,
+      path: filePath,
+      localPath: filePath,
+      kind: "audio",
+      bytes: fileStat.size,
+      createdAt: new Date().toISOString(),
+      mimeType: speech.mimeType,
+      summary: `Auto-TTS reply generated from ${input.text.length} characters.`,
+      metadata: {
+        provider: input.tts.provider,
+        model: speech.model,
+        voice: speech.voice,
+        format: speech.mimeType,
+        deliveryHint: "voice",
+        ephemeral: true
+      }
+    }
+  };
+}
 
 export function createVoiceTools(options: VoiceToolOptions): readonly RegisteredTool[] {
   const tts = options.tts ?? defaultTts();
   const stt = options.stt ?? defaultStt();
+  const ttsStatus = checkTtsProviderStatus(tts.provider, tts);
+  const sttStatus = checkSttProviderStatus(stt.provider, stt);
   const roots = [options.workspaceRoot, options.audioCacheRoot, ...(options.allowedRoots ?? [])]
     .filter((root): root is string => root !== undefined && root.length > 0);
 
@@ -57,11 +183,27 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
       toolsets: ["media", "core"],
       progressLabel: "generating speech",
       maxResultSizeChars: 4000,
-      isAvailable: () => true,
+      isAvailable: () => ttsStatus.ready,
       run: async (input: { text?: string; voice?: string; model?: string; format?: string }, context) => {
         const text = input.text?.trim();
         if (text === undefined || text.length === 0) {
           return { ok: false, content: "voice.speak requires text." };
+        }
+        const status = checkTtsProviderStatus(tts.provider, tts);
+        if (!status.ready) {
+          return {
+            ok: false,
+            content: `voice.speak unavailable: ${status.reason}`,
+            metadata: { provider: tts.provider, reason: status.reason }
+          };
+        }
+        const cap = getTtsTextCap({ provider: tts.provider, tts, model: input.model });
+        if (cap !== undefined && text.length > cap) {
+          return {
+            ok: false,
+            content: `Text exceeds provider max of ${cap} characters.`,
+            metadata: { provider: tts.provider, maxChars: cap, textChars: text.length }
+          };
         }
 
         const result = await synthesizeSpeech({
@@ -123,12 +265,20 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         },
         required: ["path"]
       },
-      riskClass: stt.provider === "local" ? "read-only-local" : "external-side-effect",
+      riskClass: sttRiskClass(stt),
       toolsets: ["media", "research"],
       progressLabel: "transcribing audio",
       maxResultSizeChars: 8000,
-      isAvailable: () => true,
+      isAvailable: () => sttStatus.ready,
       run: async (input: { path?: string; language?: string; prompt?: string; model?: string }, context) => {
+        const status = checkSttProviderStatus(stt.provider, stt);
+        if (!status.ready) {
+          return {
+            ok: false,
+            content: `voice.transcribe unavailable: ${status.reason}`,
+            metadata: { provider: stt.provider, reason: status.reason }
+          };
+        }
         const path = await resolveAllowedPath(roots, input.path);
         if (!path.ok) {
           return path;
@@ -141,6 +291,9 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           model: input.model,
           stt,
           fetch: options.fetch,
+          localWhisper: options.localWhisper,
+          audioCacheRoot: options.audioCacheRoot,
+          tempRoot: options.tempRoot ?? options.audioCacheRoot,
           signal: context?.signal
         });
         if (!result.ok) {
@@ -195,7 +348,9 @@ export const voiceToolProvider: SessionToolProvider = {
       allowedRoots: [requireProviderDependency("voice", "channelMediaRoot", ctx.channelMediaRoot)],
       tts: ctx.tts,
       stt: ctx.stt,
-      fetch: ctx.voiceFetch
+      fetch: ctx.voiceFetch,
+      localWhisper: ctx.localWhisper,
+      tempRoot: ctx.audioCacheRoot
     });
   }
 };
@@ -205,86 +360,6 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
     throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
   }
   return value;
-}
-
-async function synthesizeSpeech(input: {
-  text: string;
-  voice?: string;
-  model?: string;
-  format?: string;
-  tts: LoadedRuntimeConfig["tts"];
-  fetch?: VoiceFetchLike;
-  signal?: AbortSignal;
-}): Promise<
-  | { ok: true; bytes: Buffer; mimeType: string; model: string; voice: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> }
-> {
-  if (input.tts.provider !== "openai") {
-    return {
-      ok: false,
-      content: [
-        `TTS execution for ${input.tts.provider} is not enabled yet.`,
-        "Configured providers are visible through estacoda voice status.",
-        "This first execution pass supports OpenAI-compatible TTS."
-      ].join("\n"),
-      metadata: {
-        provider: input.tts.provider
-      }
-    };
-  }
-
-  const apiKeyEnv = input.tts.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
-  const apiKey = process.env[apiKeyEnv] ?? (apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-  if (apiKey === undefined || apiKey.length === 0) {
-    return {
-      ok: false,
-      content: `Missing TTS API key. Export ${apiKeyEnv}${apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
-      metadata: {
-        provider: "openai",
-        apiKeyEnv
-      }
-    };
-  }
-
-  const model = input.model ?? input.tts.openai?.model ?? "gpt-4o-mini-tts";
-  const voice = input.voice ?? input.tts.openai?.voice ?? "alloy";
-  const responseFormat = normalizeAudioFormat(input.format);
-  const baseUrl = (input.tts.openai?.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  const response = await (input.fetch ?? globalVoiceFetch)(`${baseUrl}/audio/speech`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: input.text,
-      response_format: responseFormat,
-      speed: input.tts.openai?.speed ?? input.tts.speed
-    }),
-    signal: input.signal
-  });
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      content: `TTS request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
-      metadata: {
-        provider: "openai",
-        model,
-        voice
-      }
-    };
-  }
-
-  return {
-    ok: true,
-    bytes: Buffer.from(await response.arrayBuffer()),
-    mimeType: mimeForAudioFormat(responseFormat),
-    model,
-    voice
-  };
 }
 
 async function globalVoiceFetch(url: string, init?: Parameters<VoiceFetchLike>[1]): ReturnType<VoiceFetchLike> {
@@ -305,191 +380,23 @@ export async function transcribeAudioFile(input: {
   model?: string;
   stt: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
+  localWhisper?: FasterWhisperWorkerClient;
+  audioCacheRoot?: string;
+  tempRoot?: string;
+  gateway?: boolean;
   signal?: AbortSignal;
 }): Promise<
-  | { ok: true; text: string; model: string; language?: string }
+  | { ok: true; text: string; model: string; language?: string; duration?: number; words?: unknown; channels?: unknown; metadata?: Record<string, unknown> }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
-  if (input.stt.provider === "local") {
-    return transcribeWithLocalCommand(input);
-  }
-
-  if (input.stt.provider !== "openai" && input.stt.provider !== "groq") {
-    return {
-      ok: false,
-      content: [
-        `STT execution for ${input.stt.provider} is not enabled yet.`,
-        "This pass supports OpenAI-compatible hosted transcription providers: openai and groq.",
-        "Configured providers are visible through estacoda voice status."
-      ].join("\n"),
-      metadata: {
-        provider: input.stt.provider
-      }
-    };
-  }
-
-  const provider = input.stt.provider;
-  const config = provider === "openai" ? input.stt.openai : input.stt.groq;
-  const apiKeyEnv = config?.apiKeyEnv ?? (provider === "openai" ? "VOICE_TOOLS_OPENAI_KEY" : "GROQ_API_KEY");
-  const apiKey = process.env[apiKeyEnv] ?? (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-  if (apiKey === undefined || apiKey.length === 0) {
-    return {
-      ok: false,
-      content: `Missing STT API key. Export ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
-      metadata: {
-        provider,
-        apiKeyEnv
-      }
-    };
-  }
-
-  const bytes = await readFile(input.path);
-  const form = new FormData();
-  form.set("file", new Blob([bytes]), basename(input.path));
-  const model = input.model ?? config?.model ?? (provider === "openai" ? "whisper-1" : "whisper-large-v3");
-  form.set("model", model);
-  form.set("response_format", "json");
-  if (input.language !== undefined && input.language.length > 0) {
-    form.set("language", input.language);
-  }
-  if (input.prompt !== undefined && input.prompt.length > 0) {
-    form.set("prompt", input.prompt);
-  }
-
-  const baseUrl = provider === "openai" ? "https://api.openai.com/v1" : "https://api.groq.com/openai/v1";
-  const response = await (input.fetch ?? globalVoiceFetch)(`${baseUrl}/audio/transcriptions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`
-    },
-    body: form,
-    signal: input.signal
-  });
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      content: `STT request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
-      metadata: {
-        provider,
-        model
-      }
-    };
-  }
-
-  const raw = await response.text();
-  const parsed = tryJson(raw);
-  const text = typeof parsed?.text === "string" ? parsed.text : raw;
-  return {
-    ok: true,
-    text,
-    model,
-    language: input.language
-  };
-}
-
-async function transcribeWithLocalCommand(input: {
-  path: string;
-  language?: string;
-  model?: string;
-  stt: LoadedRuntimeConfig["stt"];
-  signal?: AbortSignal;
-}): Promise<
-  | { ok: true; text: string; model: string; language?: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> }
-> {
-  const command = input.stt.local?.command;
-  const model = input.model ?? input.stt.local?.model ?? "base";
-  if (command === undefined || command.trim().length === 0) {
-    return {
-      ok: false,
-      content: [
-        "Local STT command is not configured.",
-        "Set stt.local.command or HERMES_LOCAL_STT_COMMAND with placeholders like {input_path}, {output_dir}, {language}, and {model}."
-      ].join("\n"),
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  const outputDir = await mkdtemp(join(tmpdir(), "estacoda-stt-"));
-  const rendered = command
-    .replaceAll("{input_path}", shellQuote(input.path))
-    .replaceAll("{output_dir}", shellQuote(outputDir))
-    .replaceAll("{language}", shellQuote(input.language ?? ""))
-    .replaceAll("{model}", shellQuote(model));
-  const result = await runShellCommand(rendered, input.signal);
-  if (!result.ok) {
-    return {
-      ok: false,
-      content: `Local STT command failed: ${result.content}`,
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  const text = result.content.trim();
-  if (text.length === 0) {
-    return {
-      ok: false,
-      content: "Local STT command completed but produced no transcript text.",
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  return {
-    ok: true,
-    text,
-    model,
-    language: input.language
-  };
-}
-
-function runShellCommand(command: string, signal?: AbortSignal): Promise<{ ok: true; content: string } | { ok: false; content: string }> {
-  return new Promise((resolveResult) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      signal
-    });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", (error) => {
-      resolveResult({ ok: false, content: error.message });
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolveResult({ ok: true, content: stdout });
-        return;
-      }
-      resolveResult({ ok: false, content: stderr.trim() || `exit code ${code ?? "unknown"}` });
-    });
-  });
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return await transcribeSpeech(input);
 }
 
 type ResolvedPath =
   | { ok: true; content: ""; path: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> };
 
-async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
+export async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
   if (typeof path !== "string" || path.length === 0) {
     return errorResult("path must be a non-empty string");
   }
@@ -523,35 +430,6 @@ function errorResult(message: string): { ok: false; content: string; metadata: {
   };
 }
 
-function tryJson(value: string): any {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeAudioFormat(value: string | undefined): "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" {
-  return value === "opus" || value === "aac" || value === "flac" || value === "wav" || value === "pcm" ? value : "mp3";
-}
-
-function mimeForAudioFormat(format: ReturnType<typeof normalizeAudioFormat>): string {
-  switch (format) {
-    case "opus":
-      return "audio/ogg";
-    case "aac":
-      return "audio/aac";
-    case "flac":
-      return "audio/flac";
-    case "wav":
-      return "audio/wav";
-    case "pcm":
-      return "audio/L16";
-    case "mp3":
-      return "audio/mpeg";
-  }
-}
-
 function extensionForMime(mimeType: string): string {
   switch (mimeType) {
     case "audio/ogg":
@@ -569,6 +447,26 @@ function extensionForMime(mimeType: string): string {
   }
 }
 
+function ttsApiKeyEnv(provider: TtsProvider, config: LoadedRuntimeConfig["tts"]): string | undefined {
+  switch (provider) {
+    case "openai":
+      return config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
+    case "elevenlabs":
+      return config.elevenlabs?.apiKeyEnv ?? "ELEVENLABS_API_KEY";
+    case "minimax":
+      return config.minimax?.apiKeyEnv ?? "MINIMAX_API_KEY";
+    case "gemini":
+      return config.gemini?.apiKeyEnv ?? "GEMINI_API_KEY";
+    case "xai":
+      return config.xai?.apiKeyEnv ?? "XAI_API_KEY";
+    case "edge":
+    case "mistral":
+    case "neutts":
+    case "kittentts":
+      return undefined;
+  }
+}
+
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80) || "speech";
 }
@@ -579,8 +477,15 @@ function truncateSummary(value: string, maxChars = 240): string {
 
 function defaultTts(): LoadedRuntimeConfig["tts"] {
   return {
-    provider: "edge",
-    speed: 1
+    provider: "openai",
+    speed: 1,
+    openai: {
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      baseUrl: "https://api.openai.com/v1",
+      speed: 1,
+      apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY"
+    }
   };
 }
 
@@ -588,4 +493,9 @@ function defaultStt(): LoadedRuntimeConfig["stt"] {
   return {
     provider: "local"
   };
+}
+
+function sttRiskClass(stt: LoadedRuntimeConfig["stt"]) {
+  const risk = computeSttRiskClass({ stt });
+  return risk.available ? risk.riskClass : "read-only-local";
 }

@@ -64,7 +64,8 @@ import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapte
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
-import type { VoiceFetchLike } from "../tools/voice-tools.js";
+import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
+import { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
@@ -129,6 +130,7 @@ export type RuntimeOptions = {
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
   voiceFetch?: VoiceFetchLike;
+  localWhisper?: FasterWhisperWorkerClient;
   imageGen?: LoadedRuntimeConfig["imageGen"];
   imageGenerationFetch?: ImageGenerationFetchLike;
   ui?: {
@@ -212,6 +214,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     webConfig: input.webConfig,
     securityConfig: input.securityConfig,
     voiceFetch: input.voiceFetch,
+    localWhisper: input.localWhisper,
     tts: input.tts,
     stt: input.stt,
     imageGen: input.imageGen,
@@ -323,6 +326,13 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  transcribeAudio?(input: {
+    path: string;
+    language?: string;
+    prompt?: string;
+    model?: string;
+    signal?: AbortSignal;
+  }): Promise<Awaited<ReturnType<typeof transcribeAudioFile>>>;
   verifyImageGeneration?(options?: {
     checkProvider?: boolean;
   }): Promise<ImageGenerationVerification>;
@@ -443,6 +453,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const channelMediaRoot = profilePaths.channelMediaPath;
   const audioCacheRoot = profilePaths.audioCachePath;
   const imageCacheRoot = profilePaths.imageCachePath;
+  const localWhisper = options.localWhisper ?? new FasterWhisperWorkerClient({
+    queueDepth: options.stt?.local?.fasterWhisper?.queueDepth ?? 1,
+    timeoutMs: options.stt?.local?.fasterWhisper?.timeoutMs ?? 300_000,
+    env: {
+      HF_HOME: options.stt?.local?.fasterWhisper?.hfHome ?? process.env.HF_HOME ?? join(profilePaths.tempPath, "huggingface"),
+      TRANSFORMERS_CACHE: process.env.TRANSFORMERS_CACHE ?? options.stt?.local?.fasterWhisper?.hfHome ?? join(profilePaths.tempPath, "huggingface")
+    }
+  });
   let activeTrustedWorkspace = false;
   let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
@@ -620,6 +638,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     webConfig: options.webConfig,
     securityConfig: options.securityConfig,
     voiceFetch: options.voiceFetch,
+    localWhisper,
     tts: options.tts,
     stt: options.stt,
     imageGen: options.imageGen,
@@ -1135,6 +1154,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         signal: input.signal
       });
     },
+    async transcribeAudio(input) {
+      return await transcribeAudioFile({
+        path: input.path,
+        language: input.language,
+        prompt: input.prompt,
+        model: input.model,
+        stt: options.stt ?? { provider: "local" },
+        fetch: options.voiceFetch,
+        localWhisper,
+        audioCacheRoot,
+        tempRoot: join(profilePaths.tempPath, "audio"),
+        signal: input.signal
+      });
+    },
     async verifyImageGeneration(input = {}) {
       return await verifyImageGeneration({
         imageGen: options.imageGen ?? defaultImageGenerationConfig(),
@@ -1205,6 +1238,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();
+      await localWhisper.dispose();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close

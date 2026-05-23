@@ -6,7 +6,7 @@ import type {
   ChannelSessionKey
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
-import type { ChannelBusyPolicy } from "../config/runtime-config.js";
+import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { SessionMessageQueue } from "./session-message-queue.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
@@ -34,6 +34,7 @@ import {
 } from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
 import { createHash } from "node:crypto";
+import { unlink } from "node:fs/promises";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
@@ -59,12 +60,41 @@ import {
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
+import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
+import {
+  checkTtsProviderStatus,
+  synthesizeSpeechToEphemeralArtifact,
+  type VoiceFetchLike
+} from "../tools/voice-tools.js";
+import { getTtsTextCap } from "../tools/tts-providers.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
 
 const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
+
+function messageProducedVoiceTranscript(message: ChannelMessage): boolean {
+  const metadata = message.metadata?.voiceTranscription;
+  if (typeof metadata !== "object" || metadata === null) {
+    return false;
+  }
+  const count = (metadata as { count?: unknown }).count;
+  const transcripts = (metadata as { transcripts?: unknown }).transcripts;
+  return (typeof count === "number" && count > 0) ||
+    (Array.isArray(transcripts) && transcripts.length > 0);
+}
+
+function isVoiceDeliveryArtifact(artifact: ArtifactRecord): boolean {
+  if (artifact.kind !== "audio") {
+    return false;
+  }
+  const metadata = artifact.metadata ?? {};
+  return metadata.deliveryHint === "voice" ||
+    metadata.ephemeral === true ||
+    typeof metadata.voice === "string" ||
+    artifact.path.startsWith("voice:");
+}
 
 export type BusyPolicyConfig = {
   busyPolicy: ChannelBusyPolicy;
@@ -122,9 +152,21 @@ export type ChannelGatewayOptions = {
   sessionHygieneService?: Pick<SessionHygieneService, "run">;
   modelSwitchContext?: () => Promise<ModelSwitchContext>;
   logWarning?: (message: string) => void;
+  voiceStateManager?: VoiceStateManager;
+  voiceAutoTtsDefault?: boolean;
+  autoTtsConfig?: () => Promise<Pick<LoadedRuntimeConfig, "tts" | "voice">> | Pick<LoadedRuntimeConfig, "tts" | "voice">;
+  autoTtsTempRoot?: string;
+  autoTtsFetch?: VoiceFetchLike;
+  autoTtsNow?: () => number;
+  autoTtsId?: () => string;
 };
 
 type ApprovalScope = "once" | "session" | "always";
+
+type AutoTtsUsageWindow = {
+  windowStartMs: number;
+  chars: number;
+};
 
 type PendingApprovalContinuation = {
   approvalId?: string;
@@ -260,6 +302,14 @@ export class ChannelGateway {
   readonly #sessionHygieneService: Pick<SessionHygieneService, "run"> | undefined;
   readonly #modelSwitchContext: (() => Promise<ModelSwitchContext>) | undefined;
   readonly #abortReasonByKey = new Map<string, string>();
+  readonly #voiceStateManager: VoiceStateManager | undefined;
+  readonly #voiceAutoTtsDefault: boolean;
+  readonly #autoTtsConfig: ChannelGatewayOptions["autoTtsConfig"];
+  readonly #autoTtsTempRoot: string | undefined;
+  readonly #autoTtsFetch: VoiceFetchLike | undefined;
+  readonly #autoTtsNow: () => number;
+  readonly #autoTtsId: (() => string) | undefined;
+  readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -296,6 +346,13 @@ export class ChannelGateway {
     this.#hookRegistry = options.hookRegistry;
     this.#sessionHygieneService = options.sessionHygieneService;
     this.#modelSwitchContext = options.modelSwitchContext;
+    this.#voiceStateManager = options.voiceStateManager;
+    this.#voiceAutoTtsDefault = options.voiceAutoTtsDefault ?? false;
+    this.#autoTtsConfig = options.autoTtsConfig;
+    this.#autoTtsTempRoot = options.autoTtsTempRoot;
+    this.#autoTtsFetch = options.autoTtsFetch;
+    this.#autoTtsNow = options.autoTtsNow ?? Date.now;
+    this.#autoTtsId = options.autoTtsId;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -347,6 +404,127 @@ export class ChannelGateway {
     } else {
       await adapter.delivery?.sendArtifact?.(sessionKey, artifact);
     }
+  }
+
+  async #maybeDeliverAutoTts(input: {
+    adapter: ChannelAdapter;
+    message: ChannelMessage;
+    sessionKey: ChannelSessionKey;
+    responseText: string;
+    artifacts: ArtifactRecord[];
+    toolExecutions: ToolExecutionRecord[];
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.#voiceStateManager === undefined || this.#autoTtsConfig === undefined || this.#autoTtsTempRoot === undefined) {
+      return;
+    }
+    if (!this.#isAutoTtsEligibleResponse(input.responseText, input.message, input.artifacts, input.toolExecutions)) {
+      return;
+    }
+
+    const incomingWasVoice = messageProducedVoiceTranscript(input.message);
+    if (!await this.#voiceStateManager.shouldAutoTts(
+      input.message.sessionKey.platform,
+      input.message.sessionKey.chatId,
+      incomingWasVoice,
+      this.#voiceAutoTtsDefault
+    )) {
+      return;
+    }
+
+    const config = await this.#autoTtsConfig();
+    const text = input.responseText.trim();
+    const status = checkTtsProviderStatus(config.tts.provider, config.tts);
+    if (!status.ready) {
+      this.#logWarning?.(`[voice-auto-tts] skipped: ${status.reason}`);
+      return;
+    }
+
+    const providerCap = getTtsTextCap({ provider: config.tts.provider, tts: config.tts });
+    if (providerCap !== undefined && text.length > providerCap) {
+      return;
+    }
+    if (config.voice.autoTtsMaxCharsPerReply !== undefined && text.length > config.voice.autoTtsMaxCharsPerReply) {
+      return;
+    }
+    if (!this.#canUseAutoTtsChars(input.message.sessionKey, text.length, config.voice.autoTtsMaxCharsPerHourPerChat)) {
+      return;
+    }
+
+    const result = await synthesizeSpeechToEphemeralArtifact({
+      text,
+      tts: config.tts,
+      tempRoot: this.#autoTtsTempRoot,
+      fetch: this.#autoTtsFetch,
+      id: this.#autoTtsId,
+      signal: input.signal
+    });
+    if (!result.ok) {
+      this.#logWarning?.(`[voice-auto-tts] synthesis failed: ${result.content}`);
+      return;
+    }
+
+    this.#recordAutoTtsChars(input.message.sessionKey, text.length, config.voice.autoTtsMaxCharsPerHourPerChat);
+
+    try {
+      await this.#deliverArtifact(input.adapter, input.sessionKey, result.artifact);
+    } catch (error) {
+      this.#logWarning?.(`[voice-auto-tts] delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await unlink(result.artifact.localPath ?? result.artifact.path).catch(() => {});
+    }
+  }
+
+  #isAutoTtsEligibleResponse(
+    responseText: string,
+    message: ChannelMessage,
+    artifacts: ArtifactRecord[],
+    toolExecutions: ToolExecutionRecord[]
+  ): boolean {
+    const text = responseText.trim();
+    if (text.length === 0) {
+      return false;
+    }
+    if (message.text.trim().startsWith("/")) {
+      return false;
+    }
+    if (/^(error:|estacoda encountered an error:)/iu.test(text)) {
+      return false;
+    }
+    if (toolExecutions.some((execution) => execution.tool.name === "voice.speak")) {
+      return false;
+    }
+    return !artifacts.some(isVoiceDeliveryArtifact);
+  }
+
+  #canUseAutoTtsChars(sessionKey: ChannelSessionKey, chars: number, maxCharsPerHour: number | undefined): boolean {
+    if (maxCharsPerHour === undefined) {
+      return true;
+    }
+    const { used } = this.#currentAutoTtsUsage(sessionKey);
+    return used + chars <= maxCharsPerHour;
+  }
+
+  #recordAutoTtsChars(sessionKey: ChannelSessionKey, chars: number, maxCharsPerHour: number | undefined): void {
+    if (maxCharsPerHour === undefined) {
+      return;
+    }
+    const { key, windowStartMs, used } = this.#currentAutoTtsUsage(sessionKey);
+    this.#autoTtsUsageByChat.set(key, { windowStartMs, chars: used + chars });
+  }
+
+  #currentAutoTtsUsage(sessionKey: ChannelSessionKey): {
+    key: string;
+    windowStartMs: number;
+    used: number;
+  } {
+    const key = `${sessionKey.platform}:${sessionKey.chatId}`;
+    const now = this.#autoTtsNow();
+    const current = this.#autoTtsUsageByChat.get(key);
+    const resetWindow = current === undefined || now - current.windowStartMs >= 3_600_000;
+    const windowStartMs = resetWindow ? now : current.windowStartMs;
+    const used = resetWindow ? 0 : current.chars;
+    return { key, windowStartMs, used };
   }
 
   async #createPendingApprovalContinuation(
@@ -731,6 +909,16 @@ export class ChannelGateway {
       for (const artifact of response.artifacts) {
         await this.#deliverArtifact(adapter, normalizedSessionKey, artifact);
       }
+
+      await this.#maybeDeliverAutoTts({
+        adapter,
+        message,
+        sessionKey: normalizedSessionKey,
+        responseText: response.text,
+        artifacts: response.artifacts,
+        toolExecutions: response.toolExecutions,
+        signal: controller.signal
+      });
 
       if (pendingApproval !== undefined) {
         const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
@@ -1478,6 +1666,11 @@ export class ChannelGateway {
       return this.#handleModelCommand(message, adapter, modelCommand);
     }
 
+    const voiceCommand = parseGatewayVoiceCommand(message.text);
+    if (voiceCommand !== undefined) {
+      return this.#handleVoiceCommand(message, adapter, voiceCommand);
+    }
+
     const command = parseGatewayCommand(message.text);
 
     if (command === undefined) {
@@ -1503,6 +1696,7 @@ export class ChannelGateway {
         "/trust - trust this workspace for local read/write work",
         "/untrust - revoke workspace trust for this chat session",
         "/workspace.trust.status - show current workspace trust state",
+        "/voice on|all|off|status - control voice reply mode for this chat",
         "/yolo - toggle YOLO/open mode for this chat session",
         "/cron <command> - manage scheduled tasks",
         "/commands - show the Telegram command menu",
@@ -2254,6 +2448,56 @@ export class ChannelGateway {
     return undefined;
   }
 
+  async #handleVoiceCommand(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    command: GatewayVoiceCommand
+  ): Promise<ChannelGatewayResult> {
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+    if (this.#voiceStateManager === undefined) {
+      const text = "Voice controls are not configured on this gateway.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command.kind === "channel" || command.kind === "leave") {
+      if (message.sessionKey.platform !== "discord") {
+        const text = "Discord voice channel controls are available only from Discord.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+      const capability = command.kind === "channel"
+        ? adapter.joinVoiceChannelForMessage
+        : adapter.leaveVoiceChannelForMessage;
+      if (capability === undefined) {
+        const text = "Discord voice channel controls are not available on this adapter.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+      const result = await capability.call(adapter, message);
+      const text = result.content;
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (command.kind === "status") {
+      const explicitMode = await this.#voiceStateManager.getMode(message.sessionKey.platform, message.sessionKey.chatId);
+      const mode = explicitMode ?? (this.#voiceAutoTtsDefault ? "voice_only" : "off");
+      const text = [
+        "Voice status",
+        `Mode: ${mode}`,
+        explicitMode === undefined ? `Source: default (${this.#voiceAutoTtsDefault ? "voice_only" : "off"})` : "Source: chat"
+      ].join("\n");
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    await this.#voiceStateManager.setMode(message.sessionKey.platform, message.sessionKey.chatId, command.mode);
+    const text = `Voice mode set to ${command.mode}.`;
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
   async #rejectCompactIfSessionBusy(
     message: ChannelMessage,
     adapter: ChannelAdapter
@@ -2701,6 +2945,12 @@ type GatewayModelCommand =
   | { kind: "clear"; scope: "session" | "global" }
   | { kind: "cancel" };
 
+type GatewayVoiceCommand =
+  | { kind: "status" }
+  | { kind: "set"; mode: VoiceMode }
+  | { kind: "channel" }
+  | { kind: "leave" };
+
 function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined {
   const args = tokenizeCommandArgs(text.trim());
   const rawToken = args[0];
@@ -2734,6 +2984,37 @@ function parseGatewayModelCommand(text: string): GatewayModelCommand | undefined
   }
 
   return { kind: "set", scope, modelInput: normalized.join(" ") };
+}
+
+function parseGatewayVoiceCommand(text: string): GatewayVoiceCommand | undefined {
+  const args = tokenizeCommandArgs(text.trim());
+  const rawToken = args[0];
+  if (rawToken === undefined) {
+    return undefined;
+  }
+  const token = rawToken.toLowerCase().replace(/@[\w_]+$/u, "");
+  if (token !== "/voice") {
+    return undefined;
+  }
+  const subcommand = args[1]?.toLowerCase() ?? "status";
+  switch (subcommand) {
+    case "on":
+    case "voice":
+      return { kind: "set", mode: "voice_only" };
+    case "all":
+    case "tts":
+      return { kind: "set", mode: "all" };
+    case "off":
+      return { kind: "set", mode: "off" };
+    case "status":
+      return { kind: "status" };
+    case "channel":
+      return { kind: "channel" };
+    case "leave":
+      return { kind: "leave" };
+    default:
+      return { kind: "status" };
+  }
 }
 
 export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {
@@ -2961,6 +3242,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/trust", description: "Trust this workspace" },
     { command: "/untrust", description: "Revoke workspace trust" },
     { command: "/workspace.trust.status", description: "Show workspace trust state" },
+    { command: "/voice", description: "Control voice reply mode" },
     { command: "/yolo", description: "Toggle YOLO/open mode for this chat" },
     { command: "/cron", description: "Manage scheduled tasks" },
     { command: "/resume", description: "Show the latest interrupted turn" },

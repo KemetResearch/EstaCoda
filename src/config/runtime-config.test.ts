@@ -595,6 +595,46 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("normalizes Discord voice channel config as disabled by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.discord.voiceChannel).toEqual({
+      enabled: false,
+      autoJoinOnCommand: true
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes explicit Discord voice channel enablement", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        discord: {
+          enabled: true,
+          botTokenEnv: "DISCORD_BOT_TOKEN",
+          voiceChannel: { enabled: true, autoJoinOnCommand: false }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.discord.voiceChannel).toEqual({
+      enabled: true,
+      autoJoinOnCommand: false
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("email ready = enabled && required config present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -887,6 +927,135 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 });
 
 describe("loadRuntimeConfig media boundary", () => {
+  it("defaults TTS to openai and normalizes inert voice auto-TTS fields", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      voice: {
+        autoTts: true,
+        autoTtsMaxCharsPerReply: 1200,
+        autoTtsMaxCharsPerHourPerChat: 5000
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.tts.provider).toBe("openai");
+    expect(loaded.tts.enabled).toBe(true);
+    expect(loaded.stt.enabled).toBe(true);
+    expect(loaded.voice).toEqual({
+      autoTts: true,
+      autoTtsMaxCharsPerReply: 1200,
+      autoTtsMaxCharsPerHourPerChat: 5000
+    });
+  });
+
+  it("normalizes xAI native TTS config without adding a model field", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      tts: {
+        provider: "xai",
+        xai: {
+          voice_id: "nova",
+          language: "en-US",
+          sample_rate: 48_000,
+          bit_rate: 192_000,
+          base_url: "https://api.x.ai/v1",
+          api_key_env: "CUSTOM_XAI_KEY",
+          speed: 1.4
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.tts.xai).toEqual({
+      voiceId: "nova",
+      language: "en-US",
+      sampleRate: 48_000,
+      bitRate: 192_000,
+      baseUrl: "https://api.x.ai/v1",
+      apiKeyEnv: "CUSTOM_XAI_KEY",
+      speed: 1.4
+    });
+    expect(loaded.tts.xai).not.toHaveProperty("model");
+  });
+
+  it("normalizes xAI native STT config and faster-whisper local settings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        provider: "xai",
+        local: {
+          engine: "faster-whisper",
+          normalize_with_ffmpeg: false,
+          ffmpeg_path: "/opt/bin/ffmpeg",
+          faster_whisper: {
+            enabled: true,
+            model: "small",
+            compute_type: "int8",
+            hf_home: "/tmp/hf",
+            allow_model_download: true,
+            gateway_allow_model_download: false,
+            queue_depth: 3,
+            timeout_ms: 300000
+          }
+        },
+        xai: {
+          base_url: "https://api.x.ai/v1",
+          api_key_env: "CUSTOM_XAI_STT_KEY",
+          language: "en",
+          format: "json",
+          diarization: true,
+          key_terms: ["EstaCoda"],
+          filler_words: true
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.stt.provider).toBe("xai");
+    expect(loaded.stt.xai).toEqual({
+      baseUrl: "https://api.x.ai/v1",
+      apiKeyEnv: "CUSTOM_XAI_STT_KEY",
+      language: "en",
+      format: "json",
+      diarize: true,
+      keyterms: ["EstaCoda"],
+      fillerWords: true,
+      rawAudioHints: undefined
+    });
+    expect(loaded.stt.xai).not.toHaveProperty("model");
+    expect(loaded.stt.local?.fasterWhisper).toMatchObject({
+      enabled: true,
+      model: "small",
+      computeType: "int8",
+      hfHome: "/tmp/hf",
+      allowModelDownload: true,
+      gatewayAllowModelDownload: false,
+      queueDepth: 3,
+      timeoutMs: 300000
+    });
+  });
+
   it("keeps voice and image-generation config separate from LLM route normalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

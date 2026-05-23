@@ -55,7 +55,7 @@ export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
 export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
-export type SttProvider = "local" | "groq" | "openai" | "mistral";
+export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 export type ImageGenerationProvider = "fal" | "byteplus";
 
 export type SessionCompressionConfig = {
@@ -84,6 +84,7 @@ export type ExternalMemoryConfig = {
 
 export type TtsConfig = {
   provider?: TtsProvider;
+  enabled?: boolean;
   speed?: number;
   edge?: {
     voice?: string;
@@ -137,6 +138,7 @@ export type TtsConfig = {
     sample_rate?: number;
     bitRate?: number;
     bit_rate?: number;
+    speed?: number;
     baseUrl?: string;
     base_url?: string;
     apiKeyEnv?: string;
@@ -159,11 +161,39 @@ export type TtsConfig = {
   };
 };
 
+export type FasterWhisperConfig = {
+  enabled?: boolean;
+  model?: string;
+  device?: string;
+  computeType?: string;
+  compute_type?: string;
+  hfHome?: string;
+  hf_home?: string;
+  allowModelDownload?: boolean;
+  allow_model_download?: boolean;
+  gatewayAllowModelDownload?: boolean;
+  gateway_allow_model_download?: boolean;
+  queueDepth?: number;
+  queue_depth?: number;
+  timeoutMs?: number;
+  timeout_ms?: number;
+  modelCached?: boolean;
+  model_cached?: boolean;
+};
+
 export type SttConfig = {
   provider?: SttProvider;
+  enabled?: boolean;
   local?: {
     model?: string;
     command?: string;
+    engine?: "command" | "faster-whisper";
+    normalizeWithFfmpeg?: boolean;
+    normalize_with_ffmpeg?: boolean;
+    ffmpegPath?: string;
+    ffmpeg_path?: string;
+    fasterWhisper?: FasterWhisperConfig;
+    faster_whisper?: FasterWhisperConfig;
   };
   groq?: {
     model?: string;
@@ -180,6 +210,28 @@ export type SttConfig = {
     apiKeyEnv?: string;
     api_key_env?: string;
   };
+  xai?: {
+    baseUrl?: string;
+    base_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    language?: string;
+    format?: string;
+    diarize?: boolean;
+    diarization?: boolean;
+    keyterms?: string[];
+    key_terms?: string[];
+    fillerWords?: boolean;
+    filler_words?: boolean;
+    rawAudioHints?: boolean;
+    raw_audio_hints?: boolean;
+  };
+};
+
+export type VoiceConfig = {
+  autoTts?: boolean;
+  autoTtsMaxCharsPerReply?: number;
+  autoTtsMaxCharsPerHourPerChat?: number;
 };
 
 export type ImageGenerationConfig = {
@@ -298,6 +350,7 @@ export type EstaCodaConfig = {
   image_gen?: ImageGenerationConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
+  voice?: VoiceConfig;
   mcpServers?: Record<string, MCPServerConfig>;
   mcp_servers?: Record<string, MCPServerConfig>;
   skills?: {
@@ -359,6 +412,10 @@ export type DiscordChannelConfig = {
   allowedGuilds?: string[];
   allowedChannels?: string[];
   freeResponseChannels?: string[];
+  voiceChannel?: {
+    enabled?: boolean;
+    autoJoinOnCommand?: boolean;
+  };
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
 };
@@ -421,6 +478,7 @@ export type LoadedRuntimeConfig = {
   imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
+  voice: Required<Pick<VoiceConfig, "autoTts">> & VoiceConfig;
   mcp: {
     servers: Record<string, MCPServerConfig>;
   };
@@ -710,6 +768,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),
     stt: normalizeSttConfig(config.stt),
+    voice: normalizeVoiceConfig(config.voice),
     mcp: {
       servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, options.homeDir)
     },
@@ -741,6 +800,10 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       },
       discord: {
         ...discord,
+        voiceChannel: {
+          enabled: discord.voiceChannel?.enabled === true,
+          autoJoinOnCommand: discord.voiceChannel?.autoJoinOnCommand ?? true,
+        },
         ready: discord.enabled === true && discordMissing.length === 0,
         missing: discordMissing.length === 0 ? undefined : discordMissing,
         busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),
@@ -795,6 +858,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     imageGen: mergeImageGenerationConfig(merged.imageGen ?? merged.image_gen, config.imageGen ?? config.image_gen),
     tts: mergeTtsConfig(merged.tts, config.tts),
     stt: mergeSttConfig(merged.stt, config.stt),
+    voice: {
+      ...(merged.voice ?? {}),
+      ...(config.voice ?? {})
+    },
     mcpServers: mergeRecordEntries(
       mergeRecordEntries(merged.mcpServers, merged.mcp_servers),
       mergeRecordEntries(config.mcpServers, config.mcp_servers)
@@ -1199,10 +1266,11 @@ function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
 }
 
 function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
-  const provider = isTtsProvider(value?.provider) ? value.provider : "edge";
+  const provider = isTtsProvider(value?.provider) ? value.provider : "openai";
   return {
     ...value,
     provider,
+    enabled: value?.enabled ?? true,
     speed: boundedNumber(value?.speed, 1, 0.25, 4),
     edge: {
       voice: value?.edge?.voice ?? "en-US-AriaNeural",
@@ -1243,6 +1311,7 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
       language: value?.xai?.language ?? "en",
       sampleRate: value?.xai?.sampleRate ?? value?.xai?.sample_rate ?? 24_000,
       bitRate: value?.xai?.bitRate ?? value?.xai?.bit_rate ?? 128_000,
+      speed: boundedNumber(value?.xai?.speed, 1, 0.5, 2),
       baseUrl: value?.xai?.baseUrl ?? value?.xai?.base_url ?? "https://api.x.ai/v1",
       apiKeyEnv: value?.xai?.apiKeyEnv ?? value?.xai?.api_key_env ?? "XAI_API_KEY"
     },
@@ -1303,12 +1372,29 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
 
 function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
   const provider = isSttProvider(value?.provider) ? value.provider : "local";
+  const fasterWhisper = value?.local?.fasterWhisper ?? value?.local?.faster_whisper;
   return {
     ...value,
     provider,
+    enabled: value?.enabled ?? true,
     local: {
       model: value?.local?.model ?? "base",
-      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND
+      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND,
+      engine: value?.local?.engine ?? (fasterWhisper?.enabled === true ? "faster-whisper" : "command"),
+      normalizeWithFfmpeg: value?.local?.normalizeWithFfmpeg ?? value?.local?.normalize_with_ffmpeg ?? true,
+      ffmpegPath: value?.local?.ffmpegPath ?? value?.local?.ffmpeg_path ?? "ffmpeg",
+      fasterWhisper: {
+        enabled: fasterWhisper?.enabled ?? false,
+        model: fasterWhisper?.model ?? "base",
+        device: fasterWhisper?.device ?? "auto",
+        computeType: fasterWhisper?.computeType ?? fasterWhisper?.compute_type ?? "default",
+        hfHome: fasterWhisper?.hfHome ?? fasterWhisper?.hf_home,
+        allowModelDownload: fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? false,
+        gatewayAllowModelDownload: fasterWhisper?.gatewayAllowModelDownload ?? fasterWhisper?.gateway_allow_model_download ?? false,
+        queueDepth: normalizeOptionalPositiveInteger(fasterWhisper?.queueDepth ?? fasterWhisper?.queue_depth) ?? undefined,
+        timeoutMs: normalizeOptionalPositiveInteger(fasterWhisper?.timeoutMs ?? fasterWhisper?.timeout_ms) ?? undefined,
+        modelCached: fasterWhisper?.modelCached ?? fasterWhisper?.model_cached
+      }
     },
     groq: {
       model: value?.groq?.model ?? "whisper-large-v3",
@@ -1321,7 +1407,26 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
     mistral: {
       model: value?.mistral?.model ?? "voxtral-mini-latest",
       apiKeyEnv: value?.mistral?.apiKeyEnv ?? value?.mistral?.api_key_env ?? "MISTRAL_API_KEY"
+    },
+    xai: {
+      baseUrl: value?.xai?.baseUrl ?? value?.xai?.base_url ?? "https://api.x.ai/v1",
+      apiKeyEnv: value?.xai?.apiKeyEnv ?? value?.xai?.api_key_env ?? "XAI_API_KEY",
+      language: value?.xai?.language,
+      format: value?.xai?.format ?? "json",
+      diarize: value?.xai?.diarize ?? value?.xai?.diarization,
+      keyterms: value?.xai?.keyterms ?? value?.xai?.key_terms ?? [],
+      fillerWords: value?.xai?.fillerWords ?? value?.xai?.filler_words,
+      rawAudioHints: value?.xai?.rawAudioHints ?? value?.xai?.raw_audio_hints
     }
+  };
+}
+
+function normalizeVoiceConfig(value: EstaCodaConfig["voice"]): LoadedRuntimeConfig["voice"] {
+  return {
+    ...value,
+    autoTts: value?.autoTts ?? false,
+    autoTtsMaxCharsPerReply: normalizeOptionalPositiveInteger(value?.autoTtsMaxCharsPerReply),
+    autoTtsMaxCharsPerHourPerChat: normalizeOptionalPositiveInteger(value?.autoTtsMaxCharsPerHourPerChat)
   };
 }
 
@@ -1354,7 +1459,8 @@ function mergeSttConfig(left: SttConfig | undefined, right: SttConfig | undefine
     local: { ...(left?.local ?? {}), ...(right?.local ?? {}) },
     groq: { ...(left?.groq ?? {}), ...(right?.groq ?? {}) },
     openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) },
-    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) }
+    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) },
+    xai: { ...(left?.xai ?? {}), ...(right?.xai ?? {}) }
   };
 }
 
@@ -1371,7 +1477,7 @@ function isTtsProvider(value: unknown): value is TtsProvider {
 }
 
 function isSttProvider(value: unknown): value is SttProvider {
-  return value === "local" || value === "groq" || value === "openai" || value === "mistral";
+  return value === "local" || value === "groq" || value === "openai" || value === "mistral" || value === "xai";
 }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -2562,6 +2668,8 @@ function sttDefaultApiKeyEnv(provider: SttProvider): string | undefined {
       return "VOICE_TOOLS_OPENAI_KEY";
     case "mistral":
       return "MISTRAL_API_KEY";
+    case "xai":
+      return "XAI_API_KEY";
   }
 }
 
@@ -2575,6 +2683,8 @@ function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttP
       return config.openai?.apiKeyEnv ?? config.openai?.api_key_env;
     case "mistral":
       return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
+    case "xai":
+      return config.xai?.apiKeyEnv ?? config.xai?.api_key_env;
   }
 }
 

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { Client, GatewayIntentBits, Events } from "discord.js";
+import { Client, GatewayIntentBits, Events, PermissionFlagsBits } from "discord.js";
 import type { TextBasedChannel, Message } from "discord.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
@@ -18,6 +18,12 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { DiscordChannelConfig } from "../config/runtime-config.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel } from "./activity-labels.js";
+import {
+  DiscordVoiceBridge,
+  type DiscordVoiceCommandResult,
+  type DiscordVoiceDependencyResult,
+  type DiscordVoicePermissionSource
+} from "./discord-voice-bridge.js";
 
 export type DiscordAdapterOptions = {
   botToken: string;
@@ -31,6 +37,10 @@ export type DiscordAdapterOptions = {
   clientFactory?: (options: { intents: number[] }) => Client;
   enabled?: boolean;
   missing?: string[];
+  voiceChannel?: DiscordChannelConfig["voiceChannel"];
+  voiceTempRoot?: string;
+  voiceBridge?: DiscordVoiceBridge;
+  voiceDependencyLoader?: () => Promise<DiscordVoiceDependencyResult>;
 };
 
 export class DiscordAdapter implements ChannelAdapter {
@@ -42,6 +52,8 @@ export class DiscordAdapter implements ChannelAdapter {
   private options: DiscordAdapterOptions;
   private config: DiscordChannelConfig;
   private missing: string[] | undefined;
+  private voiceBridge?: DiscordVoiceBridge;
+  private voiceStatesIntentRequested = false;
 
   constructor(options: DiscordAdapterOptions) {
     this.options = options;
@@ -52,7 +64,24 @@ export class DiscordAdapter implements ChannelAdapter {
       allowedGuilds: options.allowedGuilds,
       allowedChannels: options.allowedChannels,
       freeResponseChannels: options.freeResponseChannels,
+      voiceChannel: {
+        enabled: options.voiceChannel?.enabled === true,
+        autoJoinOnCommand: options.voiceChannel?.autoJoinOnCommand ?? true,
+      }
     };
+    this.voiceBridge = options.voiceBridge ?? (
+      options.voiceChannel?.enabled === true && options.voiceTempRoot !== undefined
+        ? new DiscordVoiceBridge({
+            enabled: true,
+            tempRoot: options.voiceTempRoot,
+            loadDependencies: options.voiceDependencyLoader,
+            onVoiceMessage: async (message) => {
+              await this.handler?.(message);
+            },
+            now: options.now,
+          })
+        : undefined
+    );
   }
 
   getCapabilities(): AdapterCapability {
@@ -65,6 +94,10 @@ export class DiscordAdapter implements ChannelAdapter {
     this.running = true;
 
     const intents = [GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers];
+    this.voiceStatesIntentRequested = this.options.voiceChannel?.enabled === true;
+    if (this.voiceStatesIntentRequested) {
+      intents.push(GatewayIntentBits.GuildVoiceStates);
+    }
 
     if (this.options.clientFactory) {
       this.client = this.options.clientFactory({ intents });
@@ -82,6 +115,7 @@ export class DiscordAdapter implements ChannelAdapter {
     if (!this.running) return;
     this.running = false;
     if (this.client) {
+      await this.voiceBridge?.leaveAll();
       this.client.destroy();
       this.client = undefined;
     }
@@ -128,6 +162,9 @@ export class DiscordAdapter implements ChannelAdapter {
 
       sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
         if (!this.client) return;
+        if (await this.voiceBridge?.playArtifact(sessionKey, artifact)) {
+          return;
+        }
         const channel = await this.client.channels.fetch(sessionKey.chatId);
         if (!channel || !isSendableChannel(channel)) return;
         const sendable = channel as any;
@@ -147,6 +184,41 @@ export class DiscordAdapter implements ChannelAdapter {
         }
       },
     };
+  }
+
+  async joinVoiceChannelForMessage(message: ChannelMessage): Promise<DiscordVoiceCommandResult> {
+    if (!this.client) {
+      return { ok: false, reason: "not-started", content: "Discord adapter is not started." };
+    }
+    if (this.voiceBridge === undefined) {
+      return {
+        ok: false,
+        reason: "disabled",
+        content: "Discord voice channels are disabled. Enable channels.discord.voiceChannel.enabled first."
+      };
+    }
+    const guildId = typeof message.metadata?.guildId === "string" ? message.metadata.guildId : undefined;
+    const context = await this.resolveVoiceContext(guildId, message.sender.id);
+    return this.voiceBridge.join({
+      guildId,
+      textChannelId: message.sessionKey.chatId,
+      userId: message.sender.id,
+      voiceChannel: context.voiceChannel,
+      adapterCreator: context.adapterCreator,
+      hasGuildVoiceStatesIntent: this.voiceStatesIntentRequested,
+    });
+  }
+
+  async leaveVoiceChannelForMessage(message: ChannelMessage): Promise<DiscordVoiceCommandResult> {
+    const guildId = typeof message.metadata?.guildId === "string" ? message.metadata.guildId : undefined;
+    if (this.voiceBridge === undefined) {
+      return {
+        ok: false,
+        reason: "disabled",
+        content: "Discord voice channels are disabled. Enable channels.discord.voiceChannel.enabled first."
+      };
+    }
+    return this.voiceBridge.leave({ guildId });
   }
 
   private async handleMessage(message: Message): Promise<void> {
@@ -344,6 +416,73 @@ export class DiscordAdapter implements ChannelAdapter {
       // Keep interaction handling from taking down the adapter.
     }
   }
+
+  private async resolveVoiceContext(guildId: string | undefined, userId: string): Promise<{
+    voiceChannel?: {
+      id?: string;
+      name?: string;
+      guildId?: string;
+      permissions?: DiscordVoicePermissionSource;
+    } | null;
+    adapterCreator?: unknown;
+  }> {
+    if (!guildId || !this.client) {
+      return {};
+    }
+    const guild = await resolveDiscordGuild(this.client, guildId);
+    if (!guild) {
+      return {};
+    }
+    const member = await resolveDiscordMember(guild, userId);
+    const voiceChannel = member?.voice?.channel;
+    const botMember = await resolveBotMember(guild, this.client.user?.id);
+    const permissions = voiceChannel?.permissionsFor?.(botMember ?? this.client.user);
+    return {
+      adapterCreator: guild.voiceAdapterCreator,
+      voiceChannel: voiceChannel === undefined || voiceChannel === null
+        ? null
+        : {
+            id: voiceChannel.id,
+            name: voiceChannel.name,
+            guildId: voiceChannel.guildId ?? guildId,
+            permissions: wrapDiscordPermissions(permissions),
+          }
+    };
+  }
+}
+
+async function resolveDiscordGuild(client: Client, guildId: string): Promise<any | undefined> {
+  const guilds = (client as any).guilds;
+  return guilds?.cache?.get?.(guildId) ?? await guilds?.fetch?.(guildId);
+}
+
+async function resolveDiscordMember(guild: any, userId: string): Promise<any | undefined> {
+  return guild.members?.cache?.get?.(userId) ?? await guild.members?.fetch?.(userId);
+}
+
+async function resolveBotMember(guild: any, botUserId: string | undefined): Promise<any | undefined> {
+  return guild.members?.me ??
+    (botUserId ? guild.members?.cache?.get?.(botUserId) : undefined) ??
+    await guild.members?.fetchMe?.();
+}
+
+function wrapDiscordPermissions(permissions: any): DiscordVoicePermissionSource | undefined {
+  if (permissions === undefined || permissions === null) {
+    return undefined;
+  }
+  return {
+    has: (permission) => {
+      const key = String(permission);
+      const bit = key === "Connect"
+        ? PermissionFlagsBits.Connect
+        : key === "Speak"
+          ? PermissionFlagsBits.Speak
+          : key === "UseVAD"
+            ? PermissionFlagsBits.UseVAD
+            : permission;
+      return permissions.has(bit);
+    }
+  };
 }
 
 function isSendableChannel(channel: unknown): channel is any {

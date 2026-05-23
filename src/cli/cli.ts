@@ -43,6 +43,7 @@ import { collectSetupEntryState } from "../onboarding/setup-entry-state.js";
 import { collectSetupRoute } from "../onboarding/setup-router.js";
 import { renderSetupRouteSummary } from "../onboarding/setup-state-renderer.js";
 import { runSetupVerification } from "../onboarding/verification.js";
+import { checkSttProviderStatus, checkTtsProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
@@ -141,6 +142,13 @@ import {
   renderTelegramSettings,
   renderUiSettings,
 } from "./settings-view-models.js";
+import {
+  readCliVoiceMode,
+  cliVoiceModeStatePath,
+  renderCliVoiceModeStatus,
+  writeCliVoiceMode,
+  type CliVoiceEnvironmentOptions,
+} from "./voice-mode.js";
 
 import { runVersionCommand } from "./version-command.js";
 import { runInitCommand } from "./init-command.js";
@@ -183,6 +191,7 @@ export type CliOptions = {
   modelsDevOptions?: ModelsDevRegistryOptions;
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
+  voiceModeEnv?: CliVoiceEnvironmentOptions;
 };
 
 export type ParsedGlobalCliOptions =
@@ -2160,23 +2169,65 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
 async function voice(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "setup") {
+  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "mode") {
     return {
       handled: true,
       exitCode: 0,
       output: [
         "EstaCoda voice",
-        "Hermes-aligned voice stack: TTS output plus STT transcription.",
+        "Hermes-aligned voice stack: TTS output plus STT transcription. Only ready providers are exposed to runtime tools.",
         "  estacoda voice status",
-        "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
+        "  estacoda voice mode [on|off|tts|status]",
         "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
+        "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
         "  estacoda voice setup --stt-provider local --stt-model base",
         "",
         "Defaults:",
-        "  TTS: edge, no API key",
-        "  STT: local Whisper, model base",
+        "  TTS: openai, gpt-4o-mini-tts, VOICE_TOOLS_OPENAI_KEY or OPENAI_API_KEY",
+        "  STT: local command, model base",
         "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
+    };
+  }
+
+  if (subcommand === "mode") {
+    const config = await loadRuntimeConfig(options);
+    const profileId = selectedProfileId(options);
+    const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+    const mode = args[1] ?? "status";
+    if (mode === "status") {
+      return {
+        handled: true,
+        exitCode: 0,
+        output: await renderCliVoiceModeStatus({
+          config,
+          profilePaths,
+          envOptions: options.voiceModeEnv,
+          commandExists: options.voiceModeEnv?.commandExists
+        })
+      };
+    }
+    if (mode === "on" || mode === "off" || mode === "tts") {
+      await writeCliVoiceMode(profilePaths, mode);
+      const current = await readCliVoiceMode(profilePaths);
+      return {
+        handled: true,
+        exitCode: 0,
+        output: [
+          `CLI voice mode: ${current}.`,
+          current === "off"
+            ? "Microphone recording is disabled for CLI sessions."
+            : current === "tts"
+              ? "CLI sessions will record voice turns and try local playback for replies when a player is available."
+              : "CLI sessions will record voice turns and inject transcripts as user input.",
+          `State: ${cliVoiceModeStatePath(profilePaths)}`
+        ].join("\n")
+      };
+    }
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Usage: estacoda voice mode [on|off|tts|status]"
     };
   }
 
@@ -2368,21 +2419,33 @@ function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<Retur
 function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   const ttsKey = ttsApiKeyEnv(config.tts.provider, config);
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
+  const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
+  const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
 
   return [
     "EstaCoda voice",
     `TTS provider: ${config.tts.provider}`,
+    `TTS readiness: ${formatVoiceReadiness(ttsStatus)}`,
     `TTS model: ${ttsModel(config.tts.provider, config)}`,
     `TTS voice: ${ttsVoice(config.tts.provider, config)}`,
     `TTS speed: ${config.tts.speed}`,
     `TTS API key: ${ttsKey === undefined ? "none" : ttsKey}`,
     `STT provider: ${config.stt.provider}`,
+    `STT readiness: ${formatVoiceReadiness(sttStatus)}`,
     `STT model: ${sttModel(config.stt.provider, config)}`,
-    `STT command: ${config.stt.local?.command ?? "auto"}`,
+    `STT command: ${config.stt.local?.command ?? "not configured"}`,
     `STT API key: ${sttKey === undefined ? "none" : sttKey}`,
+    `Auto-TTS replies: ${config.voice.autoTts ? "enabled" : "disabled"}`,
+    `Auto-TTS max chars/reply: ${config.voice.autoTtsMaxCharsPerReply ?? "unset"}`,
+    `Auto-TTS max chars/hour/chat: ${config.voice.autoTtsMaxCharsPerHourPerChat ?? "unset"}`,
+    "CLI voice mode: estacoda voice mode [on|off|tts|status]",
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
-    "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral"
+    "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral|xai"
   ].join("\n");
+}
+
+function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
+  return status.ready ? "ready" : `not ready (${status.reason})`;
 }
 
 function ttsModel(provider: TtsProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
@@ -2462,6 +2525,8 @@ function sttModel(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]
       return config.stt.openai?.model ?? "whisper-1";
     case "mistral":
       return config.stt.mistral?.model ?? "voxtral-mini-latest";
+    case "xai":
+      return "xai-stt";
   }
 }
 
@@ -2475,6 +2540,8 @@ function sttApiKeyEnv(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["s
       return config.stt.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
     case "mistral":
       return config.stt.mistral?.apiKeyEnv ?? "MISTRAL_API_KEY";
+    case "xai":
+      return config.stt.xai?.apiKeyEnv ?? "XAI_API_KEY";
   }
 }
 
@@ -3430,10 +3497,10 @@ function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvid
 }
 
 function parseSttProvider(value: string | undefined): VoiceSetupInput["sttProvider"] {
-  if (value === "local" || value === "groq" || value === "openai" || value === "mistral") {
+  if (value === "local" || value === "groq" || value === "openai" || value === "mistral" || value === "xai") {
     return value;
   }
-  throw new Error("Expected --stt-provider local, groq, openai, or mistral");
+  throw new Error("Expected --stt-provider local, groq, openai, mistral, or xai");
 }
 
 function renderLocalDiscovery(discovery: OpenAIModelProbe): string {

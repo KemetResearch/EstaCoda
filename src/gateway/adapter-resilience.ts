@@ -88,6 +88,14 @@ export class AdapterResilienceSupervisor {
     return this.rawAdapter.getCapabilities;
   }
 
+  get joinVoiceChannelForMessage(): ChannelAdapter["joinVoiceChannelForMessage"] {
+    return this.rawAdapter.joinVoiceChannelForMessage?.bind(this.rawAdapter);
+  }
+
+  get leaveVoiceChannelForMessage(): ChannelAdapter["leaveVoiceChannelForMessage"] {
+    return this.rawAdapter.leaveVoiceChannelForMessage?.bind(this.rawAdapter);
+  }
+
   get pollOnce(): ChannelAdapter["pollOnce"] {
     return this.rawAdapter.pollOnce === undefined
       ? undefined

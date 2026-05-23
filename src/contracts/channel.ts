@@ -111,6 +111,13 @@ export type ChannelDelivery = {
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<void>;
 };
 
+export type ChannelVoiceCommandResult = {
+  ok: boolean;
+  content: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type InboundMode = "polling" | "websocket" | "webhook" | "none";
 
 /**
@@ -161,6 +168,9 @@ export type ChannelAdapter = {
   send?(reply: ChannelReply): Promise<void>;
   /** Static capability metadata. Optional so mock adapters need not implement. */
   getCapabilities?(): AdapterCapability;
+  /** Optional Discord voice-channel capability. Command parsing stays in ChannelGateway. */
+  joinVoiceChannelForMessage?(message: ChannelMessage): Promise<ChannelVoiceCommandResult>;
+  leaveVoiceChannelForMessage?(message: ChannelMessage): Promise<ChannelVoiceCommandResult>;
   /** Poll for inbound messages. Present on polling adapters (Telegram, Email). */
   pollOnce?(): Promise<number>;
 };

@@ -1,4 +1,4 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
@@ -43,7 +43,7 @@ import {
   deriveEmailIdentityHash,
   deriveWhatsAppIdentityHash,
 } from "../channels/adapter-identity.js";
-import { injectVoiceTranscripts } from "../channels/voice-transcription.js";
+import { injectVoiceTranscripts, type VoiceTranscriptionAuditEvent } from "../channels/voice-transcription.js";
 import { acquireGatewayLock, releaseGatewayLock } from "./gateway-lock.js";
 import { writeGatewayPid, removeGatewayPid } from "./pid-file.js";
 import { writeGatewayState, removeGatewayState } from "./supervisor-state.js";
@@ -63,6 +63,7 @@ import {
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { GatewayApprovalQueue } from "./approval-queue.js";
+import { VoiceStateManager } from "./voice-state.js";
 import {
   HookRegistry,
   type GatewayHookEventName,
@@ -257,6 +258,28 @@ function emitSupervisorHook<N extends GatewayHookEventName>(
   } catch {
     // HookRegistry.emit threw synchronously — ignore
   }
+}
+
+export function createVoiceTranscriptionAudit(input: {
+  profilePaths: ProfileStatePaths;
+  hookRegistry?: HookRegistry;
+  logWarning?: (message: string) => void;
+}): (event: VoiceTranscriptionAuditEvent) => Promise<void> {
+  return async (event) => {
+    const payload = {
+      outcome: event.outcome,
+      provider: event.provider,
+      reason: event.reason,
+      attachment: event.attachment
+    };
+    emitSupervisorHook(input.hookRegistry, "gateway:stt:preprocess", payload);
+    const logPath = join(input.profilePaths.gatewayStatePath, "logs", "voice-stt-preprocess.jsonl");
+    await mkdir(dirname(logPath), { recursive: true });
+    await appendFile(logPath, `${JSON.stringify(event)}\n`, "utf8");
+    if (event.outcome === "deny" || event.outcome === "fail") {
+      input.logWarning?.(`[voice-stt-preprocess] ${event.outcome}: ${event.reason ?? "unknown"} attachment=${event.attachment.id} pathHash=${event.attachment.pathHash ?? "none"}`);
+    }
+  };
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -754,6 +777,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const approvalStore = new ChannelApprovalStore({ path: approvalStorePath });
     const handoffStore = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
     const surfacePointerStore = new FileSurfacePointerStore({ path: join(profilePaths.gatewayStatePath, "surface-pointers.json") });
+    const voiceStateManager = new VoiceStateManager({ path: join(profilePaths.gatewayStatePath, "voice-mode.json") });
 
     // 8. Adapter instantiation
     const adapters: ChannelAdapter[] = [];
@@ -785,6 +809,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 pollTimeoutSeconds: telegram.pollTimeoutSeconds,
                 maxAttachmentBytes: telegram.maxAttachmentBytes,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
                 fetch: options.telegramFetch,
               })
@@ -794,6 +819,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 pollTimeoutSeconds: telegram.pollTimeoutSeconds,
                 maxAttachmentBytes: telegram.maxAttachmentBytes,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
                 fetch: options.telegramFetch,
               });
@@ -813,6 +839,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 allowedChannels: discord.allowedChannels,
                 freeResponseChannels: discord.freeResponseChannels,
                 mediaRoot,
+                voiceChannel: discord.voiceChannel,
+                voiceTempRoot: join(profilePaths.tempPath, "audio"),
               })
             : new DiscordAdapter({
                 botToken: botToken!,
@@ -821,6 +849,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 allowedChannels: discord.allowedChannels,
                 freeResponseChannels: discord.freeResponseChannels,
                 mediaRoot,
+                voiceChannel: discord.voiceChannel,
+                voiceTempRoot: join(profilePaths.tempPath, "audio"),
               });
           router.registerAdapter(adapter);
           adapters.push(adapter);
@@ -978,6 +1008,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
+    const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
@@ -992,7 +1023,12 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           surfacePointerStore,
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
-            return injectVoiceTranscripts(message, { stt: latestConfig.stt });
+            return injectVoiceTranscripts(message, {
+              stt: latestConfig.stt,
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
+              voiceStateManager,
+              audit: voiceAudit
+            });
           },
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({
@@ -1041,6 +1077,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          voiceStateManager,
+          voiceAutoTtsDefault: config.voice.autoTts,
+          autoTtsConfig: async () => {
+            const latestConfig = await loadConfig();
+            return { tts: latestConfig.tts, voice: latestConfig.voice };
+          },
+          autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -1054,7 +1097,12 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           surfacePointerStore,
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
-            return injectVoiceTranscripts(message, { stt: latestConfig.stt });
+            return injectVoiceTranscripts(message, {
+              stt: latestConfig.stt,
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
+              voiceStateManager,
+              audit: voiceAudit
+            });
           },
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({
@@ -1103,6 +1151,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           logWarning,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          voiceStateManager,
+          voiceAutoTtsDefault: config.voice.autoTts,
+          autoTtsConfig: async () => {
+            const latestConfig = await loadConfig();
+            return { tts: latestConfig.tts, voice: latestConfig.voice };
+          },
+          autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
         });
 
     state.channelGateway = gateway;
