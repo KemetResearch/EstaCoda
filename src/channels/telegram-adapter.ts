@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
@@ -35,6 +36,8 @@ export type TelegramAdapterOptions = {
   pollTimeoutSeconds?: number;
   maxAttachmentBytes?: number;
   mediaRoot?: string;
+  voiceTempRoot?: string;
+  ffmpegPath?: string;
   activityLabelsLocale?: ActivityLabelLocale;
   fetch?: TelegramFetch;
   now?: () => Date;
@@ -143,6 +146,8 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly #pollTimeoutSeconds: number;
   readonly #maxAttachmentBytes: number;
   readonly #mediaRoot: string | undefined;
+  readonly #voiceTempRoot: string | undefined;
+  readonly #ffmpegPath: string;
   readonly #activityLabelsLocale: ActivityLabelLocale;
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
@@ -197,6 +202,8 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#pollTimeoutSeconds = options.pollTimeoutSeconds ?? 25;
     this.#maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
     this.#mediaRoot = options.mediaRoot;
+    this.#voiceTempRoot = options.voiceTempRoot;
+    this.#ffmpegPath = options.ffmpegPath ?? "ffmpeg";
     this.#activityLabelsLocale = options.activityLabelsLocale ?? "en";
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
@@ -482,13 +489,17 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async #sendAudioArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    let cleanupPath: string | undefined;
     try {
       const localPath = artifact.localPath ?? artifact.path;
-      const bytes = await readFile(localPath);
+      const converted = await this.#prepareTelegramVoiceArtifact(localPath, artifact);
+      cleanupPath = converted.cleanupPath;
+      const uploadPath = converted.path;
+      const bytes = await readFile(uploadPath);
       const form = new FormData();
-      const voiceBubble = isTelegramVoiceBubbleArtifact(artifact);
+      const voiceBubble = converted.voiceBubble;
       form.set("chat_id", chatId);
-      form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: artifact.mimeType ?? "audio/mpeg" }), basename(localPath));
+      form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: converted.mimeType }), basename(uploadPath));
       const caption = renderAudioArtifactCaption(artifact);
       if (caption.length > 0) {
         form.set("caption", caption);
@@ -498,7 +509,87 @@ export class TelegramAdapter implements ChannelAdapter {
       return true;
     } catch {
       return false;
+    } finally {
+      if (cleanupPath !== undefined) {
+        await rm(cleanupPath, { recursive: true, force: true }).catch(() => {});
+      }
     }
+  }
+
+  async #prepareTelegramVoiceArtifact(localPath: string, artifact: ArtifactRecord): Promise<{
+    path: string;
+    mimeType: string;
+    voiceBubble: boolean;
+    cleanupPath?: string;
+  }> {
+    if (isTelegramVoiceBubbleArtifact(artifact)) {
+      return {
+        path: localPath,
+        mimeType: artifact.mimeType ?? "audio/ogg",
+        voiceBubble: true
+      };
+    }
+
+    if (artifact.metadata?.deliveryHint !== "voice") {
+      return {
+        path: localPath,
+        mimeType: artifact.mimeType ?? "audio/mpeg",
+        voiceBubble: false
+      };
+    }
+
+    const converted = await this.#convertToTelegramVoice(localPath, artifact);
+    if (converted === undefined) {
+      return {
+        path: localPath,
+        mimeType: artifact.mimeType ?? "audio/mpeg",
+        voiceBubble: false
+      };
+    }
+    return converted;
+  }
+
+  async #convertToTelegramVoice(localPath: string, artifact: ArtifactRecord): Promise<{
+    path: string;
+    mimeType: string;
+    voiceBubble: true;
+    cleanupPath: string;
+  } | undefined> {
+    const root = this.#voiceTempRoot ?? (this.#mediaRoot === undefined ? undefined : join(this.#mediaRoot, "telegram-voice-temp"));
+    if (root === undefined) {
+      return undefined;
+    }
+    await mkdir(root, { recursive: true }).catch(() => {});
+    const tempDir = await mkdtemp(join(root, "opus-")).catch(() => undefined);
+    if (tempDir === undefined) {
+      return undefined;
+    }
+    const outputPath = join(tempDir, `${sanitizePathPart(artifact.id)}.ogg`);
+    const result = await runCommand(this.#ffmpegPath, [
+      "-y",
+      "-i",
+      localPath,
+      "-c:a",
+      "libopus",
+      "-b:a",
+      "24k",
+      outputPath
+    ]);
+    if (!result.ok) {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      return undefined;
+    }
+    const fileStat = await stat(outputPath).catch(() => undefined);
+    if (fileStat === undefined || fileStat.size === 0) {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      return undefined;
+    }
+    return {
+      path: outputPath,
+      mimeType: "audio/ogg",
+      voiceBubble: true,
+      cleanupPath: tempDir
+    };
   }
 
   async #sendImageArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
@@ -761,6 +852,14 @@ function isTelegramVoiceBubbleArtifact(artifact: ArtifactRecord): boolean {
   const mime = artifact.mimeType?.toLowerCase();
   const path = (artifact.localPath ?? artifact.path).toLowerCase();
   return mime === "audio/ogg" || path.endsWith(".ogg") || path.endsWith(".opus");
+}
+
+function runCommand(command: string, args: string[]): Promise<{ ok: true } | { ok: false }> {
+  return new Promise((resolveResult) => {
+    const child = spawn(command, args, { stdio: "ignore" });
+    child.on("error", () => { resolveResult({ ok: false }); });
+    child.on("close", (code) => { resolveResult(code === 0 ? { ok: true } : { ok: false }); });
+  });
 }
 
 async function fetchJson(url: string, init?: {

@@ -6,6 +6,7 @@ import { basename, extname, join } from "node:path";
 import type { LoadedRuntimeConfig, SttProvider } from "../config/runtime-config.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { validateAudioInput } from "./audio-validation.js";
+import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
 import type { FasterWhisperWorkerClient, FasterWhisperPreset } from "./stt-local-whisper.js";
 import type { VoiceFetchLike } from "./voice-tools.js";
 
@@ -49,12 +50,21 @@ export function checkSttProviderStatus(
   }
   if (provider === "openai" || provider === "groq" || provider === "xai") {
     const apiKeyEnv = sttApiKeyEnv(provider, config);
-    const apiKey = process.env[apiKeyEnv] ??
-      (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+    if (provider === "openai") {
+      const credential = resolveOpenAiAudioCredential(apiKeyEnv);
+      if (!credential.ok) {
+        return {
+          ready: false,
+          reason: `Missing ${formatMissingOpenAiAudioCredential(credential.missingApiKeyEnvs)}`
+        };
+      }
+      return { ready: true };
+    }
+    const apiKey = process.env[apiKeyEnv];
     if (apiKey === undefined || apiKey.length === 0) {
       return {
         ready: false,
-        reason: `Missing ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
+        reason: `Missing ${apiKeyEnv}`
       };
     }
     return { ready: true };
@@ -173,8 +183,11 @@ async function transcribeOpenAiCompatible(
 ): Promise<SpeechTranscriptionResult> {
   const config = provider === "openai" ? input.stt.openai : input.stt.groq;
   const apiKeyEnv = sttApiKeyEnv(provider, input.stt);
-  const apiKey = process.env[apiKeyEnv] ??
-    (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+  const credential = provider === "openai" ? resolveOpenAiAudioCredential(apiKeyEnv) : undefined;
+  const apiKey = credential?.ok === true ? credential.apiKey : process.env[apiKeyEnv];
+  if (credential?.ok === false) {
+    return missingKey(provider, credential.configuredApiKeyEnv, credential.missingApiKeyEnvs);
+  }
   if (apiKey === undefined || apiKey.length === 0) {
     return missingKey(provider, apiKeyEnv);
   }
@@ -252,15 +265,28 @@ async function parseHostedResponse(
   if (!response.ok) {
     return {
       ok: false,
-      content: `STT request failed: ${response.status} ${response.statusText}\n${raw}`,
-      metadata: { provider, model }
+      content: `STT request failed: ${response.status} ${response.statusText}\n${truncateForMetadata(raw)}`,
+      metadata: { provider, model, status: response.status, reason: "stt-request-failed" }
     };
   }
   const parsed = tryJson(raw);
-  const text = typeof parsed?.text === "string" ? parsed.text : raw;
+  const text = typeof parsed?.text === "string"
+    ? parsed.text
+    : (parsed === undefined ? raw : undefined);
+  if (text === undefined) {
+    return {
+      ok: false,
+      content: `${provider} STT response did not include transcript text.`,
+      metadata: { provider, model, reason: "invalid-transcript-response" }
+    };
+  }
+  const validText = validateTranscriptText(text, { provider, model });
+  if (!validText.ok) {
+    return validText;
+  }
   return {
     ok: true,
-    text,
+    text: validText.text,
     model: typeof parsed?.model === "string" ? parsed.model : model,
     language: typeof parsed?.language === "string" ? parsed.language : fallbackLanguage,
     duration: typeof parsed?.duration === "number" ? parsed.duration : undefined,
@@ -302,9 +328,13 @@ async function transcribeWithFasterWhisper(input: SpeechTranscriptionInput): Pro
       metadata: response.metadata
     };
   }
+  const validText = validateTranscriptText(response.text ?? "", { provider: "local", model });
+  if (!validText.ok) {
+    return validText;
+  }
   return {
     ok: true,
-    text: response.text ?? "",
+    text: validText.text,
     model: response.model ?? model,
     language: response.language ?? input.language,
     duration: typeof response.metadata?.duration === "number" ? response.metadata.duration : undefined,
@@ -434,10 +464,10 @@ async function readTxtOutputs(outputDir: string): Promise<string> {
   return parts.filter((part) => part.length > 0).join("\n");
 }
 
-function missingKey(provider: string, apiKeyEnv: string): SpeechTranscriptionResult {
+function missingKey(provider: string, apiKeyEnv: string, fallbackEnvs: readonly string[] = [apiKeyEnv]): SpeechTranscriptionResult {
   return {
     ok: false,
-    content: `Missing STT API key. Export ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
+    content: `Missing STT API key. Export ${formatMissingOpenAiAudioCredential(fallbackEnvs)}.`,
     metadata: { provider, apiKeyEnv }
   };
 }
@@ -466,7 +496,7 @@ function runShellCommand(command: string, signal?: AbortSignal): Promise<{ ok: t
         resolveResult({ ok: true, content: stdout });
         return;
       }
-      resolveResult({ ok: false, content: stderr.trim() || `exit code ${code ?? "unknown"}` });
+      resolveResult({ ok: false, content: truncateForMetadata(stderr.trim() || `exit code ${code ?? "unknown"}`) });
     });
   });
 }
@@ -482,7 +512,7 @@ function runCommand(command: string, args: string[], signal?: AbortSignal): Prom
         resolveResult({ ok: true, content: "" });
         return;
       }
-      resolveResult({ ok: false, content: stderr.trim() || `exit code ${code ?? "unknown"}` });
+      resolveResult({ ok: false, content: truncateForMetadata(stderr.trim() || `exit code ${code ?? "unknown"}`) });
     });
   });
 }
@@ -511,4 +541,23 @@ function tryJson(value: string): any {
   } catch {
     return undefined;
   }
+}
+
+function validateTranscriptText(
+  text: string,
+  metadata: { provider: string; model: string }
+): SpeechTranscriptionResult | { ok: true; text: string } {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return {
+      ok: false,
+      content: `${metadata.provider} STT returned empty transcript.`,
+      metadata: { provider: metadata.provider, model: metadata.model, reason: "empty-transcript" }
+    };
+  }
+  return { ok: true, text: trimmed };
+}
+
+function truncateForMetadata(value: string, maxChars = 500): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
 }

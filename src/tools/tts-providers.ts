@@ -1,6 +1,7 @@
 import type { LoadedRuntimeConfig, TtsProvider } from "../config/runtime-config.js";
 import type { VoiceFetchLike } from "./voice-tools.js";
 import { validateAudioOutput } from "./audio-validation.js";
+import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
 
 export type SpeechSynthesisInput = {
   text: string;
@@ -111,9 +112,9 @@ export async function fetchVoiceProviderWithRetry(
 async function synthesizeOpenAi(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult> {
   const provider = "openai";
   const apiKeyEnv = input.tts.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
-  const apiKey = process.env[apiKeyEnv] ?? (apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-  if (apiKey === undefined || apiKey.length === 0) {
-    return missingKey(provider, apiKeyEnv, apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : "");
+  const credential = resolveOpenAiAudioCredential(apiKeyEnv);
+  if (!credential.ok) {
+    return missingKey(provider, credential.configuredApiKeyEnv, credential.missingApiKeyEnvs);
   }
 
   const model = input.model ?? input.tts.openai?.model ?? "gpt-4o-mini-tts";
@@ -124,10 +125,11 @@ async function synthesizeOpenAi(input: SpeechSynthesisInput): Promise<SpeechSynt
     provider,
     fetch: input.fetch,
     url: `${baseUrl}/audio/speech`,
+    sensitiveText: input.text,
     init: {
       method: "POST",
       headers: {
-        authorization: `Bearer ${apiKey}`,
+        authorization: `Bearer ${credential.apiKey}`,
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -167,6 +169,7 @@ async function synthesizeElevenLabs(input: SpeechSynthesisInput): Promise<Speech
     provider,
     fetch: input.fetch,
     url: `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}`,
+    sensitiveText: input.text,
     init: {
       method: "POST",
       headers: {
@@ -211,6 +214,7 @@ async function synthesizeMiniMax(input: SpeechSynthesisInput): Promise<SpeechSyn
     provider,
     fetch: input.fetch,
     url: "https://api.minimax.chat/v1/t2a_v2",
+    sensitiveText: input.text,
     init: {
       method: "POST",
       headers: {
@@ -270,6 +274,7 @@ async function synthesizeGemini(input: SpeechSynthesisInput): Promise<SpeechSynt
     provider,
     fetch: input.fetch,
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    sensitiveText: input.text,
     init: {
       method: "POST",
       headers: {
@@ -344,6 +349,7 @@ async function synthesizeXai(input: SpeechSynthesisInput): Promise<SpeechSynthes
     provider,
     fetch: input.fetch,
     url: `${baseUrl}/tts`,
+    sensitiveText: input.text,
     init: {
       method: "POST",
       headers: {
@@ -372,6 +378,7 @@ async function fetchProvider(input: {
   fetch?: VoiceFetchLike;
   url: string;
   init: Parameters<VoiceFetchLike>[1];
+  sensitiveText?: string;
 }): Promise<ProviderFetchResult> {
   let response: Awaited<ReturnType<VoiceFetchLike>>;
   try {
@@ -390,12 +397,17 @@ async function fetchProvider(input: {
   }
 
   if (!response.ok) {
+    const body = sanitizeProviderErrorBody(await response.text(), input.sensitiveText);
     return {
       ok: false,
-      content: `${input.provider} TTS request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+      content: [
+        `${input.provider} TTS request failed: ${response.status} ${response.statusText}`,
+        body.length === 0 ? undefined : `Provider response: ${body}`
+      ].filter((line) => line !== undefined).join("\n"),
       metadata: {
         provider: input.provider,
-        status: response.status
+        status: response.status,
+        reason: "tts-request-failed"
       }
     };
   }
@@ -434,10 +446,10 @@ function audioResult(input: {
   };
 }
 
-function missingKey(provider: string, apiKeyEnv: string, fallback = ""): SpeechSynthesisResult {
+function missingKey(provider: string, apiKeyEnv: string, fallbackEnvs: readonly string[] = [apiKeyEnv]): SpeechSynthesisResult {
   return {
     ok: false,
-    content: `Missing TTS API key. Export ${apiKeyEnv}${fallback}.`,
+    content: `Missing TTS API key. Export ${formatMissingOpenAiAudioCredential(fallbackEnvs)}.`,
     metadata: {
       provider,
       apiKeyEnv
@@ -561,4 +573,17 @@ async function sleepBeforeRetry(baseDelayMs: number, attempt: number): Promise<v
 
 function stableErrorMessage(error: unknown): string {
   return error instanceof Error && error.message.length > 0 ? error.message : "network error";
+}
+
+function sanitizeProviderErrorBody(value: string, sensitiveText: string | undefined, maxChars = 240): string {
+  const compact = value
+    .replace(/sk-[a-zA-Z0-9_-]+/gu, "[redacted]")
+    .replace(/Bearer\s+[a-zA-Z0-9._~+/=-]+/giu, "Bearer [redacted]")
+    .replace(/api[_-]?key["':=\s]+[a-zA-Z0-9._~+/=-]+/giu, "api_key=[redacted]")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const redacted = sensitiveText === undefined || sensitiveText.trim().length === 0
+    ? compact
+    : compact.replaceAll(sensitiveText, "[redacted]");
+  return redacted.slice(0, maxChars);
 }

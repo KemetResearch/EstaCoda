@@ -69,6 +69,91 @@ function captureFetch(result: Awaited<ReturnType<VoiceFetchLike>>): { fetch: Voi
 }
 
 describe("hosted TTS provider dispatch", () => {
+  it("resolves OpenAI audio keys from configured env before voice and OpenAI fallbacks", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_AUDIO_KEY: "configured-key",
+      VOICE_TOOLS_OPENAI_KEY: "voice-key",
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      const captured = captureFetch(response({ bytes: Buffer.from("openai-audio") }));
+      const result = await synthesizeSpeech({
+        text: "hello",
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "CUSTOM_OPENAI_AUDIO_KEY" }
+        },
+        fetch: captured.fetch
+      });
+
+      expect(result.ok).toBe(true);
+      expect(captured.requests[0]?.init?.headers).toMatchObject({ authorization: "Bearer configured-key" });
+    });
+  });
+
+  it("uses VOICE_TOOLS_OPENAI_KEY when a custom OpenAI audio env is missing", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_AUDIO_KEY: undefined,
+      VOICE_TOOLS_OPENAI_KEY: "voice-key",
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      const captured = captureFetch(response({ bytes: Buffer.from("openai-audio") }));
+      const result = await synthesizeSpeech({
+        text: "hello",
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "CUSTOM_OPENAI_AUDIO_KEY" }
+        },
+        fetch: captured.fetch
+      });
+
+      expect(result.ok).toBe(true);
+      expect(captured.requests[0]?.init?.headers).toMatchObject({ authorization: "Bearer voice-key" });
+    });
+  });
+
+  it("uses OPENAI_API_KEY only when the configured OpenAI audio env is the default voice key", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_AUDIO_KEY: undefined,
+      VOICE_TOOLS_OPENAI_KEY: undefined,
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      const allowed = captureFetch(response({ bytes: Buffer.from("openai-audio") }));
+      const allowedResult = await synthesizeSpeech({
+        text: "hello",
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+        },
+        fetch: allowed.fetch
+      });
+      expect(allowedResult.ok).toBe(true);
+      expect(allowed.requests[0]?.init?.headers).toMatchObject({ authorization: "Bearer openai-key" });
+
+      const blocked = await synthesizeSpeech({
+        text: "hello",
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "CUSTOM_OPENAI_AUDIO_KEY" }
+        },
+        fetch: async () => {
+          throw new Error("custom missing env must not fall back to OPENAI_API_KEY");
+        }
+      });
+      expect(blocked).toMatchObject({
+        ok: false,
+        metadata: { provider: "openai", apiKeyEnv: "CUSTOM_OPENAI_AUDIO_KEY" }
+      });
+    });
+  });
+
   it("dispatches ElevenLabs synthesis to the voice endpoint and returns bytes", async () => {
     await withEnv({ ELEVENLABS_API_KEY: "eleven-key" }, async () => {
       const captured = captureFetch(response({ bytes: Buffer.from("eleven-audio") }));
@@ -196,6 +281,67 @@ describe("hosted TTS provider dispatch", () => {
       expect(captured.requests[0]?.url).toBe("https://api.openai.com/v1/audio/speech");
       const body = JSON.parse(String(captured.requests[0]?.init?.body));
       expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "alloy", input: "hello" });
+    });
+  });
+
+  it("fails structurally when a TTS provider returns empty audio", async () => {
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "openai-key", OPENAI_API_KEY: undefined }, async () => {
+      const result = await synthesizeSpeech({
+        text: "hello",
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+        },
+        fetch: captureFetch(response({ bytes: Buffer.alloc(0) })).fetch
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        metadata: { provider: "openai", reason: "empty-audio-output", bytes: 0 }
+      });
+    });
+  });
+
+  it("caps and sanitizes hosted TTS provider error bodies", async () => {
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "openai-key", OPENAI_API_KEY: undefined }, async () => {
+      const sensitiveText = "please read this private request text";
+      const result = await synthesizeSpeech({
+        text: sensitiveText,
+        tts: {
+          provider: "openai",
+          enabled: true,
+          speed: 1,
+          openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+        },
+        fetch: captureFetch(response({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          text: [
+            `echoed input: ${sensitiveText}`,
+            "api_key: sk-test-secret",
+            "x".repeat(400)
+          ].join("\n")
+        })).fetch
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        metadata: {
+          provider: "openai",
+          status: 400,
+          reason: "tts-request-failed"
+        }
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.content).not.toContain("sk-test-secret");
+        expect(result.content).not.toContain(sensitiveText);
+        expect(result.content).toContain("[redacted]");
+        expect(result.content.length).toBeLessThan(340);
+      }
     });
   });
 });

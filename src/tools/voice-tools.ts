@@ -12,6 +12,7 @@ import {
   transcribeSpeech
 } from "./stt-providers.js";
 import { getTtsTextCap, synthesizeSpeech } from "./tts-providers.js";
+import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
 
 export type VoiceFetchLike = (url: string, init?: {
   method?: string;
@@ -57,12 +58,21 @@ export function checkTtsProviderStatus(
 
   const apiKeyEnv = ttsApiKeyEnv(provider, config);
   if (apiKeyEnv !== undefined) {
-    const apiKey = process.env[apiKeyEnv] ??
-      (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
+    if (provider === "openai") {
+      const credential = resolveOpenAiAudioCredential(apiKeyEnv);
+      if (!credential.ok) {
+        return {
+          ready: false,
+          reason: `Missing ${formatMissingOpenAiAudioCredential(credential.missingApiKeyEnvs)}`
+        };
+      }
+      return { ready: true };
+    }
+    const apiKey = process.env[apiKeyEnv];
     if (apiKey === undefined || apiKey.length === 0) {
       return {
         ready: false,
-        reason: `Missing ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
+        reason: `Missing ${apiKeyEnv}`
       };
     }
     return { ready: true };

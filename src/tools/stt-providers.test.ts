@@ -69,6 +69,68 @@ async function audioFile(extension = "wav"): Promise<string> {
 }
 
 describe("hosted STT provider dispatch", () => {
+  it("resolves OpenAI STT keys with direct-env audio precedence", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_STT_KEY: "configured-key",
+      VOICE_TOOLS_OPENAI_KEY: "voice-key",
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      const path = await audioFile();
+      const captured = captureFetch(response(JSON.stringify({ text: "openai transcript" })));
+      const result = await transcribeSpeech({
+        path,
+        stt: {
+          provider: "openai",
+          enabled: true,
+          openai: { apiKeyEnv: "CUSTOM_OPENAI_STT_KEY" }
+        },
+        fetch: captured.fetch
+      });
+
+      expect(result.ok).toBe(true);
+      expect(captured.requests[0]?.init?.headers).toEqual({ authorization: "Bearer configured-key" });
+    });
+  });
+
+  it("does not fall back to OPENAI_API_KEY for a missing custom OpenAI STT env", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_STT_KEY: undefined,
+      VOICE_TOOLS_OPENAI_KEY: undefined,
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      expect(checkSttProviderStatus("openai", {
+        provider: "openai",
+        enabled: true,
+        openai: { apiKeyEnv: "CUSTOM_OPENAI_STT_KEY" }
+      })).toEqual({
+        ready: false,
+        reason: "Missing CUSTOM_OPENAI_STT_KEY or VOICE_TOOLS_OPENAI_KEY"
+      });
+    });
+  });
+
+  it("allows OPENAI_API_KEY fallback only for the default OpenAI audio key", async () => {
+    await withEnv({
+      VOICE_TOOLS_OPENAI_KEY: undefined,
+      OPENAI_API_KEY: "openai-key"
+    }, async () => {
+      const path = await audioFile();
+      const captured = captureFetch(response(JSON.stringify({ text: "openai transcript" })));
+      const result = await transcribeSpeech({
+        path,
+        stt: {
+          provider: "openai",
+          enabled: true,
+          openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+        },
+        fetch: captured.fetch
+      });
+
+      expect(result.ok).toBe(true);
+      expect(captured.requests[0]?.init?.headers).toEqual({ authorization: "Bearer openai-key" });
+    });
+  });
+
   it("sends xAI native multipart STT requests and preserves optional metadata", async () => {
     await withEnv({ XAI_API_KEY: "xai-key" }, async () => {
       const path = await audioFile();
@@ -141,6 +203,31 @@ describe("hosted STT provider dispatch", () => {
     });
     await withEnv({ XAI_API_KEY: "xai-key" }, async () => {
       expect(checkSttProviderStatus("xai", { provider: "xai", enabled: true, xai: { apiKeyEnv: "XAI_API_KEY" } })).toEqual({ ready: true });
+    });
+  });
+
+  it("fails structurally on empty and invalid hosted STT responses", async () => {
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "openai-key", OPENAI_API_KEY: undefined }, async () => {
+      const path = await audioFile();
+      const empty = await transcribeSpeech({
+        path,
+        stt: { provider: "openai", enabled: true, openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" } },
+        fetch: captureFetch(response(JSON.stringify({ text: "   " }))).fetch
+      });
+      expect(empty).toMatchObject({
+        ok: false,
+        metadata: { provider: "openai", reason: "empty-transcript" }
+      });
+
+      const invalid = await transcribeSpeech({
+        path,
+        stt: { provider: "openai", enabled: true, openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" } },
+        fetch: captureFetch(response(JSON.stringify({ model: "whisper-1" }))).fetch
+      });
+      expect(invalid).toMatchObject({
+        ok: false,
+        metadata: { provider: "openai", reason: "invalid-transcript-response" }
+      });
     });
   });
 });

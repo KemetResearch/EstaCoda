@@ -809,6 +809,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 pollTimeoutSeconds: telegram.pollTimeoutSeconds,
                 maxAttachmentBytes: telegram.maxAttachmentBytes,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
                 fetch: options.telegramFetch,
               })
@@ -818,6 +819,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 pollTimeoutSeconds: telegram.pollTimeoutSeconds,
                 maxAttachmentBytes: telegram.maxAttachmentBytes,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
                 fetch: options.telegramFetch,
               });

@@ -5,7 +5,7 @@ export const DEFAULT_AUDIO_INPUT_MAX_BYTES = 25 * 1024 * 1024;
 
 export type AudioValidationResult =
   | { ok: true; bytes: number }
-  | { ok: false; content: string; metadata: { reason: string; path?: string; maxBytes?: number; bytes?: number } };
+  | { ok: false; content: string; metadata: { reason: string; provider?: string; path?: string; maxBytes?: number; bytes?: number } };
 
 export async function validateAudioInput(
   path: string,
@@ -49,6 +49,8 @@ export function validateAudioOutput(
 ): AudioValidationResult {
   if (bytes.length === 0) {
     return validationError(`${options.provider} TTS returned empty audio.`, {
+      reason: "empty-audio-output",
+      provider: options.provider,
       bytes: 0
     });
   }
@@ -71,13 +73,13 @@ const DEFAULT_AUDIO_EXTENSIONS = [
 
 function validationError(
   content: string,
-  metadata: Omit<Extract<AudioValidationResult, { ok: false }>["metadata"], "reason">
+  metadata: Partial<Extract<AudioValidationResult, { ok: false }>["metadata"]> & { reason?: string }
 ): Extract<AudioValidationResult, { ok: false }> {
   return {
     ok: false,
     content,
     metadata: {
-      reason: content,
+      reason: metadata.reason ?? content,
       ...metadata
     }
   };

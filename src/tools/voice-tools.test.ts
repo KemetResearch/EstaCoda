@@ -104,6 +104,26 @@ describe("voice tool readiness", () => {
     });
   });
 
+  it("does not treat OPENAI_API_KEY as an OpenAI audio fallback for custom env names", async () => {
+    await withEnv({
+      CUSTOM_OPENAI_AUDIO_KEY: undefined,
+      VOICE_TOOLS_OPENAI_KEY: undefined,
+      OPENAI_API_KEY: "sk-global"
+    }, async () => {
+      const tts: LoadedRuntimeConfig["tts"] = {
+        provider: "openai",
+        enabled: true,
+        speed: 1,
+        openai: { apiKeyEnv: "CUSTOM_OPENAI_AUDIO_KEY" }
+      };
+
+      expect(checkTtsProviderStatus("openai", tts)).toEqual({
+        ready: false,
+        reason: "Missing CUSTOM_OPENAI_AUDIO_KEY or VOICE_TOOLS_OPENAI_KEY"
+      });
+    });
+  });
+
   it("advertises Stage 1 hosted TTS providers when their key is present", async () => {
     await withEnv({
       ELEVENLABS_API_KEY: "eleven-key",
