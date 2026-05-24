@@ -29,9 +29,9 @@ function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): Termina
   };
 }
 
-function createMockRuntime(): Runtime {
+function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
   const sessionDb = new InMemorySessionDB();
-  return {
+  const runtime: Runtime = {
     describe: () => "mock runtime",
     getStatus: () => ({
       kind: "status" as const,
@@ -105,6 +105,7 @@ function createMockRuntime(): Runtime {
     sessionDb,
     sessionId: "test-session",
   };
+  return { ...runtime, ...overrides };
 }
 
 type ApprovalGrantInput = Parameters<NonNullable<Runtime["grantApproval"]>>[0];
@@ -300,6 +301,78 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(recorder.record).toHaveBeenCalledTimes(1);
     expect(handleInputs).toEqual(["spoken turn"]);
     expect(outputChunks.join("")).toContain("Transcript: spoken turn");
+  });
+
+  it("renders the richer startup dashboard at session launch", async () => {
+    const outputChunks: string[] = [];
+    const getStartupReadiness = vi.fn(createMockRuntime().getStartupReadiness);
+    const runtime = createMockRuntime({ getStartupReadiness });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(getStartupReadiness).toHaveBeenCalledTimes(1);
+    expect(rendered).toContain("test-session");
+    expect(rendered).toContain("Workspace Trust");
+    expect(rendered).toContain("Workspace Verification");
+    expect(rendered).toContain("User Security Mode");
+    expect(rendered).toContain("/tools");
+  });
+
+  it("falls back to the legacy startup hero when readiness collection fails", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime({
+      getStartupReadiness: vi.fn(async () => {
+        throw new Error("readiness failed");
+      }),
+    });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("model: mock/mock-model");
+    expect(rendered).toContain("readiness: ready");
+    expect(rendered).not.toContain("Workspace Trust");
   });
 
   it("defaults startup and session chrome to English when no locale is provided", async () => {
@@ -534,10 +607,12 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("/help");
     expect(rendered).toContain("Show command help");
-    expect(rendered).not.toContain("Commands");
     expect(rendered).not.toContain("Name  Description");
+    const completionIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("Show command help"));
     const promptIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("hello"));
+    expect(completionIndexInOutput).toBeGreaterThanOrEqual(0);
     expect(promptIndexInOutput).toBeGreaterThanOrEqual(0);
+    expect(outputChunks.slice(completionIndexInOutput, promptIndexInOutput).join("")).not.toContain("Commands");
     expect(outputChunks.slice(promptIndexInOutput).join("")).not.toContain("Show command help");
   });
 

@@ -33,6 +33,7 @@ import {
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
+  buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
@@ -41,12 +42,13 @@ import { createSessionRenderer, type SessionRenderer } from "./session-renderer.
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import { getPackageVersion } from "./version-command.js";
 import {
   playCliTtsResponse,
   readCliVoiceMode,
@@ -193,6 +195,36 @@ export class ToolActivityAnimator {
   }
 }
 
+async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
+  const legacyStartup = runtime.getStartup();
+
+  try {
+    const [readiness, packageVersion] = await Promise.all([
+      runtime.getStartupReadiness(),
+      getPackageVersion(),
+    ]);
+    const version = packageVersion === "unknown" ? packageVersion : `v${packageVersion}`;
+    return buildStartupDashboardViewModel({
+      agentName: legacyStartup.agentName,
+      taglines: legacyStartup.taglines,
+      version,
+      sessionId: runtime.sessionId,
+      model: readiness.model,
+      workspaceTrust: readiness.workspaceTrust,
+      workspaceVerification: readiness.workspaceVerification,
+      workspaceDirectory: readiness.workspaceDirectory,
+      securityMode: readiness.securityMode ?? "unknown",
+      skillAutonomy: readiness.skillAutonomy,
+      providerReadiness: readiness.providerReadiness,
+      versionStatus: readiness.versionStatus,
+      availableCommands: [],
+      warnings: [...legacyStartup.warnings, ...readiness.warnings],
+    });
+  } catch {
+    return legacyStartup;
+  }
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
@@ -268,8 +300,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       const total = contextWindow ?? latestContextUsage?.total;
       latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
     };
-    const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
-    const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
+    const startupVm = await buildSessionStartupViewModel(runtime);
+    const startupText = renderer.render(startupVm);
     output.write(`${startupText}\n\n`);
     output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
 

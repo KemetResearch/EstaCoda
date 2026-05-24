@@ -281,7 +281,11 @@ The label `"𓂀 EstaCoda"` is skin-configurable. Plain mode falls back to `"Est
 
 ### 11.1 Startup
 
-`StartupViewModel` renders as:
+Interactive terminal launch renders `StartupDashboardViewModel` by default. It combines the compact startup identity with readiness data:
+- Standard mode: Hero panel, version/session separator, model readiness, workspace/security fields, and interactive command hints.
+- Plain mode: Simple text block with version, session, model readiness, workspace/security fields, and interactive command hints.
+
+`StartupViewModel` is the legacy compact startup hero and fallback when readiness collection cannot complete. It renders as:
 - Standard mode: Hero panel with brand-colored agent name, dim taglines, readiness state, and warnings.
 - Plain mode: Simple text block with agent name, taglines, model, readiness.
 
