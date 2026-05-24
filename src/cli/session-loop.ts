@@ -33,6 +33,7 @@ import {
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
+  buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
@@ -40,12 +41,14 @@ import {
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
-import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
+import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
+import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import { getPackageVersion } from "./version-command.js";
 import {
   playCliTtsResponse,
   readCliVoiceMode,
@@ -92,6 +95,18 @@ type SubmittedCliInput = {
   echoedPromptPrefix: string;
   echoedText: string;
   clearSubmittedPrompt: boolean;
+};
+
+type TranscriptChrome = {
+  readonly enabled: boolean;
+  clearInlineSpinner(): void;
+  suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T>;
+  suspendForPrompt?<T>(fn: () => T | Promise<T>): Promise<T>;
+};
+
+type RuntimeEventChrome = {
+  readonly enabled: boolean;
+  clearInlineSpinner(): void;
 };
 
 export class ToolActivityAnimator {
@@ -180,6 +195,36 @@ export class ToolActivityAnimator {
   }
 }
 
+async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
+  const legacyStartup = runtime.getStartup();
+
+  try {
+    const [readiness, packageVersion] = await Promise.all([
+      runtime.getStartupReadiness(),
+      getPackageVersion(),
+    ]);
+    const version = packageVersion === "unknown" ? packageVersion : `v${packageVersion}`;
+    return buildStartupDashboardViewModel({
+      agentName: legacyStartup.agentName,
+      taglines: legacyStartup.taglines,
+      version,
+      sessionId: runtime.sessionId,
+      model: readiness.model,
+      workspaceTrust: readiness.workspaceTrust,
+      workspaceVerification: readiness.workspaceVerification,
+      workspaceDirectory: readiness.workspaceDirectory,
+      securityMode: readiness.securityMode ?? "unknown",
+      skillAutonomy: readiness.skillAutonomy,
+      providerReadiness: readiness.providerReadiness,
+      versionStatus: readiness.versionStatus,
+      availableCommands: [],
+      warnings: [...legacyStartup.warnings, ...readiness.warnings],
+    });
+  } catch {
+    return legacyStartup;
+  }
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
@@ -193,22 +238,32 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let currentAnimator: ToolActivityAnimator | undefined;
   const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
   const close = options.close ?? (() => prompt.close?.());
-  const chrome = new PromptChromeController({
+  const bottomChrome = new BottomChromeController({
     output,
     capabilities: renderer.capabilities,
     renderViewModel: (vm) => renderer.render(vm),
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
   });
+  const chrome = new PromptChromeController({
+    output,
+    capabilities: renderer.capabilities,
+    renderViewModel: (vm) => renderer.render(vm),
+    enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+  });
   const onSigint = () => {
     currentAnimator?.cancel();
-    chrome.clearInlineSpinner();
-    chrome.clearChrome();
     if (activeTurn !== undefined) {
+      bottomChrome.clearActiveChrome();
+      chrome.clearInlineSpinner();
+      chrome.clearChrome();
       activeTurn.abort("SIGINT");
       output.write("\nCancelling current turn. Press Ctrl+C again or type /exit to leave.\n");
       return;
     }
 
+    bottomChrome.dispose();
+    chrome.clearInlineSpinner();
+    chrome.clearChrome();
     output.write("\nEnding EstaCoda session.\n");
     close();
   };
@@ -245,8 +300,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       const total = contextWindow ?? latestContextUsage?.total;
       latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
     };
-    const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
-    const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
+    const startupVm = await buildSessionStartupViewModel(runtime);
+    const startupText = renderer.render(startupVm);
     output.write(`${startupText}\n\n`);
     output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
 
@@ -254,9 +309,28 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
     const useUnicode = renderer.capabilities.supportsUnicode;
     const termWidth = renderer.capabilities.terminalWidth;
+    const runtimeEventBottomChrome: RuntimeEventChrome = {
+      enabled: true,
+      clearInlineSpinner: () => undefined
+    };
+    const writeAboveChrome = (fn: () => void) => {
+      if (bottomChrome.enabled) {
+        bottomChrome.writeAboveChromeSync(fn);
+        return;
+      }
+      fn();
+    };
 
     while (true) {
-      if (chrome.enabled) {
+      if (bottomChrome.enabled) {
+        bottomChrome.updateState(buildBottomChromeState({
+          runtime,
+          renderer,
+          slashMenu: pendingSlashCompletion,
+          contextUsage: latestContextUsage,
+          timing: railTiming()
+        }));
+      } else if (chrome.enabled) {
         chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
@@ -281,8 +355,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       });
       const text = submittedInput.text;
 
-      if (chrome.enabled) {
-        chrome.clearChrome(submittedPromptLineCount(renderer.capabilities, submittedInput));
+      const submittedPromptRows = submittedPromptLineCount(renderer.capabilities, submittedInput);
+      if (bottomChrome.enabled) {
+        bottomChrome.clearForReadline(submittedPromptRows);
+      } else if (chrome.enabled) {
+        chrome.clearChrome(submittedPromptRows);
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -350,7 +427,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       // Render submitted non-slash user prompts as lightweight transcript rails
       const userPromptRail = buildUserPromptRailViewModel({ text });
       const userPromptRailText = renderer.render(userPromptRail);
-      if (chrome.enabled) {
+      if (bottomChrome.enabled) {
+        clearSubmittedPromptEcho(output, renderer.capabilities, submittedInput);
+      } else if (chrome.enabled) {
         await chrome.suspendChromeForTranscript(() => {
           clearSubmittedPromptEcho(output, renderer.capabilities, submittedInput);
           output.write(`${userPromptRailText}\n`);
@@ -360,8 +439,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       let retryText: string | undefined = text;
+      let wroteUserPromptRail = false;
       while (retryText !== undefined) {
-        output.write("\n");
         activeTurn = new AbortController();
         const turnStartedAtMs = now();
         activeTurnStartedAtMs = turnStartedAtMs;
@@ -369,15 +448,31 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
+        let currentPhase: string | undefined;
+        let turnWasCancelled = false;
+        const runningBottomState = () => buildBottomChromeState({
+          runtime,
+          renderer,
+          contextUsage: latestContextUsage,
+          timing: railTiming(),
+          phase: currentPhase,
+          promptText: text
+        });
 
         currentAnimator = new ToolActivityAnimator({
           output,
           renderer,
           streamState,
-          enabled: renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+          enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
         });
 
         const renderSpinner = (phase: string) => {
+          currentPhase = phase;
+          if (bottomChrome.enabled) {
+            bottomChrome.updateState(runningBottomState());
+            turnOutput.spinnerPhase = phase;
+            return;
+          }
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => {
               const activeSpinner = buildActiveTurnSpinnerViewModel({ phase: p });
@@ -402,7 +497,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const clearSpinner = () => {
-          if (chrome.enabled) {
+          if (bottomChrome.enabled) {
+            bottomChrome.stopTicker();
+            currentPhase = undefined;
+          } else if (chrome.enabled) {
             chrome.clearInlineSpinner();
           }
           turnOutput.spinnerPhase = undefined;
@@ -410,6 +508,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         renderSpinner("thinking");
+        if (bottomChrome.enabled) {
+          bottomChrome.startTicker(runningBottomState);
+          if (!wroteUserPromptRail) {
+            bottomChrome.writeAboveChromeSync(() => {
+              output.write(`${userPromptRailText}\n\n`);
+            });
+            wroteUserPromptRail = true;
+          }
+        } else {
+          output.write("\n");
+        }
 
         const response = await runtime.handle({
             text: retryText,
@@ -418,7 +527,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             onEvent: (event) => {
               if (event.kind === "context-usage") {
                 latestContextUsage = { filled: event.filled, total: event.total };
-                if (chrome.enabled && turnOutput.spinnerPhase !== undefined) {
+                if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
                   renderSpinner(turnOutput.spinnerPhase);
                 }
               }
@@ -427,11 +536,21 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                 const contextWindow = modelContextWindow(runtime);
                 const total = contextWindow ?? latestContextUsage?.total;
                 latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
-                if (chrome.enabled && turnOutput.spinnerPhase !== undefined) {
+                if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
                   renderSpinner(turnOutput.spinnerPhase);
                 }
               }
-              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
+              if (event.kind === "agent-cancelled") {
+                turnWasCancelled = true;
+              }
+              let newPhase: string | undefined;
+              if (bottomChrome.enabled) {
+                bottomChrome.writeAboveChromeSync(() => {
+                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, undefined);
+                });
+              } else {
+                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
+              }
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
               }
@@ -451,6 +570,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
           timerMode = "last-turn";
         }
+        if (bottomChrome.enabled) {
+          bottomChrome.updateState(buildBottomChromeState({
+            runtime,
+            renderer,
+            contextUsage: latestContextUsage,
+            timing: railTiming(),
+            promptText: turnWasCancelled ? undefined : text
+          }));
+        }
 
         const assistantVm = buildAssistantResponseViewModel({
           label: response.label,
@@ -458,7 +586,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           matchedSkills: response.matchedSkills,
           progress: response.progress,
         });
-        output.write(renderer.render(assistantVm));
+        writeAboveChrome(() => {
+          output.write(renderer.render(assistantVm));
+        });
         if (voiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
@@ -469,9 +599,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             signal: activeTurn?.signal
           });
           if (playback !== undefined && playback.played === false && playback.reason !== "empty-response") {
-            output.write(`\nCLI voice playback skipped: ${playback.reason}\n`);
+            writeAboveChrome(() => {
+              output.write(`\nCLI voice playback skipped: ${playback.reason}\n`);
+            });
           } else if (playback !== undefined && playback.played === true) {
-            output.write(`\nCLI voice playback: ${playback.player}\n`);
+            writeAboveChrome(() => {
+              output.write(`\nCLI voice playback: ${playback.player}\n`);
+            });
           }
         }
 
@@ -480,12 +614,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           prompt,
           output,
           renderer,
+          chrome: bottomChrome.enabled ? bottomChrome : chrome,
           homeDir: options.homeDir,
           execution: response.toolExecutions.find(hasSetupNeededResult)
         });
 
         if (setupResolution.handled) {
-          output.write(`${setupResolution.message}\n\n`);
+          writeAboveChrome(() => {
+            output.write(`${setupResolution.message}\n\n`);
+          });
           retryText = undefined;
           continue;
         }
@@ -495,25 +632,32 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           prompt,
           output,
           renderer,
-          chrome,
+          chrome: bottomChrome.enabled ? bottomChrome : chrome,
           execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
         if (approvalResolution.retry === false) {
           if (approvalResolution.message !== undefined) {
-            output.write(`${approvalResolution.message}\n`);
+            writeAboveChrome(() => {
+              output.write(`${approvalResolution.message}\n`);
+            });
           }
-          output.write("\n");
+          writeAboveChrome(() => {
+            output.write("\n");
+          });
           retryText = undefined;
           continue;
         }
 
-        output.write(`${approvalResolution.message}\n\n`);
+        writeAboveChrome(() => {
+          output.write(`${approvalResolution.message}\n\n`);
+        });
         retryText = text;
       }
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
+    bottomChrome.dispose();
     chrome.dispose();
     await runtime.dispose();
     close();
@@ -1423,7 +1567,7 @@ async function maybeHandleApprovalGate(input: {
   prompt: (question: string) => Promise<string>;
   output: NodeJS.WritableStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  chrome: PromptChromeController;
+  chrome: TranscriptChrome;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -1439,7 +1583,7 @@ async function maybeHandleApprovalGate(input: {
   while (true) {
     const allowPersistentApproval = input.runtime.revokeApproval !== undefined;
     const answer = normalizeApprovalPromptAnswer(
-      await input.prompt(await renderApprovalPrompt(execution, input.renderer, input.chrome, input.output, allowPersistentApproval))
+      await promptForApprovalAnswer(input, execution, allowPersistentApproval)
     );
     if (answer?.kind === "deny") {
       return {
@@ -1449,7 +1593,9 @@ async function maybeHandleApprovalGate(input: {
     }
 
     if (answer?.kind !== "approve") {
-      input.output.write("Enter one of: once, session, always, deny.\n\n");
+      await writeDetachedInteraction(input.chrome, () => {
+        input.output.write("Enter one of: once, session, always, deny.\n\n");
+      });
       continue;
     }
 
@@ -1476,6 +1622,7 @@ async function maybeHandleSetupNeeded(input: {
   prompt: Prompt;
   output: NodeJS.WritableStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+  chrome: TranscriptChrome;
   homeDir?: string;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
@@ -1516,10 +1663,12 @@ async function maybeHandleSetupNeeded(input: {
     model,
     requiredSecret,
   });
-  input.output.write(input.renderer.render(vm));
-  input.output.write("\n\n");
 
-  const secret = await input.prompt(`Paste ${requiredSecret} (or type cancel): `, { secret: true });
+  const secret = await writeDetachedInteraction(input.chrome, async () => {
+    input.output.write(input.renderer.render(vm));
+    input.output.write("\n\n");
+    return await input.prompt(`Paste ${requiredSecret} (or type cancel): `, { secret: true });
+  });
   if (secret.trim().length === 0 || ["cancel", "c", "no", "n"].includes(secret.trim().toLowerCase())) {
     return {
       handled: true,
@@ -1563,10 +1712,12 @@ async function maybeHandleSetupNeeded(input: {
     };
   }
 
-  input.output.write("Image setup verified. Resuming the original image request...\n");
-  await renderManualToolExecution(input.output, input.runtime, {
-    tool: execution.tool.name,
-    toolInput: execution.input ?? {}
+  await writeDetachedInteraction(input.chrome, async () => {
+    input.output.write("Image setup verified. Resuming the original image request...\n");
+    await renderManualToolExecution(input.output, input.runtime, {
+      tool: execution.tool.name,
+      toolInput: execution.input ?? {}
+    });
   });
 
   return {
@@ -1611,24 +1762,56 @@ function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadat
   return metadata as SetupNeededMetadata;
 }
 
-async function renderApprovalPrompt(
+async function promptForApprovalAnswer(
+  input: {
+    prompt: (question: string) => Promise<string>;
+    output: NodeJS.WritableStream;
+    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+    chrome: TranscriptChrome;
+  },
   execution: ToolExecutionRecord,
-  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
-  chrome: PromptChromeController,
-  output: NodeJS.WritableStream,
   allowPersistentApproval: boolean
 ): Promise<string> {
-  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
-  chrome.clearInlineSpinner();
-  const cardText = renderer.render(vm);
-  if (chrome.enabled) {
-    await chrome.suspendChromeForTranscript(() => {
-      output.write(`${cardText}\n`);
+  const promptText = "approval > ";
+  const cardText = renderApprovalPromptCard(execution, input.renderer, allowPersistentApproval);
+  if (input.chrome.suspendForPrompt !== undefined) {
+    return await input.chrome.suspendForPrompt(async () => {
+      input.output.write(`${cardText}\n`);
+      return await input.prompt(promptText);
+    });
+  }
+
+  input.chrome.clearInlineSpinner();
+  if (input.chrome.enabled) {
+    await input.chrome.suspendChromeForTranscript(() => {
+      input.output.write(`${cardText}\n`);
     });
   } else {
-    output.write(`${cardText}\n`);
+    input.output.write(`${cardText}\n`);
   }
-  return "approval > ";
+  return await input.prompt(promptText);
+}
+
+function renderApprovalPromptCard(
+  execution: ToolExecutionRecord,
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
+  allowPersistentApproval: boolean
+): string {
+  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
+  return renderer.render(vm);
+}
+
+async function writeDetachedInteraction<T>(
+  chrome: TranscriptChrome,
+  fn: () => T | Promise<T>
+): Promise<T> {
+  if (chrome.suspendForPrompt !== undefined) {
+    return await chrome.suspendForPrompt(fn);
+  }
+  if (chrome.enabled) {
+    return await chrome.suspendChromeForTranscript(fn);
+  }
+  return await fn();
 }
 
 function normalizeApprovalPromptAnswer(value: string):
@@ -1887,7 +2070,7 @@ export function renderRuntimeEvent(
   activityBuilder: ToolActivityViewModelBuilder,
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
-  chrome: PromptChromeController | undefined,
+  chrome: RuntimeEventChrome | undefined,
   turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
   animator?: ToolActivityAnimator
 ): string | undefined {
@@ -2044,6 +2227,36 @@ function buildPromptChromeState(
     }),
     activeSpinner,
     slashMenu,
+  };
+}
+
+function buildBottomChromeState(input: {
+  runtime: Runtime;
+  renderer: SessionRenderer;
+  slashMenu?: SlashMenuViewModel;
+  contextUsage?: ContextUsageSnapshot;
+  timing?: StatusRailTiming;
+  phase?: string;
+  promptText?: string;
+}): BottomChromeState {
+  const activeSpinner = input.phase === undefined
+    ? undefined
+    : buildActiveTurnSpinnerViewModel({ phase: input.phase });
+  const chromeState = buildPromptChromeState(
+    input.runtime,
+    input.renderer,
+    activeSpinner,
+    input.slashMenu,
+    input.contextUsage,
+    input.timing
+  );
+  return {
+    statusRail: chromeState.statusRail,
+    activeSpinner: chromeState.activeSpinner,
+    slashMenu: chromeState.slashMenu,
+    prompt: input.promptText === undefined
+      ? undefined
+      : { text: input.promptText, readOnly: true }
   };
 }
 

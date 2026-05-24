@@ -307,6 +307,8 @@ export type Runtime = {
   describe(): string;
   getStatus(): import("../contracts/view-model.js").StatusViewModel;
   getModelInfo(): import("../contracts/view-model.js").KeyValueBlockViewModel;
+  // Legacy compact startup hero. The interactive CLI composes the richer dashboard
+  // from this identity data plus getStartupReadiness(), and keeps this as fallback.
   getStartup(): import("../contracts/view-model.js").StartupViewModel;
   getStartupReadiness(): Promise<StartupReadinessSnapshot>;
   tools(): import("../contracts/tool.js").ToolDefinition[];
@@ -1292,6 +1294,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     getStartup() {
+      // Legacy compact startup hero used as the fallback when dashboard readiness
+      // collection cannot complete during interactive session launch.
       return buildStartupViewModel({
         agentName: runtimeBranding.agentName,
         taglines: [
