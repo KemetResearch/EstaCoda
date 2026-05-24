@@ -8,6 +8,8 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import type { Prompt } from "./readline-prompt.js";
+import type { SelectPromptInput } from "./interactive-select.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -85,6 +87,80 @@ describe("session-loop /model", () => {
     expect(result).toBe(false);
     expect(outputChunks.join("")).toContain("provider: local");
     expect(outputChunks.join("")).toContain("model: qwen2.5:3b");
+  });
+
+  it("/model picker uses prompt card selects for session provider and model", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const refreshed = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const selectInputs: Array<SelectPromptInput<unknown>> = [];
+    const selections = ["local", "phi4:latest"];
+    let selectionIndex = 0;
+    const prompt = (async () => "") as Prompt;
+    prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      const value = selections[selectionIndex] as T;
+      selectionIndex++;
+      return value;
+    };
+
+    const result = await handleSlashCommand({
+      text: "/model",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      prompt,
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).not.toBe(false);
+    expect(selectInputs).toMatchObject([
+      {
+        surface: "promptCard",
+        title: "Session model provider",
+        body: "Choose the provider to use for this session only."
+      },
+      {
+        surface: "promptCard",
+        title: "Session model",
+        body: "Choose the model to use for this session only."
+      }
+    ]);
+    const override = await sessionDb.getSessionModelOverride("test-session");
+    expect(override?.route.provider).toBe("local");
+    expect(override?.route.id).toBe("phi4:latest");
   });
 
   it("/model set stores a session-scoped override and refreshes the runtime", async () => {

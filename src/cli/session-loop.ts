@@ -1533,7 +1533,8 @@ async function handleSessionModelPicker(
 
   const cancel = "__cancel__";
   const provider = await input.prompt.select<string>({
-    title: "Choose session model provider",
+    title: "Session model provider",
+    body: "Choose the provider to use for this session only.",
     options: [
       ...providers.map((candidate) => ({
         value: candidate.id,
@@ -1543,7 +1544,8 @@ async function handleSessionModelPicker(
       { value: cancel, label: "Cancel", description: "Keep the current session model" }
     ],
     fallbackPrompt: "Provider number > ",
-    selectedLabel: "Provider"
+    selectedLabel: "Provider",
+    surface: "promptCard"
   });
   if (provider === cancel) {
     input.output.write("No changes were made.\n\n");
@@ -1557,7 +1559,8 @@ async function handleSessionModelPicker(
   }
 
   const model = await input.prompt.select<string>({
-    title: "Choose session model",
+    title: "Session model",
+    body: "Choose the model to use for this session only.",
     options: [
       ...models.map((candidate) => ({
         value: candidate.id,
@@ -1571,7 +1574,8 @@ async function handleSessionModelPicker(
       { value: cancel, label: "Cancel", description: "Keep the current session model" }
     ],
     fallbackPrompt: "Model number > ",
-    selectedLabel: "Model"
+    selectedLabel: "Model",
+    surface: "promptCard"
   });
   if (model === cancel) {
     input.output.write("No changes were made.\n\n");

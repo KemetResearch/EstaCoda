@@ -1180,9 +1180,11 @@ async function runBareModelPicker(
   });
 
   const selectedProviderId = await prompt.select!({
-    title: "Select a provider:",
+    title: "Primary provider",
+    body: "Choose the provider EstaCoda should use first when it needs to think.",
     options: providerOptions,
-    fallbackPrompt: "Choose: "
+    fallbackPrompt: "Choose: ",
+    surface: "promptCard"
   });
   if (selectedProviderId === "__cancel__") {
     return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
@@ -1221,9 +1223,11 @@ async function runBareModelPicker(
   });
 
   const selectedModelId = await prompt.select!({
-    title: "Select a model:",
+    title: "Primary model",
+    body: `Choose the primary model for ${selectedProviderId}.`,
     options: modelOptions,
-    fallbackPrompt: "Choose: "
+    fallbackPrompt: "Choose: ",
+    surface: "promptCard"
   });
   if (selectedModelId === "__cancel__") {
     return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
