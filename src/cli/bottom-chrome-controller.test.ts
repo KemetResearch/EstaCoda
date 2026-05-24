@@ -1,0 +1,278 @@
+import { describe, it, expect, vi } from "vitest";
+import { BottomChromeController } from "./bottom-chrome-controller.js";
+import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel } from "../ui/view-models/builders.js";
+import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { ViewModel } from "../contracts/view-model.js";
+
+function makeCaps(partial: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
+  return {
+    isTTY: true,
+    supportsColor: true,
+    supportsTrueColor: true,
+    supportsUnicode: true,
+    supportsEmoji: true,
+    terminalWidth: 40,
+    isDumb: false,
+    isCI: false,
+    supportsAnimation: true,
+    ...partial,
+  };
+}
+
+function mockOutput(): { chunks: string[]; stream: NodeJS.WritableStream } {
+  const chunks: string[] = [];
+  const stream = {
+    write: (chunk: string | Buffer) => {
+      chunks.push(String(chunk));
+      return true;
+    },
+    end: () => {},
+  } as NodeJS.WritableStream;
+  return { chunks, stream };
+}
+
+function renderViewModel(vm: ViewModel): string {
+  if (vm.kind === "sessionStatusRail") return `${vm.modelLabel} | ${vm.turnState}`;
+  if (vm.kind === "activeTurnSpinner") return `spinner:${vm.phase ?? "none"}`;
+  return `[unsupported ${vm.kind}]`;
+}
+
+function makeController(
+  stream: NodeJS.WritableStream,
+  caps: TerminalCapabilities = makeCaps(),
+  enabled?: boolean
+): BottomChromeController {
+  return new BottomChromeController({ output: stream, capabilities: caps, renderViewModel, enabled });
+}
+
+function status(text = "model") {
+  return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
+}
+
+describe("BottomChromeController", () => {
+  it("renders status and fake prompt chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("deepseek"), prompt: { text: "hello", readOnly: true } });
+    expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n"]);
+  });
+
+  it("bounds rendered chrome lines to terminal width", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
+    ctrl.updateState({ statusRail: status("deepseek-reasoner"), prompt: { text: "a very long prompt", readOnly: true } });
+    expect(chunks.join("").split("\n").filter(Boolean)).toEqual([
+      "deepseek-...",
+      "────────────",
+      "▸ a very ...",
+      "────────────",
+    ]);
+  });
+
+  it("clears for readline with wrapped submitted prompt rows", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+    ctrl.clearForReadline(3);
+    expect(chunks).toEqual(["\x1b[5A\x1b[2K\x1b[1B\x1b[2K\x1b[4B"]);
+  });
+
+  it("writes above chrome by clearing and redrawing around output", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    chunks.length = 0;
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("tool output\n");
+    });
+    expect(chunks).toEqual([
+      "\x1b[4A\x1b[1G\x1b[0J",
+      "tool output\n",
+      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("redraws state from the ticker factory", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let phase = "thinking";
+      ctrl.updateState({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) });
+      chunks.length = 0;
+      ctrl.startTicker(() => ({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) }));
+      phase = "tool";
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual(["\x1b[1A\x1b[1G\x1b[0J", "spinner:tool\n"]);
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("suspends chrome for nested prompts and redraws afterward", async () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    chunks.length = 0;
+
+    const answer = await ctrl.suspendForPrompt(async () => {
+      stream.write("approval card\n");
+      return "once";
+    });
+
+    expect(answer).toBe("once");
+    expect(chunks).toEqual([
+      "\x1b[4A\x1b[1G\x1b[0J",
+      "approval card\n",
+      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("pauses and resumes the ticker while a nested prompt is active", async () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let phase = "thinking";
+      ctrl.updateState({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) });
+      ctrl.startTicker(() => ({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) }));
+      chunks.length = 0;
+
+      const pending = ctrl.suspendForPrompt(async () => {
+        phase = "tool";
+        vi.advanceTimersByTime(100);
+        stream.write("approval card\n");
+        return "once";
+      });
+
+      await expect(pending).resolves.toBe("once");
+      expect(chunks).toEqual([
+        "\x1b[1A\x1b[1G\x1b[0J",
+        "approval card\n",
+        "spinner:tool\n",
+      ]);
+
+      phase = "done";
+      chunks.length = 0;
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual(["\x1b[1A\x1b[1G\x1b[0J", "spinner:done\n"]);
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not redraw suspended prompt chrome after disposal", async () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let release!: () => void;
+      const blocker = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+      ctrl.startTicker(() => ({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } }));
+      chunks.length = 0;
+
+      const pending = ctrl.suspendForPrompt(async () => {
+        stream.write("approval card\n");
+        await blocker;
+        return "once";
+      });
+      expect(chunks).toEqual(["\x1b[4A\x1b[1G\x1b[0J", "approval card\n"]);
+
+      chunks.length = 0;
+      ctrl.dispose();
+      release();
+      await expect(pending).resolves.toBe("once");
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears active chrome without disposing the controller", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      ctrl.updateState({ statusRail: status("status") });
+      ctrl.startTicker(() => ({ statusRail: status("next") }));
+      chunks.length = 0;
+
+      ctrl.clearActiveChrome();
+      vi.advanceTimersByTime(100);
+      ctrl.writeAboveChromeSync(() => {
+        stream.write("cancelled\n");
+      });
+      ctrl.updateState({ statusRail: status("after") });
+
+      expect(chunks).toEqual([
+        "\x1b[2A\x1b[1G\x1b[0J",
+        "cancelled\n",
+        "after | idle\n────────────────────────────────────────\n",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is disabled for non-TTY and still runs broker callbacks", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+    let called = false;
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.writeAboveChromeSync(() => {
+      called = true;
+      stream.write("plain\n");
+    });
+    expect(called).toBe(true);
+    expect(chunks).toEqual(["plain\n"]);
+  });
+
+  it("dispose clears active chrome and stops ticker", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      ctrl.updateState({ statusRail: status("status") });
+      ctrl.startTicker(() => ({ statusRail: status("next") }));
+      chunks.length = 0;
+      ctrl.dispose();
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual(["\x1b[2A\x1b[1G\x1b[0J"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -938,7 +938,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("▸ this is a delib...");
-    const chromeClearIndex = rendered.lastIndexOf("\x1b[3A\x1b[2K\x1b[3B", userRailIndex);
+    const chromeClearIndex = rendered.lastIndexOf("\x1b[4A\x1b[2K\x1b[1B\x1b[2K\x1b[3B", userRailIndex);
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(chromeClearIndex).toBeGreaterThan(-1);
     expect(chromeClearIndex).toBeLessThan(echoClearIndex);
@@ -982,6 +982,81 @@ describe("runSessionLoop — active turn spinner", () => {
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(echoClearIndex).toBeGreaterThan(-1);
     expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("renders a read-only bottom prompt chrome during the active turn", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 80,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 80 }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+  });
+
+  it("brokers tool output above the redrawn bottom chrome", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 80,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 80 }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const toolIndex = rendered.indexOf("browser.status");
+    const redrawnPromptIndex = rendered.indexOf("▸ hello", toolIndex);
+    expect(toolIndex).toBeGreaterThan(-1);
+    expect(redrawnPromptIndex).toBeGreaterThan(toolIndex);
   });
 
   it("updates chrome status rail from live context usage events", async () => {
@@ -1658,6 +1733,212 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("src/app.ts");
     expect(rendered).toContain("Permission denied.");
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
+    const renderedPlain = stripAnsi(rendered);
+    const plainPermissionIndex = renderedPlain.indexOf("Permission required");
+    const promptRedrawIndex = renderedPlain.indexOf("▸ write file", plainPermissionIndex);
+    expect(promptRedrawIndex).toBeGreaterThan(plainPermissionIndex);
+  });
+
+  it("renders image setup secret flow above redrawn bottom chrome", async () => {
+    const outputChunks: string[] = [];
+    const executeToolCalls: string[] = [];
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-image-setup-"));
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 80,
+    } as unknown as NodeJS.WritableStream;
+
+    const baseRuntime = createMockRuntime();
+    const runtime = {
+      ...baseRuntime,
+      handle: async (): Promise<AgentLoopResponse> => ({
+        label: "EstaCoda",
+        text: "Image setup is required.",
+        matchedSkills: [],
+        intent: {
+          nativeIntent: "general",
+          labels: ["chat"],
+          confidence: 1,
+          suggestedToolsets: [],
+          suggestedSkills: [],
+          evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+          confirmationRequired: false,
+          rationale: "mock",
+        },
+        securityDecision: "allow",
+        toolExecutions: [
+          {
+            tool: {
+              name: "image.generate",
+              description: "Generate an image",
+              inputSchema: {},
+              riskClass: "external-side-effect",
+              toolsets: ["image"],
+              progressLabel: "generating image",
+              maxResultSizeChars: 1000,
+            },
+            decision: "allow",
+            riskClass: "external-side-effect",
+            targetKey: "image.generate",
+            targetSummary: "image.generate",
+            input: { prompt: "a quiet terminal" },
+            result: {
+              ok: false,
+              content: "setup needed",
+              metadata: {
+                kind: "setup_needed",
+                capability: "image_generation",
+                providerOptions: ["fal"],
+                requiredSecret: "FAL_KEY",
+                resumeIntent: "image",
+                suggestedCommand: "config.image.setup",
+                suggestedTool: "config.image.setup",
+                provider: "fal",
+                model: "fal-ai/flux",
+              },
+            },
+          },
+        ],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: [],
+      }),
+      executeTool: async (input) => {
+        executeToolCalls.push(input.tool);
+        return {
+          tool: {
+            name: input.tool,
+            description: input.tool,
+            inputSchema: {},
+            riskClass: "external-side-effect",
+            toolsets: [],
+            progressLabel: input.tool,
+            maxResultSizeChars: 1000,
+          },
+          decision: "allow",
+          riskClass: "external-side-effect",
+          targetKey: input.tool,
+          targetSummary: input.tool,
+          input: input.toolInput,
+          result: {
+            ok: true,
+            content: input.tool === "image.generate" ? "generated image" : "saved",
+          },
+        };
+      },
+      verifyImageGeneration: async () => ({
+        ok: true,
+        provider: "fal",
+        model: "fal-ai/flux",
+        apiKeyEnv: "FAL_KEY",
+        apiKeyPresent: true,
+        check: "skipped",
+        message: "ok",
+        cachePath: join(homeDir, ".estacoda", "profiles", "default", "image-cache"),
+        telegramDelivery: "not-configured",
+      }),
+    } as Runtime;
+
+    let promptIndex = 0;
+    try {
+      await runSessionLoop({
+        runtime,
+        output,
+        capabilities: interactiveCaps({ terminalWidth: 80 }),
+        homeDir,
+        prompt: Object.assign(
+          async () => {
+            const values = ["make image", "secret-value", "/exit"];
+            return values[promptIndex++] ?? "/exit";
+          },
+          { close: () => {} }
+        ),
+        close: () => {},
+      });
+    } finally {
+      delete process.env.FAL_KEY;
+    }
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const setupIndex = rendered.indexOf("Setup required");
+    const setupPromptRedrawIndex = rendered.indexOf("▸ make image", setupIndex);
+    const resumedIndex = rendered.indexOf("Image setup verified");
+    const resumedPromptRedrawIndex = rendered.indexOf("▸ make image", resumedIndex);
+    expect(setupIndex).toBeGreaterThan(-1);
+    expect(setupPromptRedrawIndex).toBeGreaterThan(setupIndex);
+    expect(resumedIndex).toBeGreaterThan(setupPromptRedrawIndex);
+    expect(resumedPromptRedrawIndex).toBeGreaterThan(resumedIndex);
+    expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
+    expect(rendered).toContain("generated image");
+  });
+
+  it("keeps bottom chrome alive after active-turn SIGINT cancellation", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 80,
+    } as unknown as NodeJS.WritableStream;
+
+    const baseRuntime = createMockRuntime();
+    let handleCalls = 0;
+    const runtime = {
+      ...baseRuntime,
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }): Promise<AgentLoopResponse> => {
+        handleCalls += 1;
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+        if (handleCalls === 1) {
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => resolve(), { once: true });
+            setTimeout(() => {
+              process.emit("SIGINT");
+            }, 0);
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: "SIGINT" });
+          return {
+            ...mockResponse(),
+            text: "Cancelled response",
+          };
+        }
+        return {
+          ...mockResponse(),
+          text: "Second response",
+        };
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 80 }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["first", "second", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const cancelIndex = rendered.indexOf("Cancelling current turn.");
+    const secondPromptIndex = rendered.indexOf("▸ second", cancelIndex);
+    expect(cancelIndex).toBeGreaterThan(-1);
+    expect(secondPromptIndex).toBeGreaterThan(cancelIndex);
+    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("▸ first");
+    expect(rendered).toContain("Second response");
   });
 
   it("/approve once grants one-time approval and retries", async () => {
