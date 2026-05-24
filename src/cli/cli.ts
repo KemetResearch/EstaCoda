@@ -1156,7 +1156,7 @@ async function runBareModelPicker(
     mode: "setup"
   });
 
-  const prompt = options.prompt!;
+  const prompt = options.prompt ?? createReadlinePrompt();
 
   // ── Provider selection ──
   const providerCandidates = await flow.listProviderCandidates();
