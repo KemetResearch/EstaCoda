@@ -41,6 +41,7 @@ export class BottomChromeController {
   #currentState: BottomChromeState = {};
   #ticker?: ReturnType<typeof setInterval>;
   #stateFactory?: () => BottomChromeState;
+  #readlinePromptLineCountFactory?: () => number;
   #isDrawing = false;
   #disposed = false;
 
@@ -158,6 +159,42 @@ export class BottomChromeController {
       if (this.#stateFactory === undefined) return;
       this.updateState(this.#stateFactory());
     }, this.#tickMs);
+  }
+
+  startReadlineTicker(stateFactory: () => BottomChromeState, promptLineCountFactory: () => number = () => 1): void {
+    if (!this.#enabled || this.#disposed) return;
+    this.#stateFactory = stateFactory;
+    this.#readlinePromptLineCountFactory = promptLineCountFactory;
+    this.stopTicker();
+    this.#ticker = setInterval(() => {
+      if (this.#stateFactory === undefined) return;
+      this.updateStateAboveReadline(this.#stateFactory(), this.#readlinePromptLineCountFactory?.() ?? 1);
+    }, this.#tickMs);
+  }
+
+  updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
+    if (!this.#enabled || this.#disposed) return;
+    this.#currentState = state;
+    const lines = this.#buildChromeLines();
+    if (lines.length === 0) {
+      return;
+    }
+    if (this.#activeLineCount === 0 || this.#activeLineCount !== lines.length) {
+      this.#redraw();
+      return;
+    }
+
+    const promptRows = Math.max(1, Math.ceil(promptLineCount));
+    let sequence = "\x1b[s";
+    sequence += `\x1b[${this.#activeLineCount + promptRows - 1}A`;
+    for (let index = 0; index < lines.length; index += 1) {
+      sequence += `\x1b[2K\r${lines[index]}`;
+      if (index < lines.length - 1) {
+        sequence += "\x1b[1B";
+      }
+    }
+    sequence += "\x1b[u";
+    this.#output.write(sequence);
   }
 
   stopTicker(): void {

@@ -6,7 +6,12 @@ import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { createSessionRenderer } from "./session-renderer.js";
 
-export type Prompt = ((question: string, options?: { secret?: boolean }) => Promise<string>) & {
+export type PromptOptions = {
+  secret?: boolean;
+  onRowsChange?: (rows: number) => void;
+};
+
+export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
   close?: () => void;
@@ -14,11 +19,11 @@ export type Prompt = ((question: string, options?: { secret?: boolean }) => Prom
 
 export function createReadlinePrompt(input: Readable = defaultInput, output: Writable = defaultOutput): Prompt {
   return Object.assign(
-    async (question: string, options?: { secret?: boolean }) => {
+    async (question: string, options?: PromptOptions) => {
       if (options?.secret === true) {
         return hiddenQuestion(input, output, question);
       }
-      return plainQuestion(input, output, question);
+      return plainQuestion(input, output, question, options);
     },
     {
       select: async <T>(selection: SelectPromptInput<T>) => selectOption(input, output, selection),
@@ -38,13 +43,50 @@ export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): bool
   return input.isTTY === true;
 }
 
-async function plainQuestion(input: Readable, output: Writable, question: string): Promise<string> {
+async function plainQuestion(input: Readable, output: Writable, question: string, options?: PromptOptions): Promise<string> {
+  const isTty = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
+  if (isTty && options?.onRowsChange !== undefined) {
+    return trackedQuestion(input, output, question, options.onRowsChange);
+  }
+
   const readline = createPromptInterface({ input, output });
   try {
     return await readline.question(question);
   } finally {
     readline.close();
   }
+}
+
+async function trackedQuestion(
+  input: Readable,
+  output: Writable,
+  question: string,
+  onRowsChange: (rows: number) => void
+): Promise<string> {
+  return await new Promise<string>((resolve) => {
+    const readline = createCallbackInterface({ input, output, terminal: true });
+    const mutable = readline as unknown as {
+      _writeToOutput?: (value: string) => void;
+      getCursorPos?: () => { rows: number; cols: number };
+    };
+    const reportRows = () => {
+      const cursor = mutable.getCursorPos?.();
+      onRowsChange(Math.max(1, Math.floor(cursor?.rows ?? 0) + 1));
+    };
+    const originalWrite = mutable._writeToOutput?.bind(readline);
+    if (originalWrite !== undefined) {
+      mutable._writeToOutput = (value: string) => {
+        originalWrite(value);
+        reportRows();
+      };
+    }
+    readline.question(question, (answer) => {
+      onRowsChange(1);
+      readline.close();
+      resolve(answer);
+    });
+    reportRows();
+  });
 }
 
 async function hiddenQuestion(input: Readable, output: Writable, question: string): Promise<string> {

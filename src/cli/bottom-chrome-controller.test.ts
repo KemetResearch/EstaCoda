@@ -116,6 +116,57 @@ describe("BottomChromeController", () => {
     }
   });
 
+  it("redraws chrome above an active readline prompt without clearing the prompt row", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let label = "first";
+      ctrl.updateState({ statusRail: status(label) });
+      chunks.length = 0;
+      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }));
+      label = "second";
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual([
+        `\x1b[s\x1b[2A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b[u`,
+      ]);
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("redraws chrome above a wrapped active readline prompt", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let label = "first";
+      let promptRows = 3;
+      ctrl.updateState({ statusRail: status(label) });
+      chunks.length = 0;
+      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }), () => promptRows);
+      label = "second";
+      vi.advanceTimersByTime(100);
+      expect(chunks).toEqual([
+        `\x1b[s\x1b[4A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b[u`,
+      ]);
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("suspends chrome for nested prompts and redraws afterward", async () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
