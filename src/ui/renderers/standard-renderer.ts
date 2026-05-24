@@ -777,7 +777,7 @@ export class StandardRenderer {
     }
     if (event.status === "running") {
       const frames = this.#useUnicode
-        ? ["\uD80C\uDDE0", "\uD80C\uDDE0\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7"]
+        ? this.#tokens.contract.glyph.spinner.waiting
         : ["[>]", "[>.]", "[>..]", "[>...]", "[>..]", "[>.]"];
       return this.#brand(this.#spinnerFrame(frames));
     }
@@ -1356,7 +1356,7 @@ export class StandardRenderer {
 
   renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel): string {
     const eyeFrames = this.#useUnicode
-      ? ["\uD80C\uDDE0", "\uD80C\uDDE0\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7"]
+      ? this.#tokens.contract.glyph.spinner.thinking
       : ["*", "*.", "*..", "*...", "*..", "*."];
     const eye = this.#spinnerFrame(eyeFrames);
     const label = vm.label ?? (vm.phase !== undefined ? ((this.#copy as unknown) as Record<string, string>)[vm.phase] : undefined);

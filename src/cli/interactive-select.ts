@@ -18,7 +18,7 @@ export type SelectPromptInput<T> = {
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
-  surface?: "onboarding";
+  surface?: "promptCard";
   locale?: UiLocale;
   direction?: "ltr" | "rtl";
   technicalLines?: readonly string[];
@@ -123,7 +123,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 }
 
 function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedIndex: number): ViewModel {
-  if (selection.surface === "onboarding") {
+  if (selection.surface === "promptCard") {
     const options: OnboardingPromptOption[] = selection.options.map((opt, i) => ({
       id: String(i),
       label: opt.label,

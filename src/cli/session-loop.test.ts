@@ -303,6 +303,70 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(outputChunks.join("")).toContain("Transcript: spoken turn");
   });
 
+  it("stops the idle bottom chrome ticker before CLI voice progress writes", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-voice-chrome-"));
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    await mkdir(dirname(profilePaths.configPath), { recursive: true });
+    await writeFile(profilePaths.configPath, JSON.stringify({
+      stt: {
+        provider: "local",
+        local: { command: "mock-stt" }
+      }
+    }), "utf8");
+    await writeCliVoiceMode(profilePaths, "on");
+
+    const outputChunks: string[] = [];
+    const recorder = {
+      record: vi.fn(async ({ outputPath }: { outputPath: string }) => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await writeFile(outputPath, "wav");
+        return { ok: true as const };
+      })
+    };
+    const runtime = {
+      ...createMockRuntime(),
+      transcribeAudio: async (): ReturnType<NonNullable<Runtime["transcribeAudio"]>> =>
+        ({ ok: true, text: "spoken turn", model: "mock-stt" })
+    } as Runtime;
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      homeDir,
+      workspaceRoot: homeDir,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+      cliVoice: {
+        recorder,
+        envOptions: {
+          platform: "darwin",
+          commandExists: async (command) => command === "sox"
+        }
+      }
+    });
+
+    const recordingIndex = outputChunks.findIndex((chunk) => chunk.includes("Recording CLI voice input..."));
+    const transcriptIndex = outputChunks.findIndex((chunk) => chunk.includes("Transcript: spoken turn"));
+    expect(recordingIndex).toBeGreaterThan(-1);
+    expect(transcriptIndex).toBeGreaterThan(recordingIndex);
+    expect(outputChunks.slice(recordingIndex, transcriptIndex).join("")).not.toContain("\x1b[s");
+  });
+
   it("renders the richer startup dashboard at session launch", async () => {
     const outputChunks: string[] = [];
     const getStartupReadiness = vi.fn(createMockRuntime().getStartupReadiness);
@@ -1134,6 +1198,209 @@ describe("runSessionLoop — active turn spinner", () => {
     const redrawnPromptIndex = rendered.indexOf("▸ hello", toolIndex);
     expect(toolIndex).toBeGreaterThan(-1);
     expect(redrawnPromptIndex).toBeGreaterThan(toolIndex);
+  });
+
+  it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-tool-call", provider: "mock", model: "mock-model", name: "browser.status", id: "tc1", argumentsText: "{}" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    const lastToolChunkIndex = strippedChunks.reduce(
+      (lastIndex, chunk, index) => chunk.includes("browser.status") ? index : lastIndex,
+      -1
+    );
+    const providerSpinnerChunkIndex = strippedChunks.findIndex((chunk, index) =>
+      index > lastToolChunkIndex && chunk.includes("scribbling")
+    );
+    const nextChromeChunkIndex = strippedChunks.findIndex((chunk, index) =>
+      index > providerSpinnerChunkIndex && chunk.includes("mock-model") && chunk.includes("▸ hello")
+    );
+    const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
+      chunk.includes("mock-model") || chunk.includes("▸ hello")
+    );
+
+    expect(lastToolChunkIndex).toBeGreaterThan(-1);
+    expect(providerSpinnerChunkIndex).toBeGreaterThan(lastToolChunkIndex);
+    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("mock-model");
+    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("▸ hello");
+    expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
+    expect(chromeChunksAfterTool.every((chunk) => !chunk.includes("scribbling"))).toBe(true);
+  });
+
+  it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    let releaseTurn: (() => void) | undefined;
+    let providerStarted: (() => void) | undefined;
+    const providerStartedPromise = new Promise<void>((resolve) => {
+      providerStarted = resolve;
+    });
+    const runtime: Runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onEvent?.({ kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false });
+        providerStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        onEvent?.({ kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false });
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    };
+
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: true }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await providerStartedPromise;
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    releaseTurn?.();
+    await loop;
+
+    const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    const spinnerChunks = strippedChunks.filter((chunk) => chunk.includes("scribbling"));
+    expect(spinnerChunks.length).toBeGreaterThanOrEqual(2);
+    expect(outputChunks.some((chunk) => chunk.includes("\x1b[1A\x1b[0J"))).toBe(true);
+  });
+
+  it("ticks the session timer while waiting for idle input", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    let nowMs = 0;
+    let resolvePrompt: ((value: string) => void) | undefined;
+    const prompt = Object.assign(
+      vi.fn(async () => await new Promise<string>((resolve) => {
+        resolvePrompt = resolve;
+      })),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+      now: () => nowMs,
+    });
+
+    while (resolvePrompt === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    nowMs = 61_000;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    resolvePrompt("/exit");
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("◷ 1m 1s");
+  });
+
+  it("uses live wrapped prompt rows when ticking the idle session timer", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    let nowMs = 0;
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: { onRowsChange?: (rows: number) => void } | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: { onRowsChange?: (rows: number) => void }) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+      now: () => nowMs,
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onRowsChange?.(3);
+    nowMs = 61_000;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    resolvePrompt("/exit");
+    await loop;
+
+    expect(outputChunks.some((chunk) => chunk.includes("\x1b[s\x1b[4A"))).toBe(true);
   });
 
   it("updates chrome status rail from live context usage events", async () => {

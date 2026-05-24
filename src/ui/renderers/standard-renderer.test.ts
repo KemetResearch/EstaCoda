@@ -1452,11 +1452,12 @@ describe("StandardRenderer — prompt chrome rails", () => {
   });
 
   it("renders active turn spinner with brand eye and localized label", () => {
-    const r = renderer("dark", fullCaps());
+    const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
-    const out = r.render(vm);
+    const out = stripAnsi(r.render(vm));
+    expect(out).toContain("(⌦)");
+    expect(out).not.toContain("𓇠");
     expect(out).toContain("contemplating");
-    expect(hasAnsi(out)).toBe(true);
   });
 
   it("renders active turn spinner with explicit label overriding phase", () => {
@@ -1482,5 +1483,16 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out).not.toContain("\uD80C\uDDE0");
     expect(out).toContain("scribbling");
     expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders running tool activity with tokenized waiting spinner", () => {
+    const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
+    const vm = buildToolActivityRailViewModel({
+      events: [toolActivityRailEvent("readFile", "running", { label: "preparing" })],
+    });
+    const out = stripAnsi(r.render(vm));
+    expect(out).toContain("(⌦)");
+    expect(out).not.toContain("𓇠");
+    expect(out).toContain("preparing");
   });
 });

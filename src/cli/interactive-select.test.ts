@@ -32,13 +32,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("interactive-select onboarding surface", () => {
-  it("renders onboarding cards while preserving arrow navigation and Enter confirmation", async () => {
+describe("interactive-select prompt card surface", () => {
+  it("renders prompt cards while preserving arrow navigation and Enter confirmation", async () => {
     clearCiEnv();
     process.env.FORCE_COLOR = "1";
     process.env.LANG = "en_US.UTF-8";
     const { input, output } = makeTtyStreams();
-    const pending = selectOption(input, output, onboardingSelection());
+    const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
     input.emit("keypress", "", { name: "down" });
@@ -55,7 +55,7 @@ describe("interactive-select onboarding surface", () => {
     clearCiEnv();
     const emitSpy = vi.spyOn(process, "emit").mockImplementation(((event: string) => event === "SIGINT") as typeof process.emit);
     const { input } = makeTtyStreams();
-    void selectOption(input, makeTtyStreams().output, onboardingSelection());
+    void selectOption(input, makeTtyStreams().output, promptCardSelection());
 
     await Promise.resolve();
     input.emit("keypress", "", { name: "c", ctrl: true });
@@ -63,12 +63,12 @@ describe("interactive-select onboarding surface", () => {
     expect(emitSpy).toHaveBeenCalledWith("SIGINT");
   });
 
-  it("renders no-color onboarding cards without ANSI leakage", async () => {
+  it("renders no-color prompt cards without ANSI leakage", async () => {
     process.env.FORCE_COLOR = "0";
     const input = Readable.from(["\n"]);
     const output = makeOutput(false);
 
-    await selectOption(input, output, onboardingSelection());
+    await selectOption(input, output, promptCardSelection());
 
     const rendered = output.getText();
     expect(rendered).toContain("Workspace trust");
@@ -76,13 +76,13 @@ describe("interactive-select onboarding surface", () => {
     expect(/\x1B\[[0-?]*[ -/]*[@-~]/u.test(rendered)).toBe(false);
   });
 
-  it("renders no-Unicode onboarding cards with stable fallback markers", async () => {
+  it("renders no-Unicode prompt cards with stable fallback markers", async () => {
     clearCiEnv();
     process.env.FORCE_COLOR = "1";
     process.env.LANG = "C";
     process.env.LC_ALL = "C";
     const { input, output } = makeTtyStreams();
-    const pending = selectOption(input, output, onboardingSelection());
+    const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
     input.emit("keypress", "", { name: "return" });
@@ -95,11 +95,11 @@ describe("interactive-select onboarding surface", () => {
     expect(rendered).not.toContain("▸");
   });
 
-  it("keeps plain onboarding fallback deterministic", async () => {
+  it("keeps plain prompt card fallback deterministic", async () => {
     const input = Readable.from(["\n"]);
     const output = makeOutput(false);
 
-    await selectOption(input, output, onboardingSelection());
+    await selectOption(input, output, promptCardSelection());
 
     expect(output.getText()).toContain([
       "Workspace trust",
@@ -111,9 +111,9 @@ describe("interactive-select onboarding surface", () => {
   });
 });
 
-function onboardingSelection(): SelectPromptInput<string> {
+function promptCardSelection(): SelectPromptInput<string> {
   return {
-    surface: "onboarding",
+    surface: "promptCard",
     locale: "en",
     direction: "ltr",
     title: "Workspace trust",

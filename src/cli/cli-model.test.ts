@@ -35,6 +35,7 @@ function profileEnvPath(homeDir: string): string {
 function createMockPrompt(responses: {
   selects?: string[];
   secrets?: string[];
+  onSelect?: (input: SelectPromptInput<unknown>) => void;
 }): Prompt {
   let selectIndex = 0;
   let secretIndex = 0;
@@ -48,7 +49,8 @@ function createMockPrompt(responses: {
     return "";
   }) as Prompt;
 
-  prompt.select = async <T>(_input: SelectPromptInput<T>): Promise<T> => {
+  prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
+    responses.onSelect?.(input as SelectPromptInput<unknown>);
     const value = responses.selects?.[selectIndex] as T;
     selectIndex++;
     return value;
@@ -151,8 +153,10 @@ describe("cli model", () => {
         }
       });
 
+      const selectInputs: Array<SelectPromptInput<unknown>> = [];
       const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"]
+        selects: ["openai", "gpt-4o"],
+        onSelect: (input) => selectInputs.push(input)
       });
 
       const result = await runCliCommand({
@@ -167,6 +171,18 @@ describe("cli model", () => {
       expect(result.output).toContain("Model switched: gpt-4o");
       expect(result.output).toContain("Provider: openai");
       expect(result.output).toContain("Saved as preferred model.");
+      expect(selectInputs).toMatchObject([
+        {
+          surface: "promptCard",
+          title: "Primary provider",
+          body: "Choose the provider EstaCoda should use first when it needs to think."
+        },
+        {
+          surface: "promptCard",
+          title: "Primary model",
+          body: "Choose the primary model for openai."
+        }
+      ]);
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");

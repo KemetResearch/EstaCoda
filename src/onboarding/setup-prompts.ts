@@ -63,7 +63,7 @@ export async function promptSetupChoice<T>(prompt: Prompt, input: {
       })),
       defaultIndex,
       fallbackPrompt: "Choose: ",
-      surface: "onboarding",
+      surface: "promptCard",
     } satisfies SelectPromptInput<T>);
   }
 
