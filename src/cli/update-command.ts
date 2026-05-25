@@ -2,13 +2,23 @@ import {
   checkForUpdate,
   prepareUpdateInfo,
   canApplyUpdate,
-  applyUpdate
+  applyUpdate,
+  type UpdateCheckResult
 } from "../lifecycle/update-engine.js";
+import {
+  detectInstallMethod,
+  type InstallMethodInfo
+} from "../lifecycle/install-method.js";
 
 export type UpdateOptions = {
   dryRun: boolean;
   apply: boolean;
   homeDir?: string;
+  installMethodInfo?: InstallMethodInfo;
+  detectInstallMethod?: () => Promise<InstallMethodInfo>;
+  checkForUpdate?: () => Promise<UpdateCheckResult>;
+  canApplyUpdate?: typeof canApplyUpdate;
+  applyUpdate?: typeof applyUpdate;
 };
 
 export type UpdateResult = {
@@ -26,7 +36,33 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
     };
   }
 
-  const check = await checkForUpdate();
+  const installMethod = options.installMethodInfo ?? await (options.detectInstallMethod ?? (() => detectInstallMethod({
+    includeCwd: false,
+    entrypointPath: process.argv[1],
+    moduleUrl: import.meta.url
+  })))();
+
+  if (!installMethod.canSelfUpdate) {
+    return {
+      exitCode: options.apply ? 1 : 0,
+      output: renderInstallMethodRouting(installMethod, options.apply)
+    };
+  }
+
+  if (options.apply && installMethod.method === "managed-source") {
+    return {
+      exitCode: 1,
+      output: [
+        "Detected install method: managed-source",
+        `Reason: ${installMethod.reason}`,
+        "",
+        "Managed source update apply is planned for PR-I5 and is not active in this build.",
+        "No files were modified."
+      ].join("\n")
+    };
+  }
+
+  const check = await (options.checkForUpdate ?? checkForUpdate)();
 
   if (check.kind === "error") {
     return {
@@ -56,7 +92,7 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
     };
   }
 
-  const test = canApplyUpdate();
+  const test = (options.canApplyUpdate ?? canApplyUpdate)();
 
   if (!test.testable) {
     return {
@@ -70,7 +106,7 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
   }
 
   const artifactPath = process.env.ESTACODA_UPDATE_ARTIFACT!;
-  const result = await applyUpdate({ artifactPath, homeDir });
+  const result = await (options.applyUpdate ?? applyUpdate)({ artifactPath, homeDir });
 
   return {
     exitCode: result.kind === "success" ? 0 : 1,
@@ -80,4 +116,29 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
       result.message
     ].join("\n")
   };
+}
+
+function renderInstallMethodRouting(info: InstallMethodInfo, apply: boolean): string {
+  const lines = [
+    apply ? "Update routing" : "Update routing (dry run)",
+    `Detected install method: ${info.method}`,
+    `Reason: ${info.reason}`,
+    `Recommended update command: ${info.recommendedUpdateCommand}`
+  ];
+
+  if (info.installDir !== undefined) {
+    lines.push(`Install directory: ${info.installDir}`);
+  }
+
+  if (info.method === "manual-source") {
+    lines.push("Manual source checkouts are not self-mutated by `estacoda update`.");
+  }
+
+  if (apply) {
+    lines.push("", "No files were modified.");
+  } else {
+    lines.push("", "This was a dry run. No files were modified.");
+  }
+
+  return lines.join("\n");
 }
