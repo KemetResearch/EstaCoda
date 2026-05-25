@@ -1,27 +1,57 @@
 ---
 title: FAQ
-description: Frequently asked questions.
+description: Short operational answers.
 sidebar_position: 9
 ---
 
 # FAQ
 
-This page documents **FAQ** for EstaCoda v0.1.0.
+## Is EstaCoda a hosted service?
 
-## Purpose
+No. EstaCoda runs on your machine. You provide the providers, the credentials, and the channels. There is no SaaS backend, no centralized message broker, and no remote agent farm.
 
-Frequently asked questions.
+## Where does state live?
 
-## Source of Truth
+Global state lives in `~/.estacoda/`. Profile-local state lives in `~/.estacoda/profiles/<profile-id>/`. The active profile pointer is global; everything else is scoped to the selected profile.
 
-For release-scope decisions and current claims, see:
+## Are profiles cosmetic?
 
-- `docs/operations/v0.1.0-release-scope.md`
+No. Profiles own their config, secrets, memory, skills, gateway state, sessions, and logs. Switching profiles switches the entire runtime context. Sessions do not leak between profiles.
 
-## TODO
+## Where do credentials go?
 
-- [ ] Migrate and rewrite content from existing repo docs.
-- [ ] Align claims with v0.1.0 release scope.
-- [ ] Add code examples, CLI snippets, and configuration samples.
-- [ ] Cross-link related docs pages.
-- [ ] Validate technical accuracy against current codebase.
+In the selected profile `.env` file. Setup flows write secrets there with `0600` permissions. Do not put raw keys in `config.json`.
+
+## Which providers are live-proven?
+
+Kimi, OpenAI, DeepSeek, and OpenRouter are live-proven for v0.1.0. Codex is a public setup path but not live-proven. Google and Anthropic are configurable/catalog-known. MiniMax and Nous are catalog-known but not runnable in the current build.
+
+## Which channels are live-proven?
+
+Telegram is the only live-proven first-party remote channel for v0.1.0. Discord and Email are present but not live-proven. WhatsApp is experimental-only.
+
+## Is WhatsApp stable?
+
+No. WhatsApp is gated behind `experimental: true` and uses an unofficial library. Meta may suspend accounts that use it. Do not enable it in a production profile without understanding the risk.
+
+## Are cloud browsers live-supported?
+
+No. Only `local-cdp` is live-implemented. Browserbase, browser-use, Firecrawl, and Camofox are registered stubs and cannot create live sessions.
+
+## Are web research providers live-supported?
+
+No. Only guarded built-in `fetch` extraction is live. Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs and report unavailable even when configured.
+
+## Is session compression stable?
+
+No. Session compression is experimental-only in v0.1.0. It requires both `compression.enabled` and `compression.experimental` to be `true`.
+
+## Can the docs claim final install/update behavior yet?
+
+No. Install and update docs remain blocked until the implementation PRs land. The docs site includes stubs with source-of-truth links and safety rules, but does not claim final curl, Homebrew, Docker, npm, or source-update behavior before that code is merged.
+
+## Related docs
+
+- [Troubleshooting](./troubleshooting.md) — concrete problems and repairs
+- [Configuration](./configuration.md) — config families
+- [State and Files](./state-and-files.md) — state paths
