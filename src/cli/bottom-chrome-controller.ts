@@ -40,6 +40,9 @@ export class BottomChromeController {
   readonly #tickMs: number;
   readonly #readlineTickMs: number;
   #activeLineCount = 0;
+  #renderedTransientLineCount = 0;
+  #transientLines: readonly string[] = [];
+  #lastRenderedTransientLines?: readonly string[];
   #lastRenderedLines?: readonly string[];
   #currentState: BottomChromeState = {};
   #ticker?: ReturnType<typeof setInterval>;
@@ -68,19 +71,23 @@ export class BottomChromeController {
   }
 
   clearForReadline(promptLineCount = 1): void {
-    if (!this.#enabled || this.#disposed || this.#activeLineCount === 0) return;
-    const chromeLines = Math.max(1, this.#activeLineCount);
+    if (!this.#enabled || this.#disposed || this.#managedLineCount() === 0) return;
+    const chromeLines = this.#activeLineCount;
+    const transientLines = this.#renderedTransientLineCount;
     const promptRows = Math.max(1, Math.ceil(promptLineCount));
-    let sequence = `\x1b[${chromeLines + promptRows}A`;
-    for (let index = 0; index < chromeLines; index += 1) {
+    const managedLines = transientLines + chromeLines;
+    let sequence = `\x1b[${managedLines + promptRows}A`;
+    for (let index = 0; index < managedLines; index += 1) {
       sequence += "\x1b[2K";
-      if (index < chromeLines - 1) {
+      if (index < managedLines - 1) {
         sequence += "\x1b[1B";
       }
     }
     sequence += `\x1b[${promptRows + 1}B`;
     this.#output.write(sequence);
     this.#activeLineCount = 0;
+    this.#renderedTransientLineCount = 0;
+    this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
   }
 
@@ -92,7 +99,7 @@ export class BottomChromeController {
     try {
       return fn();
     } finally {
-      this.#draw();
+      this.#drawManagedRegion();
     }
   }
 
@@ -104,7 +111,7 @@ export class BottomChromeController {
     try {
       return await fn();
     } finally {
-      this.#draw();
+      this.#drawManagedRegion();
     }
   }
 
@@ -131,7 +138,7 @@ export class BottomChromeController {
         if (this.#stateFactory !== undefined) {
           this.#currentState = this.#stateFactory();
         }
-        this.#draw();
+        this.#drawManagedRegion();
         if (hadTicker && this.#stateFactory !== undefined) {
           this.#ticker = setInterval(() => {
             if (this.#stateFactory === undefined) return;
@@ -154,6 +161,9 @@ export class BottomChromeController {
     this.#stateFactory = undefined;
     this.#clearForOutput();
     this.#currentState = {};
+    this.#transientLines = [];
+    this.#renderedTransientLineCount = 0;
+    this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
   }
 
@@ -165,6 +175,11 @@ export class BottomChromeController {
       if (this.#stateFactory === undefined) return;
       this.updateState(this.#stateFactory());
     }, this.#tickMs);
+  }
+
+  setStateFactory(stateFactory: (() => BottomChromeState) | undefined): void {
+    if (!this.#enabled || this.#disposed) return;
+    this.#stateFactory = stateFactory;
   }
 
   startReadlineTicker(stateFactory: () => BottomChromeState, promptLineCountFactory: () => number = () => 1): void {
@@ -207,6 +222,80 @@ export class BottomChromeController {
     this.#lastRenderedLines = lines;
   }
 
+  updateStateInPlace(state: BottomChromeState): void {
+    if (!this.#enabled || this.#disposed) return;
+    this.#currentState = state;
+    const lines = this.#buildChromeLines();
+    if (lines.length === 0) {
+      if (this.#activeLineCount > 0) {
+        this.#redraw();
+      }
+      return;
+    }
+    if (this.#activeLineCount === 0 || this.#activeLineCount !== lines.length) {
+      this.#redraw();
+      return;
+    }
+    if (linesEqual(lines, this.#lastRenderedLines)) {
+      return;
+    }
+
+    let sequence = "\x1b7";
+    sequence += `\x1b[${this.#activeLineCount}A`;
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index] !== this.#lastRenderedLines?.[index]) {
+        sequence += `\x1b[2K\r${lines[index]}`;
+      }
+      if (index < lines.length - 1) {
+        sequence += "\x1b[1B";
+      }
+    }
+    sequence += "\x1b8";
+    this.#output.write(sequence);
+    this.#lastRenderedLines = lines;
+  }
+
+  updateTransientLines(lines: readonly string[]): void {
+    if (!this.#enabled || this.#disposed) return;
+    const width = Math.max(1, this.#capabilities.terminalWidth);
+    const nextLines = lines
+      .filter((line) => line.length > 0)
+      .map((line) => truncateVisible(line.replace(/[\r\n]+/gu, " "), width));
+    this.#transientLines = nextLines;
+    if (linesEqual(nextLines, this.#lastRenderedTransientLines)) {
+      return;
+    }
+    if (this.#renderedTransientLineCount === 0 || this.#renderedTransientLineCount !== nextLines.length) {
+      this.#redraw();
+      return;
+    }
+
+    let sequence = "\x1b7";
+    sequence += `\x1b[${this.#activeLineCount + this.#renderedTransientLineCount}A`;
+    for (let index = 0; index < nextLines.length; index += 1) {
+      if (nextLines[index] !== this.#lastRenderedTransientLines?.[index]) {
+        sequence += `\x1b[2K\r${nextLines[index]}`;
+      }
+      if (index < nextLines.length - 1) {
+        sequence += "\x1b[1B";
+      }
+    }
+    sequence += "\x1b8";
+    this.#output.write(sequence);
+    this.#lastRenderedTransientLines = nextLines;
+  }
+
+  clearTransientLines(): void {
+    if (!this.#enabled || this.#disposed) return;
+    if (this.#transientLines.length === 0 && this.#renderedTransientLineCount === 0) return;
+    this.#transientLines = [];
+    if (this.#renderedTransientLineCount === 0) {
+      this.#lastRenderedTransientLines = undefined;
+      return;
+    }
+    this.#redraw();
+  }
+
   stopTicker(): void {
     if (this.#ticker !== undefined) {
       clearInterval(this.#ticker);
@@ -221,35 +310,47 @@ export class BottomChromeController {
     if (!this.#enabled) return;
     this.#clearForOutput();
     this.#currentState = {};
+    this.#transientLines = [];
+    this.#renderedTransientLineCount = 0;
+    this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
   }
 
   #redraw(): void {
     if (this.#isDrawing) return;
     this.#clearForOutput();
-    this.#draw();
+    this.#drawManagedRegion();
   }
 
   #clearForOutput(): void {
-    if (this.#activeLineCount === 0) return;
-    const lineCount = Math.max(1, this.#activeLineCount);
+    const lineCount = this.#managedLineCount();
+    if (lineCount === 0) return;
     this.#output.write(`\x1b[${lineCount}A\x1b[1G\x1b[0J`);
     this.#activeLineCount = 0;
+    this.#renderedTransientLineCount = 0;
+    this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
   }
 
-  #draw(): void {
+  #drawManagedRegion(): void {
     if (this.#isDrawing) return;
     this.#isDrawing = true;
     try {
-      const lines = this.#buildChromeLines();
+      const chromeLines = this.#buildChromeLines();
+      const lines = [...this.#transientLines, ...chromeLines];
       if (lines.length === 0) return;
       this.#output.write(`${lines.join("\n")}\n`);
-      this.#activeLineCount = lines.length;
-      this.#lastRenderedLines = lines;
+      this.#renderedTransientLineCount = this.#transientLines.length;
+      this.#activeLineCount = chromeLines.length;
+      this.#lastRenderedTransientLines = this.#transientLines;
+      this.#lastRenderedLines = chromeLines;
     } finally {
       this.#isDrawing = false;
     }
+  }
+
+  #managedLineCount(): number {
+    return this.#renderedTransientLineCount + this.#activeLineCount;
   }
 
   #buildChromeLines(): string[] {

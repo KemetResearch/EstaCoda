@@ -1251,13 +1251,20 @@ describe("runSessionLoop — active turn spinner", () => {
     const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
       chunk.includes("mock-model") || chunk.includes("▸ hello")
     );
+    const providerSpinnerChunk = strippedChunks[providerSpinnerChunkIndex] ?? "";
+    const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
+    const modelOffset = providerSpinnerChunk.indexOf("mock-model");
+    const promptOffset = providerSpinnerChunk.indexOf("▸ hello");
 
     expect(lastToolChunkIndex).toBeGreaterThan(-1);
     expect(providerSpinnerChunkIndex).toBeGreaterThan(lastToolChunkIndex);
-    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("mock-model");
-    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("▸ hello");
+    expect(spinnerOffset).toBeGreaterThan(-1);
+    if (modelOffset !== -1) {
+      expect(modelOffset).toBeGreaterThan(spinnerOffset);
+      expect(promptOffset).toBeGreaterThan(modelOffset);
+    }
     expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
-    expect(chromeChunksAfterTool.every((chunk) => !chunk.includes("scribbling"))).toBe(true);
+    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model") && chunk.includes("▸ hello"))).toBe(true);
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -1314,7 +1321,9 @@ describe("runSessionLoop — active turn spinner", () => {
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     const spinnerChunks = strippedChunks.filter((chunk) => chunk.includes("scribbling"));
     expect(spinnerChunks.length).toBeGreaterThanOrEqual(2);
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b[1A\x1b[0J"))).toBe(true);
+    expect(outputChunks.some((chunk) =>
+      chunk.includes("\x1b7") && chunk.includes("scribbling") && !chunk.includes("\x1b[0J")
+    )).toBe(true);
   });
 
   it("ticks the session timer while waiting for idle input", async () => {
@@ -2248,6 +2257,7 @@ describe("runSessionLoop — active turn spinner", () => {
               process.emit("SIGINT");
             }, 0);
           });
+          await new Promise((resolve) => setTimeout(resolve, 250));
           onEvent?.({ kind: "agent-cancelled", reason: "SIGINT" });
           return {
             ...mockResponse(),
@@ -2282,6 +2292,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(cancelIndex).toBeGreaterThan(-1);
     expect(secondPromptIndex).toBeGreaterThan(cancelIndex);
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("▸ first");
+    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
     expect(rendered).toContain("Second response");
   });
 
