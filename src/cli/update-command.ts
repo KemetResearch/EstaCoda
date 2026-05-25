@@ -20,7 +20,9 @@ export type UpdateOptions = {
   dryRun: boolean;
   apply: boolean;
   explicitApply?: boolean;
+  backupMode?: "default" | "force" | "skip";
   homeDir?: string;
+  workspaceRoot?: string;
   installMethodInfo?: InstallMethodInfo;
   detectInstallMethod?: () => Promise<InstallMethodInfo>;
   checkForUpdate?: () => Promise<UpdateCheckResult>;
@@ -58,7 +60,9 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
 
     const result = await (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
       installMethod,
-      homeDir
+      homeDir,
+      workspaceRoot: options.workspaceRoot,
+      backupMode: options.backupMode ?? "default"
     });
 
     return {

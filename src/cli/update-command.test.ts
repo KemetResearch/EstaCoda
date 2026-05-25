@@ -117,6 +117,7 @@ describe("runUpdateCommand install-method routing", () => {
         appliedSource = true;
         expect(input.homeDir).toBe("/tmp/estacoda-home");
         expect(input.installMethod.installDir).toBe("/repo");
+        expect(input.backupMode).toBe("default");
         return { kind: "success", message: "Update applied: test" };
       }
     });
@@ -127,6 +128,35 @@ describe("runUpdateCommand install-method routing", () => {
     expect(checkedArtifact).toBe(false);
     expect(appliedArtifact).toBe(false);
     expect(appliedSource).toBe(true);
+  });
+
+  it("passes explicit backup modes to managed-source updates", async () => {
+    const seenModes: Array<"default" | "force" | "skip" | undefined> = [];
+
+    for (const backupMode of ["force", "skip"] as const) {
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        explicitApply: true,
+        backupMode,
+        homeDir: "/tmp/estacoda-home",
+        installMethodInfo: installInfo("managed-source", {
+          source: "stamp",
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        applyManagedSourceUpdate: async (input): Promise<UpdateApplyResult> => {
+          seenModes.push(input.backupMode);
+          return { kind: "success", message: `Update applied with ${input.backupMode}` };
+        }
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain(`Update applied with ${backupMode}`);
+    }
+
+    expect(seenModes).toEqual(["force", "skip"]);
   });
 
   it("maps managed-source dirty worktree refusal to exit 3", async () => {
@@ -192,6 +222,7 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("reports managed-source update availability through git without applying", async () => {
+    let appliedSource = false;
     const result = await runUpdateCommand({
       check: true,
       dryRun: true,
@@ -217,6 +248,10 @@ describe("runUpdateCommand install-method routing", () => {
             commitsBehind: 3
           }
         };
+      },
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+        appliedSource = true;
+        return { kind: "success", message: "should not apply" };
       }
     });
 
@@ -224,6 +259,7 @@ describe("runUpdateCommand install-method routing", () => {
     expect(result.output).toContain("Update available: 3 commits behind origin/main.");
     expect(result.output).toContain("Run: estacoda update");
     expect(result.output).toContain("No files were modified.");
+    expect(appliedSource).toBe(false);
   });
 
   it("reports managed-source up-to-date through git", async () => {
@@ -336,6 +372,7 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("keeps managed-source dry-run on the existing update check path", async () => {
+    let appliedSource = false;
     const result = await runUpdateCommand({
       dryRun: true,
       apply: false,
@@ -352,10 +389,15 @@ describe("runUpdateCommand install-method routing", () => {
           repoDir: "/repo",
           commitsBehind: 0
         }
-      })
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+        appliedSource = true;
+        return { kind: "success", message: "should not apply" };
+      }
     });
 
     expect(result.exitCode).toBe(2);
     expect(result.output).toContain("Already up to date.");
+    expect(appliedSource).toBe(false);
   });
 });

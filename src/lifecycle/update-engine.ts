@@ -35,10 +35,17 @@ export type SourceUpdateCommandRunner = (
 export type ManagedSourceUpdateOptions = {
   installMethod: InstallMethodInfo;
   homeDir: string;
+  workspaceRoot?: string;
+  backupMode?: "default" | "force" | "skip";
   commandRunner?: SourceUpdateCommandRunner;
   pathExists?: (path: string) => Promise<boolean>;
   writeCache?: (homeDir: string, status: "up-to-date" | "update-available") => Promise<void>;
+  backupState?: typeof backupState;
 };
+
+type ManagedSourceBackupResult =
+  | { kind: "created"; backupPath: string; backedUpCount: number; skippedCount: number }
+  | { kind: "skipped"; reason: string };
 
 type UpdateCacheEntry = {
   checkedAt: string;
@@ -205,6 +212,7 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
   const runner = options.commandRunner ?? runCommand;
   const pathExists = options.pathExists ?? defaultPathExists;
   const writeCache = options.writeCache ?? writeCachedUpdateStatus;
+  const backupStateFn = options.backupState ?? backupState;
 
   const validation = validateManagedSourceInfo(info);
   if (validation.kind === "error") {
@@ -284,6 +292,16 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
     return { kind: "error", message: "Update refused: current HEAD did not resolve to a commit." };
   }
 
+  const backup = await prepareManagedSourceBackup({
+    homeDir: options.homeDir,
+    workspaceRoot: options.workspaceRoot,
+    mode: options.backupMode ?? "default",
+    backupState: backupStateFn
+  });
+  if (backup.kind === "error") {
+    return { kind: "error", message: backup.message };
+  }
+
   const fetch = await runStep(runner, "fetch origin", "git", ["fetch", "origin"], installDir);
   if (!fetch.ok) return { kind: "error", message: fetch.message };
 
@@ -304,12 +322,15 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       kind: "success",
       message: [
         "Already up to date.",
+        renderBackupSummary(backup.result),
         "No files were modified.",
         "Bundled skill sync: no-op for v0.1.0."
       ].join("\n")
     };
   }
 
+  let mutationStarted = false;
+  mutationStarted = true;
   const pull = await runStep(runner, `pull origin ${expectedBranch}`, "git", ["pull", "--ff-only", "origin", expectedBranch], installDir);
   if (!pull.ok) {
     return await rollbackAfterMutation({
@@ -317,7 +338,9 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       installDir,
       prePullSha,
       failure: pull.message,
-      phase: "pull"
+      phase: "pull",
+      mutationStarted,
+      backup: backup.result
     });
   }
 
@@ -328,7 +351,9 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       installDir,
       prePullSha,
       failure: install.message,
-      phase: "dependency install"
+      phase: "dependency install",
+      mutationStarted,
+      backup: backup.result
     });
   }
 
@@ -339,7 +364,9 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       installDir,
       prePullSha,
       failure: build.message,
-      phase: "build"
+      phase: "build",
+      mutationStarted,
+      backup: backup.result
     });
   }
 
@@ -350,7 +377,9 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       installDir,
       prePullSha,
       failure: version.message,
-      phase: "post-update validation"
+      phase: "post-update validation",
+      mutationStarted,
+      backup: backup.result
     });
   }
 
@@ -361,7 +390,9 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
       installDir,
       prePullSha,
       failure: help.message,
-      phase: "post-update validation"
+      phase: "post-update validation",
+      mutationStarted,
+      backup: backup.result
     });
   }
 
@@ -371,6 +402,7 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
     kind: "success",
     message: [
       `Update applied: fast-forwarded ${commitsBehind} commit${commitsBehind === 1 ? "" : "s"} from origin/${expectedBranch}.`,
+      renderBackupSummary(backup.result),
       "Validated: node dist/index.js --version",
       "Validated: node dist/index.js --help",
       "Bundled skill sync: no-op for v0.1.0.",
@@ -419,21 +451,99 @@ async function rollbackAfterMutation(input: {
   prePullSha: string;
   failure: string;
   phase: string;
+  mutationStarted: boolean;
+  backup: ManagedSourceBackupResult;
 }): Promise<UpdateApplyResult> {
+  if (!input.mutationStarted) {
+    return {
+      kind: "error",
+      message: [
+        `Update failed during ${input.phase}.`,
+        input.failure,
+        renderBackupSummary(input.backup),
+        "Rollback skipped: source mutation phase had not started."
+      ].join("\n")
+    };
+  }
+
   const rollback = await input.runner("git", ["reset", "--hard", input.prePullSha], { cwd: input.installDir });
   const rollbackMessage = rollback.exitCode === 0
     ? `Rolled back managed-source checkout to ${input.prePullSha}.`
     : `Rollback failed: ${formatCommandFailure("git reset --hard", rollback)}`;
+  const recoveryMessage = rollback.exitCode === 0
+    ? "Review the checkout before retrying `estacoda update`."
+    : `Manual recovery: inspect ${input.installDir}, then restore the repository to ${input.prePullSha} before retrying.`;
 
   return {
     kind: "error",
     message: [
       `Update failed during ${input.phase}.`,
       input.failure,
+      renderBackupSummary(input.backup),
       rollbackMessage,
-      "Review the checkout before retrying `estacoda update`."
+      recoveryMessage
     ].join("\n")
   };
+}
+
+async function prepareManagedSourceBackup(input: {
+  homeDir: string;
+  workspaceRoot?: string;
+  mode: "default" | "force" | "skip";
+  backupState: typeof backupState;
+}): Promise<{ kind: "ok"; result: ManagedSourceBackupResult } | { kind: "error"; message: string }> {
+  if (input.mode === "skip") {
+    return { kind: "ok", result: { kind: "skipped", reason: "--no-backup" } };
+  }
+
+  try {
+    const backup = await input.backupState({
+      homeDir: input.homeDir,
+      workspaceRoot: input.workspaceRoot,
+      label: `pre-source-update-${Date.now()}`
+    });
+
+    if (backup.backedUp.length === 0) {
+      return {
+        kind: "error",
+        message: [
+          "Update aborted: user-state backup failed before source mutation.",
+          `Backup path: ${backup.backupPath}`,
+          "No protected state paths were backed up.",
+          "Use `estacoda update --no-backup` only if you intentionally want to skip user-state backup."
+        ].join("\n")
+      };
+    }
+
+    return {
+      kind: "ok",
+      result: {
+        kind: "created",
+        backupPath: backup.backupPath,
+        backedUpCount: backup.backedUp.length,
+        skippedCount: backup.skipped.length
+      }
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "error",
+      message: [
+        "Update aborted: user-state backup failed before source mutation.",
+        `Reason: ${message}`,
+        "Use `estacoda update --no-backup` only if you intentionally want to skip user-state backup."
+      ].join("\n")
+    };
+  }
+}
+
+function renderBackupSummary(backup: ManagedSourceBackupResult): string {
+  if (backup.kind === "skipped") {
+    return `Backup: skipped (${backup.reason}).`;
+  }
+
+  const skipped = backup.skippedCount > 0 ? `, skipped ${backup.skippedCount}` : "";
+  return `Backup: ${backup.backupPath} (${backup.backedUpCount} item${backup.backedUpCount === 1 ? "" : "s"}${skipped}).`;
 }
 
 async function runStep(

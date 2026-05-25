@@ -202,6 +202,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo({ installDir: undefined }),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {})
     });
@@ -217,6 +218,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -245,6 +247,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -285,11 +288,217 @@ describe("applyManagedSourceUpdate", () => {
     expect(writes).toEqual(["up-to-date"]);
   });
 
+  it("creates a default user-state backup before managed-source git mutation", async () => {
+    const calls: string[] = [];
+    const writes: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      workspaceRoot: "/workspace",
+      pathExists: async () => true,
+      backupState: async (options) => {
+        calls.push("backup state");
+        expect(options.homeDir).toBe("/tmp/home");
+        expect(options.workspaceRoot).toBe("/workspace");
+        expect(options.label).toMatch(/^pre-source-update-/);
+        return {
+          backupPath: "/tmp/home/.estacoda/.backups/pre-source-update-test",
+          backedUp: ["profiles", "memory"],
+          skipped: ["sessions.sqlite"]
+        };
+      },
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n"),
+        "git fetch origin": ok(""),
+        "git rev-list --count HEAD..origin/main": ok("1\n"),
+        "git pull --ff-only origin main": ok("Fast-forward\n"),
+        "pnpm install --frozen-lockfile": ok(""),
+        "pnpm run build": ok(""),
+        "node dist/index.js --version": ok("0.0.5\n"),
+        "node dist/index.js --help": ok("Usage\n")
+      }),
+      writeCache: async (_homeDir, status) => {
+        writes.push(status);
+      }
+    });
+
+    expect(result.kind).toBe("success");
+    expect(result.message).toContain("Backup: /tmp/home/.estacoda/.backups/pre-source-update-test (2 items, skipped 1).");
+    expect(calls).toEqual([
+      "git rev-parse --show-toplevel",
+      "git remote get-url origin",
+      "git rev-parse --abbrev-ref HEAD",
+      "git status --porcelain",
+      "git rev-parse HEAD",
+      "backup state",
+      "git fetch origin",
+      "git rev-list --count HEAD..origin/main",
+      "git pull --ff-only origin main",
+      "pnpm install --frozen-lockfile",
+      "pnpm run build",
+      "node dist/index.js --version",
+      "node dist/index.js --help"
+    ]);
+    expect(writes).toEqual(["up-to-date"]);
+  });
+
+  it("honors forced backup mode before managed-source git mutation", async () => {
+    const calls: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      backupMode: "force",
+      pathExists: async () => true,
+      backupState: async () => {
+        calls.push("backup state");
+        return {
+          backupPath: "/tmp/home/.estacoda/.backups/pre-source-update-test",
+          backedUp: ["profiles"],
+          skipped: []
+        };
+      },
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n"),
+        "git fetch origin": ok(""),
+        "git rev-list --count HEAD..origin/main": ok("0\n")
+      })
+    });
+
+    expect(result.kind).toBe("success");
+    expect(result.message).toContain("Backup: /tmp/home/.estacoda/.backups/pre-source-update-test");
+    expect(calls).toContain("backup state");
+    expect(calls.indexOf("backup state")).toBeLessThan(calls.indexOf("git fetch origin"));
+  });
+
+  it("blocks managed-source update when the default backup fails", async () => {
+    const calls: string[] = [];
+    const writes: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      pathExists: async () => true,
+      backupState: async () => {
+        throw new Error("backup denied");
+      },
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n")
+      }),
+      writeCache: async (_homeDir, status) => {
+        writes.push(status);
+      }
+    });
+
+    expect(result.kind).toBe("error");
+    expect(result.message).toContain("user-state backup failed before source mutation");
+    expect(result.message).toContain("backup denied");
+    expect(result.message).toContain("--no-backup");
+    expect(calls).not.toContain("git fetch origin");
+    expect(calls).not.toContain("git pull --ff-only origin main");
+    expect(calls).not.toContain("git reset --hard abc1234");
+    expect(writes).toEqual([]);
+  });
+
+  it("blocks managed-source update when forced backup fails", async () => {
+    const calls: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      backupMode: "force",
+      pathExists: async () => true,
+      backupState: async () => {
+        throw new Error("forced backup denied");
+      },
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n")
+      })
+    });
+
+    expect(result.kind).toBe("error");
+    expect(result.message).toContain("forced backup denied");
+    expect(calls).not.toContain("git fetch origin");
+    expect(calls).not.toContain("git pull --ff-only origin main");
+    expect(calls).not.toContain("git reset --hard abc1234");
+  });
+
+  it("skips user-state backup with --no-backup while keeping repo rollback", async () => {
+    const calls: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      backupMode: "skip",
+      pathExists: async () => true,
+      backupState: async () => {
+        calls.push("backup state");
+        throw new Error("backup should not run");
+      },
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n"),
+        "git fetch origin": ok(""),
+        "git rev-list --count HEAD..origin/main": ok("1\n"),
+        "git pull --ff-only origin main": ok(""),
+        "pnpm install --frozen-lockfile": fail("install failed"),
+        "git reset --hard abc1234": ok("")
+      })
+    });
+
+    expect(result.kind).toBe("error");
+    expect(result.message).toContain("Backup: skipped (--no-backup).");
+    expect(calls).not.toContain("backup state");
+    expect(calls).toContain("git reset --hard abc1234");
+  });
+
+  it("blocks managed-source update when backup contains no protected state", async () => {
+    const calls: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      pathExists: async () => true,
+      backupState: async () => ({
+        backupPath: "/tmp/home/.estacoda/.backups/pre-source-update-test",
+        backedUp: [],
+        skipped: ["profiles missing"]
+      }),
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n")
+      })
+    });
+
+    expect(result.kind).toBe("error");
+    expect(result.message).toContain("No protected state paths were backed up");
+    expect(result.message).toContain("Backup path: /tmp/home/.estacoda/.backups/pre-source-update-test");
+    expect(calls).not.toContain("git fetch origin");
+  });
+
   it("refuses dirty managed-source worktrees before mutation", async () => {
     const calls: string[] = [];
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -311,6 +520,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -330,6 +540,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -353,6 +564,7 @@ describe("applyManagedSourceUpdate", () => {
         sourceUrl: "https://github.com/KemetResearch/EstaCoda.git"
       }),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -374,6 +586,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -397,6 +610,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: { ...managedSourceInfo(), method: "manual-source", canSelfUpdate: false },
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {})
     });
@@ -411,6 +625,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -432,12 +647,41 @@ describe("applyManagedSourceUpdate", () => {
     expect(calls.some((call) => call.startsWith("pnpm "))).toBe(false);
   });
 
+  it("reports rollback failure with manual recovery instructions", async () => {
+    const calls: string[] = [];
+    const result = await applyManagedSourceUpdate({
+      installMethod: managedSourceInfo(),
+      homeDir: "/tmp/home",
+      backupMode: "skip",
+      pathExists: async () => true,
+      commandRunner: runnerFor(calls, {
+        "git rev-parse --show-toplevel": ok("/repo\n"),
+        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git rev-parse --abbrev-ref HEAD": ok("main\n"),
+        "git status --porcelain": ok(""),
+        "git rev-parse HEAD": ok("abc1234\n"),
+        "git fetch origin": ok(""),
+        "git rev-list --count HEAD..origin/main": ok("1\n"),
+        "git pull --ff-only origin main": ok(""),
+        "pnpm install --frozen-lockfile": fail("install failed"),
+        "git reset --hard abc1234": fail("reset denied")
+      })
+    });
+
+    expect(result.kind).toBe("error");
+    expect(result.message).toContain("Rollback failed");
+    expect(result.message).toContain("Manual recovery: inspect /repo");
+    expect(result.message).toContain("restore the repository to abc1234");
+    expect(calls).toContain("git reset --hard abc1234");
+  });
+
   it("rolls back when dependency install fails after pull and does not write cache", async () => {
     const calls: string[] = [];
     const writes: string[] = [];
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -468,6 +712,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -494,6 +739,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -521,6 +767,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
@@ -549,6 +796,7 @@ describe("applyManagedSourceUpdate", () => {
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo(),
       homeDir: "/tmp/home",
+      backupMode: "skip",
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
