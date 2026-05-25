@@ -93,6 +93,94 @@ describe("BottomChromeController", () => {
     ]);
   });
 
+  it("updates transient lines above chrome without redrawing chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+
+    chunks.length = 0;
+    ctrl.updateTransientLines(["spinner:thinking"]);
+    expect(chunks).toEqual([
+      "\x1b[4A\x1b[1G\x1b[0J",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+
+    chunks.length = 0;
+    ctrl.updateTransientLines(["spinner:thinking"]);
+    expect(chunks).toEqual([]);
+
+    ctrl.updateTransientLines(["spinner:tool"]);
+    expect(chunks).toEqual([
+      "\x1b7\x1b[5A\x1b[2K\rspinner:tool\x1b8",
+    ]);
+  });
+
+  it("writes transcript output above transient lines and chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateTransientLines(["spinner:thinking"]);
+
+    chunks.length = 0;
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("tool output\n");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[5A\x1b[1G\x1b[0J",
+      "tool output\n",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("can clear transient lines while transcript output is being written", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateTransientLines(["spinner:thinking"]);
+
+    chunks.length = 0;
+    ctrl.writeAboveChromeSync(() => {
+      ctrl.clearTransientLines();
+      stream.write("tool output\n");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[5A\x1b[1G\x1b[0J",
+      "tool output\n",
+      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("clears transient lines while preserving chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateTransientLines(["spinner:thinking"]);
+
+    chunks.length = 0;
+    ctrl.clearTransientLines();
+
+    expect(chunks).toEqual([
+      "\x1b[5A\x1b[1G\x1b[0J",
+      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("patches chrome state in place below transient lines", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateTransientLines(["spinner:thinking"]);
+
+    chunks.length = 0;
+    ctrl.updateStateInPlace({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } });
+
+    expect(chunks).toEqual([
+      "\x1b7\x1b[4A\x1b[2K\rnext | idle\x1b[1B\x1b[1B\x1b[1B\x1b8",
+    ]);
+  });
+
   it("redraws state from the ticker factory", () => {
     vi.useFakeTimers();
     try {

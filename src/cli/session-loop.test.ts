@@ -1251,13 +1251,20 @@ describe("runSessionLoop — active turn spinner", () => {
     const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
       chunk.includes("mock-model") || chunk.includes("▸ hello")
     );
+    const providerSpinnerChunk = strippedChunks[providerSpinnerChunkIndex] ?? "";
+    const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
+    const modelOffset = providerSpinnerChunk.indexOf("mock-model");
+    const promptOffset = providerSpinnerChunk.indexOf("▸ hello");
 
     expect(lastToolChunkIndex).toBeGreaterThan(-1);
     expect(providerSpinnerChunkIndex).toBeGreaterThan(lastToolChunkIndex);
-    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("mock-model");
-    expect(strippedChunks[providerSpinnerChunkIndex]).not.toContain("▸ hello");
+    expect(spinnerOffset).toBeGreaterThan(-1);
+    if (modelOffset !== -1) {
+      expect(modelOffset).toBeGreaterThan(spinnerOffset);
+      expect(promptOffset).toBeGreaterThan(modelOffset);
+    }
     expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
-    expect(chromeChunksAfterTool.every((chunk) => !chunk.includes("scribbling"))).toBe(true);
+    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model") && chunk.includes("▸ hello"))).toBe(true);
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -1314,7 +1321,9 @@ describe("runSessionLoop — active turn spinner", () => {
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     const spinnerChunks = strippedChunks.filter((chunk) => chunk.includes("scribbling"));
     expect(spinnerChunks.length).toBeGreaterThanOrEqual(2);
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b[1A\x1b[0J"))).toBe(true);
+    expect(outputChunks.some((chunk) =>
+      chunk.includes("\x1b7") && chunk.includes("scribbling") && !chunk.includes("\x1b[0J")
+    )).toBe(true);
   });
 
   it("ticks the session timer while waiting for idle input", async () => {
@@ -1403,7 +1412,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[4A"))).toBe(true);
   });
 
-  it("updates chrome status rail from live context usage events", async () => {
+  it("updates chrome status rail from provider-actual context usage events", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1417,7 +1426,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "live-estimate" },
+        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({
@@ -1448,6 +1457,57 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("context 1.0k/64.0k");
+  });
+
+  it("keeps the last provider-actual context usage when live estimates arrive", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = {
+      ...createEventEmittingMockRuntime([
+        { kind: "agent-start", sessionId: "test-session", input: "hello" },
+        { kind: "context-usage", filled: 12_000, total: 64_000, source: "provider-actual" },
+        { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
+        { kind: "context-usage", filled: 500, total: 64_000, source: "assembled-prompt" },
+        { kind: "agent-final", text: "Mock response" },
+      ]),
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "64000" },
+        ],
+      }),
+    };
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 12.0k/64.0k");
+    expect(rendered).not.toContain("context 300/64.0k");
+    expect(rendered).not.toContain("context 500/64.0k");
   });
 
   it("renders fresh session timing with idle state and no turn timer", async () => {
@@ -1500,7 +1560,7 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 252_000;
-        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -1739,7 +1799,7 @@ describe("runSessionLoop — active turn spinner", () => {
       }),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
-        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -2248,6 +2308,7 @@ describe("runSessionLoop — active turn spinner", () => {
               process.emit("SIGINT");
             }, 0);
           });
+          await new Promise((resolve) => setTimeout(resolve, 250));
           onEvent?.({ kind: "agent-cancelled", reason: "SIGINT" });
           return {
             ...mockResponse(),
@@ -2282,6 +2343,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(cancelIndex).toBeGreaterThan(-1);
     expect(secondPromptIndex).toBeGreaterThan(cancelIndex);
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("▸ first");
+    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
     expect(rendered).toContain("Second response");
   });
 

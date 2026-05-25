@@ -383,6 +383,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
+  let clearActiveTurnChrome: () => void = () => undefined;
   const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
   const close = options.close ?? (() => prompt.close?.());
   const bottomChrome = new BottomChromeController({
@@ -400,6 +401,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const onSigint = () => {
     currentAnimator?.cancel();
     if (activeTurn !== undefined) {
+      clearActiveTurnChrome();
       bottomChrome.clearActiveChrome();
       chrome.clearInlineSpinner();
       chrome.clearChrome();
@@ -457,7 +459,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const useUnicode = renderer.capabilities.supportsUnicode;
     const termWidth = renderer.capabilities.terminalWidth;
     let clearBottomChromeTranscriptSpinner: () => void = () => undefined;
-    let bottomChromeOutputSuspended = false;
     const runtimeEventBottomChrome: RuntimeEventChrome = {
       enabled: true,
       clearInlineSpinner: () => clearBottomChromeTranscriptSpinner()
@@ -609,8 +610,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
-        let bottomChromeTranscriptSpinnerLineCount = 0;
         let bottomChromeTranscriptSpinnerTicker: ReturnType<typeof setInterval> | undefined;
+        let bottomChromeActiveChromeTicker: ReturnType<typeof setInterval> | undefined;
         let bottomChromeTranscriptSpinnerPhase: string | undefined;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
@@ -619,7 +620,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           renderer,
           contextUsage: latestContextUsage,
           timing: railTiming(),
-          phase: currentPhase,
           promptText: text
         });
 
@@ -640,32 +640,24 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           && !renderer.capabilities.isCI
           && !renderer.capabilities.isDumb;
 
-        const clearBottomChromeTranscriptSpinnerLine = () => {
-          if (!bottomChrome.enabled || bottomChromeTranscriptSpinnerLineCount === 0) {
-            return;
-          }
-          const clear = () => {
-            output.write(clearTranscriptBlock(bottomChromeTranscriptSpinnerLineCount));
-          };
-          if (bottomChromeOutputSuspended) {
-            clear();
-          } else {
-            bottomChrome.writeAboveChromeSync(clear);
-          }
-          bottomChromeTranscriptSpinnerLineCount = 0;
-          streamState.lastWriteEndedWithNewline = true;
-          turnOutput.lastOutputWasSpinner = false;
-        };
-
         const stopBottomChromeTranscriptSpinner = () => {
           if (bottomChromeTranscriptSpinnerTicker !== undefined) {
             clearInterval(bottomChromeTranscriptSpinnerTicker);
             bottomChromeTranscriptSpinnerTicker = undefined;
           }
           bottomChromeTranscriptSpinnerPhase = undefined;
-          clearBottomChromeTranscriptSpinnerLine();
+          bottomChrome.clearTransientLines();
+          streamState.lastWriteEndedWithNewline = true;
+          turnOutput.lastOutputWasSpinner = false;
         };
         clearBottomChromeTranscriptSpinner = stopBottomChromeTranscriptSpinner;
+
+        const stopBottomChromeActiveChromeTicker = () => {
+          if (bottomChromeActiveChromeTicker !== undefined) {
+            clearInterval(bottomChromeActiveChromeTicker);
+            bottomChromeActiveChromeTicker = undefined;
+          }
+        };
 
         const renderBottomChromeTranscriptSpinnerFrame = () => {
           if (!bottomChrome.enabled || bottomChromeTranscriptSpinnerPhase === undefined) {
@@ -673,13 +665,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           }
           const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: bottomChromeTranscriptSpinnerPhase }));
           const spinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
-          bottomChrome.writeAboveChromeSync(() => {
-            if (bottomChromeTranscriptSpinnerLineCount > 0) {
-              output.write(clearTranscriptBlock(bottomChromeTranscriptSpinnerLineCount));
-            }
-            output.write(`${spinnerLines.join("\n")}\n`);
-          });
-          bottomChromeTranscriptSpinnerLineCount = Math.max(1, spinnerLines.length);
+          bottomChrome.updateTransientLines(spinnerLines);
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.hasOutput = true;
           turnOutput.lastOutputWasSpinner = true;
@@ -699,7 +685,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const renderSpinner = (phase: string) => {
           currentPhase = phase;
           if (bottomChrome.enabled) {
-            bottomChrome.updateState(runningBottomState());
+            bottomChrome.updateStateInPlace(runningBottomState());
             startBottomChromeTranscriptSpinner(phase);
             turnOutput.spinnerPhase = phase;
             return;
@@ -729,7 +715,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         const clearSpinner = () => {
           if (bottomChrome.enabled) {
-            bottomChrome.stopTicker();
+            stopBottomChromeActiveChromeTicker();
             stopBottomChromeTranscriptSpinner();
             currentPhase = undefined;
           } else if (chrome.enabled) {
@@ -738,10 +724,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;
         };
+        clearActiveTurnChrome = clearSpinner;
 
         if (bottomChrome.enabled) {
-          bottomChrome.startTicker(runningBottomState);
+          bottomChrome.setStateFactory(runningBottomState);
           bottomChrome.updateState(runningBottomState());
+          bottomChromeActiveChromeTicker = setInterval(() => {
+            bottomChrome.updateStateInPlace(runningBottomState());
+          }, 1000);
           if (!wroteUserPromptRail) {
             bottomChrome.writeAboveChromeSync(() => {
               output.write(`${userPromptRailText}\n\n`);
@@ -759,7 +749,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
-              if (event.kind === "context-usage") {
+              if (event.kind === "context-usage" && event.source === "provider-actual") {
                 latestContextUsage = { filled: event.filled, total: event.total };
                 if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
                   renderSpinner(turnOutput.spinnerPhase);
@@ -780,12 +770,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               let newPhase: string | undefined;
               if (bottomChrome.enabled) {
                 bottomChrome.writeAboveChromeSync(() => {
-                  bottomChromeOutputSuspended = true;
-                  try {
-                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, bottomChromeToolActivityAnimator);
-                  } finally {
-                    bottomChromeOutputSuspended = false;
-                  }
+                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, bottomChromeToolActivityAnimator);
                 });
               } else {
                 newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
@@ -802,6 +787,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             currentAnimator?.dispose();
             currentAnimator = undefined;
             clearBottomChromeTranscriptSpinner = () => undefined;
+            clearActiveTurnChrome = () => undefined;
           });
         if (pendingCompactionPostTokens !== undefined) {
           applyCompactionRailReset(pendingCompactionPostTokens);
@@ -2481,7 +2467,6 @@ function buildBottomChromeState(input: {
   slashMenu?: SlashMenuViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
-  phase?: string;
   promptText?: string;
 }): BottomChromeState {
   const chromeState = buildPromptChromeState(
