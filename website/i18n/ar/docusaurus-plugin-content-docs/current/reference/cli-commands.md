@@ -1,29 +1,471 @@
 ---
 title: أوامر CLI
-description: مرجع كامل لأوامر estacoda CLI.
+description: مرجع تشغيلي لسطح أوامر estacoda CLI.
 sidebar_position: 1
 ---
 
 # أوامر CLI
 
-هذه الصفحة ستكون النسخة العربية لمراجعة الصفحة الإنجليزية المرتبطة.
+EstaCoda نظام وكيل سطر أوامر. كل سطح يُعدّل الحالة أو يفحص الإعدادات أو يغيّر سلوك التشغيل يُصل إليه من الطرفية. توثق هذه الصفحة عائلات الأوامر المُطبّقة. لا توثق سلوكاً مخططاً أو معلّقاً.
 
-## الغرض
+## الخيار العام
 
-مرجع كامل لأوامر estacoda CLI.
+```bash
+estacoda --profile <id> <command>
+estacoda -p <id> <command>
+```
 
-## ملاحظات مهمة
+يختار `--profile` / `-p` ملف تعريف للأمر الحالي فقط. لا يغيّر `active-profile.json`. فقط `estacoda profile use <name>` يغيّر الملف التعريف النشط. العلامة صالحة قبل أي أمر.
 
-- اسماء الأوامر، الاختيارات، والمعاملات التقنية تبقى باللغة الإنجليزية.
-- مسارات الملفات، ومتغيرات البيئة، ومعرفات المزودين تبقى باللغة الإنجليزية.
-- لا تزال الترجمة الآلية الكاملة في هذه المرحلة.
+---
 
-## مصدر الحقيقة
+## الإعداد والتهيئة
 
-- `docs/operations/v0.1.0-release-scope.md`
+### `estacoda setup`
 
-## قائمة المهام
+يفتح تدفق الإعداد والإصلاح والتهيئة المراجع. هذا هو المسار المعياري لتهيئة التشغيل الأول وللإصلاح لاحقاً.
 
-- [ ] ترجمة المحتوى التقني من الصفحة الإنجليزية.
-- [ ] التحقق من المصطلحات التقنية.
-- [ ] المراجعة مع الصفحات العربية المرتبطة.
+```bash
+estacoda setup                          # إعداد تفاعلي/إصلاح
+estacoda setup --interactive            # الوضع التفاعلي الصريح
+estacoda setup --advanced               # خيارات متقدمة في الوضع التفاعلي
+estacoda setup --provider <p> --model <m> --api-key-env <env>
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/config.json`
+- `~/.estacoda/profiles/<id>/.env` (مراجع بيانات الاعتماد، لا القيم الخام)
+- `~/.estacoda/profiles/<id>/trust.json`
+
+**حدود الملف التعريف:** يستخدم الملف التعريف النشط، أو الملف المختار عبر `--profile`.
+
+**السلوك:** يوجّه عبر قرار إعداد محدد بناءً على الحالة الحالية (first-run، configured-ready، configured-degraded، partial-provider، missing-credential، broken-config، untrusted-workspace، state-not-writable). إلغاء المراجعة لا ينتج تعديلاً. البيانات السرية الخام لا تُعرض أبداً في بيانات المراجعة.
+
+**أنماط الفشل:**
+- الإعداد التالف يحظر التعديلات العادية حتى يصبح التحليل آمناً.
+- state-not-writable يحظر الكتابات حتى تصحح الأذونات.
+- بيانات الاعتماد المفقودة تُوجّه لإصلاح بيانات الاعتماد دون جمع قيم خام مباشرة.
+
+### `estacoda init`
+
+يبني هيكل أدلة الحالة والإعداد الافتراضي.
+
+```bash
+estacoda init                           # إنشاء الهيكل الأساسي للحالة
+estacoda init --home <dir>              # دليل حالة مخصص
+estacoda init --yes                     # غير تفاعلي؛ يستخدم الافتراضيات
+```
+
+**الحالة المُعدّلة:** `~/.estacoda/`، الهيكل الأساسي للملف التعريف الافتراضي، `active-profile.json`.
+
+**أنماط الفشل:** فشل إنشاء الدليل يُظهر رمز خروج 1 مع المسار الفاشل.
+
+### `estacoda verify`
+
+ينفذ تحقيقاً للقراءة فقط من جاهزية الإعداد.
+
+```bash
+estacoda verify
+```
+
+الفحوصات:
+- صلاحية بناء جملة إعداد المزود
+- جاهزية بيانات الاعتماد ونقطة النهاية للمزود
+- جاهزية نسخ الحالة الاحتياطي
+- صلاحية سجل الحزم
+
+**رمز الخروج:** 0 إذا جاهز، 1 إذا توجد تحذيرات.
+
+---
+
+## النموذج والمزود
+
+### `estacoda model`
+
+تدير عائلة أوامر النموذج أي نموذج لغوي يستخدمه EstaCoda، وكيف تُحمّل بيانات الاعتماد، وما يحدث عند فشل المسار الأساسي.
+
+```bash
+estacoda model                          # منتقي تفاعلي أو نظرة عامة
+estacoda model status                   # حالة المسار الأساسي والاحتياطي والمساعد
+estacoda model list                     # النماذج القابلة للتهيئة في الكتالوج
+estacoda model list --live              # يتضمن تحقيقات الشبكة الحية
+estacoda model search <query>           # البحث في الكتالوج بالاسم أو المزود
+estacoda model providers                # قائمة المزودين المعروفين
+estacoda model refresh                  # تحديث كتالوج المزود من الشبكة
+estacoda model diagnose                 # تشخيص كامل مع حالة التنفيذ
+estacoda model auxiliary status         # جاهزية المسارات المساعدة
+estacoda model fallback                 # إدارة سلسلة الاحتياطي
+estacoda model setup local              # تهيئة نقطة نهاية Ollama/متوافقة مع OpenAI محلية
+estacoda model setup custom             # تهيئة نقطة نهاية مخصصة متوافقة مع OpenAI
+estacoda model setup codex              # إعداد OAuth device-code لـ Codex
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/config.json` (المسار الأساسي، سلسلة الاحتياطي، تسجيل المزود)
+- `~/.estacoda/profiles/<id>/.env` (مراجع متغيرات البيئة)
+- `~/.estacoda/auth.json` (رموز OAuth لـ Codex)
+
+**حدود الملف التعريف:** كل إعدادات النموذج مرتبطة بالملف التعريف.
+
+**السلوك:**
+- `estacoda model` الصافي يفتح منتقي تفاعلي في وضع الإعداد عند توفر TTY؛ وإلا يطبع نظرة عامة.
+- `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `~/.estacoda/auth.json`، ويُهيئ مسار `codex/o3`.
+- `model fallback` تدير سلسلة الاحتياطي المرتبة. `estacoda model set` مرفوض كأمر مهمل.
+
+**أنماط الفشل:**
+- إدخال نموذج غير معروف يرجع رمز خروج 1 مع اقتراحات للمرشحين.
+- الإدخال الغامض يسرد المرشحين المتطابقين.
+- بيانات الاعتماد المطلوبة دون وجود prompt متاح يرجع تعليمات إصلاح.
+- فشل حفظ الإعداد يُبلّغ المسار والخطأ.
+
+---
+
+## إدارة الملفات التعريفية
+
+تفصل الملفات التعريفية الإعدادات والأسرار والذاكرة الهوية والمهارات وحالة cron وحالة البوابة والسجلات والذاكرة المؤقتة ووسائط القنوات تحت `~/.estacoda/profiles/<id>/`.
+
+```bash
+estacoda profile create <name>
+estacoda profile create <name> --blank
+estacoda profile create <name> --from <profile> --files user,memory,soul
+estacoda profile list
+estacoda profile use <name>
+estacoda profile show [name]
+estacoda profile delete <name>
+estacoda profile delete <name> --force
+estacoda profile rename <old> <new>
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/` (الهيكل الكامل)
+- `~/.estacoda/active-profile.json`
+
+**حدود الملف التعريف:** `profile use` يغيّر الملف التعريف النشط العام. بقية أوامر الملف التعريف تعمل على الملف المسمى.
+
+**أنماط الفشل:**
+- `profile delete` يرفض الملف النشط أو غير الفارغ ما لم يُزوّد بـ `--force`.
+- `profile rename` يُحدّث سجل الملف النشط عند إعادة تسمية الملف النشط.
+
+---
+
+## البوابة والقنوات
+
+### `estacoda gateway`
+
+تدير دورة حياة بوابة القنوات، وتثبيت الخدمة، والتشخيصات.
+
+```bash
+estacoda gateway start                  # مشرف البوابة في المقدمة
+estacoda gateway start --dry-run        # فحص الجاهزية؛ بدون كتابة PID/lock
+estacoda gateway start --background     # عملية خلفية منفصلة
+estacoda gateway start --profile <id>   # ربط البوابة بملف تعريف محدد
+estacoda gateway stop                   # SIGTERM؛ يفضل الخدمة المُدارة إن وُجدت
+estacoda gateway stop --force           # SIGKILL للغير مُدارة؛ systemd stop للمُدارة
+estacoda gateway restart                # إيقاف ثم تشغيل خلفي
+estacoda gateway restart --graceful     # alias لـ restart في v0.1.0
+estacoda gateway restart --system       # إعادة تشغيل خدمة نطاق النظام
+estacoda gateway status                 # الحالة الكاملة: مدير الخدمة، القنوات، cron، الموافقات
+estacoda gateway diagnose               # جاهزية لكل قناة؛ يخرج 1 عند التحذيرات
+estacoda gateway approvals              # عدد الموافقات المعلقة
+estacoda gateway install                # تثبيت خدمة systemd/launchd نطاق المستخدم
+estacoda gateway install --force        # استبدال وحدة خدمة موجودة
+estacoda gateway install --profile <id> # تثبيت خدمة مرتبطة بملف تعريف
+estacoda gateway install --system --run-as-user <user>
+estacoda gateway uninstall              # إزالة خدمة نطاق المستخدم
+estacoda gateway uninstall --system     # إزالة خدمة نطاق النظام
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/gateway.pid`
+- `~/.estacoda/profiles/<id>/gateway.lock`
+- `~/.estacoda/profiles/<id>/gateway-state/`
+- وحدات systemd للمستخدم / ملفات plist لـ launchd (عند التشغيل المُدار)
+
+**حدود الملف التعريف:** عمليات البوابة ترتبط بالملف التعريف المختار عند بدء التشغيل. تغيير `active-profile.json` لا يُعدّل بوابة قيد التشغيل.
+
+**أنماط الفشل:**
+- `start --background` يرفض التشغيل إن وُجد ملف PID حي أو قفل بوابة نشط.
+- `stop` يفضل خدمة مُدارة نطاق المستخدم؛ إن وُجدت فقط خدمة النظام، أعد التشغيل مع `--system`.
+- خدمات systemd نطاق المستخدم قد تتوقف عند الخروج ما لم يُفعّل linger.
+- التثبيتات في وضع المصدر تُثبّت المسار المطلق؛ نقل ال repo يتطلب إعادة التثبيت.
+
+### `estacoda channels`
+
+```bash
+estacoda channels list                  # جدول مدمج لكل القنوات
+estacoda channels status <name>         # الحالة التفصيلية لقناة واحدة
+estacoda channels enable <name>         # تعيين enabled: true في الإعداد
+estacoda channels disable <name>        # تعيين enabled: false في الإعداد
+```
+
+أسماء القنوات الصالحة: `telegram`، `discord`، `email`، `whatsapp` (غير حساسة لحالة الأحرف).
+
+**الحالة المُعدّلة:** `~/.estacoda/profiles/<id>/config.json` (كتلة القنوات).
+
+**أنماط الفشل:** أسماء قنوات غير صالحة ترجع رمز خروج 1.
+
+---
+
+## Cron
+
+```bash
+estacoda cron list                      # كل المهام مع الجدولة والتشغيل التالي
+estacoda cron show <job-id>             # تفاصيل المهمة + آخر 5 تنفيذات
+estacoda cron history [job-id]          # سجل التنفيذ
+estacoda cron run <job-id>              # طلب تشغيل يدوي
+estacoda cron pause <job-id>
+estacoda cron resume <job-id>
+estacoda cron remove <job-id>
+estacoda cron tick                      # دورة مجدول يدوية
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/cron/jobs.json`
+- `~/.estacoda/sessions.sqlite` (سجل التنفيذ)
+- `~/.estacoda/profiles/<id>/cron/output/`
+
+**حدود الملف التعريف:** مهام cron مرتبطة بالملف التعريف.
+
+**أنماط الفشل:**
+- الأقفال القديمة من العمليات المنهارة تُستعاد عند بدء التشغيل.
+- لا يمكن لمهام cron جدولة مهام cron إضافية (حارس تكرار).
+- فشل التسليم يُصنّف ويُخزّن في سجل التنفيذ.
+
+---
+
+## الجلسات
+
+```bash
+estacoda sessions list                  # الجلسات الأخيرة مع الأسطح المرتبطة
+estacoda sessions show <session-id>     # تفاصيل الجلسة + مؤشرات الأسطح
+estacoda sessions current               # جلسة التشغيل الحالية
+estacoda sessions attach <surface> <id> <session-id>
+estacoda sessions detach <surface> <id>
+estacoda sessions recall <query>        # تلخيص تطابقات الجلسات التاريخية
+estacoda session recall <query>         # alias
+estacoda sessions compact <session-id> [--topic <topic>]
+```
+
+الأسطح الصالحة: `cli`، `telegram`، `discord`، `whatsapp`، `email`.
+
+**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (`~/.estacoda/sessions.sqlite`).
+
+**حدود الملف التعريف:** الجلسات مرتبطة بالملف التعريف. `sessions recall` مُقيّد بالملف التعريف النشط ومساحة العمل عند توفر البيانات الوصفية.
+
+**أنماط الفشل:**
+- `sessions compact` غير دوّار في هذه التطبيقة؛ لا يتبنى جلسة فرعية مضغوطة.
+- attach/detach تتطلب وجود الجلسة في الملف التعريف النشط.
+
+---
+
+## TaskFlow
+
+يتطلب قاعدة بيانات جلسات SQLite. ترفض قاعدة بيانات الذاكرة أوامر TaskFlow.
+
+```bash
+estacoda flow list                      # التدفقات النشطة (غير النهائية)
+estacoda flow show <flowId>
+estacoda flow status <flowId>
+estacoda flow trace <flowId> [limit]
+estacoda flow pause <flowId> [reason]
+estacoda flow resume <flowId>
+estacoda flow interrupt <flowId> [reason]
+estacoda flow cancel <flowId> [reason]
+estacoda flow steer <flowId> <instruction>
+estacoda flow approve <stepId>
+estacoda flow reject <stepId> [reason]
+estacoda flow retry <stepId>
+estacoda flow skip <stepId> [reason]
+estacoda flow checkpoint <flowId> <name>
+estacoda flow compact <flowId>
+```
+
+**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `flow_events`، `flow_steps`).
+
+**أنماط الفشل:**
+- إعادة المحاولة تعمل فقط إن كان `idempotent` أو `safeToRetry` صحيحاً وتحت `maxRetries`.
+- التخطي يعمل فقط إن لم يبدأ الخطوة وكان `allowSkipIfSkippable` صحيحاً.
+- يُرفض التوجيه للتدفقات في حالات نهائية.
+- الإيقاف يرسل SIGTERM مع مهلة 5 ثوانٍ للعمليات النشطة، ثم ينتقل الحالة.
+
+---
+
+## الأمن والموافقات
+
+```bash
+estacoda security                       # عرض وضع الأمن الحالي
+estacoda security --mode <mode>         # تعيين وضع الموافقة
+```
+
+الأوضاع الصالحة: `strict`، `normal`، `open`. كتل الأمان الصلبة تنطبق في كل الأوضاع.
+
+**الحالة المُعدّلة:** `~/.estacoda/profiles/<id>/config.json`.
+
+---
+
+## الأدوات و MCP
+
+```bash
+estacoda tools                          # قائمة الأدوات المتاحة مجمعة حسب toolset
+estacoda mcp status                     # خوادم MCP المُهيأة والجاهزية
+estacoda mcp reload                     # إعادة تحميل إعداد MCP
+```
+
+**الحالة المُعدّلة:** لا شيء لـ `tools`. `mcp reload` يُعيد بناء سجل أدوات التشغيل من الإعداد الحالي.
+
+**أنماط الفشل:** خوادم MCP المفقودة من الإعداد ليست أخطاء؛ ببساطة لا تظهر.
+
+---
+
+## التشخيص
+
+```bash
+estacoda doctor                         # جاهزية الإعداد وتشخيصات المزود
+estacoda doctor --live                  # يتضمن تحقيقات نقاط النهاية الحية
+```
+
+**رمز الخروج:** 0 إذا جاهز، 1 إذا توجد تحذيرات.
+
+---
+
+## المسارات والتقييم
+
+```bash
+estacoda trace list [--session <id>] [--limit <n>]
+estacoda trace dump <trajectory-id> [--raw]
+estacoda trace timeline <trajectory-id> [--raw]
+estacoda trace failures <trajectory-id>
+estacoda eval [fixture-id]
+```
+
+**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (تخزين المسارات).
+
+**أنماط الفشل:** `--raw` يتجاوز التحريض. استخدم بحذر.
+
+---
+
+## الحزم والمهارات
+
+```bash
+estacoda packs list                     # الحزم المُثبّتة
+estacoda packs inspect <id>             # البيان الوصفي الكامل والبيانات الوصفية
+estacoda packs install <path>           # التثبيت من مسار محلي
+estacoda packs enable <id>
+estacoda packs disable <id>
+estacoda packs uninstall <id>
+
+estacoda skills list                    # المهارات المتاحة من الحزم المُفعلة
+estacoda skills inspect <name>          # بيانات وصفية للمهارة
+estacoda skills view <name>             # محتوى SKILL.md الكامل
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/packs.json`
+- `~/.estacoda/packs/` (تخزين الحزم المشترك)
+
+**حدود الملف التعريف:** الحزم تُثبّت عالمياً؛ التفعيل لكل ملف تعريف. رؤية المهارات تعتمد على الحزم المُفعلة.
+
+---
+
+## الإعدادات
+
+```bash
+estacoda settings                       # نظرة عامة على كل الفئات
+estacoda settings profile               # وضع الملف التعريف ولغة الاستجابة
+estacoda settings profile --mode <mode> --response-language <lang>
+estacoda settings ui                    # لغة واجهة المستخدم، النمط، تسميات النشاط
+estacoda settings ui --language <en|ar> --flavor <f> --activity-labels <l>
+estacoda settings skills                # استقلالية المهارات
+estacoda settings skills --autonomy <level>
+estacoda settings security              # وضع الأمن
+estacoda settings browser               # إعداد backend المتصفح
+estacoda settings voice                 # جاهزية مزود الصوت
+estacoda settings image                 # إعداد توليد الصور
+estacoda settings telegram              # إعداد قناة Telegram
+estacoda settings provider              # ملخص تشخيصي للمزود
+```
+
+**الحالة المُعدّلة:** `~/.estacoda/profiles/<id>/config.json`.
+
+---
+
+## المعرفة، التطوير، المنسق، البيان، الاقتراح
+
+عائلات أوامر موجهة للتطوير. تعمل على بيانات المهارات ورسوم المعرفة واقتراحات التطوير.
+
+```bash
+estacoda knowledge <subcommand>
+estacoda evolution <subcommand>
+estacoda curator <subcommand>
+estacoda manifest diff <id>
+estacoda proposal <subcommand>
+```
+
+هذه أسطح متقدمة. شغّل `--help` على كل منها للأوامر الفرعية.
+
+---
+
+## التحديث
+
+```bash
+estacoda update                         # التحقق من التحديثات (dry-run)
+estacoda update --apply                 # تطبيق أثر التحديث إن وُجد
+```
+
+**السلوك الحالي:** يتحقق المُحدّث من وجود تحديثات متاحة ويمكنه تطبيق أثر تحديث مسبق. سلوك التحديث الكامل على نمط Hermes (git pull، توجيه التثبيت المُدار، التراجع) لم يُدمج بعد. لا تعتمد على `estacoda update` كمسار تحديث كامل حتى يصل تطبيق التثبيت/التحديث.
+
+**الحالة المُعدّلة:** قد يكتب أثار التحديث والذاكرة المؤقتة تحت `~/.estacoda/`.
+
+---
+
+## الإصدار والمساعدة
+
+```bash
+estacoda --version
+estacoda -v
+estacoda --help
+estacoda -h
+estacoda help
+```
+
+---
+
+## خادم ACP
+
+```bash
+estacoda acp                            # تشغيل خادم ACP stdio
+```
+
+يبدأ خادم بروتوكول اتصال الوكيل stdio للتكامل الخارجي.
+
+---
+
+## التسليم
+
+```bash
+estacoda handoff <surface>
+```
+
+يُنشئ رمز تسليم لمشاركة جلسة CLI الحالية مع سطح قناة. يدعم حالياً `telegram` فقط.
+
+**الحالة المُعدّلة:** `~/.estacoda/profiles/<id>/gateway-state/handoff-codes.json`.
+
+---
+
+## رموز الخروج
+
+| الرمز | المعنى |
+|-------|--------|
+| 0 | نجاح |
+| 1 | خطأ، تحذير، أو أمر مرفوض |
+
+معظم الأوامر تخرج 0 عند النجاح و1 عند أي فشل أو تحذير تشخيصي أو إدخال غير صالح. عائلة البوابة تتبع نفس الاتفاقية.
+
+---
+
+## صفحات ذات صلة
+
+- [أوامر الشرطة المائلة](./slash-commands.md) — مرجع الأوامر داخل الجلسة
+- [مرجع الأدوات](./tools-reference.md) — فئات الأدوات وحدود التوفر
+- [الحالة والملفات](./state-and-files.md) — مواقع حالة الملف التعريف
+- [مرجع المزود](./provider-reference.md) — نضج المزود وطريقة الإعداد
