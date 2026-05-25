@@ -527,12 +527,23 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
   const check = hasFlag(args, "--check");
   const dryRun = check || hasFlag(args, "--dry-run");
   const explicitApply = hasFlag(args, "--apply");
+  const backup = hasFlag(args, "--backup");
+  const noBackup = hasFlag(args, "--no-backup");
+  if (backup && noBackup) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Use either --backup or --no-backup, not both."
+    };
+  }
   const result = await runUpdateCommand({
     check,
     dryRun,
     apply: explicitApply || !dryRun,
     explicitApply,
-    homeDir: options.homeDir
+    backupMode: noBackup ? "skip" : backup ? "force" : "default",
+    homeDir: options.homeDir,
+    workspaceRoot: options.workspaceRoot
   });
 
   return {

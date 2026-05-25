@@ -15,7 +15,7 @@ export function getProtectedPaths(homeDir: string, workspaceRoot?: string): Prot
     { source: join(root, "trust.json"), label: "trust store" },
     { source: join(root, "workspace-approvals.json"), label: "workspace approvals" },
     { source: join(root, "sessions.sqlite"), label: "session database" },
-    { source: join(root, "memory", "shared"), label: "shared memory directory" },
+    { source: join(root, "memory"), label: "memory directory" },
     { source: join(root, "packs", "registry.jsonl"), label: "pack registry" }
   ];
 
