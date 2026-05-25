@@ -102,6 +102,38 @@ describe("collectStartupReadinessSnapshot", () => {
     expect(snapshot.versionStatus).toBe("update-available");
   });
 
+  it("adds an update hint warning only when an update is available", () => {
+    const snapshot = collectStartupReadinessSnapshot({
+      workspaceRoot: "/workspace",
+      workspaceTrusted: true,
+      verificationReport: makeVerificationReport(),
+      model: { provider: "openrouter", id: "claude-sonnet" },
+      versionStatus: "update-available",
+      updateHint: "Update available. Run: estacoda update",
+    });
+
+    expect(snapshot.updateHint).toBe("Update available. Run: estacoda update");
+    expect(snapshot.warnings).toContainEqual({
+      kind: "warning",
+      severity: "info",
+      title: "Update",
+      message: "Update available. Run: estacoda update",
+    });
+  });
+
+  it("does not add an update hint warning when up to date", () => {
+    const snapshot = collectStartupReadinessSnapshot({
+      workspaceRoot: "/workspace",
+      workspaceTrusted: true,
+      verificationReport: makeVerificationReport(),
+      model: { provider: "openrouter", id: "claude-sonnet" },
+      versionStatus: "up-to-date",
+      updateHint: "Update available. Run: estacoda update",
+    });
+
+    expect(snapshot.warnings.some((warning) => warning.title === "Update")).toBe(false);
+  });
+
   it("returns verified when all checks pass", () => {
     const snapshot = collectStartupReadinessSnapshot({
       workspaceRoot: "/workspace",
