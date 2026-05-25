@@ -1,0 +1,59 @@
+# Draft only. Not the real tap formula.
+# The real formula lives in KemetResearch/homebrew-tap.
+# Do not copy without filling the release version, URL, SHA-256, and validating in the tap.
+# Do not install this file from the EstaCoda repository as if this repo were the tap.
+
+class Estacoda < Formula
+  desc "Local-first agent runtime and CLI"
+  homepage "https://estacoda.kemetresearch.com"
+
+  # TODO: Replace v0.1.0 with the release tag being published.
+  url "https://github.com/KemetResearch/EstaCoda/archive/refs/tags/v0.1.0.tar.gz"
+  # TODO: Replace with the SHA-256 of the GitHub source tarball for the release tag.
+  sha256 "TODO"
+  license "Apache-2.0"
+
+  # TODO: Confirm whether Homebrew's current node formula satisfies EstaCoda's
+  # package.json engine requirement: Node >= 22.18.0.
+  depends_on "node"
+
+  def install
+    ENV["HOME"] = buildpath/".home"
+    ENV["COREPACK_HOME"] = buildpath/".corepack"
+    ENV["PNPM_HOME"] = buildpath/".pnpm"
+    ENV.prepend_path "PATH", ENV["PNPM_HOME"]
+
+    # TODO: Keep Corepack/pnpm setup compatible with the selected Homebrew Node formula.
+    system "corepack", "enable"
+    system "pnpm", "install", "--frozen-lockfile"
+    system "pnpm", "run", "build"
+    system "pnpm", "prune", "--prod"
+
+    libexec.install "dist"
+    libexec.install "node_modules"
+    libexec.install "package.json"
+    libexec.install "skills"
+    libexec.install "assets"
+    libexec.install "workers"
+    libexec.install "acp_registry"
+    libexec.install "README.md"
+    libexec.install "LICENSE"
+    libexec.install "NOTICE"
+    libexec.install "CHANGELOG.md"
+
+    # TODO: Confirm wrapper behavior in the external tap before release.
+    (libexec/"bin").mkpath
+    (libexec/"bin/estacoda").write <<~SH
+      #!/bin/sh
+      exec "#{Formula["node"].opt_bin}/node" "#{libexec}/dist/index.js" "$@"
+    SH
+    chmod 0755, libexec/"bin/estacoda"
+
+    bin.install_symlink libexec/"bin/estacoda"
+  end
+
+  test do
+    system "#{bin}/estacoda", "--version"
+    system "#{bin}/estacoda", "--help"
+  end
+end
