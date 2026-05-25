@@ -8,6 +8,7 @@ import {
   checkForUpdate,
   canApplyUpdate,
   prepareUpdateInfo,
+  readCachedUpdateInfo,
   readCachedUpdateStatus,
   UPDATE_CACHE_TTL_MS,
   type SourceUpdateCommandRunner
@@ -137,6 +138,24 @@ describe("readCachedUpdateStatus", () => {
     );
     const result = await readCachedUpdateStatus(tempDir);
     expect(result).toBe("update-available");
+  });
+
+  it("returns cached update hint when cache is fresh", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({
+        checkedAt: new Date().toISOString(),
+        versionStatus: "update-available",
+        hint: "Update available. Run: estacoda update"
+      })
+    );
+    const result = await readCachedUpdateInfo(tempDir);
+    expect(result).toEqual({
+      versionStatus: "update-available",
+      hint: "Update available. Run: estacoda update"
+    });
   });
 
   it("uses a 6 hour cache TTL", () => {

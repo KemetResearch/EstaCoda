@@ -50,6 +50,7 @@ type ManagedSourceBackupResult =
 type UpdateCacheEntry = {
   checkedAt: string;
   versionStatus: "up-to-date" | "update-available";
+  hint?: string;
 };
 
 export const UPDATE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -58,28 +59,45 @@ function cachePath(homeDir: string): string {
   return join(homeDir, ".estacoda", "update-cache.json");
 }
 
-export async function readCachedUpdateStatus(homeDir: string): Promise<"up-to-date" | "update-available" | "unknown"> {
+export type CachedUpdateInfo = {
+  versionStatus: "up-to-date" | "update-available" | "unknown";
+  hint?: string;
+};
+
+export async function readCachedUpdateInfo(homeDir: string): Promise<CachedUpdateInfo> {
   try {
     const raw = await readFile(cachePath(homeDir), "utf8");
     const parsed = JSON.parse(raw) as UpdateCacheEntry;
     const checkedAt = new Date(parsed.checkedAt).getTime();
     const now = Date.now();
     if (Number.isNaN(checkedAt) || now - checkedAt > UPDATE_CACHE_TTL_MS) {
-      return "unknown";
+      return { versionStatus: "unknown" };
     }
     if (parsed.versionStatus === "up-to-date" || parsed.versionStatus === "update-available") {
-      return parsed.versionStatus;
+      return {
+        versionStatus: parsed.versionStatus,
+        hint: typeof parsed.hint === "string" && parsed.hint.length > 0 ? parsed.hint : undefined,
+      };
     }
-    return "unknown";
+    return { versionStatus: "unknown" };
   } catch {
-    return "unknown";
+    return { versionStatus: "unknown" };
   }
 }
 
-export async function writeCachedUpdateStatus(homeDir: string, status: "up-to-date" | "update-available"): Promise<void> {
+export async function readCachedUpdateStatus(homeDir: string): Promise<"up-to-date" | "update-available" | "unknown"> {
+  return (await readCachedUpdateInfo(homeDir)).versionStatus;
+}
+
+export async function writeCachedUpdateStatus(
+  homeDir: string,
+  status: "up-to-date" | "update-available",
+  hint?: string
+): Promise<void> {
   const entry: UpdateCacheEntry = {
     checkedAt: new Date().toISOString(),
     versionStatus: status,
+    ...(hint !== undefined && hint.length > 0 ? { hint } : {}),
   };
   await mkdir(join(homeDir, ".estacoda"), { recursive: true });
   await writeFile(cachePath(homeDir), JSON.stringify(entry, null, 2) + "\n", "utf8");

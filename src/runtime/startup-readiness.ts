@@ -7,6 +7,7 @@ export type StartupReadinessSnapshot = {
   readonly workspaceVerification: "verified" | "unverified" | "unknown";
   readonly providerReadiness: "ready" | "degraded" | "missing-config" | "unknown";
   readonly versionStatus: "up-to-date" | "update-available" | "unknown";
+  readonly updateHint?: string;
   readonly workspaceDirectory?: string;
   readonly securityMode?: string;
   readonly skillAutonomy?: string;
@@ -20,6 +21,7 @@ export type StartupReadinessInput = {
   readonly verificationReport: SetupVerificationReport;
   readonly model: { readonly provider: string; readonly id: string };
   readonly versionStatus?: "up-to-date" | "update-available" | "unknown";
+  readonly updateHint?: string;
   readonly securityMode?: string;
   readonly skillAutonomy?: string;
 };
@@ -38,12 +40,16 @@ export function collectStartupReadinessSnapshot(
   for (const warning of input.verificationReport.providerDiagnostic.warnings) {
     warnings.push({ kind: "warning", severity: "warn", title: "Provider", message: warning });
   }
+  if (input.versionStatus === "update-available" && input.updateHint !== undefined && input.updateHint.length > 0) {
+    warnings.push({ kind: "warning", severity: "info", title: "Update", message: input.updateHint });
+  }
 
   return {
     workspaceTrust,
     workspaceVerification,
     providerReadiness,
     versionStatus: input.versionStatus ?? "unknown",
+    updateHint: input.updateHint,
     workspaceDirectory: input.workspaceRoot,
     securityMode: input.securityMode,
     skillAutonomy: input.skillAutonomy,

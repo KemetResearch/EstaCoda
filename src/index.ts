@@ -20,6 +20,7 @@ import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
+import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
@@ -249,6 +250,12 @@ async function main(): Promise<void> {
     sessionDb
   });
   await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
+  if (shouldScheduleStartupUpdatePrefetch(argv, canRunInteractive())) {
+    scheduleStartupUpdatePrefetch({
+      homeDir: stateHome.homeDir,
+      workspaceRoot
+    });
+  }
 
   const command = await runCliCommand({
     argv,

@@ -87,7 +87,9 @@ import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
 import { collectSetupVerificationReport } from "../onboarding/verification.js";
-import { readCachedUpdateStatus } from "../lifecycle/update-engine.js";
+import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
+import { detectInstallMethod } from "../lifecycle/install-method.js";
+import { buildStartupUpdateHint } from "../lifecycle/startup-update.js";
 
 export type RuntimeOptions = {
   tokens: ResolvedTokens;
@@ -1320,9 +1322,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         trustStorePath: options.trustStorePath,
         runtime: this as Runtime,
       });
-      const versionStatus = options.homeDir !== undefined
-        ? await readCachedUpdateStatus(options.homeDir)
-        : "unknown";
+      const cachedUpdate = options.homeDir !== undefined
+        ? await readCachedUpdateInfo(options.homeDir)
+        : { versionStatus: "unknown" as const };
+      const updateHint = cachedUpdate.versionStatus === "update-available"
+        ? cachedUpdate.hint ?? await resolveCachedStartupUpdateHint(workspaceRoot, cachedUpdate.versionStatus)
+        : undefined;
       return collectStartupReadinessSnapshot({
         workspaceRoot,
         workspaceTrusted,
@@ -1330,7 +1335,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         model: { provider: options.model.provider, id: options.model.id },
         securityMode: activeSecurityMode,
         skillAutonomy: options.skillAutonomy,
-        versionStatus,
+        versionStatus: cachedUpdate.versionStatus,
+        updateHint,
       });
     },
     taskflow
@@ -1339,6 +1345,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
 function hasTrajectoryStore(db: SessionDB): db is SessionDB & Pick<TrajectoryStore, "saveTrajectory"> {
   return typeof (db as { saveTrajectory?: unknown }).saveTrajectory === "function";
+}
+
+async function resolveCachedStartupUpdateHint(
+  workspaceRoot: string,
+  versionStatus: "update-available"
+): Promise<string | undefined> {
+  const installMethod = await detectInstallMethod({
+    cwd: workspaceRoot,
+    includeCwd: true,
+    entrypointPath: process.argv[1],
+    moduleUrl: import.meta.url
+  }).catch(() => undefined);
+
+  if (installMethod === undefined) {
+    return undefined;
+  }
+
+  return buildStartupUpdateHint({
+    installMethod,
+    versionStatus
+  });
 }
 
 function createSkillVisibilityContext(input: {
