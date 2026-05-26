@@ -53,7 +53,7 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
 With flags:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir ~/custom/estacoda --skip-init
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 This creates a **managed-source** install. The installer:

@@ -40,22 +40,10 @@ estacoda
 
 ## Install with flags
 
-Skip the initial state bootstrap:
+Install to a custom directory and skip the initial state bootstrap:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --skip-init
-```
-
-Install to a custom directory:
-
-```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir ~/src/estacoda
-```
-
-Install from a specific branch:
-
-```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --branch develop
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 ## Contributor path

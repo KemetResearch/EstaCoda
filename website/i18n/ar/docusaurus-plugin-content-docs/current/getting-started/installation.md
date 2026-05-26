@@ -53,7 +53,7 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
 مع الخيارات:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir ~/custom/estacoda --skip-init
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 ينشئ هذا تثبيتًا من نوع **managed-source**. المثبت:

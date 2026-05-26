@@ -40,22 +40,10 @@ estacoda
 
 ## التثبيت مع خيارات
 
-تخطي البدء الافتراضي للحالة:
+التثبيت في مجلد مخصّص وتخطي البدء الافتراضي للحالة:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --skip-init
-```
-
-التثبيت في مجلد مخصّص:
-
-```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir ~/src/estacoda
-```
-
-التثبيت من فرع محدد:
-
-```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --branch develop
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 ## مسار المساهمين
