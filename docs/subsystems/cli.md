@@ -62,7 +62,7 @@ Packed binary behavior is validated from a tarball installed into a temporary pr
 scripts/verify-package-bin.sh
 ```
 
-The npm package metadata exposes `bin.estacoda` for packed installs, but public npm publication remains blocked with `private: true`. The current local/manual installer is `bash scripts/install.sh`; the hosted curl installer is the planned launch direction and should not be described as live until release validation proves it. Do not claim `npm install -g estacoda` or `npx estacoda` works before publication.
+The npm package metadata exposes `bin.estacoda` for packed installs. The hosted curl installer is the default public path. `npm install -g estacoda` will work once the package is published.
 
 ## Trace Commands
 

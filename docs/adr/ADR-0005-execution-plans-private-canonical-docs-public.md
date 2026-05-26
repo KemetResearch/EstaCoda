@@ -18,7 +18,7 @@ Execution plans are detailed, iterative, and contain internal decisions, trade-o
 ## Rejected Alternatives
 
 1. **Keep everything in the repo** — Rejected: sprawl, stale docs, internal detail leakage.
-2. **Separate private repo for docs** — Rejected: overhead for a pre-MVP project.
+2. **Separate private repo for docs** — Rejected: overhead for an early-stage project.
 3. **Mark internal docs with disclaimers** — Rejected: still clutters the public tree.
 
 ## Consequences

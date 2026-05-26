@@ -32,7 +32,7 @@ Eval fixtures run deterministically against known scenarios. The eval runner is 
 
 1. **Log-only tracing** — Rejected. Unstructured logs are not queryable or linkable.
 2. **External observability platform** — Rejected. Local-first requirement.
-3. **Unit tests as primary safety net** — Rejected. Too much code churn pre-MVP; eval fixtures are cheaper.
+3. **Unit tests as primary safety net** — Rejected. Too much code churn before the first public release; eval fixtures are cheaper.
 
 ## Consequences
 
