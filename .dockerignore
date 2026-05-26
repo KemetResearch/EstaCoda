@@ -5,6 +5,7 @@
 .env
 .env.*
 !.env.example
+.install-method.json
 .npmrc
 .pnpm-store
 node_modules
