@@ -325,6 +325,17 @@ html[lang='ar'] .markdown h4 {
 }
 html[lang='ar'] .navbar__title { font-family: 'Cairo', var(--estacoda-serif-heading); }
 
+html[lang='ar'] .navbar__link,
+html[lang='ar'] .menu__link,
+html[lang='ar'] .table-of-contents__link,
+html[lang='ar'] .breadcrumbs__link,
+html[lang='ar'] .footer__title,
+html[lang='ar'] .theme-doc-sidebar-item-category > .menu__list-item-collapsible {
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: 'Cairo', sans-serif;
+}
+
 /* Mirror the active-link left border in RTL */
 html[dir='rtl'] .menu__link--active {
   border-left: none;

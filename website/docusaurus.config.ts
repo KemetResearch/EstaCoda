@@ -76,7 +76,7 @@ const config: Config = {
       },
       items: [
         {
-          to: '/',
+          to: '/getting-started/',
           label: 'Docs',
           position: 'left',
           activeBaseRegex: '^/$|^/(?!ar(?:/|$)).*$',
