@@ -1,27 +1,102 @@
 ---
 title: State and Files
-description: State directory layout.
+description: Global and profile-local state paths.
 sidebar_position: 7
 ---
 
 # State and Files
 
-This page documents **State and Files** for EstaCoda v0.1.0.
+EstaCoda stores state in two scopes: global (under `~/.estacoda/`) and profile-local (under `~/.estacoda/profiles/<profile-id>/`). The active profile is tracked globally; everything else is owned by the selected profile.
 
-## Purpose
+## Global state
 
-State directory layout.
+Default root: `~/.estacoda/`
 
-## Source of Truth
+| Path | Purpose | Created by |
+|------|---------|------------|
+| `active-profile.json` | Active profile pointer | `estacoda init`, `estacoda profile switch` |
+| `trust.json` | Workspace trust grants | `estacoda workspace trust` |
+| `workspace-approvals.json` | Workspace approval grants | Approval commands |
+| `sessions.sqlite` | Global session database with `profile_id` scoping | Runtime initialization |
+| `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
+| `packs/registry.jsonl` | Global pack cache | Pack operations |
+| `memory/shared/` | Global shared memory snippets | Memory operations |
+| `logs/update.log` | Update operation log (gateway mode and managed-source updates) | Update command |
+| `.backups/<label>/` | User-state backups before managed-source mutation | `estacoda update` |
 
-For release-scope decisions and current claims, see:
+Global state is not deleted when a profile is removed. If you want a clean slate, delete the global root. Backup your sessions database first if you care about history.
 
-- `docs/operations/v0.1.0-release-scope.md`
+## Install-local state
 
-## TODO
+Source install directories may contain an `.install-method.json` stamp that proves install ownership. EstaCoda uses this stamp to decide whether a checkout is `managed-source` (installer-owned, may be mutated by update) or `manual-source` (contributor-owned, never self-mutated).
 
-- [ ] Migrate and rewrite content from existing repo docs.
-- [ ] Align claims with v0.1.0 release scope.
-- [ ] Add code examples, CLI snippets, and configuration samples.
-- [ ] Cross-link related docs pages.
-- [ ] Validate technical accuracy against current codebase.
+| Path | Purpose | Created by |
+|------|---------|------------|
+| `.install-method.json` | Install method stamp: method, source URL, branch, installDir | Installer (`scripts/install.sh`, `scripts/setup-estacoda.sh`) |
+
+## Profile-local state
+
+Profile root: `~/.estacoda/profiles/<id>/`
+
+| Path | Purpose | Created by |
+|------|---------|------------|
+| `config.json` | Selected profile runtime configuration | `estacoda init`, `estacoda setup`, manual edit |
+| `.env` | Selected profile secrets | Setup flows, secret store |
+| `auth.json` | Selected profile OAuth auth state | Codex OAuth setup |
+| `USER.md` | Profile user preferences and communication style | Memory promotion, `memory.curate` |
+| `SOUL.md` | Profile identity and safety memory | `memory.curate` |
+| `MEMORY.md` | Profile learned facts and conventions | Memory promotion, `memory.curate` |
+| `promotions.json` | Promotion metadata | Memory promotion |
+| `gateway/` | Gateway state: sessions, approvals, voice mode, handoff codes | Gateway runtime |
+| `cron/jobs.json` | Cron job definitions | `estacoda cron create` |
+| `skills/` | Profile-installed skills | Skill operations, learning |
+| `skills/.usage.json` | Skill usage telemetry | Runtime |
+| `skills/.evolution/` | Skill evolution proposals and manifests | Skill evolution |
+| `logs/` | Profile logs | Gateway, runtime |
+| `channel-media/` | Channel attachment downloads | Gateway adapters |
+| `audio-cache/` | Audio cache | Voice tools |
+| `image-cache/` | Generated image cache | `image.generate` |
+| `temp/` | Temporary files | Various operations |
+| `temp/audio/` | CLI recordings, auto-TTS temps, Telegram conversion, Discord receive audio | Voice operations |
+| `external-memory/` | File-backed external memory records | External memory (if enabled) |
+
+## Ownership rule
+
+- Global files are shared across all profiles.
+- Profile-local files belong to exactly one profile.
+- Commands that create state report which profile owns the change.
+- Commands that inspect state require the selected profile or an explicit `--profile` flag.
+
+## Recovery and inspection
+
+```bash
+# See which profile is active
+cat ~/.estacoda/active-profile.json
+
+# Inspect profile config
+estacoda config show
+
+# List all profiles
+estacoda profiles list
+
+# Check a specific profile's state tree
+ls -la ~/.estacoda/profiles/work/
+
+# View logs for the selected profile
+tail -f ~/.estacoda/profiles/work/logs/gateway.log
+```
+
+## What not to do
+
+- Do not edit `sessions.sqlite` directly unless you know the schema.
+- Do not copy `.env` files between profiles without updating the paths and secrets.
+- Do not delete `gateway/` while the gateway is running; stop the gateway first.
+- Do not delete `.install-method.json` unless you intend to convert a `managed-source` install to `manual-source`.
+- Do not hand-edit `update-cache.json`; it is a machine-generated cache.
+
+## Related docs
+
+- [Configuration](./configuration.md) — config file content
+- [Environment Variables](./environment-variables.md) — env var storage
+- [Profiles](../user-guide/profiles.md) — profile management
+- [Memory](../user-guide/memory.md) — memory file behavior

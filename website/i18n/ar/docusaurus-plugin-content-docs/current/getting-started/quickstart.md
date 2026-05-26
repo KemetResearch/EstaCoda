@@ -1,29 +1,87 @@
 ---
 title: البدء السريع
-description: ابدأ واستخدم EstaCoda خلال 5 دقائق.
+description: شغّل EstaCoda في دقائق.
 sidebar_position: 2
 ---
 
 # البدء السريع
 
-هذه الصفحة ستكون النسخة العربية لمراجعة الصفحة الإنجليزية المرتبطة.
+EstaCoda هو نظام وكيل أمر سطري. تحصل هذه الصفحة بك من الصفر إلى جلسة عمل أولى. تفترض بيئة POSIX مع Node.js 22.18.0 أو أحدث.
 
-## الغرض
+## التثبيت الافتراضي
 
-ابدأ واستخدم EstaCoda خلال 5 دقائق.
+أسرع مسار هو نقطة الدخول العامة:
 
-## ملاحظات مهمة
+```bash
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+```
 
-- اسماء الأوامر، الاختيارات، والمعاملات التقنية تبقى باللغة الإنجليزية.
-- مسارات الملفات، ومتغيرات البيئة، ومعرفات المزودين تبقى باللغة الإنجليزية.
-- لا تزال الترجمة الآلية الكاملة في هذه المرحلة.
+ينشئ هذا تثبيتًا من نوع managed-source تحت `~/.estacoda/estacoda`، ويبني المشروع، ويكتب مشغّلًا إلى `~/.local/bin/estacoda`، ويشغّل `estacoda init`.
 
-## مصدر الحقيقة
+إذا كان `~/.local/bin` غير موجود على PATH، أضفه:
 
-- `docs/operations/v0.1.0-release-scope.md`
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-## قائمة المهام
+ثم قم بتهيئة المزود الأول:
 
-- [ ] ترجمة المحتوى التقني من الصفحة الإنجليزية.
-- [ ] التحقق من المصطلحات التقنية.
-- [ ] المراجعة مع الصفحات العربية المرتبطة.
+```bash
+estacoda setup
+```
+
+يدلّك سيوم التهيئة خلال اختيار المزود، واختيار الموديل، وتهيئة البيانات الاعتمادية. يكتب حالة الملف الشخصي تحت `~/.estacoda/profiles/default/`.
+
+بعد التهيئة، ابدأ جلسة:
+
+```bash
+estacoda
+```
+
+## التثبيت مع خيارات
+
+التثبيت في مجلد مخصّص وتخطي البدء الافتراضي للحالة:
+
+```bash
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
+```
+
+## مسار المساهمين
+
+إذا كنت تخطط لتعديل المصدر، استنسخ المستودعات وشغّل سيوم التهيئة:
+
+```bash
+git clone https://github.com/KemetResearch/EstaCoda.git
+cd EstaCoda
+./scripts/setup-estacoda.sh
+```
+
+ينشئ هذا تثبيتًا من نوع manual-source. يتم الاحتفاظ بالمستودعات أثناء الإزالة، ويعمل التحديث في وضعية الفحص والإرشاد.
+
+## قائمة المهام الأولى
+
+بعد التثبيت، تحقق من الجاهزية:
+
+```bash
+estacoda verify
+```
+
+تحقق من حالة المزود:
+
+```bash
+estacoda model status
+```
+
+شغّل التشخيص:
+
+```bash
+estacoda doctor
+```
+
+## مستندات مرتبطة
+
+- [Installation](./installation.md) — جميع مسارات التثبيت ومتطلبات النظام
+- [Uninstall](./uninstall.md) — إزالة EstaCoda مع الحفاظ على البيانات أو حذفها
+- [Updating](./updating.md) — سلوك التحديث لكل طريقة تثبيت
+- [CLI Commands](../reference/cli-commands.md) — مرجع الأوامر الكامل
+- [State and Files](../reference/state-and-files.md) — أماكن تخزين الحالة

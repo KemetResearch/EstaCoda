@@ -1,31 +1,40 @@
 # Security Policy
 
-EstaCoda is agent infrastructure that can read files, write files, run tools, call model providers, and eventually operate through messaging interfaces. Treat it as security-sensitive software.
+EstaCoda is agent infrastructure with local file access, terminal execution, and messaging interfaces. Treat it as security-sensitive software.
 
-This document defines how to report vulnerabilities, what security boundaries EstaCoda intends to enforce, and what is considered in scope for security review.
+This document defines how to report vulnerabilities, what boundaries EstaCoda enforces, and what is in scope for security review.
 
-For deeper implementation details, see `docs/SECURITY_MODEL.md` once available.
+---
 
-## Reporting a vulnerability
+## Supported Versions
 
-Do not open a public GitHub issue for a security vulnerability.
+| Version | Security support |
+|---|---|
+| `main` | Supported — fixes land here first |
+| Latest `0.x` release | Supported |
+| Older snapshots | Not supported |
 
-Report security issues through one of these private channels:
+Until a later release formalizes long-term support, security fixes target `main` and the latest tagged release.
 
-1. GitHub Security Advisories for the repository.
-2. `security@kemetresearch.com`, once the inbox is active and monitored.
-3. A private maintainer contact only if the first two channels are unavailable.
+---
 
-Before publishing this file publicly, confirm that the security inbox is active. If it is not active yet, remove the email address and rely on GitHub private vulnerability reporting.
+## Reporting a Vulnerability
 
-## What to include
+Do not open a public issue for a security vulnerability.
+
+Report privately via [GitHub Security Advisories](https://github.com/KemetResearch/EstaCoda/security/advisories/new).
+
+A security contact email will be listed here once its monitoring status is confirmed.
+
+---
+
+## What to Include
 
 A useful security report should include:
 
-- A concise title.
-- Severity estimate: critical, high, medium, or low.
+- A concise title and severity estimate: critical, high, medium, or low.
 - Affected component, file path, and relevant line range if known.
-- EstaCoda version, commit SHA, operating system, Node/Bun version, and relevant configuration.
+- EstaCoda version, commit SHA, operating system, and Node.js version.
 - Clear reproduction steps against `main` or the latest release.
 - Expected behavior and actual behavior.
 - Impact: what trust boundary was crossed.
@@ -33,9 +42,9 @@ A useful security report should include:
 - Logs, screenshots, or terminal output, with credentials redacted.
 - Whether the issue requires a malicious project file, malicious skill, malicious model output, compromised dependency, unauthorized gateway user, or local machine access.
 
-## Response expectations
+---
 
-EstaCoda is currently pre-MVP. Security response will be best-effort until formal maintainership and release processes are finalized.
+## Response Process
 
 Target handling process:
 
@@ -46,271 +55,82 @@ Target handling process:
 5. Add regression coverage where practical.
 6. Publish a security advisory or release note after the fix is available.
 
+Response times depend on maintainer availability and issue complexity. No formal SLA is guaranteed.
+
 No bug bounty is currently offered.
 
-## Supported versions
+---
 
-Until the first public stable release, security fixes target `main` and the latest tagged pre-release.
+## Security Model
 
-| Version | Security support |
-| --- | --- |
-| `main` | Supported on a best-effort basis |
-| Latest `0.x` release | Supported once releases begin |
-| Older pre-MVP snapshots | Not supported |
+EstaCoda assumes a single trusted operator controlling a local or self-hosted agent runtime. It protects the operator from unsafe agent behavior, unsafe model output, malicious project content, untrusted skills, unsafe tool execution, and accidental credential exposure.
 
-## Security model
+It does not protect against malicious co-tenants on the same machine, a compromised operating system account, an attacker with write access to EstaCoda configuration files, or a maintainer intentionally approving malicious code.
 
-EstaCoda assumes a single trusted operator controlling a local or self-hosted agent runtime.
+### Security Modes
 
-EstaCoda is designed to protect the operator from unsafe agent behavior, unsafe model output, malicious project content, untrusted skills, unsafe tool execution, and accidental credential exposure.
+EstaCoda supports three security modes:
 
-EstaCoda is not designed to protect against malicious co-tenants on the same machine, a compromised operating system account, an attacker with write access to EstaCoda configuration files, or a maintainer intentionally approving malicious code.
+- `strict` — manual approval for non-trivial actions.
+- `adaptive` — smart assessment with hard-block floor. Default.
+- `open` — allows by default unless a hard block matches. Not "security off."
 
-## Core trust boundaries
+The hard safety floor remains active in all modes. Hard-block decisions are non-overridable.
 
-### Operator trust
+### Approvals and Trust Boundaries
 
-The operator is trusted. The model is not trusted. Project files are not trusted. Tool outputs are not trusted. Third-party skills are not trusted until reviewed and approved.
+Workspace trust is explicit and path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy. It does not enable project config loading or change which profile config is used.
 
-The operator may intentionally weaken protections through configuration. Those choices should be explicit, visible, and reversible.
-
-### Workspace trust
-
-A workspace should be treated as untrusted until the operator explicitly trusts it.
-
-Workspace trust controls whether EstaCoda may perform local file and terminal work in that folder without repeated approval prompts. A workspace may contain prompt injection, malicious instructions, poisoned documentation, unsafe scripts, or dependency traps.
-
-A report is security-relevant if untrusted workspace content can bypass approval, execute tools, mutate trusted files, persist unsafe memory, alter configuration, or escalate beyond the selected workspace boundary.
-
-### Tool execution
-
-Tool calls are a primary security boundary.
-
-Security-sensitive tools include, but are not limited to:
-
-- Terminal execution.
-- File writes and replacements.
-- File deletion.
-- Credential access.
-- Network calls.
-- Package installation.
-- Git operations.
-- Skill installation and promotion.
-- Gateway or messaging actions.
-- Memory writes.
-
-Provider-generated tool calls must be validated against the exposed schema. Invalid tool names, malformed arguments, unauthorized aliases, or tool calls outside the current capability set must fail closed.
-
-### Dangerous command approval
-
-Commands that can destroy data, alter system security, expose credentials, install unknown software, modify shell startup files, change Git history, overwrite system paths, or affect external services should require explicit approval unless the operator has placed the session in an intentionally permissive mode.
+Dangerous commands — recursive deletion, permission weakening, remote script execution, writes to shell profiles or SSH configuration, force-pushes, secret exfiltration — require explicit approval unless the operator has intentionally chosen a permissive mode.
 
 Approval bypasses are security issues.
 
-Examples of high-risk command classes:
+### Credential Handling
 
-- Recursive deletion.
-- Disk formatting or block-device writes.
-- Permission weakening such as world-writable files.
-- Ownership changes across large directory trees.
-- Remote script execution such as piping downloaded content into a shell.
-- Package manager operations from untrusted sources.
-- Writes to shell profiles, SSH configuration, `.env` files, or system configuration.
-- Force-pushes, destructive resets, or history rewrites.
-- Secret printing or exfiltration.
+Credentials belong in the active profile `.env` or `auth.json`. Profile `.env` is created with `0600` permissions when written by the env secret store.
 
-### File access and mutation
+Secrets must not be committed, logged, displayed, or persisted into memory. Redaction protects terminal output, logs, tool previews, gateway messages, and final responses. Redaction is a display and logging control, not permission to pass secrets into untrusted code.
 
-File reads and writes must respect the active workspace boundary and configured policy.
+### Browser and URL Safety
 
-Security-relevant cases include:
+Browser navigation requires `http` or `https`. Private and internal URLs are blocked by default unless explicitly allowed. Cloud metadata endpoints are always blocked.
 
-- Path traversal outside the trusted workspace.
-- Symlink escapes.
-- Writes to credential files or shell startup files without approval.
-- Silent mutation of generated docs, config files, lockfiles, or source files outside the requested scope.
-- Inconsistent restrictions where a file tool blocks an action but terminal access allows the same action without approval.
+Website blocklists support exact domains, wildcard domains, and shared files. `browser.cdp` is approval-gated by default.
 
-### Provider and prompt injection boundary
+### Gateway Approval Boundaries
 
-Model output is instructions, not authority.
+Gateway approvals are durable in the `pending_approvals` table inside `~/.estacoda/sessions.sqlite` and are scoped by `profile_id` plus session where applicable. `estacoda gateway approvals list|approve|deny` operates on the same durable rows that block live gateway executions.
 
-A prompt injection is a security issue when it causes a concrete boundary failure, such as:
+Gateway access denies by default unless a platform is explicitly configured for open access.
 
-- Running a blocked tool.
-- Bypassing approval.
-- Reading or leaking secrets.
-- Persisting malicious memory.
-- Installing or promoting an unsafe skill.
-- Modifying trusted configuration.
-- Sending messages or network requests without authorization.
-- Concealing tool activity or misleading the operator about what happened.
+---
 
-A prompt injection that only persuades the model to produce a bad answer, without crossing a tool, memory, credential, or approval boundary, is normally handled as a model-quality issue rather than a security vulnerability.
+## What Is Out of Scope
 
-### Skills
+The following are not considered security vulnerabilities in EstaCoda itself:
 
-Skills are high-trust procedural code and documentation.
+- **Native Windows installer** — not part of the v0.1.0 support surface.
+- **Experimental WhatsApp channel** — gated behind `experimental: true`; Baileys is an unofficial API with account-risk implications.
+- **Registered-but-not-live cloud browser providers** — Browserbase, browser-use, Firecrawl, and Camofox are registered stubs, not live-supported.
+- **Registered-but-not-live web research providers** — Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs; only guarded fetch extraction is live.
+- **Local environment compromise** not caused by EstaCoda — a compromised OS account, malicious co-tenant, or physical access to the machine.
+- **Model hallucination** without tool execution, persistence, or boundary crossing.
+- **Unsafe behavior after the operator explicitly disables approvals** or runs in a permissive mode.
+- **Denial-of-service through intentionally huge local inputs**, unless it affects default public workflows.
 
-A skill may contain instructions, templates, references, scripts, assets, required environment variables, and workflow expectations. This makes skills powerful and dangerous.
+---
 
-Security-relevant cases include:
+## Secret Handling Rules
 
-- A skill that hides dangerous behavior behind harmless metadata.
-- A skill that requests unnecessary credentials.
-- A skill that causes unsafe terminal commands or file writes.
-- A skill that bypasses workspace trust.
-- A skill that modifies itself or another skill without review.
-- A skill that smuggles prompt injection into references, templates, scripts, or assets.
-- A skill promotion path that accepts unsafe learned behavior without evaluation and approval.
+- Store provider API keys, tokens, and OAuth credentials in the active profile `.env` or `auth.json`.
+- Do not commit `.env`, `auth.json`, or any file containing real secrets.
+- Do not paste secrets into issues, pull requests, logs, or screenshots.
+- Documentation and examples must use obvious placeholders.
 
-Third-party and external skills must be treated as untrusted until reviewed.
+---
 
-### Memory and learning
+## Documentation
 
-Memory and learning systems must not become an unreviewed persistence channel for malicious instructions.
+For the user-facing security and approvals guide, see [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals).
 
-Security-relevant cases include:
-
-- Prompt injection persisted into user memory.
-- Unsafe preferences promoted as durable instructions.
-- Malicious observations influencing future sessions without review.
-- Skill patches promoted without evaluation.
-- Hidden instructions stored in summaries, memories, or learned workflow records.
-- Sensitive data stored unnecessarily in memory.
-
-Memory writes and skill-learning writes should be auditable, explainable, and reversible.
-
-### Gateway and messaging interfaces
-
-Messaging interfaces such as Telegram, Discord, Slack, email, or future channels are remote control surfaces.
-
-Security-relevant cases include:
-
-- Unauthorized users sending commands to the agent.
-- Weak or missing allowlists.
-- Pairing-code bypass.
-- Message spoofing.
-- Attachment handling that leads to unsafe file writes or execution.
-- Remote users triggering local terminal commands without operator approval.
-- Voice, image, or document inputs causing unsafe tool execution.
-
-Gateway access must deny by default unless a platform is explicitly configured for open access.
-
-Voice-specific gateway handling must preserve the deterministic STT preprocess gate: profile-local allowed roots, audio type/size validation, provider readiness checks, and faster-whisper download denial before worker startup. Auto-TTS must remain object/artifact based and must not treat arbitrary `MEDIA:/path` model text as a voice-delivery instruction. Voice credentials are direct env-var references only; do not add credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources for voice.
-
-### Secrets and credentials
-
-Secrets must not be committed, logged, displayed, or persisted into memory.
-
-Secrets include:
-
-- Provider API keys.
-- GitHub tokens.
-- Telegram bot tokens.
-- OAuth tokens.
-- SSH keys.
-- `.env` values.
-- Cloud credentials.
-- Database credentials.
-- Private webhook URLs.
-
-Credential redaction should protect terminal output, logs, tool previews, gateway messages, and final responses. Redaction is a display and logging control, not permission to pass secrets into untrusted code.
-
-### Supply chain
-
-The dependency and skill supply chain is in scope.
-
-Security-relevant cases include:
-
-- Malicious dependencies.
-- Dependency confusion.
-- Unsafe lifecycle scripts.
-- Generated lockfile changes that introduce unexpected packages.
-- GitHub Actions that use unpinned third-party actions.
-- Install scripts that execute remote code without review.
-- Bundled skills or templates that include hidden executable behavior.
-
-## In-scope vulnerability examples
-
-The following are in scope:
-
-- Bypassing dangerous command approval.
-- Executing terminal commands from untrusted project content without approval.
-- Reading files outside the trusted workspace through path traversal or symlink escape.
-- Writing to sensitive files without approval.
-- Leaking provider API keys, tokens, or secrets through logs, gateway messages, tool output, memory, or final responses.
-- Unauthorized gateway user control.
-- Skill installation or promotion bypass.
-- Memory poisoning that persists malicious operational instructions.
-- Malformed provider tool calls that execute despite schema failure.
-- Dependency or install flow that enables arbitrary code execution unexpectedly.
-- CI workflow injection or unsafe release automation.
-- Sandbox escape once sandboxed backends exist.
-
-## Out-of-scope or lower-priority reports
-
-The following are usually not considered vulnerabilities unless they cross a concrete security boundary:
-
-- Model hallucination without tool execution or persistence.
-- Prompt injection that only affects the current answer and does not trigger unauthorized tools, memory, credentials, or file changes.
-- Unsafe behavior after the operator explicitly disables approvals or runs in a permissive mode.
-- Reports requiring prior write access to EstaCoda configuration, local credentials, or source files.
-- Local host compromise outside EstaCoda.
-- Denial-of-service through intentionally huge local inputs, unless it affects default public workflows.
-- Complaints that local terminal execution can access local files when the operator intentionally enabled local terminal execution.
-- Social engineering against a maintainer outside the software boundary.
-
-## Secure configuration guidance
-
-Recommended defaults for normal development:
-
-- Keep dangerous command approval enabled.
-- Trust only the workspace you intend EstaCoda to modify.
-- Keep credentials in local environment files that are ignored by Git.
-- Never commit `.env` files, provider keys, tokens, or private SSH material.
-- Review generated diffs before committing.
-- Treat third-party skills as code.
-- Review skill metadata, scripts, templates, and required environment variables before use.
-- Do not expose a gateway publicly without allowlists, network protection, and secret hygiene.
-- Use containers or isolated environments for untrusted repositories once supported.
-- Keep CI checks required before merging.
-
-## Secure contribution expectations
-
-Security-sensitive PRs must include:
-
-- The affected boundary.
-- Threat model summary.
-- Tests or smoke coverage.
-- Manual verification steps.
-- Notes on backwards compatibility.
-- Any new configuration flags and their failure mode.
-- Whether behavior fails open or fails closed.
-
-Agent-generated PRs must disclose agent involvement and include human review before merge.
-
-## Disclosure policy
-
-Do not publicly disclose unresolved vulnerabilities before maintainers have had a reasonable opportunity to investigate and patch.
-
-After a fix is available, maintainers should publish a brief advisory or release note describing:
-
-- Affected versions.
-- Impact.
-- Fixed version or commit.
-- Workaround if available.
-- Credit, if the reporter wants attribution.
-
-## Maintainer checklist
-
-Before publishing the repository publicly:
-
-- Enable GitHub private vulnerability reporting.
-- Confirm the security contact email or remove it.
-- Add `SECURITY.md` to the root of the repository.
-- Add `docs/SECURITY_MODEL.md` for deeper architecture details.
-- Add CI checks that prevent committed secrets.
-- Add dependency and supply-chain checks.
-- Add CODEOWNERS for security-sensitive paths.
-- Require review for changes to approval logic, tool execution, gateway auth, skills, memory, credentials, install scripts, and CI workflows.
+For CLI gateway approval commands, see [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands).

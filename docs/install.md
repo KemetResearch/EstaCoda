@@ -58,7 +58,7 @@ Do not treat this as a verified public path until the hosted installer is live a
 
 ## Optional Future Npm Path
 
-The package has local installability metadata for tarball validation, but public npm publication remains blocked with `private: true`.
+The package has local installability metadata for tarball validation. `npm install -g estacoda` will work once the package is published.
 
 Do not claim these work until the package is actually published:
 

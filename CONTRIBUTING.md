@@ -1,66 +1,22 @@
 # Contributing to EstaCoda
 
-Thank you for contributing to EstaCoda.
+Thank you for contributing.
 
-This guide explains how to decide what to build, how to set up the project locally, how to work safely with agent-generated code, and how to get a pull request reviewed.
-
-EstaCoda is pre-MVP software. Contributions should make the product more reliable, safer, easier to install, easier to understand, or easier to maintain. Keep changes small, testable, and reversible.
+EstaCoda is agent infrastructure with local file and terminal access. Contributions should make the runtime more reliable, safer, easier to understand, or easier to maintain. Keep changes small, testable, and reversible.
 
 ---
 
-## Contribution priorities
+## Development Posture
 
 We value contributions in this order:
 
-1. Bug fixes
-   - Crashes
-   - Incorrect behavior
-   - Data loss
-   - Broken setup or onboarding
-   - Regressions in existing CLI, agent, tool, or skill behavior
-
-2. Security hardening
-   - Prompt injection resistance
-   - Shell command safety
-   - Path traversal prevention
-   - Workspace trust boundaries
-   - Secret redaction
-   - Tool approval and permission handling
-
-3. MVP reliability
-   - Better error handling
-   - Better recovery from malformed provider responses
-   - More deterministic tool execution
-   - Better smoke coverage
-   - Clearer diagnostics through `doctor` commands
-
-4. Cross-platform compatibility
-   - macOS
-   - Linux
-   - WSL2
-   - Terminal behavior across common shells
-
-5. Agent and skill workflow improvements
-   - Better skill discovery
-   - Safer skill loading
-   - Better intent routing
-   - Better evaluation fixtures
-   - Better review and promotion workflows
-
-6. Documentation
-   - Setup instructions
-   - Contributor guidance
-   - Security explanations
-   - Architecture notes
-   - Troubleshooting examples
-
-7. New features
-   - Features should be narrow, justified, and linked to the roadmap.
-   - Avoid large speculative rewrites before MVP.
-
----
-
-## What to work on first
+1. Bug fixes — crashes, incorrect behavior, data loss, broken setup, regressions.
+2. Security hardening — shell command safety, path traversal prevention, workspace trust boundaries, secret redaction, approval logic.
+3. Reliability — better error handling, recovery from malformed provider responses, deterministic tool execution, clearer diagnostics.
+4. Cross-platform compatibility — macOS, Linux, WSL2, shell behavior across common terminals.
+5. Agent and skill workflow improvements — safer skill loading, better intent routing, better evaluation fixtures.
+6. Documentation — setup instructions, security explanations, architecture notes, troubleshooting examples.
+7. New features — narrow, justified, and linked to an existing gap or limitation.
 
 Good first contributions:
 
@@ -69,9 +25,9 @@ Good first contributions:
 - Improve an unclear error message.
 - Improve setup or onboarding copy.
 - Improve documentation for an existing behavior.
-- Add a small guardrail around an unsafe edge case.
+- Add a guardrail around an unsafe edge case.
 
-Bad first contributions:
+Avoid as first contributions:
 
 - Large architecture rewrites.
 - New provider integrations without tests.
@@ -81,121 +37,24 @@ Bad first contributions:
 
 ---
 
-## Common contribution paths
+## Runtime Requirements
 
-### Bug fixes
+| Requirement | Notes |
+|---|---|
+| Git | Required for all contribution workflows. |
+| Node.js >= 22.18.0 | Production runtime contract. |
+| pnpm via Corepack | Use Corepack to activate the pnpm version declared in `package.json`. |
+| Python 3.11+ | Optional — for Python-based skills and scripts. |
 
-A strong bug fix includes:
-
-- A clear description of the bug.
-- A minimal reproduction.
-- A focused code change.
-- A test or smoke case when practical.
-- A note about security impact if the bug touches commands, files, tools, skills, providers, or memory.
-
-### Documentation
-
-Documentation changes should be direct and verifiable.
-
-Use documentation for:
-
-- Setup steps
-- Expected behavior
-- Known limitations
-- Security boundaries
-- Contributor workflows
-- Architecture explanations
-
-Do not use documentation to promise features that do not exist.
-
-### Skills
-
-Make something a skill when it can be expressed through:
-
-- Instructions
-- Existing tools
-- Shell commands
-- Templates
-- References
-- Helper scripts
-
-Skills should be preferred when the capability does not need new runtime primitives.
-
-Bundled skills should be broadly useful. Specialized skills should stay outside the core repo until they have repeated demand and clear maintenance ownership.
-
-### Tools
-
-Make something a tool only when it needs precise runtime behavior that should not depend on model interpretation.
-
-Examples:
-
-- File operations
-- Terminal execution
-- Provider-facing tool schemas
-- Skill inspection
-- Security assessment
-- Binary or structured data handling
-- Gateway integrations
-- Anything that manages secrets, permissions, or external auth
-
-A new tool must include:
-
-- A clear schema
-- Deterministic behavior
-- Error handling
-- Security analysis
-- Tests or smoke coverage
-- Documentation if user-facing
-
-### Providers
-
-Provider changes must preserve the core tool loop.
-
-Provider work should include:
-
-- Schema compatibility notes
-- Tool-call behavior notes
-- Error recovery behavior
-- Live or mocked verification
-- No hardcoded provider-specific assumptions unless isolated behind an adapter
-
-### Security-sensitive changes
-
-Security-sensitive changes include anything touching:
-
-- Terminal commands
-- File reads or writes
-- Workspace trust
-- Tool approvals
-- Prompt construction
-- Provider responses
-- Skill loading
-- External skill directories
-- Memory promotion
-- Secrets and environment variables
-- Gateway or messaging integrations
-
-These changes require extra review and must not be bundled with unrelated refactors.
+Bun is not required. Some scripts accept Bun as an optional dev-speed lane, but CI and production run on Node.
 
 ---
 
-## Development setup
-
-### Prerequisites
-
-| Requirement | Notes |
-| --- | --- |
-| Git | Required for all contribution workflows. |
-| Node.js | Node >= 22.18.0 is the production runtime contract. |
-| Corepack / pnpm | Use Corepack to activate the pnpm version declared in `package.json`. |
-| Bun | Optional dev-speed lane only; not required for normal development or production runtime. |
-| Python 3.11+ | Optional for Python-based skills, scripts, and compatibility checks. |
-
-### Clone and install
+## Local Setup
 
 ```bash
-git clone git@github.com:KemetResearch/estacoda.git
-cd estacoda
+git clone https://github.com/KemetResearch/EstaCoda.git
+cd EstaCoda
 corepack enable
 pnpm install
 ```
@@ -203,14 +62,22 @@ pnpm install
 If you are contributing from a fork:
 
 ```bash
-git clone git@github.com:<your-username>/estacoda.git
-cd estacoda
-git remote add upstream git@github.com:KemetResearch/estacoda.git
+git clone https://github.com:<your-username>/EstaCoda.git
+cd EstaCoda
+git remote add upstream https://github.com/KemetResearch/EstaCoda.git
 corepack enable
 pnpm install
 ```
 
-### Local environment
+Alternatively, run the repo setup script:
+
+```bash
+./scripts/setup-estacoda.sh
+```
+
+The script installs dependencies, builds the project, and offers to symlink a local wrapper.
+
+### Environment
 
 If the repo includes an example environment file, copy it:
 
@@ -226,199 +93,12 @@ Rules:
 - Never commit real API keys.
 - Never paste secrets into issues, pull requests, logs, screenshots, or test fixtures.
 - Use obvious placeholders such as `TEST_OPENROUTER_API_KEY` in tests.
-- Prefer local-only config files for provider credentials.
-
-### Run checks
-
-Run the checks that apply to your change.
-
-Minimum local verification:
-
-```bash
-pnpm run typecheck
-pnpm run smoke
-git diff --check
-```
-
-If the repo exposes additional scripts, run the relevant ones:
-
-```bash
-pnpm run test
-pnpm run build
-pnpm run smoke:dist
-```
-
-If your change touches provider tool-calling, run the relevant live or mocked provider check documented by the repo.
-
-If your change touches install, onboarding, CLI rendering, terminal behavior, or filesystem paths, test manually in a fresh shell.
 
 ---
 
-## Project structure
+## Branch Workflow
 
-The exact tree will evolve, but contributors should expect the project to be organized around these areas:
-
-```text
-estacoda/
-├── src/
-│   ├── cli/                 # CLI commands, onboarding, terminal UI primitives
-│   ├── agent/               # Agent loop, prompt assembly, provider interaction
-│   ├── tools/               # Runtime tools exposed to the model
-│   ├── skills/              # Skill loading, cataloging, viewing, evaluation
-│   ├── security/            # Safety policies, command assessment, trust boundaries
-│   ├── memory/              # Persistent memory and learning records
-│   ├── providers/           # Model provider adapters and schema normalization
-│   └── gateway/             # Messaging or external interface adapters, when enabled
-├── skills/                  # Bundled official skills
-├── docs/                    # Public documentation and contributor guidance
-├── tests/                   # Unit, integration, and fixture-based tests
-├── scripts/                 # Repo maintenance and local development scripts
-├── AGENTS.md                # Guidance for coding agents and AI assistants
-├── CONTRIBUTING.md          # This file
-├── SECURITY.md              # Security reporting and trust model
-└── README.md                # User-facing project overview
-```
-
-Do not move large areas of the codebase without a prior issue or design discussion.
-
----
-
-## Code style
-
-### TypeScript
-
-- Prefer explicit types at module boundaries.
-- Keep functions small.
-- Keep side effects isolated.
-- Avoid broad `any`.
-- Avoid hidden global state.
-- Use clear names over clever abstractions.
-- Return structured errors where the caller needs to recover.
-- Do not swallow errors silently.
-- Keep provider-specific logic behind provider adapters.
-- Keep security-sensitive checks centralized.
-
-### Comments
-
-Write comments only when they explain:
-
-- Intent
-- Trade-offs
-- Security reasoning
-- Compatibility constraints
-- Non-obvious provider behavior
-- Why a dangerous-looking operation is safe
-
-Do not narrate obvious code.
-
-### Error handling
-
-Errors should help users and maintainers understand what failed.
-
-Good errors include:
-
-- What failed
-- Why it likely failed
-- Whether the operation was blocked for safety
-- What command or config area to check
-- No secrets
-
-### Cross-platform rules
-
-- Use `path` utilities instead of string path concatenation.
-- Do not assume `/tmp`, `~`, Bash, GNU utilities, or macOS-only behavior.
-- Treat terminal rendering as fragile.
-- Keep CLI selectors and redraw logic centralized.
-- Avoid hardcoded absolute paths.
-- Test file and process behavior on macOS and Linux when touched.
-
----
-
-## Security rules
-
-EstaCoda is an agent runtime with local file and terminal access. Security is not a feature layer. It is part of the core architecture.
-
-### Required practices
-
-- Validate paths before reading or writing.
-- Resolve symlinks before access-control decisions.
-- Redact secrets from logs and model-visible text.
-- Never print real API keys.
-- Keep destructive commands behind approval boundaries.
-- Keep workspace trust explicit.
-- Treat skill instructions as untrusted unless their source is trusted.
-- Treat provider output as untrusted.
-- Treat user-provided files as untrusted.
-- Treat agent-generated code as untrusted until reviewed.
-- Add tests for bypasses where practical.
-
-### Do not weaken these boundaries
-
-Do not bypass or weaken:
-
-- Workspace trust checks
-- Tool approval checks
-- Path allowlists or denylists
-- Secret redaction
-- Prompt-injection filters
-- Skill source trust logic
-- Human review for promoted learned behavior
-- Review gates for medium-risk or high-risk changes
-
-### Security reporting
-
-Do not open public issues for vulnerabilities.
-
-Report security vulnerabilities using the process in `SECURITY.md`.
-
----
-
-## Agent-generated contributions
-
-AI coding agents are allowed, but the human contributor is responsible for the result.
-
-Agent-generated changes must follow the same review standard as human-written code.
-
-### Required agent discipline
-
-- One task per branch.
-- One logical change per pull request.
-- No unrelated cleanup.
-- No broad refactors without prior discussion.
-- No generated code that the contributor cannot explain.
-- No weakening of security checks to make tests pass.
-- No committing secrets, logs, local config, or machine-specific paths.
-
-### Include in the pull request
-
-If an agent produced or significantly modified the code, include:
-
-- The goal given to the agent.
-- The files changed.
-- The checks run.
-- Any known limitations.
-- Any security-sensitive areas touched.
-- Whether the human contributor reviewed the diff manually.
-
-### Agent review standard
-
-Before submitting, inspect:
-
-```bash
-git diff
-git status
-git diff --check
-pnpm run typecheck
-pnpm run smoke
-```
-
-Do not submit an agent change only because the agent said checks passed. Run the checks yourself or show the CI result.
-
----
-
-## Branch naming
-
-Use short, descriptive branch names.
+Branch from the current `main`. Use short, descriptive names.
 
 ```text
 fix/onboarding-selector-redraw
@@ -429,212 +109,125 @@ refactor/skill-catalog-loader
 chore/update-ci
 ```
 
-Preferred prefixes:
+Keep pull requests scoped. Do not mix documentation and code churn without a clear reason. One logical change per PR.
 
-| Prefix | Use for |
-| --- | --- |
-| `fix/` | Bug fixes |
-| `feat/` | New user-facing behavior |
-| `docs/` | Documentation |
-| `test/` | Tests and fixtures |
-| `refactor/` | Internal restructuring with no behavior change |
-| `chore/` | Maintenance, dependencies, CI |
-
----
-
-## Commit messages
-
-Use Conventional Commits.
+Use Conventional Commits:
 
 ```text
 <type>(<scope>): <description>
 ```
 
-Examples:
-
-```text
-fix(cli): prevent selector redraw from scrolling terminal
-feat(skills): add proposal review command
-docs(security): clarify workspace trust boundary
-test(router): add fixture for ambiguous coding intent
-chore(ci): add typecheck to pull request workflow
-```
-
-Common types:
-
-| Type | Use for |
-| --- | --- |
-| `fix` | Bug fixes |
-| `feat` | New behavior |
-| `docs` | Documentation |
-| `test` | Tests |
-| `refactor` | Code restructuring |
-| `chore` | Build, CI, dependency updates |
-| `security` | Security hardening |
-
-Common scopes:
-
-```text
-cli
-agent
-tools
-skills
-security
-providers
-gateway
-memory
-docs
-ci
-install
-router
-```
+Common types: `fix`, `feat`, `docs`, `test`, `refactor`, `chore`, `security`.
 
 ---
 
-## Pull request process
+## Validation
 
-### Before opening a pull request
+Run the checks that apply to your change.
 
-Confirm:
+Minimum local verification:
+
+```bash
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run build
+```
+
+If your change touches the compiled output or distribution:
+
+```bash
+pnpm run smoke:dist
+pnpm run audit:esm
+pnpm run audit:runtime-imports
+```
+
+If your change touches install, update, or uninstall behavior:
+
+```bash
+pnpm run validate:install
+pnpm run validate:source-install
+pnpm run validate:uninstall
+```
+
+If your change touches packaging:
+
+```bash
+pnpm run pack:dry-run
+pnpm run verify:local-bin
+```
+
+If your change touches Docker:
+
+```bash
+pnpm run validate:docker
+```
+
+If your change touches provider tool-calling, run the relevant live or mocked provider check.
+
+If your change touches install, onboarding, CLI rendering, terminal behavior, or filesystem paths, test manually in a fresh shell.
+
+---
+
+## Documentation Contribution Rules
+
+Docusaurus source lives under `website/docs/`. Arabic mirrors live under `website/i18n/ar/docusaurus-plugin-content-docs/current/`.
+
+Documentation must match the current release scope and implemented behavior. Do not document planned behavior that is not yet implemented.
+
+Public docs must not contain marketing language. Use concrete, operator-focused prose. Every page should answer: what is this, why does it exist, when should the user care, how does it behave, what commands or files are involved, what can go wrong, and how does the user recover.
+
+English is the canonical drafting source. Arabic documentation must mirror the full launch set where a launch-critical English page exists.
+
+---
+
+## Security and Safety Contribution Rules
+
+Hard safety blocks are not optional. Do not bypass or weaken:
+
+- Workspace trust checks
+- Tool approval checks
+- Path allowlists or denylists
+- Secret redaction
+- Prompt-injection filters
+- Skill source trust logic
+- Human review for promoted learned behavior
+- Review gates for medium-risk or high-risk changes
+
+Security-sensitive changes include anything touching terminal commands, file reads or writes, workspace trust, tool approvals, prompt construction, provider responses, skill loading, external skill directories, memory promotion, secrets, gateway or messaging integrations.
+
+These changes require extra review and must not be bundled with unrelated refactors.
+
+Do not commit generated or private artifacts unless they are explicitly intended for the repo.
+
+---
+
+## Pull Request Expectations
+
+Before opening a pull request, confirm:
 
 - The branch is up to date with `main`.
-- The change is focused.
-- The diff contains no secrets.
-- Local-only files are not committed.
-- Typecheck passes.
-- Smoke checks pass.
-- The PR includes testing notes.
-- Security-sensitive areas are identified.
+- All relevant validation scripts pass.
+- `git diff --check` reports no whitespace errors.
+- The change includes tests or smoke cases where practical.
 
-Recommended flow:
+In the PR description, include:
 
-```bash
-git fetch upstream
-git checkout main
-git pull upstream main
-git checkout -b fix/short-description
-# make changes
-pnpm run typecheck
-pnpm run smoke
-git diff --check
-git status
-git diff
-git add .
-git commit -m "fix(scope): short description"
-git push origin fix/short-description
-```
+- What behavior changed and why.
+- Which validation commands you ran.
+- Known limitations or deferred work.
+- Whether the change touches security-sensitive areas.
 
-### Pull request description
-
-Include:
-
-- What changed
-- Why it changed
-- How to test it
-- Which commands were run
-- Screenshots or terminal output when relevant
-- Related issue, if any
-- Security impact, if any
-- Agent involvement, if any
-
-### Review expectations
-
-Maintainers may ask for:
-
-- Smaller diffs
-- More tests
-- Clearer docs
-- Safer defaults
-- More explicit error handling
-- Stronger permission boundaries
-- Removal of unrelated changes
-
-Security-sensitive pull requests may require review from a code owner.
+If an AI coding agent produced or significantly modified the code, disclose it and confirm that a human reviewed the diff manually.
 
 ---
 
-## Issue reporting
+## What Not To Do
 
-Use GitHub Issues for non-security bugs, feature requests, documentation gaps, and support questions.
-
-A good bug report includes:
-
-- Operating system
-- Shell
-- Node.js version
-- pnpm version
-- Bun version, only if using an optional Bun lane
-- EstaCoda version or commit
-- Install method
-- Command run
-- Expected behavior
-- Actual behavior
-- Minimal reproduction
-- Logs with secrets removed
-
-For setup issues, include:
-
-```bash
-node --version
-pnpm --version
-git --version
-```
-
-Do not paste secrets.
-
----
-
-## Design proposals
-
-Open a design issue before building:
-
-- New provider support
-- New tool categories
-- New gateway integrations
-- Changes to skill trust or promotion
-- Changes to the security model
-- Changes to memory persistence
-- Large CLI or TUI changes
-- Public API changes
-- Breaking config changes
-
-A design issue should include:
-
-- Problem
-- Proposed behavior
-- Alternatives considered
-- Security impact
-- User impact
-- Migration impact
-- Test plan
-
----
-
-## Documentation standards
-
-Documentation should be:
-
-- Accurate
-- Current
-- Plain
-- Verifiable
-- Honest about limitations
-
-Avoid:
-
-- Marketing language
-- Overclaiming
-- Future promises written as current behavior
-- Hidden assumptions
-- Unexplained jargon
-- Commands that have not been tested
-
-When behavior is experimental, label it experimental.
-
-When a command is platform-specific, say so.
-
----
-
-## License
-
-By contributing to EstaCoda, you agree that your contribution will be licensed under the repository license.
+- Do not claim unsupported providers or channels as stable.
+- Do not bypass install ownership checks.
+- Do not weaken state preservation.
+- Do not commit generated or private artifacts unless intended.
+- Do not describe Bun as required for normal development.
+- Do not instruct contributors to publish npm packages.
+- Do not include release-manager-only steps as normal contributor workflow.

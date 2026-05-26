@@ -27,7 +27,7 @@ Generated artifacts go under `.estacoda/graphs/`:
 
 1. **Commit full generated graphs** — Rejected: stale bloat, local path leakage.
 2. **No graphs at all** — Rejected: useful for onboarding and architecture review.
-3. **Graphs in CI only** — Rejected: local generation is faster and more flexible.
+3. **Graphs in CI only** — Rejected: local generation is faster and keeps iteration local.
 
 ## Consequences
 
