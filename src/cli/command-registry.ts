@@ -358,6 +358,14 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
+    name: "uninstall",
+    aliases: [],
+    category: "System",
+    description: "Remove EstaCoda code, wrappers, services, and optionally user data",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
     name: "version",
     aliases: ["--version", "-v"],
     category: "System",

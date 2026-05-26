@@ -19,6 +19,7 @@ live-tool-smoke.ts
 .env
 .env.*
 !.env.example
+.install-method.json
 
 .estacoda/
 .docusaurus/

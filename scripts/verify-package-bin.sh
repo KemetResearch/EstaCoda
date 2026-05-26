@@ -5,17 +5,25 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT=""
 TARBALL=""
 
+cleanup_package_tarballs() {
+  local package_tarball
+  for package_tarball in "$ROOT"/estacoda-*.tgz; do
+    if [ -e "$package_tarball" ]; then
+      rm -f -- "$package_tarball"
+    fi
+  done
+}
+
 cleanup() {
   if [ -n "$TMP_ROOT" ] && [ -d "$TMP_ROOT" ]; then
     rm -rf "$TMP_ROOT"
   fi
-  if [ -n "$TARBALL" ] && [ -f "$ROOT/$TARBALL" ]; then
-    rm -f "$ROOT/$TARBALL"
-  fi
+  cleanup_package_tarballs
 }
 trap cleanup EXIT
 
 cd "$ROOT"
+cleanup_package_tarballs
 
 pnpm run build
 
@@ -67,6 +75,7 @@ process.stdin.on("end", () => {
     "dist/index.js",
     "scripts/install.sh",
     "scripts/setup-estacoda.sh",
+    "scripts/uninstall.sh",
     "scripts/estacoda-wrapper.sh",
     "README.md",
     "LICENSE",

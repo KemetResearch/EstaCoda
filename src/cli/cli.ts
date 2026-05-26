@@ -153,6 +153,7 @@ import {
 import { runVersionCommand } from "./version-command.js";
 import { runInitCommand } from "./init-command.js";
 import { runUpdateCommand } from "./update-command.js";
+import { runUninstallCommand } from "./uninstall-command.js";
 import { isBackupReady } from "../lifecycle/state-preservation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import {
@@ -318,6 +319,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return init(options, args);
     case "update":
       return update(options, args);
+    case "uninstall":
+      return uninstall(options, args);
     case "version":
       return version();
     case "help":
@@ -547,6 +550,20 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
     homeDir: options.homeDir,
     profileId: options.profileId,
     workspaceRoot: options.workspaceRoot
+  });
+
+  return {
+    handled: true,
+    exitCode: result.exitCode,
+    output: result.output
+  };
+}
+
+async function uninstall(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const result = await runUninstallCommand({
+    args,
+    homeDir: options.homeDir,
+    profileId: options.profileId
   });
 
   return {
