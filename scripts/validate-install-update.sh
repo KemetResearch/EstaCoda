@@ -181,6 +181,9 @@ pnpm run verify:package-bin
 echo "==> Update routing validation"
 pnpm exec vitest run src/lifecycle/install-method.test.ts src/cli/update-command.test.ts
 
+echo "==> Uninstall validation"
+pnpm run validate:uninstall
+
 validate_managed_source_update
 
 "$ROOT/scripts/validate-homebrew-handoff.sh"

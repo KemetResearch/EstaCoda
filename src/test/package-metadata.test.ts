@@ -53,6 +53,7 @@ describe("package installability metadata", () => {
       "acp_registry",
       "scripts/install.sh",
       "scripts/setup-estacoda.sh",
+      "scripts/uninstall.sh",
       "scripts/estacoda-wrapper.sh",
       "README.md",
       "LICENSE",

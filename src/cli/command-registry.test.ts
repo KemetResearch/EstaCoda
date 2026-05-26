@@ -390,6 +390,7 @@ describe("global commandRegistry", () => {
 
   it("has CLI commands pre-registered", () => {
     expect(commandRegistry.resolve("setup")?.scope).toBe("cli");
+    expect(commandRegistry.resolve("uninstall")?.scope).toBe("cli");
     expect(commandRegistry.resolve("verify")?.scope).toBe("cli");
     expect(commandRegistry.resolve("tools")?.scope).toBe("both");
   });

@@ -75,6 +75,7 @@ process.stdin.on("end", () => {
     "dist/index.js",
     "scripts/install.sh",
     "scripts/setup-estacoda.sh",
+    "scripts/uninstall.sh",
     "scripts/estacoda-wrapper.sh",
     "README.md",
     "LICENSE",

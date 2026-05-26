@@ -14,6 +14,7 @@ Run focused helpers:
 
 ```bash
 pnpm run validate:source-install
+pnpm run validate:uninstall
 pnpm run validate:docker
 pnpm run validate:homebrew
 pnpm run verify:package-bin
@@ -33,10 +34,11 @@ pnpm run verify:package-bin
 - managed-source default backup behavior
 - managed-source `--no-backup`
 - managed-source dirty worktree refusal
+- uninstall behavior tests for managed-source, manual-source, package-manager routes, wrapper cleanup, PATH cleanup, purge confirmation, Termux wrapper cleanup, and named-profile safe defaults
 - Homebrew handoff formula syntax check
 - Docker image build/run when Docker is available
 
-Uninstall support and uninstall validation are deferred to PR-I10A. Do not treat this matrix as final release-complete until uninstall behavior is implemented and validated.
+Uninstall support is covered by `pnpm run validate:uninstall` and by the full `validate:install` orchestrator.
 
 ## Docker Behavior
 
@@ -63,5 +65,7 @@ Set `ESTACODA_REQUIRE_HOMEBREW=1` in CI jobs where Homebrew is expected.
 The validation scripts use temporary homes, prefixes, install directories, and clones. They must not write to the real `~/.estacoda` or require provider credentials.
 
 The managed-source simulation uses a local Git remote and does not use GitHub network access. The `.install-method.json` stamp is ignored by git so managed-source checkouts do not appear dirty solely because they are stamped.
+
+Uninstall validation uses temp homes, wrappers, and install directories. It must not remove the real `~/.estacoda`, real package-manager global installs, or arbitrary files named `estacoda`.
 
 Failures should be interpreted as release-surface regressions unless the output says a dependency was intentionally skipped. For optional Docker/Homebrew checks, enable the corresponding `ESTACODA_REQUIRE_*` flag in environments where the dependency is guaranteed to exist.
