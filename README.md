@@ -1,8 +1,12 @@
+![EstaCoda banner](assets/estacoda-readme-banner.png)
+
 # EstaCoda
 
-A terminal-native agent runtime with durable execution, multi-channel gateways, and governed skill evolution.
+The first open-source agentic harness built in the Middle East, designed for governed self-evolution.
 
-EstaCoda executes tools, manages sessions, operates across messaging channels, and learns structured skills — all under explicit operator control. It runs on macOS, Linux, Docker, and WSL2. It does not require a cloud account or a dashboard.
+EstaCoda is a terminal-native runtime that executes tools, preserves durable sessions across channels, and improves its own harness through operator-approved proposals. It does not silently mutate itself. Every proposed change carries evidence, a hypothesis, and a rollback path.
+
+It runs on macOS, Linux, Docker, and WSL2. It does not require a cloud account or a dashboard.
 
 ---
 

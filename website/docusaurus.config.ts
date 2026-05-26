@@ -65,7 +65,7 @@ const config: Config = {
     },
     // TODO: configure local search (e.g. @easyops-cn/docusaurus-search-local) once dependency friction is resolved
     navbar: {
-      title: 'EstaCoda',
+      title: 'estacoda',
       logo: {
         alt: 'EstaCoda',
         src: 'img/logo-light.png',

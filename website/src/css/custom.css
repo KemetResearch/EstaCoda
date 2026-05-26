@@ -203,11 +203,23 @@ h3, .markdown h3 { font-weight: 600; }
   box-shadow: none;
 }
 .navbar__title {
+  display: flex;
+  flex-direction: column;
   font-family: var(--estacoda-serif-heading);
   font-weight: 600;
   letter-spacing: -0.01em;
   font-size: 1.15rem;
+  line-height: 1;
   color: var(--estacoda-kemet);
+}
+.navbar__title::after {
+  content: 'BY KEMET RESEARCH';
+  margin-top: 0.18rem;
+  font-family: var(--estacoda-mono);
+  font-size: 0.42rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--estacoda-ink-faint);
 }
 .navbar__logo img { height: 1.75rem; width: auto; }
 .navbar__link { font-family: var(--estacoda-mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.14em; }
