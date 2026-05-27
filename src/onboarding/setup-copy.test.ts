@@ -87,11 +87,18 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.editPrimaryModelRoute",
   "setupEditor.actions.repairPrimaryProvider",
   "setupEditor.actions.editPrimaryCredentialReference",
+  "setupEditor.actions.storeProviderCredentialReference",
+  "setupEditor.actions.editFallbackModelRoute",
+  "setupEditor.actions.editAuxiliaryModelRoute",
   "setupEditor.actions.repairMissingCredential",
   "setupEditor.actions.editSecurityMode",
   "setupEditor.actions.editWorkflowLearning",
   "setupEditor.actions.repairWorkspaceTrust",
   "setupEditor.actions.reviewOptionalCapabilities",
+  "setupEditor.actions.configureChannels",
+  "setupEditor.actions.configureVoice",
+  "setupEditor.actions.configureImageGeneration",
+  "setupEditor.actions.configureBrowser",
   "setupEditor.actions.runReadonlyVerification",
   "setupEditor.actions.repairBrokenConfig",
   "setupEditor.actions.repairStateDirectory",
@@ -103,7 +110,14 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.editPrimaryModelRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
   "setupEditor.actions.editPrimaryCredentialReference.description",
+  "setupEditor.actions.storeProviderCredentialReference.description",
+  "setupEditor.actions.editFallbackModelRoute.description",
+  "setupEditor.actions.editAuxiliaryModelRoute.description",
   "setupEditor.actions.reviewOptionalCapabilities.description",
+  "setupEditor.actions.configureChannels.description",
+  "setupEditor.actions.configureVoice.description",
+  "setupEditor.actions.configureImageGeneration.description",
+  "setupEditor.actions.configureBrowser.description",
   "setupEditor.diagnostics.title",
   "setupEditor.diagnostics.manualRepair.brokenConfig",
   "setupEditor.diagnostics.manualRepair.stateNotWritable",
@@ -199,6 +213,9 @@ const REVIEW_MANIFEST_KEYS = [
   "setupReview.sections.warnings",
   "setupDrafts.review",
   "setupDrafts.providerModelRoute.summary",
+  "setupDrafts.fallbackModelRoute.add.summary",
+  "setupDrafts.fallbackModelRoute.replace.summary",
+  "setupDrafts.auxiliaryModelRoute.summary",
   "setupDrafts.credentialReference.summary",
   "setupDrafts.workspaceTrust.summary",
   "setupDrafts.securityMode.summary",
@@ -346,6 +363,28 @@ describe("setup copy", () => {
     assertKeys(FIRST_RUN_KEYS);
     assertKeys(SETUP_EDITOR_KEYS);
     assertKeys(SETUP_MODULE_KEYS);
+  });
+
+  it("contains Phase 1 setup editor foundation copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Edit fallback provider/model route.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Choose or add a fallback provider/model route through a reviewed setup change.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Edit auxiliary provider/model route.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Choose an auxiliary route for assessor, compression, session search, memory compaction, or profile context.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Configure channels.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Configure voice.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser.");
+    expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback route {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback route {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} route to {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.credentialReference.summary")).toBe("Store credential env-var reference {envVar} only.");
+
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("assessor");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("compression");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("session_search");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("memory_compaction");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("profile_context");
   });
 
   it("contains review manifest copy keys", () => {
