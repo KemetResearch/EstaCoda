@@ -372,7 +372,7 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - The guided setup editor opens instead of first-run setup.
-- Available actions include review/edit, read-only verification, launch after verification, and exit.
+- Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit.
 - Exiting writes nothing.
 - Running verification is read-only.
 
@@ -465,7 +465,7 @@ chmod 700 /tmp/estacoda-qa-state/.estacoda
 - Permission guidance is shown.
 - Verification retry and exit are available; launch is not.
 
-### 10.9 Optional Capability Editor
+### 10.9 Configure Channels
 
 From a configured disposable setup:
 
@@ -474,27 +474,96 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
-- Optional capabilities are presented independently from the primary provider/model route.
+- Selecting `configure-channels` creates a single-module draft bundle for channels only.
+- Telegram shows remote-control risk and requires allowed user or chat identities.
+- Telegram token is an env var reference only.
 - `Leave unchanged` writes nothing.
 - `Skip` keeps core setup valid and non-blocking.
-- `Enable/configure` produces reviewed drafts for only the selected capability.
-- Telegram/channels shows remote-control risk and requires allowed user or chat identities.
-- Telegram token is an env var reference only.
-- Voice setup remains a native optional capability and does not change the primary LLM route.
-- Vision/image generation remains a native optional capability and does not change the primary LLM route.
-- Browser setup records references only and does not auto-launch a browser during planning.
 
-### 10.10 Review, Cancel, And Raw Secret Safety
+### 10.10 Configure Voice
+
+From a configured disposable setup:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Selecting `configure-voice` creates a single-module draft bundle for voice only.
+- Voice setup does not change the primary LLM route.
+- `Leave unchanged` writes nothing.
+- `Skip` keeps core setup valid and non-blocking.
+
+### 10.11 Configure Image Generation
+
+From a configured disposable setup:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Selecting `configure-image-generation` creates a single-module draft bundle for vision only.
+- Image generation setup does not change the primary LLM route.
+- `Leave unchanged` writes nothing.
+- `Skip` keeps core setup valid and non-blocking.
+
+### 10.12 Configure Browser
+
+From a configured disposable setup:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Selecting `configure-browser` creates a single-module draft bundle for browser only.
+- Browser setup records references only and does not auto-launch a browser during planning.
+- `Leave unchanged` writes nothing.
+- `Skip` keeps core setup valid and non-blocking.
+
+### 10.13 Fallback Route Editor
+
+From a configured disposable setup with at least one fallback route configured:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- `edit-fallback-model-route` is available from configured-ready state.
+- When no fallbacks exist, it prompts to add a new fallback route.
+- When fallbacks exist, it prompts to select an existing fallback to replace or add another.
+- Review shows the full fallback chain (existing plus change).
+- Replace preserves the order of remaining fallbacks.
+- Add appends after existing fallbacks.
+
+### 10.14 Auxiliary Route Editor
+
+From a configured disposable setup:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- `edit-auxiliary-model-route` is available from configured-ready state.
+- The task prompt shows the approved tasks: assessor, compression, session_search, memory_compaction, and profile_context.
+- Assessor is explicitly described as approval-assessment in the prompt copy.
+- Review is explicit about which auxiliary task is being configured.
+- Applying sets the correct `auxiliaryModels.<task>` route.
+
+### 10.15 Review, Cancel, And Raw Secret Safety
 
 For any setup path that collects credentials:
 
-1. Enter a fake secret value such as `sk-manual-qa-do-not-store`.
+1. Enter a fake secret value such as `sk-man...tore`.
 2. Continue to review.
 3. Cancel review.
 
 **Verify:**
-- Review does not show `sk-manual-qa-do-not-store`.
-- Terminal output does not show `sk-manual-qa-do-not-store`.
+- Review does not show `sk-man...tore`.
+- Terminal output does not show `sk-man...tore`.
 - `.env` is not created or changed by the cancelled review.
 - Config and trust store are not changed by the cancelled review.
 - Re-running setup still treats the credential as missing.
@@ -506,7 +575,7 @@ Then repeat and approve review.
 - Review and final output still do not print the raw secret.
 - Verification is read-only after apply.
 
-### 10.11 Blocked Launch Denial
+### 10.16 Blocked Launch Denial
 
 Use a missing credential, broken config, untrusted workspace, state-not-writable home, or failed verification state.
 

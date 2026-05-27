@@ -228,7 +228,7 @@ First-run setup silently creates and selects the default profile before writing 
 | State | Route behavior |
 |-------|----------------|
 | `first-run` / no usable config | Runs first-run setup and review/apply. |
-| configured ready | Opens the guided setup editor with launch, review, verification, and exit choices. |
+| configured ready | Opens the guided setup editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit choices. |
 | configured degraded | Shows verification warnings; repair or explicit limited-mode acceptance is required before launch. |
 | partial provider / broken route | Runs guided provider/model repair through the shared provider/model selection flow. |
 | missing credential | Repairs the active route credential reference; review shows env var references only. |
@@ -256,14 +256,14 @@ Codex OAuth setup is implemented on the model setup surface (`estacoda model set
 
 `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-Optional capabilities stay separate from the primary LLM route:
+Optional capabilities stay separate from the primary LLM route. Each capability creates its own single-module draft bundle through an independent setup editor action:
 
-| Optional capability | Setup behavior |
-|---------------------|----------------|
-| Telegram/channels | Remote-control surface. Setup requires token env var reference plus allowed user or chat identities before enable can apply. |
-| Voice | Optional/native voice configuration. It does not change the primary provider/model route. |
-| Vision/image generation | Optional/native image capability configuration. It does not change the primary provider/model route. |
-| Browser | Records backend, URL, or command references. Setup planning does not auto-launch a browser or open a CDP connection. |
+| Action | Setup behavior |
+|--------|----------------|
+| `configure-channels` | Remote-control surface. Setup requires token env var reference plus allowed user or chat identities before enable can apply. Creates a single-module draft bundle. |
+| `configure-voice` | Optional/native voice configuration. Does not change the primary provider/model route. Creates a single-module draft bundle. |
+| `configure-image-generation` | Optional/native image capability configuration. Does not change the primary provider/model route. Creates a single-module draft bundle. |
+| `configure-browser` | Records backend, URL, or command references. Setup planning does not auto-launch a browser or open a CDP connection. Creates a single-module draft bundle. |
 
 Skipping optional capabilities keeps core setup valid.
 
@@ -278,7 +278,7 @@ These flags are compatibility/direct paths. They are not the preferred guided re
 
 Runtime mutating onboarding tools are removed. The runtime no longer exposes `onboarding.status` or `onboarding.complete`; setup mutation stays behind reviewed CLI setup/apply.
 
-Backup/fallback routes are managed through `estacoda model fallback ...`; first-run onboarding no longer offers the legacy backup-provider prompt.
+Fallback routes are manageable through both the guided setup editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary routes (including assessor, compression, session_search, memory_compaction, and profile_context) are configurable through the guided setup editor (`edit-auxiliary-model-route`). First-run onboarding no longer offers the legacy backup-provider prompt.
 
 **Arabic support:**
 - Selector chrome is localized
