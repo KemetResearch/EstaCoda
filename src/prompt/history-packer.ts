@@ -1,5 +1,10 @@
 import type { SessionMessage } from "../contracts/session.js";
-import { estimateMessagesTokensRough } from "./token-estimator.js";
+import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
+
+export const DEFAULT_HISTORY_CONTEXT_WINDOW = 128_000;
+export const HISTORY_BUDGET_RATIO = 0.12;
+export const HISTORY_BUDGET_MIN = 6_000;
+export const HISTORY_BUDGET_MAX = 24_000;
 
 type PackableSessionMessage = {
   id?: string;
@@ -33,6 +38,20 @@ export type HistoryPackerOptions = {
   maxEstimatedTokens?: number;
 };
 
+export function deriveSessionHistoryBudget(
+  contextWindowTokens: number | undefined,
+): number {
+  const contextWindow =
+    contextWindowTokens !== undefined && contextWindowTokens > 0
+      ? contextWindowTokens
+      : DEFAULT_HISTORY_CONTEXT_WINDOW;
+
+  return Math.min(
+    HISTORY_BUDGET_MAX,
+    Math.max(HISTORY_BUDGET_MIN, Math.floor(contextWindow * HISTORY_BUDGET_RATIO)),
+  );
+}
+
 export function packSessionHistory(
   messages: PackableSessionMessage[],
   options: HistoryPackerOptions = {}
@@ -40,7 +59,7 @@ export function packSessionHistory(
   const maxProtectedMessages = options.maxProtectedMessages ?? 6;
   const maxSummaryChars = options.maxSummaryChars ?? 1_400;
   const maxMessageChars = options.maxMessageChars ?? 900;
-  const maxEstimatedTokens = options.maxEstimatedTokens ?? 6_000;
+  const maxEstimatedTokens = options.maxEstimatedTokens ?? deriveSessionHistoryBudget(undefined);
   const conversational = messages.filter((message) =>
     message.role === "user" || message.role === "agent" || message.role === "tool"
   );
@@ -137,17 +156,34 @@ function countProtectedToolPairs(messages: PackableSessionMessage[]): number {
 }
 
 function trimToTokenBudget(messages: PackedHistoryMessage[], maxEstimatedTokens: number): PackedHistoryMessage[] {
-  let trimmed = [...messages];
+  const trimmed = [...messages];
 
   while (estimateTokens(trimmed) > maxEstimatedTokens && trimmed.length > 1) {
-    const removableIndex = trimmed.findIndex((message) => message.role !== "tool");
-    if (removableIndex === -1) {
+    const summaryCount = trimmed.filter((message) => message.role === "system").length;
+    const candidates = trimmed
+      .map((message, index) => ({
+        index,
+        tokens: estimateMessageTokensRough(message),
+        importance: messageImportance(message),
+        role: message.role
+      }))
+      .filter((candidate) => !(candidate.role === "system" && summaryCount <= 1));
+
+    if (candidates.length === 0) {
       break;
     }
-    trimmed.splice(removableIndex, 1);
+
+    candidates.sort((left, right) => left.importance - right.importance || right.tokens - left.tokens);
+    trimmed.splice(candidates[0].index, 1);
   }
 
   return trimmed;
+}
+
+function messageImportance(message: PackedHistoryMessage): number {
+  if (message.role === "tool") return 1;
+  if (message.role === "user" || message.role === "assistant") return 2;
+  return 3;
 }
 
 function truncate(value: string, maxChars: number): string {
