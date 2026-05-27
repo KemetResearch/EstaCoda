@@ -62,6 +62,7 @@ describe("runConfigEditor", () => {
     expect(applyCalled).toBe(false);
     expect(output.join("")).toContain("EstaCoda guided setup editor");
     expect(output.join("")).toContain("Available actions:");
+    expect(output.join("")).toContain("edit-fallback-model-route");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
     expect(output.join("")).toContain("configure-channels");
@@ -523,6 +524,166 @@ describe("runConfigEditor", () => {
     ]);
     expect(JSON.stringify(result)).not.toContain("saved-reuse-secret");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("saved-reuse-secret");
+  });
+
+  it("adds a fallback route directly when no fallbacks exist", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["OpenAI", "gpt-5.5", true],
+      secret: "sk-fallback-add-secret",
+    });
+    const fallbackChoiceTitles: string[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Fallback provider/model route") {
+        fallbackChoiceTitles.push(input.title);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_FALLBACK_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string; apiKeyEnv?: string }> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-fallback-model-route");
+    expect(fallbackChoiceTitles).toEqual([]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "add",
+      provider: "openai",
+      model: "gpt-5.5",
+      apiKeyEnv: "PR8_FALLBACK_KEY",
+    }));
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.fallbacks"],
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(config.model?.provider).toBe("local");
+    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5", apiKeyEnv: "PR8_FALLBACK_KEY" }),
+    ]);
+    expect(rawConfig).not.toContain("sk-fallback-add-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-fallback-add-secret");
+  });
+
+  it("prompts to edit existing fallbacks or add another route", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [
+          { provider: "openai", id: "gpt-5.5" },
+          { provider: "kimi", id: "kimi-k2" },
+        ],
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({ values: ["fallback-add", "Anthropic", "claude-sonnet-4-5", true] });
+    const fallbackChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Fallback provider/model route") {
+        fallbackChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "none", providers: ["anthropic"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(fallbackChoiceLabels).toEqual([[
+      "Edit fallback 1: openai/gpt-5.5",
+      "Edit fallback 2: kimi/kimi-k2",
+      "Add another fallback route",
+    ]]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "add",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    }));
+  });
+
+  it("replaces a selected fallback route while preserving surrounding fallbacks", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [
+          { provider: "openai", id: "gpt-5.5" },
+          { provider: "kimi", id: "kimi-k2" },
+        ],
+      },
+      providers: {
+        ...(localReadyConfig().providers as Record<string, unknown>),
+        openai: { kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"], enableNetwork: true },
+        kimi: { kind: "openai-compatible", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k2"], enableNetwork: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["fallback-1", "Anthropic", "claude-sonnet-4-5", true] }),
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "none", providers: ["anthropic"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string }> };
+      providers?: Record<string, unknown>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.fallbackModelRoute.replace.summary");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "replace",
+      fallbackIndex: 1,
+      previousProvider: "kimi",
+      previousModel: "kimi-k2",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    }));
+    expect(config.model?.provider).toBe("local");
+    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+      expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+    ]);
+    expect(config.providers?.kimi).toBeDefined();
   });
 
   it("replaces a saved profile credential only after reviewed approval when the user enters a new key", async () => {

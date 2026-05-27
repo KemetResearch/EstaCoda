@@ -15,18 +15,22 @@ import {
 import {
   setupImageGenerationConfig,
   setupBrowserConfig,
+  readConfig,
   setupSecurityConfig,
   setupSkillConfig,
+  setupModelFallbackConfig,
   setupTelegramConfig,
   setupUiConfig,
   setupVoiceConfig,
   type ActivityLabelsLocale,
   type ImageGenerationProvider,
+  type ModelFallbackConfig,
   type SttProvider,
   type TtsProvider,
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import {
   registerProviderConfig,
   registerProviderModel,
@@ -159,6 +163,10 @@ async function applyConfigPatch(
     case "setupModules.provider.draft":
       await applyProviderRoute(operation, context, options);
       return;
+    case "setupDrafts.fallbackModelRoute.add.summary":
+    case "setupDrafts.fallbackModelRoute.replace.summary":
+      await applyFallbackRoute(operation, context, options);
+      return;
     case "setupDrafts.credentialReference.summary":
     case "setupModules.credentials.draft":
       await applyCredentialReference(operation, context, options);
@@ -239,6 +247,56 @@ async function applyProviderRoute(
       contextWindowTokens,
     },
   });
+}
+
+async function applyFallbackRoute(
+  operation: SetupApplyOperation,
+  context: PlanContext,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const provider = providerIdValue(operation.review.values.provider ?? operation.review.values.providerId);
+  const model = stringValue(operation.review.values.model ?? operation.review.values.modelId);
+  if (provider === undefined || model === undefined) {
+    throw new Error("Fallback apply requires provider and model review values.");
+  }
+  const operationKind = operation.review.values.fallbackOperation === "replace" ? "replace" : "add";
+  const fallbackIndex = numberValue(operation.review.values.fallbackIndex);
+  const baseUrl = stringValue(operation.review.values.baseUrl);
+  const apiKeyEnv = stringValue(operation.review.values.apiKeyEnv) ?? context.credentialEnv;
+  const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
+  const nextFallback: ModelFallbackConfig = {
+    provider,
+    id: model,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+    ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+  };
+  const target = configApplyTarget(operation, options);
+  const profileId = target.profileId ?? readActiveProfile({ homeDir: target.homeDir }).profileId ?? defaultProfileId();
+  const configPath = resolveProfileStateHome({ homeDir: target.homeDir, profileId }).configPath;
+  const existing = await readConfig(configPath);
+  const currentFallbacks = existing.config.model?.fallbacks ?? [];
+  const nextFallbacks = operationKind === "replace"
+    ? replaceFallbackAtIndex(currentFallbacks, fallbackIndex, nextFallback)
+    : [...currentFallbacks, nextFallback];
+
+  await setupModelFallbackConfig({
+    ...target,
+    input: {
+      fallbacks: nextFallbacks,
+    },
+  });
+}
+
+function replaceFallbackAtIndex(
+  currentFallbacks: readonly ModelFallbackConfig[],
+  index: number | undefined,
+  nextFallback: ModelFallbackConfig
+): ModelFallbackConfig[] {
+  if (index === undefined || !Number.isInteger(index) || index < 0 || index >= currentFallbacks.length) {
+    throw new Error("Fallback replace apply requires a valid fallback index.");
+  }
+  return currentFallbacks.map((fallback, fallbackIndex) => fallbackIndex === index ? nextFallback : fallback);
 }
 
 async function applyCredentialReference(

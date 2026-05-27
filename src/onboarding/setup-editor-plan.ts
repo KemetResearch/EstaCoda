@@ -229,6 +229,15 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
         requiresExplicitApply: true,
         patch: scopedPatch(["provider.route"]),
       }),
+      setupEditorAction({
+        id: "edit-fallback-model-route",
+        copyKey: "setupEditor.actions.editFallbackModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.fallbacks"]),
+      }),
     ],
   });
 }

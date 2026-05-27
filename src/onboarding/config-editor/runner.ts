@@ -59,6 +59,7 @@ import {
   promptConfigEditorReviewApproval,
   promptBrowserCapability,
   promptCredentialReuseChoice,
+  promptFallbackRouteAction,
   promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
   promptConfigEditorPostApplyAction,
@@ -281,6 +282,8 @@ async function handleAction(
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return handleProviderRouteAction(options, initialDecision, session, action);
+    case "edit-fallback-model-route":
+      return handleFallbackRouteAction(options, initialDecision, session, action);
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
       return handleCredentialAction(options, initialDecision, session, action);
@@ -464,6 +467,43 @@ async function handleProviderRouteAction(
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
+}
+
+async function handleFallbackRouteAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const loaded = await loadRuntimeConfig(options);
+  const fallbacks = loaded.config.model?.fallbacks ?? [];
+  const choice = fallbacks.length === 0
+    ? { id: "fallback-add" as const, fallbackOperation: "add" as const }
+    : await promptFallbackRouteAction(options.prompt, fallbacks);
+  const currentFallback = choice.fallbackOperation === "replace" ? choice.fallback : undefined;
+  const resolved = await selectResolvedProviderRoute(options, initialDecision, {
+    currentProviderId: currentFallback?.provider,
+    currentModelId: currentFallback?.id,
+  });
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      fallbackOperation: choice.fallbackOperation,
+      ...(choice.fallbackOperation === "replace"
+        ? {
+            fallbackIndex: choice.fallbackIndex,
+            previousProvider: choice.fallback.provider,
+            previousModel: choice.fallback.id,
+          }
+        : {}),
+    },
+  }, resolved.selection);
 }
 
 async function handleCredentialAction(
@@ -1149,7 +1189,11 @@ async function reviewAndApplyResolvedRoute(
 
 async function selectResolvedProviderRoute(
   options: ConfigEditorRunnerOptions,
-  initialDecision: SetupRouteDecision
+  initialDecision: SetupRouteDecision,
+  currentRoute: {
+    readonly currentProviderId?: string;
+    readonly currentModelId?: string;
+  } = {}
 ): Promise<
   | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
   | { readonly kind: "diagnostic"; readonly output: string }
@@ -1162,7 +1206,7 @@ async function selectResolvedProviderRoute(
 
   const provider = await promptProviderCandidate(options.prompt, {
     candidates: providers,
-    currentProviderId: initialDecision.state.model?.provider,
+    currentProviderId: currentRoute.currentProviderId ?? initialDecision.state.model?.provider,
   });
   const models = await flowEngine.listModelCandidates(provider.id);
   if (models.length === 0) {
@@ -1172,7 +1216,9 @@ async function selectResolvedProviderRoute(
   const model = await promptModelCandidate(options.prompt, {
     providerId: provider.id,
     candidates: models,
-    currentModelId: initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
+    currentModelId: currentRoute.currentProviderId === provider.id
+      ? currentRoute.currentModelId
+      : initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
   });
   const resolved = await flowEngine.resolveSelection(provider.id, model.id);
   if (resolved.kind === "diagnostic") {

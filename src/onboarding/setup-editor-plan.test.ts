@@ -262,6 +262,7 @@ describe("buildSetupEditorPlan", () => {
 
     expect(plan.actions.map((action) => action.id)).toEqual([
       "edit-primary-model-route",
+      "edit-fallback-model-route",
       "edit-primary-credential-reference",
       "edit-security-mode",
       "edit-workflow-learning",
@@ -274,11 +275,24 @@ describe("buildSetupEditorPlan", () => {
     ]);
   });
 
-  it("does not reintroduce backupForMain or future fallback placeholders", () => {
+  it("exposes fallback route editing as a scoped reviewed model route action", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const fallback = plan.actions.find((action) => action.id === "edit-fallback-model-route");
+
+    expect(fallback).toEqual(expect.objectContaining({
+      sectionId: "model-route",
+      effect: "draft-config-patch",
+      patch: expect.objectContaining({
+        fields: ["model.fallbacks"],
+        preserveUnrelatedConfig: true,
+      }),
+    }));
+  });
+
+  it("does not reintroduce backupForMain placeholders", () => {
     const plan = buildSetupEditorPlan(state("configured-ready"));
 
     expect(JSON.stringify(plan)).not.toContain("backupForMain");
-    expect(JSON.stringify(plan)).not.toContain("model.fallbacks");
   });
 
   it("keeps the setup editor plan free of terminal rendering fields", () => {

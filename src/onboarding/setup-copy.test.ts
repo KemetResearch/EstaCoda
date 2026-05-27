@@ -136,6 +136,12 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.credentialReuse.existing.description",
   "setupEditor.prompt.credentialReuse.new",
   "setupEditor.prompt.credentialReuse.new.description",
+  "setupEditor.prompt.fallbackRoute.title",
+  "setupEditor.prompt.fallbackRoute.body",
+  "setupEditor.prompt.fallbackRoute.edit",
+  "setupEditor.prompt.fallbackRoute.edit.description",
+  "setupEditor.prompt.fallbackRoute.add",
+  "setupEditor.prompt.fallbackRoute.add.description",
   "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged",
   "setupEditor.prompt.optionalCapabilityAction.skip",
   "setupEditor.prompt.optionalCapabilityAction.enableConfigure",
@@ -385,6 +391,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback route {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} route to {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.credentialReference.summary")).toBe("Store credential env-var reference {envVar} only.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.add")).toBe("Add another fallback route");
+    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.edit")).toBe("Edit fallback {index}: {providerId}/{modelId}");
 
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("compression");

@@ -3,10 +3,12 @@ import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
+import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import {
   promptSetupChoice,
+  type SetupChoice,
   promptSetupStringWithDefault,
   setupCopyText,
 } from "../setup-prompts.js";
@@ -19,6 +21,18 @@ export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "brow
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
 export type CredentialReuseChoice = "existing" | "new";
+
+export type FallbackRouteChoice =
+  | {
+      readonly id: "fallback-add";
+      readonly fallbackOperation: "add";
+    }
+  | {
+      readonly id: `fallback-${number}`;
+      readonly fallbackOperation: "replace";
+      readonly fallbackIndex: number;
+      readonly fallback: ModelFallbackConfig;
+    };
 
 export type ConfigEditorPostApplyActionId =
   | "launch"
@@ -243,6 +257,42 @@ export async function promptCredentialReuseChoice(
       },
     ],
     defaultValue: "existing" as const,
+  });
+}
+
+export async function promptFallbackRouteAction(
+  prompt: Prompt,
+  fallbacks: readonly ModelFallbackConfig[]
+): Promise<FallbackRouteChoice> {
+  const editChoices: SetupChoice<FallbackRouteChoice>[] = fallbacks.map((fallback, index) => ({
+    id: `fallback-${index}`,
+    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit")
+      .replace("{index}", String(index + 1))
+      .replace("{providerId}", fallback.provider)
+      .replace("{modelId}", fallback.id),
+    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit.description"),
+    value: {
+      id: `fallback-${index}` as const,
+      fallbackOperation: "replace" as const,
+      fallbackIndex: index,
+      fallback,
+    },
+  }));
+  const addChoice: SetupChoice<FallbackRouteChoice> = {
+    id: "fallback-add",
+    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add"),
+    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add.description"),
+    value: {
+      id: "fallback-add" as const,
+      fallbackOperation: "add" as const,
+    },
+  };
+
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.fallbackRoute.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.fallbackRoute.body")}\n`,
+    choices: [...editChoices, addChoice],
+    defaultValue: editChoices[0]?.value ?? addChoice.value,
   });
 }
 
