@@ -43,6 +43,7 @@ import {
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
+import { resolveOsHomeDir } from "./home-dir.js";
 import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
@@ -2755,7 +2756,7 @@ function expandConfiguredPaths(paths: string[], homeDir?: string): string[] {
   )];
 }
 
-function expandConfiguredPath(path: string, homeDir?: string): string {
+function expandConfiguredPath(path: string, _homeDir?: string): string {
   const trimmed = path.trim();
 
   if (trimmed.length === 0) {
@@ -2765,12 +2766,11 @@ function expandConfiguredPath(path: string, homeDir?: string): string {
   const envExpanded = trimmed.replace(/\$\{([A-Za-z0-9_]+)\}/g, (match, name: string) => process.env[name] ?? match);
 
   if (envExpanded === "~") {
-    return homeDir ?? process.env.HOME ?? envExpanded;
+    return resolveOsHomeDir();
   }
 
   if (envExpanded.startsWith("~/")) {
-    const base = homeDir ?? process.env.HOME;
-    return base === undefined ? envExpanded : join(base, envExpanded.slice(2));
+    return join(resolveOsHomeDir(), envExpanded.slice(2));
   }
 
   return envExpanded;

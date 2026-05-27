@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, rm } from "node:fs/promises";
@@ -7,6 +7,7 @@ import {
   applyManagedSourceUpdate,
   checkForUpdate,
   canApplyUpdate,
+  __resolveProtectedUpdatePathsForTest,
   prepareUpdateInfo,
   readCachedUpdateInfo,
   readCachedUpdateStatus,
@@ -108,6 +109,38 @@ describe("prepareUpdateInfo", () => {
       breakingChanges: true
     });
     expect(text).toContain("breaking changes");
+  });
+
+  it("uses OS home, not ESTACODA_HOME, for protected path resolution", () => {
+    const prodHome = mkdtempSync(join(tmpdir(), "estacoda-update-prod-home-"));
+    const devHome = mkdtempSync(join(tmpdir(), "estacoda-update-dev-home-"));
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+
+    try {
+      process.env.HOME = prodHome;
+      process.env.ESTACODA_HOME = devHome;
+
+      const protectedPaths = __resolveProtectedUpdatePathsForTest();
+
+      expect(protectedPaths[0]?.source).toBe(join(prodHome, ".estacoda", "active-profile.json"));
+      expect(protectedPaths.some((path) => path.source.startsWith(devHome))).toBe(false);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+
+      rmSync(prodHome, { recursive: true, force: true });
+      rmSync(devHome, { recursive: true, force: true });
+    }
   });
 });
 

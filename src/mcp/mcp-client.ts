@@ -1,7 +1,7 @@
 import { access, readFile, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { resolveOsHomeDir } from "../config/home-dir.js";
 import { buildSafeChildEnv } from "../security/process-env.js";
 
 export type MCPServerTransport = "stdio" | "http";
@@ -606,9 +606,7 @@ function pickPackageBinaryName(packageJson: {
 }
 
 function resolveUserHome(): string {
-  return process.env.HOME
-    ?? process.env.USERPROFILE
-    ?? homedir();
+  return resolveOsHomeDir();
 }
 
 export const __resolveNpxCachedBinaryForTest = resolveNpxCachedBinary;

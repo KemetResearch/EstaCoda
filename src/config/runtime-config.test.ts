@@ -36,6 +36,42 @@ async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => 
   }
 }
 
+async function withHomeEnv<T>(
+  env: { HOME?: string; ESTACODA_HOME?: string },
+  run: () => Promise<T>
+): Promise<T> {
+  const previousHome = process.env.HOME;
+  const previousEstacodaHome = process.env.ESTACODA_HOME;
+
+  if (env.HOME === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = env.HOME;
+  }
+
+  if (env.ESTACODA_HOME === undefined) {
+    delete process.env.ESTACODA_HOME;
+  } else {
+    process.env.ESTACODA_HOME = env.ESTACODA_HOME;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+
+    if (previousEstacodaHome === undefined) {
+      delete process.env.ESTACODA_HOME;
+    } else {
+      process.env.ESTACODA_HOME = previousEstacodaHome;
+    }
+  }
+}
+
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
     const result = normalizeAuxiliaryModels({});
@@ -1218,6 +1254,38 @@ describe("loadRuntimeConfig profile loading", () => {
     expect(loaded.model.provider).toBe("openai");
     expect(loaded.sources).toEqual([profileConfigPath(workspace)]);
     await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("expands configured tilde paths with OS home, not ESTACODA_HOME", async () => {
+    const prodHome = await mkdtemp(join(tmpdir(), "estacoda-config-prod-home-"));
+    const devHome = await mkdtemp(join(tmpdir(), "estacoda-config-dev-home-"));
+
+    try {
+      await withHomeEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, async () => {
+        await mkdir(dirname(profileConfigPath(devHome)), { recursive: true });
+        await writeFile(profileConfigPath(devHome), JSON.stringify({
+          model: { provider: "openai", id: "gpt-4o" },
+          mcpServers: {
+            local: {
+              command: "echo",
+              cwd: "~/mcp-server"
+            }
+          },
+          skills: {
+            externalDirs: ["~/skills"]
+          }
+        }));
+
+        const loaded = await loadRuntimeConfig({ workspaceRoot: devHome, homeDir: devHome });
+
+        expect(loaded.sources).toEqual([profileConfigPath(devHome)]);
+        expect(loaded.skills.externalDirs).toEqual([join(prodHome, "skills")]);
+        expect(loaded.mcp.servers.local?.cwd).toBe(join(prodHome, "mcp-server"));
+      });
+    } finally {
+      await rm(prodHome, { recursive: true, force: true });
+      await rm(devHome, { recursive: true, force: true });
+    }
   });
 });
 
