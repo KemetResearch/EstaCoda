@@ -9,11 +9,11 @@ import {
   normalizeModelFallbacks,
   readConfig,
   saveRuntimeConfig,
+  shouldPersistProviderBaseUrl,
   type AuxiliaryModelRouteSetupInput,
   type EstaCodaConfig,
   type ModelFallbackConfig
 } from "./runtime-config.js";
-import { getProviderMetadata } from "../providers/provider-metadata.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 
 // ── Input types ──────────────────────────────────────────────────────────────
@@ -81,11 +81,12 @@ export function applyRegisterProviderConfig(
   const providerConfig: Record<string, unknown> = { ...existingProvider };
 
   if (input.kind !== undefined) providerConfig.kind = input.kind;
-  const meta = getProviderMetadata(input.provider);
   if (input.baseUrl !== undefined) {
-    providerConfig.baseUrl = input.baseUrl;
-  } else if (existingProvider.baseUrl === undefined && meta.defaultBaseUrl !== undefined) {
-    providerConfig.baseUrl = meta.defaultBaseUrl;
+    if (shouldPersistProviderBaseUrl(input.provider, input.baseUrl)) {
+      providerConfig.baseUrl = input.baseUrl;
+    } else {
+      delete providerConfig.baseUrl;
+    }
   }
   if (input.apiKeyEnv !== undefined) providerConfig.apiKeyEnv = input.apiKeyEnv;
   if (input.apiMode !== undefined) providerConfig.apiMode = input.apiMode;
@@ -150,8 +151,8 @@ export function applyRegisterProviderModel(
 /**
  * Set the preferred model route.
  * This switches the primary model.
- * Explicit baseUrl and apiKeyEnv are stored on the provider block so that
- * the runtime config loader can resolve a complete ResolvedModelRoute.
+ * Custom baseUrl overrides and apiKeyEnv are stored on the provider block so
+ * that the runtime config loader can resolve a complete ResolvedModelRoute.
  */
 export function applySetPreferredModelRoute(
   existing: EstaCodaConfig,
@@ -161,7 +162,13 @@ export function applySetPreferredModelRoute(
   const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
   const providerPatch: Record<string, unknown> = { ...existingProvider };
 
-  if (input.baseUrl !== undefined) providerPatch.baseUrl = input.baseUrl;
+  if (input.baseUrl !== undefined) {
+    if (shouldPersistProviderBaseUrl(input.provider, input.baseUrl)) {
+      providerPatch.baseUrl = input.baseUrl;
+    } else {
+      delete providerPatch.baseUrl;
+    }
+  }
   if (input.apiKeyEnv !== undefined) providerPatch.apiKeyEnv = input.apiKeyEnv;
 
   const modelPatch: Record<string, unknown> = {

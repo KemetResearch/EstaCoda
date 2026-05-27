@@ -83,6 +83,15 @@ export type ExternalMemoryConfig = {
   };
 };
 
+export function shouldPersistProviderBaseUrl(
+  provider: ProviderId,
+  baseUrl: string | undefined
+): boolean {
+  if (baseUrl === undefined) return false;
+  const metadata = getProviderMetadata(provider);
+  return baseUrl !== metadata.defaultBaseUrl;
+}
+
 export type TtsConfig = {
   provider?: TtsProvider;
   enabled?: boolean;
@@ -717,13 +726,16 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       console.warn(`[config] ${warning}`);
     }
   }
+  const primaryProviderId = config.model?.provider ?? "unconfigured";
+  const primaryProviderConfig = config.providers?.[primaryProviderId];
+  const primaryProviderMetadata = getProviderMetadata(primaryProviderId);
   const primaryModelRoute = buildResolvedModelRoute({
-    provider: config.model?.provider ?? "unconfigured",
+    provider: primaryProviderId,
     model: config.model?.id ?? "unconfigured",
     profile: model,
-    baseUrl: config.providers?.[config.model?.provider ?? ""]?.baseUrl,
-    apiKeyEnv: config.providers?.[config.model?.provider ?? ""]?.apiKeyEnv,
-    apiMode: config.providers?.[config.model?.provider ?? ""]?.apiMode,
+    baseUrl: primaryProviderConfig?.baseUrl ?? primaryProviderMetadata.defaultBaseUrl,
+    apiKeyEnv: primaryProviderConfig?.apiKeyEnv,
+    apiMode: primaryProviderConfig?.apiMode,
     contextWindowTokens: config.model?.contextWindowTokens
   });
 
@@ -1718,12 +1730,6 @@ export async function setupProviderConfig(options: {
     ...(options.input.models ?? []),
     options.input.model
   ]);
-  const providerMetadata = getProviderMetadata(options.input.provider);
-  const resolvedBaseUrl =
-    options.input.baseUrl ??
-    existingProvider.baseUrl ??
-    providerMetadata.defaultBaseUrl;
-
   const providerConfig: Record<string, unknown> = {
     ...existingProvider,
     kind: "openai-compatible" as const,
@@ -1731,8 +1737,12 @@ export async function setupProviderConfig(options: {
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
-  if (resolvedBaseUrl !== undefined) {
-    providerConfig.baseUrl = resolvedBaseUrl;
+  if (options.input.baseUrl !== undefined) {
+    if (shouldPersistProviderBaseUrl(options.input.provider, options.input.baseUrl)) {
+      providerConfig.baseUrl = options.input.baseUrl;
+    } else {
+      providerConfig.baseUrl = undefined;
+    }
   }
 
   const contextWindowPatch = options.input.contextWindowTokens !== undefined

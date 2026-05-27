@@ -1339,10 +1339,11 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "kimi", id: "kimi-k2.5" },
       providers: {
-        openai: {
+        kimi: {
           kind: "openai-compatible",
-          models: ["gpt-4o"]
+          models: ["kimi-k2.5"]
         }
       }
     }));
@@ -1352,8 +1353,9 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
       homeDir: workspace
     });
 
-    const adapter = loaded.providerRegistry.get("openai");
+    const adapter = loaded.providerRegistry.get("kimi");
     expect(adapter).toBeDefined();
+    expect(adapter?.endpoint?.baseUrl).toBe("https://api.moonshot.ai/v1");
     await rm(workspace, { recursive: true, force: true });
   });
 

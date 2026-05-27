@@ -75,16 +75,34 @@ describe("applyRegisterProviderConfig", () => {
     expect(result.providers!.openai!.apiKeyEnv).toBe("OPENAI_API_KEY");
   });
 
-  it("sets default baseUrl when not provided", () => {
+  it("does not write metadata default baseUrl when not provided", () => {
     const existing: EstaCodaConfig = {};
     const result = applyRegisterProviderConfig(existing, { provider: "openai" });
-    expect(result.providers!.openai!.baseUrl).toBe("https://api.openai.com/v1");
+    expect(result.providers!.openai!.baseUrl).toBeUndefined();
+    expect(result.providers!.openai!).not.toHaveProperty("baseUrl");
   });
 
-  it("known provider without baseUrl gets canonical default", () => {
+  it("known provider without baseUrl leaves baseUrl absent", () => {
     const existing: EstaCodaConfig = {};
     const result = applyRegisterProviderConfig(existing, { provider: "deepseek" });
-    expect(result.providers!.deepseek!.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(result.providers!.deepseek!.baseUrl).toBeUndefined();
+    expect(result.providers!.deepseek!).not.toHaveProperty("baseUrl");
+  });
+
+  it("removes existing baseUrl when explicit input matches metadata default", () => {
+    const existing: EstaCodaConfig = {
+      providers: {
+        openai: {
+          baseUrl: "https://custom.openai.com/v1"
+        }
+      }
+    };
+    const result = applyRegisterProviderConfig(existing, {
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1"
+    });
+    expect(result.providers!.openai!.baseUrl).toBeUndefined();
+    expect(result.providers!.openai!).not.toHaveProperty("baseUrl");
   });
 
   it("unknown/custom provider without baseUrl does not get placeholder", () => {
@@ -211,6 +229,34 @@ describe("applySetPreferredModelRoute", () => {
     });
     expect(result.providers!.deepseek!.baseUrl).toBe("https://custom.deepseek.com/v1");
     expect(result.providers!.deepseek!.apiKeyEnv).toBe("CUSTOM_DEEPSEEK_KEY");
+  });
+
+  it("does not store metadata default baseUrl on provider block", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applySetPreferredModelRoute(existing, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      baseUrl: "https://api.deepseek.com/v1"
+    });
+    expect(result.providers!.deepseek!.baseUrl).toBeUndefined();
+    expect(result.providers!.deepseek!).not.toHaveProperty("baseUrl");
+  });
+
+  it("removes existing baseUrl when preferred route returns to metadata default", () => {
+    const existing: EstaCodaConfig = {
+      providers: {
+        deepseek: {
+          baseUrl: "https://custom.deepseek.com/v1"
+        }
+      }
+    };
+    const result = applySetPreferredModelRoute(existing, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      baseUrl: "https://api.deepseek.com/v1"
+    });
+    expect(result.providers!.deepseek!.baseUrl).toBeUndefined();
+    expect(result.providers!.deepseek!).not.toHaveProperty("baseUrl");
   });
 
   it("does not synthesize placeholder base URL for custom providers", () => {
@@ -398,7 +444,7 @@ describe("load/save wrappers", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("registerProviderConfig writes provider without switching primary", async () => {
+  it("registerProviderConfig writes provider without switching primary or persisting defaults", async () => {
     await writeUserConfig(tmpDir, { model: { provider: "openai", id: "gpt-4o" } });
     await registerProviderConfig({
       workspaceRoot: tmpDir,
@@ -406,7 +452,8 @@ describe("load/save wrappers", () => {
       input: { provider: "deepseek", baseUrl: "https://api.deepseek.com/v1" }
     });
     const config = await readUserConfig(tmpDir);
-    expect(config.providers!.deepseek!.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(config.providers!.deepseek!.baseUrl).toBeUndefined();
+    expect(config.providers!.deepseek!).not.toHaveProperty("baseUrl");
     expect(config.model!.provider).toBe("openai");
   });
 
@@ -548,7 +595,8 @@ describe("setupProviderConfig parity with pure helpers", () => {
     // We compare the salient fields rather than deep-equal because the
     // wrapper also writes the secret to disk, which helpers don't do.
     expect(viaHelpers.model).toEqual({ provider: "deepseek", id: "deepseek-chat" });
-    expect(viaHelpers.providers!.deepseek!.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(viaHelpers.providers!.deepseek!.baseUrl).toBeUndefined();
+    expect(viaHelpers.providers!.deepseek!).not.toHaveProperty("baseUrl");
     expect(viaHelpers.providers!.deepseek!.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
     expect(viaHelpers.providers!.deepseek!.models).toContain("deepseek-chat");
     expect(viaHelpers.providers!.deepseek!.enableNetwork).toBe(true);
@@ -800,7 +848,7 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("known provider with no baseUrl writes metadata default", async () => {
+  it("known provider with no baseUrl leaves baseUrl absent", async () => {
     const tmpDir = await makeTempDir();
     await writeUserConfig(tmpDir, {});
     await setupProviderConfig({
@@ -809,7 +857,8 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
       input: { provider: "openai", baseUrl: undefined, model: "gpt-4o" }
     });
     const config = await readUserConfig(tmpDir);
-    expect(config.providers?.openai?.baseUrl).toBe("https://api.openai.com/v1");
+    expect(config.providers?.openai?.baseUrl).toBeUndefined();
+    expect(config.providers?.openai).not.toHaveProperty("baseUrl");
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -844,6 +893,28 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     });
     const config = await readUserConfig(tmpDir);
     expect(config.providers?.["custom-corp"]?.baseUrl).toBe("https://custom.corp.com/v1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("explicit metadata default baseUrl removes an existing custom override", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          baseUrl: "https://custom.openai.com/v1",
+          models: ["gpt-4o"]
+        }
+      }
+    });
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      input: { provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers?.openai?.baseUrl).toBeUndefined();
+    expect(config.providers?.openai).not.toHaveProperty("baseUrl");
     await rm(tmpDir, { recursive: true, force: true });
   });
 
