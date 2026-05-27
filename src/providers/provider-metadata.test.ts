@@ -19,7 +19,7 @@ describe("provider-metadata", () => {
     it.each([
       ["openai", "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["deepseek", "DeepSeek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", true, true, "api_key", "openai_chat_completions"],
-      ["kimi", "Kimi For Coding", "https://api.moonshot.cn/v1", "KIMI_API_KEY", true, true, "api_key", "openai_chat_completions"],
+      ["kimi", "Kimi For Coding", "https://api.moonshot.ai/v1", "KIMI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["google", "Google", "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["local", "Local", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
@@ -55,7 +55,7 @@ describe("provider-metadata", () => {
     it("provider default base URL returns real metadata defaults only", () => {
       expect(getProviderDefaultBaseUrl("openai")).toBe("https://api.openai.com/v1");
       expect(getProviderDefaultBaseUrl("deepseek")).toBe("https://api.deepseek.com/v1");
-      expect(getProviderDefaultBaseUrl("kimi")).toBe("https://api.moonshot.cn/v1");
+      expect(getProviderDefaultBaseUrl("kimi")).toBe("https://api.moonshot.ai/v1");
       expect(getProviderDefaultBaseUrl("google")).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
       expect(getProviderDefaultBaseUrl("openrouter")).toBe("https://openrouter.ai/api/v1");
       expect(getProviderDefaultBaseUrl("local")).toBe("http://localhost:11434/v1");

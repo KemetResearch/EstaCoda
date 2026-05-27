@@ -79,7 +79,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
       catalogExplore: true
     },
     apiMode: "openai_chat_completions",
-    defaultBaseUrl: "https://api.moonshot.cn/v1",
+    defaultBaseUrl: "https://api.moonshot.ai/v1",
     defaultApiKeyEnv: "KIMI_API_KEY",
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",

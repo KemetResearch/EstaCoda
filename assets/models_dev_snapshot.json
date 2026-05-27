@@ -95695,7 +95695,7 @@
       "MOONSHOT_API_KEY"
     ],
     "npm": "@ai-sdk/openai-compatible",
-    "api": "https://api.moonshot.cn/v1",
+    "api": "https://api.moonshot.ai/v1",
     "name": "Moonshot AI (China)",
     "doc": "https://platform.moonshot.cn/docs/api/chat",
     "models": {
