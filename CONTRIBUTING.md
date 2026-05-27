@@ -52,30 +52,55 @@ Bun is not required. Some scripts accept Bun as an optional dev-speed lane, but 
 
 ## Local Setup
 
+### Option A: Development checkout (recommended for contributors)
+
+Clone the repo and build, but do NOT run the setup script yet. The setup
+script writes a wrapper to `~/.local/bin/estacoda` and initializes state in
+`~/.estacoda` — that is a real user install, not a dev environment.
+
+For isolated dev state, use `ESTACODA_HOME`:
+
 ```bash
 git clone https://github.com/KemetResearch/EstaCoda.git
 cd EstaCoda
 corepack enable
 pnpm install
+pnpm run build
 ```
 
-If you are contributing from a fork:
+Run dev builds against isolated state:
 
 ```bash
-git clone https://github.com:<your-username>/EstaCoda.git
-cd EstaCoda
-git remote add upstream https://github.com/KemetResearch/EstaCoda.git
-corepack enable
-pnpm install
+ESTACODA_HOME="$HOME/.estacoda-dev" node dist/index.js --help
 ```
 
-Alternatively, run the repo setup script:
+Or create a dev alias in your shell rc:
+
+```bash
+alias estacoda-dev='ESTACODA_HOME="$HOME/.estacoda-dev" /path/to/EstaCoda/dist/index.js'
+```
+
+Then initialize dev state:
+
+```bash
+estacoda-dev init
+estacoda-dev setup
+```
+
+Rules:
+- Dev uses `git` and `pnpm run build`.
+- Dogfood uses `estacoda update`.
+- Never git pull inside your dogfood directory.
+- Never run `estacoda update` inside your dev checkout.
+
+### Option B: Quick local wrapper (creates a real user install)
+
+Use this when you want an `estacoda` command on PATH from a local checkout.
+This writes state to `~/.estacoda` like a normal user install.
 
 ```bash
 ./scripts/setup-estacoda.sh
 ```
-
-The script installs dependencies, builds the project, and offers to symlink a local wrapper.
 
 ### Environment
 

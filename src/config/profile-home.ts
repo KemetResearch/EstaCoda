@@ -157,7 +157,7 @@ export function writeActiveProfile(profileId: string, options?: { homeDir?: stri
 }
 
 function resolveHomeDir(homeDir: string | undefined): string {
-  return homeDir ?? process.env.HOME ?? homedir() ?? "";
+  return homeDir ?? process.env.ESTACODA_HOME ?? process.env.HOME ?? homedir() ?? "";
 }
 
 function readPreviousActiveProfile(activeProfilePath: string): ActiveProfileRecord | undefined {

@@ -12,7 +12,8 @@ rm -rf ~/.estacoda
 
 # Remove PATH entries from shell rc files
 # Edit ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish
-# and remove the lines that reference ESTACODA_HOME.
+# and remove any lines that reference ESTACODA_HOME
+# (only if you manually added them for dev isolation).
 ```
 
 ## Preserve state before removal

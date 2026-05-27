@@ -44,6 +44,12 @@ Production dependencies are installed through pnpm. SQLite state uses `better-sq
 
 ## Environment Variables
 
+State isolation:
+
+| Variable | Purpose |
+|----------|---------|
+| `ESTACODA_HOME` | Override the default state root (`~/.estacoda`). Use this to run dev builds against isolated state without touching your real user data. |
+
 Provider keys (configure at least one):
 
 | Variable | Provider |
@@ -91,7 +97,7 @@ Runtime config loads exactly one selected profile config: an explicit `--profile
 
 ## Runtime State Paths
 
-Default root: `~/.estacoda/`
+Default root: `~/.estacoda/` (override with `ESTACODA_HOME`)
 
 | Path | Purpose |
 |------|---------|
