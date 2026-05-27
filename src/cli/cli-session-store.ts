@@ -18,8 +18,8 @@ export class PersistentCliSessionStore {
   readonly #entries = new Map<string, CliSessionEntry>();
   #loaded = false;
 
-  constructor(options: { path?: string } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "cli-sessions.json");
+  constructor(options: { path?: string; homeDir?: string } = {}) {
+    this.#path = options.path ?? join(options.homeDir ?? homedir(), ".estacoda", "cli-sessions.json");
   }
 
   get path(): string {
