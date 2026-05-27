@@ -936,7 +936,7 @@ function renderSessionHistory(messages: PromptSessionHistoryMessage[] | undefine
 
   return [
     "Session history:",
-    ...messages.slice(-8).map((message) => `${message.role}: ${truncate(stringifyProviderMessageContent(message.content), 900)}`)
+    ...messages.map((message) => `${message.role}: ${truncate(stringifyProviderMessageContent(message.content), 900)}`)
   ].join("\n");
 }
 
