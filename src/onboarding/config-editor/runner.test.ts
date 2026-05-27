@@ -25,6 +25,7 @@ describe("runConfigEditor", () => {
   });
 
   afterEach(async () => {
+    delete process.env.PR8_SHELL_ONLY_KEY;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -473,6 +474,149 @@ describe("runConfigEditor", () => {
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
+  });
+
+  it("prompts to reuse a saved profile credential and keeps the existing key without raw key prompt", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_REUSE_KEY="saved-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["OpenAI", "gpt-5.5", "existing", true],
+      secret: "sk-should-not-be-read",
+    });
+    const reuseChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Saved provider API key") {
+        reuseChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_REUSE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(reuseChoiceLabels).toEqual([["Use existing saved API key.", "Enter a new API key."]]);
+    expect(prompt.secretPromptCount()).toBe(0);
+    expect(envFile).toContain("saved-reuse-secret");
+    expect(envFile).not.toContain("sk-should-not-be-read");
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(JSON.stringify(result)).not.toContain("saved-reuse-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("saved-reuse-secret");
+  });
+
+  it("replaces a saved profile credential only after reviewed approval when the user enters a new key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_REPLACE_KEY="old-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["OpenAI", "gpt-5.5", "new", true],
+        secret: "sk-pr8-replacement-secret",
+      }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_REPLACE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    expect(envFile).toContain('PR8_REPLACE_KEY="sk-pr8-replacement-secret"');
+    expect(envFile).not.toContain("old-reuse-secret");
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(result.output).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-pr8-replacement-secret");
+  });
+
+  it("returns a diagnostic when replacing a saved credential with an empty key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_EMPTY_REUSE_KEY="old-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", "new"], secret: "" }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_EMPTY_REUSE_KEY" }),
+      applyExecutor: {
+        apply: () => {
+          throw new Error("apply should not run for empty replacement credential");
+        },
+      },
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(false);
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(result.output).toContain("No API key was entered for PR8_EMPTY_REUSE_KEY");
+    expect(envFile).toContain("old-reuse-secret");
+  });
+
+  it("does not show the saved-key prompt when only shell env has the credential", async () => {
+    process.env.PR8_SHELL_ONLY_KEY = "sk-shell-only-secret";
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({ values: ["OpenAI", "gpt-5.5", true] });
+    const reuseChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Saved provider API key") {
+        reuseChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_SHELL_ONLY_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(reuseChoiceLabels).toEqual([]);
+    expect(prompt.secretPromptCount()).toBe(0);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("sk-shell-only-secret");
   });
 
   it("cancels guided credential repair without writing config or .env", async () => {
@@ -991,6 +1135,26 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   };
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
+  return prompt;
+}
+
+function trackingPrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt & {
+  readonly secretPromptCount: () => number;
+} {
+  const base = fakePrompt(options);
+  let secretPromptCount = 0;
+  const prompt = (async (question: string, promptOptions?: { secret?: boolean }) => {
+    if (promptOptions?.secret === true) {
+      secretPromptCount += 1;
+    }
+    return base(question, promptOptions);
+  }) as Prompt & { readonly secretPromptCount: () => number };
+  prompt.select = base.select;
+  prompt.onboardingCard = base.onboardingCard;
+  prompt.close = base.close;
+  Object.defineProperty(prompt, "secretPromptCount", {
+    value: () => secretPromptCount,
+  });
   return prompt;
 }
 

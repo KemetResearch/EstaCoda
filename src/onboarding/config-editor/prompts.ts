@@ -18,6 +18,8 @@ export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "brow
 
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
+export type CredentialReuseChoice = "existing" | "new";
+
 export type ConfigEditorPostApplyActionId =
   | "launch"
   | "accept-limited-mode"
@@ -217,6 +219,30 @@ export async function promptConfigEditorReviewApproval(
       },
     ],
     defaultValue: true,
+  });
+}
+
+export async function promptCredentialReuseChoice(
+  prompt: Prompt
+): Promise<CredentialReuseChoice> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.credentialReuse.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.credentialReuse.body")}\n`,
+    choices: [
+      {
+        id: "existing",
+        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing"),
+        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing.description"),
+        value: "existing" as const,
+      },
+      {
+        id: "new",
+        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.new"),
+        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.new.description"),
+        value: "new" as const,
+      },
+    ],
+    defaultValue: "existing" as const,
   });
 }
 

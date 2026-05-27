@@ -130,6 +130,12 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.postApply.repairAgain",
   "setupEditor.prompt.postApply.exit",
   "setupEditor.postApply.warningList",
+  "setupEditor.prompt.credentialReuse.title",
+  "setupEditor.prompt.credentialReuse.body",
+  "setupEditor.prompt.credentialReuse.existing",
+  "setupEditor.prompt.credentialReuse.existing.description",
+  "setupEditor.prompt.credentialReuse.new",
+  "setupEditor.prompt.credentialReuse.new.description",
   "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged",
   "setupEditor.prompt.optionalCapabilityAction.skip",
   "setupEditor.prompt.optionalCapabilityAction.enableConfigure",
@@ -385,6 +391,18 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("session_search");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("memory_compaction");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("profile_context");
+  });
+
+  it("contains Phase 2 credential reuse prompt copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.existing")).toBe("Use existing saved API key.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.existing.description")).toBe("Keep the saved credential reference and continue.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.new")).toBe("Enter a new API key.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.new.description")).toBe("Replace the saved secret value after review.");
+
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing")).toContain("API");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new")).toContain("API");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing").length).toBeGreaterThan(0);
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new.description").length).toBeGreaterThan(0);
   });
 
   it("contains review manifest copy keys", () => {

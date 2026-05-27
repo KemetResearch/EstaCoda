@@ -1,5 +1,5 @@
 import { resolveStateHome } from "../../config/state-home.js";
-import { writeEnvSecret } from "../../config/env-secret-store.js";
+import { hasSavedEnvSecret, writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import {
   loadRuntimeConfig,
@@ -58,6 +58,7 @@ import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
   promptBrowserCapability,
+  promptCredentialReuseChoice,
   promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
   promptConfigEditorPostApplyAction,
@@ -1237,6 +1238,36 @@ async function resolveCredentialForReview(
         return { kind: "diagnostic", output: `Malformed reuse credential reference: ${ref}` };
       }
       const envVarName = ref.slice(4);
+      const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+      const savedSecret = await hasSavedEnvSecret({
+        homeDir: options.homeDir,
+        profileId,
+        key: envVarName,
+      });
+
+      if (savedSecret.exists) {
+        const reuseChoice = await promptCredentialReuseChoice(options.prompt);
+        if (reuseChoice === "new") {
+          const promptResult = await promptForApiKeyInput({
+            prompt: options.prompt,
+            providerId: resolution.provider,
+            envVarName,
+          });
+          if (promptResult.kind === "skipped") {
+            return {
+              kind: "diagnostic",
+              output: `No API key was entered for ${envVarName}. The saved credential was left unchanged.`,
+            };
+          }
+          return {
+            kind: "ready",
+            envVarName,
+            credentialAction: credentialReferenceAction(resolution, envVarName),
+            pendingCredentialWrite: { envVarName: promptResult.envVarName, value: promptResult.value },
+          };
+        }
+      }
+
       return {
         kind: "ready",
         envVarName,
@@ -1268,8 +1299,8 @@ function credentialReferenceAction(
 ): SetupEditorActionDraft {
   return {
     kind: "setup-editor-action-draft",
-    id: "edit-primary-credential-reference",
-    copyKey: "setupEditor.actions.editPrimaryCredentialReference",
+    id: "store-provider-credential-reference",
+    copyKey: "setupEditor.actions.storeProviderCredentialReference",
     sectionId: "credentials",
     effect: "draft-config-patch",
     readOnly: false,
