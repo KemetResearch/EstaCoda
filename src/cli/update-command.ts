@@ -26,6 +26,7 @@ import {
   type ServiceManagerState,
   type ServiceScope
 } from "../gateway/service-manager.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 
 export type UpdateOptions = {
   check?: boolean;
@@ -64,7 +65,7 @@ export type GatewayRestartHandoffResult = {
 };
 
 export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateResult> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = resolveHomeDir(options.homeDir);
 
   if (homeDir.length === 0) {
     return {

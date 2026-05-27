@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { resolveHomeDir } from "../config/home-dir.js";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
@@ -62,8 +62,8 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   #sequence = 0;
   #loaded = false;
 
-  constructor(options: { path?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "channel-sessions.json");
+  constructor(options: { path?: string; homeDir?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore } = {}) {
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "channel-sessions.json");
     this.#policy = options.policy ?? {};
     this.#surfacePointerStore = options.surfacePointerStore;
   }

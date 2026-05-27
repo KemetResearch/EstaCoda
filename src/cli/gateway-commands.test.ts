@@ -182,6 +182,30 @@ async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
 }
 
+async function withEnv<T>(env: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(env)) {
+    previous.set(key, process.env[key]);
+    const value = env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 describe("gateway commands", () => {
   let tmpDir: string;
   let stateRoot: string;
@@ -583,7 +607,7 @@ describe("gateway commands", () => {
         logCommand: "journalctl --user -u estacoda-gateway-default-37a8eec1.service -f",
       });
 
-      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir }));
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Gateway service installed (user scope, profile: default).");
@@ -597,6 +621,30 @@ describe("gateway commands", () => {
         workspaceRoot: tmpDir,
         profileId: "default",
       }));
+    });
+
+    it("uses ESTACODA_HOME for profile lookup but OS HOME for service install semantics", async () => {
+      const envRoot = await makeTempDir();
+      const prodHome = join(envRoot, "prod-home");
+      const devHome = join(envRoot, "dev-home");
+      await mkdir(join(devHome, ".estacoda"), { recursive: true });
+      await writeFile(join(devHome, ".estacoda", "active-profile.json"), JSON.stringify({ profileId: "dev-profile" }), "utf8");
+      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+
+      try {
+        const result = await withEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, () => (
+          runGatewayInstallService({ workspaceRoot: tmpDir })
+        ));
+
+        expect(result.ok).toBe(true);
+        expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
+          homeDir: prodHome,
+          workspaceRoot: tmpDir,
+          profileId: "dev-profile",
+        }));
+      } finally {
+        await rm(envRoot, { recursive: true, force: true });
+      }
     });
 
     it("omits source-mode warning for package installs", async () => {
@@ -650,12 +698,12 @@ describe("gateway commands", () => {
 
     it("uninstalls a service and returns failures", async () => {
       serviceManagerMock.uninstallService.mockResolvedValueOnce({ ok: true });
-      const success = await runGatewayUninstallService({
+      const success = await withEnv({ HOME: tmpDir }, () => runGatewayUninstallService({
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
         profileId: "work",
         system: true,
-      });
+      }));
       expect(success).toEqual({
         ok: true,
         output: "Gateway service uninstalled (system scope, profile: work).",
@@ -669,6 +717,29 @@ describe("gateway commands", () => {
       serviceManagerMock.uninstallService.mockResolvedValueOnce({ ok: false, error: "not supported" });
       const failure = await runGatewayUninstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(failure).toEqual({ ok: false, output: "not supported" });
+    });
+
+    it("uses ESTACODA_HOME for profile lookup but OS HOME for service uninstall semantics", async () => {
+      const envRoot = await makeTempDir();
+      const prodHome = join(envRoot, "prod-home");
+      const devHome = join(envRoot, "dev-home");
+      await mkdir(join(devHome, ".estacoda"), { recursive: true });
+      await writeFile(join(devHome, ".estacoda", "active-profile.json"), JSON.stringify({ profileId: "dev-profile" }), "utf8");
+      serviceManagerMock.uninstallService.mockResolvedValue({ ok: true });
+
+      try {
+        const result = await withEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, () => (
+          runGatewayUninstallService({ workspaceRoot: tmpDir })
+        ));
+
+        expect(result.ok).toBe(true);
+        expect(serviceManagerMock.uninstallService).toHaveBeenCalledWith(expect.objectContaining({
+          homeDir: prodHome,
+          profileId: "dev-profile",
+        }));
+      } finally {
+        await rm(envRoot, { recursive: true, force: true });
+      }
     });
 
     it("renders user and system service state in status on systemd", async () => {

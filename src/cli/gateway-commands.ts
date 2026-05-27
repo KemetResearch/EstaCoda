@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat, readdir } from "node:fs/promises";
+import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
@@ -134,7 +135,7 @@ async function resolveGatewayProfile(
   options: GatewayCommandOptions,
   behavior: { preferRunning?: boolean } = {}
 ): Promise<SelectedGatewayProfile> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId
     ?? (behavior.preferRunning ? await discoverRunningGatewayProfile(homeDir) : undefined)
     ?? readActiveProfile({ homeDir }).profileId
@@ -274,8 +275,8 @@ export async function runGatewayStatus(
 export async function runGatewayInstallService(
   options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean; serviceHomeDir?: string }
 ): Promise<{ ok: boolean; output: string }> {
-  const stateHomeDir = options.homeDir ?? process.env.HOME ?? "";
-  const homeDir = options.serviceHomeDir ?? stateHomeDir;
+  const stateHomeDir = resolveHomeDir(options.homeDir);
+  const homeDir = options.serviceHomeDir ?? resolveOsHomeDir();
   const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await installService({
     homeDir,
@@ -316,8 +317,9 @@ export async function runGatewayInstallService(
 export async function runGatewayUninstallService(
   options: GatewayCommandOptions & { system?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
-  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const stateHomeDir = resolveHomeDir(options.homeDir);
+  const homeDir = resolveOsHomeDir();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await uninstallService({
     homeDir,
     profileId,

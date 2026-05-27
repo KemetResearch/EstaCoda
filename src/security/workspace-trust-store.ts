@@ -1,6 +1,6 @@
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 
 export type WorkspaceTrustGrant = {
   root: string;
@@ -15,6 +15,7 @@ export type WorkspaceTrustFile = {
 
 export type WorkspaceTrustStoreOptions = {
   path?: string;
+  homeDir?: string;
   now?: () => Date;
 };
 
@@ -23,7 +24,7 @@ export class WorkspaceTrustStore {
   readonly #now: () => Date;
 
   constructor(options: WorkspaceTrustStoreOptions = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "trust.json");
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "trust.json");
     this.#now = options.now ?? (() => new Date());
   }
 

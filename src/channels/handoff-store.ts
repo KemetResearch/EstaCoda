@@ -13,8 +13,8 @@
  */
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { randomInt } from "node:crypto";
+import { resolveHomeDir } from "../config/home-dir.js";
 
 export type HandoffCode = {
   code: string;
@@ -64,8 +64,8 @@ export class FileHandoffStore implements HandoffStore {
   readonly #codes = new Map<string, HandoffCode>();
   #loaded = false;
 
-  constructor(options: { path?: string } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "handoff-codes.json");
+  constructor(options: { path?: string; homeDir?: string } = {}) {
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "handoff-codes.json");
   }
 
   get path(): string {

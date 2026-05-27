@@ -1,5 +1,6 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic, type ProviderDiagnostic } from "../config/provider-diagnostics.js";
@@ -68,19 +69,20 @@ export type SetupVerificationReport = {
 export async function collectSetupVerificationReport(
   options: SetupVerificationOptions
 ): Promise<SetupVerificationReport> {
-  const config = await loadRuntimeConfig(options);
+  const homeDir = resolveHomeDir(options.homeDir);
+  const config = await loadRuntimeConfig({ ...options, homeDir });
   const locale = config.ui.language === "ar" ? "ar" : "en";
   const security = formatSecurityMode(config.security.approvalMode, locale);
   const autonomy = formatSkillAutonomy(config.skills.autonomy, locale);
   const provider = await diagnoseProviderConfig(config);
   const trustStore = new WorkspaceTrustStore({
-    path: options.trustStorePath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "trust.json")
+    path: options.trustStorePath ?? join(homeDir, ".estacoda", "trust.json")
   });
   const workspaceTrusted = await isWorkspaceTrusted(trustStore, options.workspaceRoot);
-  const stateRoot = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda");
+  const stateRoot = join(homeDir, ".estacoda");
   const verifyFile = join(stateRoot, ".verify");
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const envPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).envPath;
+  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const envPath = resolveProfileStateHome({ homeDir, profileId }).envPath;
   let stateWritable = false;
   let envFilePresent = false;
   let envMode: string | undefined;

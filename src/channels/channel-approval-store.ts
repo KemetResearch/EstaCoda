@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 
 export type PersistedApprovalGrant = {
@@ -27,10 +27,11 @@ export class ChannelApprovalStore {
 
   constructor(options: {
     path?: string;
+    homeDir?: string;
     now?: () => Date;
     idFactory?: () => string;
   } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "channel-approvals.json");
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "channel-approvals.json");
     this.#now = options.now ?? (() => new Date());
     this.#idFactory = options.idFactory ?? (() => `approval-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
   }

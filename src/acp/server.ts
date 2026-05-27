@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
@@ -118,7 +118,7 @@ export class AcpServer {
 
   constructor(options: AcpServerOptions) {
     this.#workspaceRoot = options.workspaceRoot;
-    this.#homeDir = options.homeDir ?? homedir();
+    this.#homeDir = resolveHomeDir(options.homeDir);
     this.#profileId = readActiveProfile({ homeDir: this.#homeDir })?.profileId ?? defaultProfileId();
     this.#input = options.input ?? process.stdin;
     this.#output = options.output ?? process.stdout;

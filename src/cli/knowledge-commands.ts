@@ -1,6 +1,6 @@
 import { join, relative } from "node:path";
-import { homedir } from "node:os";
 import type { CliCommandResult, CliOptions } from "./cli.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { MemoryInspector } from "../memory/memory-inspector.js";
@@ -212,7 +212,7 @@ async function memoryDeactivate(
 }
 
 async function openMemoryInspector(options: CliOptions): Promise<MemoryInspector | undefined> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? homedir();
+  const homeDir = resolveHomeDir(options.homeDir);
   const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const identityContext = await loadIdentityContext({ profilePaths });

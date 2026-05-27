@@ -6,12 +6,13 @@ import {
   uninstallPack
 } from "../packs/pack-installer.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { createReadlinePrompt } from "./readline-prompt.js";
 
 export async function packCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];
   const subArgs = args.slice(1);
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = resolveHomeDir(options.homeDir);
   const actor = process.env.USER ?? "cli";
 
   if (hasFlag(args, "--help") || hasFlag(args, "-h")) {

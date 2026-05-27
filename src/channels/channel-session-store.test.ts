@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PersistentChannelSessionStore, shouldAutoResetSession } from "./channel-session-store.js";
 import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 
 describe("PersistentChannelSessionStore with surface pointers", () => {
+  it("uses ESTACODA_HOME before HOME for the default store path", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-channel-session-store-"));
+    const prodHome = join(tempDir, "prod-home");
+    const devHome = join(tempDir, "dev-home");
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const store = new PersistentChannelSessionStore();
+
+      expect(store.path).toBe(join(devHome, ".estacoda", "channel-sessions.json"));
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns channel-local session id by default", async () => {
     const store = new PersistentChannelSessionStore({
       path: "/tmp/test-channel-sessions-" + Math.random().toString(36).slice(2) + ".json",

@@ -143,6 +143,35 @@ describe("DeliveryRouter", () => {
       expect(content).toBe("Local content");
     });
 
+    it("uses ESTACODA_HOME before HOME for default local delivery state", async () => {
+      const prodHome = join(tmpDir, "prod-home");
+      const devHome = join(tmpDir, "dev-home");
+      const previousHome = process.env.HOME;
+      const previousEstacodaHome = process.env.ESTACODA_HOME;
+      process.env.HOME = prodHome;
+      process.env.ESTACODA_HOME = devHome;
+      try {
+        const router = new DeliveryRouter();
+        const targets = router.parseTarget("local", baseSessionKey);
+        await router.deliverText(targets, "Local content");
+
+        const devFiles = await readdir(join(devHome, ".estacoda", "delivery"));
+        expect(devFiles.length).toBeGreaterThan(0);
+        await expect(readdir(join(prodHome, ".estacoda", "delivery"))).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        if (previousHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = previousHome;
+        }
+        if (previousEstacodaHome === undefined) {
+          delete process.env.ESTACODA_HOME;
+        } else {
+          process.env.ESTACODA_HOME = previousEstacodaHome;
+        }
+      }
+    });
+
     it("silent target does nothing and succeeds", async () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const targets = router.parseTarget("silent", baseSessionKey);

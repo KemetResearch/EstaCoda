@@ -63,6 +63,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { runSessionsCommand } from "./session-commands.js";
@@ -472,7 +473,8 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
   }
 
   // State directory backup readiness
-  const backupReady = await isBackupReady(options.homeDir ?? process.env.HOME ?? "");
+  const homeDir = resolveHomeDir(options.homeDir);
+  const backupReady = await isBackupReady(homeDir);
   if (backupReady.ok) {
     extraLines.push("State backup: ready");
   } else {
@@ -480,7 +482,7 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
   }
 
   // pack registry validation
-  const registry = new PackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const registry = new PackRegistry({ homeDir });
   const installedPacks = await registry.list();
   if (installedPacks.length === 0) {
     extraLines.push("pack registry: not initialized");
@@ -1915,13 +1917,14 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   }
 
   // State directory backup integrity
-  const backupReady = await isBackupReady(options.homeDir ?? process.env.HOME ?? "");
+  const homeDir = resolveHomeDir(options.homeDir);
+  const backupReady = await isBackupReady(homeDir);
   if (!backupReady.ok) {
     warnings.push(`State backup not ready: ${backupReady.reason}`);
   }
 
   // pack registry health
-  const spRegistry = new PackRegistry({ homeDir: options.homeDir ?? process.env.HOME ?? "" });
+  const spRegistry = new PackRegistry({ homeDir });
   const spEntries = await spRegistry.list();
   if (spEntries.length === 0) {
     notes.push("pack registry: no packs installed");
@@ -3960,7 +3963,7 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
 async function handoff(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const result = await runHandoffCommand({
     args,
-    homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
+    homeDir: resolveHomeDir(options.homeDir),
     runtime: options.runtime,
   });
   return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
@@ -3969,7 +3972,7 @@ async function handoff(options: CliOptions, args: string[]): Promise<CliCommandR
 async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const result = await runSessionsCommand({
     args,
-    homeDir: options.homeDir ?? process.env.HOME ?? ".estacoda",
+    homeDir: resolveHomeDir(options.homeDir),
     workspaceRoot: options.workspaceRoot,
     providerFetch: options.providerFetch,
     modelsDevOptions: options.modelsDevOptions,

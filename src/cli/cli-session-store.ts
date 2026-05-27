@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { resolveHomeDir } from "../config/home-dir.js";
 
 type CliSessionFile = {
   version: 1;
@@ -19,7 +19,7 @@ export class PersistentCliSessionStore {
   #loaded = false;
 
   constructor(options: { path?: string; homeDir?: string } = {}) {
-    this.#path = options.path ?? join(options.homeDir ?? homedir(), ".estacoda", "cli-sessions.json");
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "cli-sessions.json");
   }
 
   get path(): string {

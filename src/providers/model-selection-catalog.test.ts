@@ -529,6 +529,49 @@ describe("ModelSelectionCatalog refresh", () => {
     expect(report.sourceDomain).toBe("models.dev");
     expect(report.cachePath).toContain("models_dev_cache.json");
   }));
+
+  it("uses ESTACODA_HOME before HOME for the default models.dev cache path", withFixture(async (fixturePath, _cachePath) => {
+    const tempHome = mkdtempSync(join(tmpdir(), "estacoda-model-catalog-home-"));
+    const prodHome = join(tempHome, "prod-home");
+    const devHome = join(tempHome, "dev-home");
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const catalog = await createModelSelectionCatalog({
+        config: {},
+        providerRegistry: new ProviderRegistry(),
+        modelsDevOptions: {
+          bundledSnapshotPath: fixturePath,
+          allowNetwork: false,
+          fetchImpl: async () => ({
+            ok: false,
+            status: 503,
+            statusText: "Service Unavailable",
+            json: async () => ({}),
+            text: async () => ""
+          })
+        }
+      });
+      const report = await catalog.refresh();
+
+      expect(report.cachePath).toBe(join(devHome, ".estacoda", "models_dev_cache.json"));
+      expect(report.cachePath).not.toContain(prodHome);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  }));
 });
 
 describe("ModelSelectionCatalog provider listing", () => {

@@ -2,12 +2,13 @@ import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 
 export async function skillsCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];
   const subArgs = args.slice(1);
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = resolveHomeDir(options.homeDir);
 
   switch (subcommand) {
     case "list":

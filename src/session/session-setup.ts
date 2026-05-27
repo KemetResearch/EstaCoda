@@ -21,8 +21,8 @@ export async function prepareSessionDbFile(path: string): Promise<void> {
   }
 }
 
-export async function createSQLiteSessionDB(options?: { path?: string }): Promise<SQLiteSessionDB> {
-  const stateHome = resolveStateHome();
+export async function createSQLiteSessionDB(options?: { path?: string; homeDir?: string }): Promise<SQLiteSessionDB> {
+  const stateHome = resolveStateHome({ homeDir: options?.homeDir });
   const sessionDbPath = options?.path ?? stateHome.sessionsSqlitePath;
   await prepareSessionDbFile(sessionDbPath);
   return new SQLiteSessionDB({ path: sessionDbPath });

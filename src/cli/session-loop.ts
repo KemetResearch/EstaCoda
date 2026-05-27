@@ -1,5 +1,4 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
-import { homedir } from "node:os";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -46,6 +45,7 @@ import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEv
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
 import { getPackageVersion } from "./version-command.js";
@@ -895,7 +895,7 @@ async function currentCliVoiceMode(input: {
   homeDir?: string;
 }): Promise<CliVoiceMode> {
   const profileId = await runtimeProfileId(input.runtime);
-  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
   return await readCliVoiceMode(profilePaths);
 }
 
@@ -941,10 +941,11 @@ async function readNextCliInput(input: {
   }
 
   const profileId = await runtimeProfileId(input.runtime);
-  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  const homeDir = resolveHomeDir(input.homeDir);
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const config = await loadRuntimeConfig({
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
-    homeDir: input.homeDir,
+    homeDir,
     profileId
   });
 
@@ -1032,10 +1033,11 @@ async function playCliResponseIfEnabled(input: {
   signal?: AbortSignal;
 }): Promise<Extract<Awaited<ReturnType<typeof playCliTtsResponse>>, { ok: true }> | undefined> {
   const profileId = await runtimeProfileId(input.runtime);
-  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  const homeDir = resolveHomeDir(input.homeDir);
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const config = await loadRuntimeConfig({
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
-    homeDir: input.homeDir,
+    homeDir,
     profileId
   });
   const result = await playCliTtsResponse({
@@ -1337,7 +1339,7 @@ export async function handleSlashCommand(input: {
       const { FileHandoffStore } = await import("../channels/handoff-store.js");
       const { join } = await import("node:path");
       const profileId = await runtimeProfileId(input.runtime);
-      const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+      const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
       const store = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
       const handoff = await store.create({
         sessionId: input.runtime.sessionId,
@@ -1469,7 +1471,7 @@ async function handleGlobalModelSet(
 
   const profileId = await runtimeProfileId(input.runtime);
   const targetPath = resolveProfileStateHome({
-    homeDir: input.homeDir ?? homedir(),
+    homeDir: resolveHomeDir(input.homeDir),
     profileId
   }).configPath;
   const mutated = applyModelSwitchPrimaryRoute(context.config, resolution.route);

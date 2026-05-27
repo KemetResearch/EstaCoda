@@ -1,4 +1,5 @@
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ChannelAuthPolicies } from "../contracts/channel.js";
 import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
@@ -51,15 +52,16 @@ export type TelegramGatewayDiagnostics = {
 };
 
 export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions): Promise<TelegramGatewayDiagnostics> {
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
+  const homeDir = resolveHomeDir(options.homeDir);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const config = await loadRuntimeConfig({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
+    homeDir,
     profileId
   });
   const telegram = config.channels.telegram;
-  const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot });
-  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot, profileId });
+  const globalPaths = resolveGlobalStateHome({ homeDir });
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const stateRoot = globalPaths.stateRoot;
   const sessionDbPath = globalPaths.sessionsSqlitePath;
   const mediaRoot = profilePaths.channelMediaPath;

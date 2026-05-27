@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { readFile, stat } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "./cli.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
@@ -10,7 +10,7 @@ import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillProposalService } from "../skills/skill-proposal-service.js";
 
 function resolveHome(options: CliOptions): string {
-  return options.homeDir ?? process.env.HOME ?? homedir();
+  return resolveHomeDir(options.homeDir);
 }
 
 async function openManifestService(options: CliOptions): Promise<SkillProposalService> {
