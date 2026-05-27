@@ -617,7 +617,9 @@ describe("gateway commands", () => {
       expect(result.output).toContain("loginctl enable-linger");
       expect(result.output).toContain("Installed in source mode");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
-        homeDir: tmpDir,
+        stateHomeDir: tmpDir,
+        serviceUserHomeDir: tmpDir,
+        serviceUserHomeDirExplicit: false,
         workspaceRoot: tmpDir,
         profileId: "default",
       }));
@@ -638,7 +640,9 @@ describe("gateway commands", () => {
 
         expect(result.ok).toBe(true);
         expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
-          homeDir: prodHome,
+          stateHomeDir: devHome,
+          serviceUserHomeDir: prodHome,
+          serviceUserHomeDirExplicit: false,
           workspaceRoot: tmpDir,
           profileId: "dev-profile",
         }));
@@ -688,8 +692,9 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Logs: sudo journalctl -u estacoda-gateway-work-6b7fb7c6.service -f");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
         profileId: "work",
-        homeDir: "/home/estacoda",
-        serviceHomeDir: "/home/estacoda",
+        stateHomeDir: tmpDir,
+        serviceUserHomeDir: "/home/estacoda",
+        serviceUserHomeDirExplicit: true,
         system: true,
         runAsUser: "estacoda",
         force: true,
@@ -709,7 +714,7 @@ describe("gateway commands", () => {
         output: "Gateway service uninstalled (system scope, profile: work).",
       });
       expect(serviceManagerMock.uninstallService).toHaveBeenCalledWith(expect.objectContaining({
-        homeDir: tmpDir,
+        serviceUserHomeDir: tmpDir,
         profileId: "work",
         system: true,
       }));
@@ -734,7 +739,7 @@ describe("gateway commands", () => {
 
         expect(result.ok).toBe(true);
         expect(serviceManagerMock.uninstallService).toHaveBeenCalledWith(expect.objectContaining({
-          homeDir: prodHome,
+          serviceUserHomeDir: prodHome,
           profileId: "dev-profile",
         }));
       } finally {
@@ -1090,14 +1095,14 @@ describe("gateway commands", () => {
       }));
       const stopGatewaySpy = vi.spyOn(lifecycleModule, "stopGateway");
 
-      const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir }));
 
       expect(result).toEqual({
         ok: true,
         output: "Gateway service stopped (user scope, profile: default).",
       });
       expect(serviceManagerMock.stopService).toHaveBeenCalledWith(expect.objectContaining({
-        homeDir: tmpDir,
+        serviceUserHomeDir: tmpDir,
         profileId: "default",
         system: false,
       }));
@@ -1511,7 +1516,7 @@ describe("gateway commands", () => {
     });
 
     it("reports not running and background-starts when no PID exists", async () => {
-      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir }));
       expect(result.output).toContain("Gateway was not running");
       expect(result.output).toContain("Gateway started (PID 12346)");
       expect(childProcessMock.spawn).toHaveBeenCalledOnce();
@@ -1528,14 +1533,14 @@ describe("gateway commands", () => {
         profileId: options.profileId,
       }));
 
-      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir }));
 
       expect(result).toEqual({
         ok: true,
         output: "Gateway service restarted (user scope, profile: default).",
       });
       expect(serviceManagerMock.restartService).toHaveBeenCalledWith(expect.objectContaining({
-        homeDir: tmpDir,
+        serviceUserHomeDir: tmpDir,
         profileId: "default",
         system: false,
       }));

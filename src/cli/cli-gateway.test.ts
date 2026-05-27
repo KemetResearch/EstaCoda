@@ -326,7 +326,9 @@ describe("cli gateway start", () => {
       profileId: "work",
       system: true,
       runAsUser: "estacoda",
-      serviceHomeDir: "/home/estacoda",
+      stateHomeDir: "/tmp/home",
+      serviceUserHomeDir: "/home/estacoda",
+      serviceUserHomeDirExplicit: true,
       force: true,
     }));
   });

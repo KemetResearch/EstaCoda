@@ -30,7 +30,7 @@ type CommandResult = {
 };
 
 type ValidationResult = { ok: true } | { ok: false; error: string };
-type HomeDirResult = { ok: true; homeDir: string } | { ok: false; error: string };
+type ServiceUserHomeDirResult = { ok: true; serviceUserHomeDir: string } | { ok: false; error: string };
 type InstallResult = { ok: true; mode: ExecMode; unitName?: string; logCommand?: string } | { ok: false; error: string };
 type ExistingServiceFile = { content: string; mode: number };
 
@@ -48,15 +48,17 @@ export function detectServiceManager(): ServiceManagerKind {
 }
 
 export async function installService(options: {
-  homeDir: string;
-  serviceHomeDir?: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
+  serviceUserHomeDirExplicit?: boolean;
   workspaceRoot: string;
   profileId: string;
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
 }): Promise<InstallResult> {
-  let homeDir = resolve(options.homeDir);
+  const stateHomeDir = resolve(options.stateHomeDir);
+  let serviceUserHomeDir = resolve(options.serviceUserHomeDir);
   const workspaceRoot = resolve(options.workspaceRoot);
   const kind = targetKind(options);
 
@@ -78,15 +80,16 @@ export async function installService(options: {
     if (!userValidation.ok) return userValidation;
     const userExists = await verifySystemUserExists(runAsUser);
     if (!userExists.ok) return userExists;
-    const systemHome = options.serviceHomeDir === undefined
-      ? await resolveSystemUserHome(runAsUser)
-      : await validateExplicitSystemHome(options.serviceHomeDir);
+    const systemHome = options.serviceUserHomeDirExplicit === true
+      ? await validateExplicitSystemHome(options.serviceUserHomeDir)
+      : await resolveSystemUserHome(runAsUser);
     if (!systemHome.ok) return systemHome;
-    homeDir = systemHome.homeDir;
+    serviceUserHomeDir = systemHome.serviceUserHomeDir;
   }
   const baseValidation = validateServiceRenderValues([
     { label: "profileId", value: options.profileId },
-    { label: "homeDir", value: homeDir },
+    { label: "stateHomeDir", value: stateHomeDir },
+    { label: "serviceUserHomeDir", value: serviceUserHomeDir },
     ...(kind === "systemd-system" && options.runAsUser !== undefined
       ? [{ label: "runAsUser", value: options.runAsUser }]
       : []),
@@ -99,17 +102,17 @@ export async function installService(options: {
   }
 
   if (kind === "launchd") {
-    return installLaunchd({ ...options, homeDir, workspaceRoot, resolved: resolved.resolved });
+    return installLaunchd({ ...options, stateHomeDir, serviceUserHomeDir, workspaceRoot, resolved: resolved.resolved });
   }
-  return installSystemd({ ...options, homeDir, workspaceRoot, kind, resolved: resolved.resolved });
+  return installSystemd({ ...options, stateHomeDir, serviceUserHomeDir, workspaceRoot, kind, resolved: resolved.resolved });
 }
 
 export async function uninstallService(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   system?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const homeDir = resolve(options.homeDir);
+  const serviceUserHomeDir = resolve(options.serviceUserHomeDir);
   const kind = targetKind(options);
   if (kind === "none") {
     return { ok: false, error: "No supported service manager detected." };
@@ -119,13 +122,13 @@ export async function uninstallService(options: {
   }
 
   if (kind === "launchd") {
-    return uninstallLaunchd({ homeDir, profileId: options.profileId });
+    return uninstallLaunchd({ serviceUserHomeDir, profileId: options.profileId });
   }
-  return uninstallSystemd({ homeDir, profileId: options.profileId, kind });
+  return uninstallSystemd({ serviceUserHomeDir, profileId: options.profileId, kind });
 }
 
 export async function stopService(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   system?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -144,11 +147,11 @@ export async function stopService(options: {
 }
 
 export async function startService(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   system?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const homeDir = resolve(options.homeDir);
+  const serviceUserHomeDir = resolve(options.serviceUserHomeDir);
   const kind = targetKind(options);
   if (kind === "none") {
     return { ok: false, error: "No supported service manager detected." };
@@ -158,13 +161,13 @@ export async function startService(options: {
   }
 
   if (kind === "launchd") {
-    return startLaunchd({ homeDir, profileId: options.profileId });
+    return startLaunchd({ serviceUserHomeDir, profileId: options.profileId });
   }
   return controlSystemd({ profileId: options.profileId, kind, action: "start" });
 }
 
 export async function restartService(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   system?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -183,16 +186,16 @@ export async function restartService(options: {
 }
 
 export async function probeServiceState(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   system?: boolean;
 }): Promise<ServiceManagerState> {
   try {
-    const homeDir = resolve(options.homeDir);
+    const serviceUserHomeDir = resolve(options.serviceUserHomeDir);
     const kind = targetKind(options, { unsupportedSystemAsNone: true });
     if (kind === "none") return fallbackState(options);
-    if (kind === "launchd") return await probeLaunchd({ homeDir, profileId: options.profileId });
-    return await probeSystemd({ homeDir, profileId: options.profileId, kind });
+    if (kind === "launchd") return await probeLaunchd({ serviceUserHomeDir, profileId: options.profileId });
+    return await probeSystemd({ serviceUserHomeDir, profileId: options.profileId, kind });
   } catch {
     return fallbackState(options);
   }
@@ -220,15 +223,15 @@ export function plistNameForProfile(profileId: string): string {
   return `${launchdLabelForProfile(profileId)}.plist`;
 }
 
-export function systemdUnitPath(options: { homeDir: string; profileId: string; system?: boolean }): string {
+export function systemdUnitPath(options: { serviceUserHomeDir: string; profileId: string; system?: boolean }): string {
   const unitName = unitNameForProfile(options.profileId);
   return options.system === true
     ? join("/etc", "systemd", "system", unitName)
-    : join(options.homeDir, ".config", "systemd", "user", unitName);
+    : join(options.serviceUserHomeDir, ".config", "systemd", "user", unitName);
 }
 
-export function launchdPlistPath(options: { homeDir: string; profileId: string }): string {
-  return join(options.homeDir, "Library", "LaunchAgents", plistNameForProfile(options.profileId));
+export function launchdPlistPath(options: { serviceUserHomeDir: string; profileId: string }): string {
+  return join(options.serviceUserHomeDir, "Library", "LaunchAgents", plistNameForProfile(options.profileId));
 }
 
 function targetKind(options: { system?: boolean }, behavior: { unsupportedSystemAsNone?: boolean } = {}): ServiceManagerKind {
@@ -256,7 +259,8 @@ function fallbackState(options: { profileId: string; system?: boolean }): Servic
 }
 
 async function installSystemd(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   workspaceRoot: string;
   profileId: string;
   system?: boolean;
@@ -265,14 +269,15 @@ async function installSystemd(options: {
   kind: "systemd-user" | "systemd-system";
   resolved: ResolvedExec;
 }): Promise<InstallResult> {
-  const path = systemdUnitPath({ homeDir: options.homeDir, profileId: options.profileId, system: options.kind === "systemd-system" });
+  const path = systemdUnitPath({ serviceUserHomeDir: options.serviceUserHomeDir, profileId: options.profileId, system: options.kind === "systemd-system" });
   const unitName = unitNameForProfile(options.profileId);
   const exists = await fileExists(path);
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
   const validation = validateSystemdUnitInput({
-    homeDir: options.homeDir,
+    stateHomeDir: options.stateHomeDir,
+    serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     runAsUser: options.kind === "systemd-system" ? options.runAsUser : undefined,
     resolved: options.resolved,
@@ -289,13 +294,14 @@ async function installSystemd(options: {
     if (!stop.ok) return { ok: false, error: commandError("systemctl stop", stop) };
   }
   const liveEvidence = exists && options.force === true
-    ? await waitForNoLiveGatewayEvidence(options.homeDir, options.profileId)
-    : await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+    ? await waitForNoLiveGatewayEvidence(options.stateHomeDir, options.profileId)
+    : await assertNoLiveGatewayEvidence(options.stateHomeDir, options.profileId);
   if (!liveEvidence.ok) return liveEvidence;
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, renderSystemdUnit({
-    homeDir: options.homeDir,
+    stateHomeDir: options.stateHomeDir,
+    serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     runAsUser: options.kind === "systemd-system" ? options.runAsUser : undefined,
     resolved: options.resolved,
@@ -320,12 +326,12 @@ async function installSystemd(options: {
 }
 
 async function uninstallSystemd(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   kind: "systemd-user" | "systemd-system";
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const unitName = unitNameForProfile(options.profileId);
-  const path = systemdUnitPath({ homeDir: options.homeDir, profileId: options.profileId, system: options.kind === "systemd-system" });
+  const path = systemdUnitPath({ serviceUserHomeDir: options.serviceUserHomeDir, profileId: options.profileId, system: options.kind === "systemd-system" });
   if (!(await fileExists(path))) return { ok: true };
 
   for (const args of [["stop", unitName], ["disable", unitName]]) {
@@ -339,19 +345,21 @@ async function uninstallSystemd(options: {
 }
 
 async function installLaunchd(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   workspaceRoot: string;
   profileId: string;
   force?: boolean;
   resolved: ResolvedExec;
 }): Promise<InstallResult> {
-  const path = launchdPlistPath({ homeDir: options.homeDir, profileId: options.profileId });
+  const path = launchdPlistPath({ serviceUserHomeDir: options.serviceUserHomeDir, profileId: options.profileId });
   const exists = await fileExists(path);
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
   const validation = validateLaunchdPlistInput({
-    homeDir: options.homeDir,
+    stateHomeDir: options.stateHomeDir,
+    serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     resolved: options.resolved,
   });
@@ -367,15 +375,16 @@ async function installLaunchd(options: {
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   }
   const liveEvidence = exists && options.force === true
-    ? await waitForNoLiveGatewayEvidence(options.homeDir, options.profileId)
-    : await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+    ? await waitForNoLiveGatewayEvidence(options.stateHomeDir, options.profileId)
+    : await assertNoLiveGatewayEvidence(options.stateHomeDir, options.profileId);
   if (!liveEvidence.ok) return liveEvidence;
 
-  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir: options.stateHomeDir, profileId: options.profileId });
   await mkdir(dirname(path), { recursive: true });
   await mkdir(profilePaths.logsPath, { recursive: true });
   await writeFile(path, renderLaunchdPlist({
-    homeDir: options.homeDir,
+    stateHomeDir: options.stateHomeDir,
+    serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     resolved: options.resolved,
   }), { encoding: "utf8", mode: 0o600 });
@@ -390,10 +399,10 @@ async function installLaunchd(options: {
 }
 
 async function uninstallLaunchd(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const path = launchdPlistPath({ homeDir: options.homeDir, profileId: options.profileId });
+  const path = launchdPlistPath({ serviceUserHomeDir: options.serviceUserHomeDir, profileId: options.profileId });
   if (!(await fileExists(path))) return { ok: true };
   const unload = await runCommand("launchctl", ["unload", "-w", path]);
   if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
@@ -419,7 +428,7 @@ async function stopLaunchd(options: { profileId: string }): Promise<{ ok: true }
   return { ok: true };
 }
 
-async function startLaunchd(options: { homeDir: string; profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+async function startLaunchd(options: { serviceUserHomeDir: string; profileId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
   const domain = launchdGuiDomain();
   if (!domain.ok) return domain;
   const result = await runCommand("launchctl", ["bootstrap", domain.domain, launchdPlistPath(options)]);
@@ -450,7 +459,8 @@ function launchdGuiDomain(): { ok: true; domain: string } | { ok: false; error: 
 }
 
 function renderSystemdUnit(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   runAsUser?: string;
   resolved: ResolvedExec;
@@ -475,7 +485,8 @@ function renderSystemdUnit(options: {
     "KillMode=mixed",
     "StandardOutput=journal",
     "StandardError=journal",
-    `Environment="${systemdEscapeEnvAssignment("HOME", options.homeDir)}"`,
+    `Environment="${systemdEscapeEnvAssignment("HOME", options.serviceUserHomeDir)}"`,
+    `Environment="${systemdEscapeEnvAssignment("ESTACODA_HOME", options.stateHomeDir)}"`,
     `Environment="${systemdEscapeEnvAssignment("PATH", path)}"`,
     `WorkingDirectory=${systemdEscapeArg(options.resolved.cwd)}`,
   ].filter((line): line is string => line !== undefined);
@@ -497,11 +508,12 @@ function renderSystemdUnit(options: {
 }
 
 function renderLaunchdPlist(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   resolved: ResolvedExec;
 }): string {
-  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir: options.stateHomeDir, profileId: options.profileId });
   const argv = [
     options.resolved.command,
     ...options.resolved.args,
@@ -529,7 +541,9 @@ function renderLaunchdPlist(options: {
     "  <key>EnvironmentVariables</key>",
     "  <dict>",
     "    <key>HOME</key>",
-    `    <string>${xmlEscape(options.homeDir)}</string>`,
+    `    <string>${xmlEscape(options.serviceUserHomeDir)}</string>`,
+    "    <key>ESTACODA_HOME</key>",
+    `    <string>${xmlEscape(options.stateHomeDir)}</string>`,
     "    <key>PATH</key>",
     `    <string>${xmlEscape(servicePath(options.resolved.command))}</string>`,
     "  </dict>",
@@ -544,7 +558,7 @@ function renderLaunchdPlist(options: {
 }
 
 async function probeSystemd(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   kind: "systemd-user" | "systemd-system";
 }): Promise<ServiceManagerState> {
@@ -565,7 +579,7 @@ async function probeSystemd(options: {
 }
 
 async function probeLaunchd(options: {
-  homeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
 }): Promise<ServiceManagerState> {
   const label = launchdLabelForProfile(options.profileId);
@@ -614,7 +628,8 @@ function normalizeActiveState(value: string | undefined): ServiceActiveState {
 }
 
 function validateSystemdUnitInput(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   runAsUser?: string;
   resolved: ResolvedExec;
@@ -622,7 +637,8 @@ function validateSystemdUnitInput(options: {
   const inputValidation = validateServiceRenderValues([
     { label: "profileId", value: options.profileId },
     ...(options.runAsUser === undefined ? [] : [{ label: "runAsUser", value: options.runAsUser }]),
-    { label: "homeDir", value: options.homeDir },
+    { label: "stateHomeDir", value: options.stateHomeDir },
+    { label: "serviceUserHomeDir", value: options.serviceUserHomeDir },
     { label: "resolved.command", value: options.resolved.command },
     ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
     { label: "resolved.cwd", value: options.resolved.cwd },
@@ -635,14 +651,16 @@ function validateSystemdUnitInput(options: {
 }
 
 function validateLaunchdPlistInput(options: {
-  homeDir: string;
+  stateHomeDir: string;
+  serviceUserHomeDir: string;
   profileId: string;
   resolved: ResolvedExec;
 }): ValidationResult {
-  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir: options.stateHomeDir, profileId: options.profileId });
   const inputValidation = validateServiceRenderValues([
     { label: "profileId", value: options.profileId },
-    { label: "homeDir", value: options.homeDir },
+    { label: "stateHomeDir", value: options.stateHomeDir },
+    { label: "serviceUserHomeDir", value: options.serviceUserHomeDir },
     { label: "resolved.command", value: options.resolved.command },
     ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
     { label: "resolved.cwd", value: options.resolved.cwd },
@@ -666,8 +684,8 @@ function validateServiceRenderValues(values: Array<{ label: string; value: strin
   return { ok: true };
 }
 
-async function assertNoLiveGatewayEvidence(homeDir: string, profileId: string): Promise<ValidationResult> {
-  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+async function assertNoLiveGatewayEvidence(stateHomeDir: string, profileId: string): Promise<ValidationResult> {
+  const profilePaths = resolveProfileStateHome({ homeDir: stateHomeDir, profileId });
   const lock = await inspectGatewayLockState(profilePaths);
   if (lock.state === "active") {
     return {
@@ -685,12 +703,12 @@ async function assertNoLiveGatewayEvidence(homeDir: string, profileId: string): 
   return { ok: true };
 }
 
-async function waitForNoLiveGatewayEvidence(homeDir: string, profileId: string): Promise<ValidationResult> {
+async function waitForNoLiveGatewayEvidence(stateHomeDir: string, profileId: string): Promise<ValidationResult> {
   const deadline = Date.now() + FORCE_REINSTALL_EVIDENCE_WAIT_MS;
-  let last = await assertNoLiveGatewayEvidence(homeDir, profileId);
+  let last = await assertNoLiveGatewayEvidence(stateHomeDir, profileId);
   while (!last.ok && Date.now() < deadline) {
     await sleep(FORCE_REINSTALL_EVIDENCE_POLL_MS);
-    last = await assertNoLiveGatewayEvidence(homeDir, profileId);
+    last = await assertNoLiveGatewayEvidence(stateHomeDir, profileId);
   }
   return last;
 }
@@ -745,7 +763,7 @@ async function verifySystemUserExists(user: string): Promise<ValidationResult> {
   return { ok: false, error: `System service user '${user}' does not exist or cannot be resolved.` };
 }
 
-async function resolveSystemUserHome(user: string): Promise<HomeDirResult> {
+async function resolveSystemUserHome(user: string): Promise<ServiceUserHomeDirResult> {
   const result = await runCommand("getent", ["passwd", user]);
   if (!result.ok) {
     return { ok: false, error: `Could not resolve home directory for system service user '${user}'. Pass --home <absolute-dir>.` };
@@ -761,26 +779,26 @@ async function resolveSystemUserHome(user: string): Promise<HomeDirResult> {
   return validateSystemHomeDir(fields[5], "Resolved home directory");
 }
 
-async function validateExplicitSystemHome(homeDir: string): Promise<HomeDirResult> {
-  return validateSystemHomeDir(homeDir, "--home");
+async function validateExplicitSystemHome(serviceUserHomeDir: string): Promise<ServiceUserHomeDirResult> {
+  return validateSystemHomeDir(serviceUserHomeDir, "--home");
 }
 
-async function validateSystemHomeDir(homeDir: string, label: string): Promise<HomeDirResult> {
-  const controlValidation = validateServiceRenderValues([{ label, value: homeDir }]);
+async function validateSystemHomeDir(serviceUserHomeDir: string, label: string): Promise<ServiceUserHomeDirResult> {
+  const controlValidation = validateServiceRenderValues([{ label, value: serviceUserHomeDir }]);
   if (!controlValidation.ok) return controlValidation;
-  if (!isAbsolute(homeDir)) {
+  if (!isAbsolute(serviceUserHomeDir)) {
     return { ok: false, error: `${label} for system service install must be an absolute path.` };
   }
   let stats: Awaited<ReturnType<typeof stat>>;
   try {
-    stats = await stat(homeDir);
+    stats = await stat(serviceUserHomeDir);
   } catch {
     return { ok: false, error: `${label} for system service install must exist and be a directory.` };
   }
   if (!stats.isDirectory()) {
     return { ok: false, error: `${label} for system service install must exist and be a directory.` };
   }
-  return { ok: true, homeDir };
+  return { ok: true, serviceUserHomeDir };
 }
 
 async function systemctl(kind: "systemd-user" | "systemd-system", args: string[]): Promise<CommandResult> {

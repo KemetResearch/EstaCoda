@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access, lstat, readFile, readlink, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve, sep } from "node:path";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveOsHomeDir } from "../config/home-dir.js";
 import { detectInstallMethod, type InstallMethodInfo } from "./install-method.js";
 import { uninstallService } from "../gateway/service-manager.js";
 
@@ -16,7 +17,7 @@ export type UninstallOptions = {
   installMethodInfo?: InstallMethodInfo;
   detectInstallMethod?: () => Promise<InstallMethodInfo>;
   wrapperPaths?: readonly string[];
-  teardownGateway?: (options: { homeDir: string; profileId: string; termux: boolean }) => Promise<TeardownResult>;
+  teardownGateway?: (options: { homeDir: string; serviceUserHomeDir: string; profileId: string; termux: boolean }) => Promise<TeardownResult>;
 };
 
 export type TeardownResult = {
@@ -86,7 +87,12 @@ export async function runUninstall(options: UninstallOptions = {}): Promise<Unin
     lines.push("Termux detected: system service teardown is skipped; known Termux wrapper paths are cleaned best-effort.");
   }
 
-  const teardown = await (options.teardownGateway ?? teardownGatewayService)({ homeDir, profileId, termux });
+  const teardown = await (options.teardownGateway ?? teardownGatewayService)({
+    homeDir,
+    serviceUserHomeDir: resolveOsHomeDir(env),
+    profileId,
+    termux
+  });
   lines.push(`Gateway teardown: ${teardown.message}`);
 
   const effectiveMethod = effectiveUninstallMethod(installMethod, homeDir);
@@ -195,13 +201,13 @@ function isSafeManagedInstallDir(installDir: string, homeDir: string): boolean {
   return basename === "estacoda" || basename === "estacoda.git" || basename === "estacoda-source";
 }
 
-async function teardownGatewayService(options: { homeDir: string; profileId: string; termux: boolean }): Promise<TeardownResult> {
+async function teardownGatewayService(options: { homeDir: string; serviceUserHomeDir: string; profileId: string; termux: boolean }): Promise<TeardownResult> {
   if (options.termux) {
     return { ok: true, message: "skipped service-manager teardown on Termux" };
   }
 
   const result = await uninstallService({
-    homeDir: options.homeDir,
+    serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId
   });
 
