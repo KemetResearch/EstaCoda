@@ -1,7 +1,7 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
-import type { AuxiliaryModelTask } from "../../contracts/provider.js";
+import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
@@ -215,12 +215,16 @@ export async function promptModelCandidate(
         candidate.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
         candidate.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
         candidate.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-        candidate.profile.status,
+        renderableModelStatus(candidate.profile.status),
       ].filter((part): part is string => part !== undefined).join(", "),
       value: candidate,
     })),
     defaultValue: input.candidates.find((candidate) => candidate.id === input.currentModelId) ?? input.candidates[0],
   });
+}
+
+function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
+  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 export async function promptConfigEditorReviewApproval(

@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
-import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
+import { promptModelCandidate } from "./prompts.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
@@ -76,6 +77,29 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("renders only actionable model status tags in config-editor model choices", async () => {
+    const descriptions: Array<string | undefined> = [];
+    const prompt = fakePrompt();
+    prompt.select = async (input) => {
+      descriptions.push(...input.options.map((option) => option.description));
+      return input.options[0]!.value;
+    };
+
+    await promptModelCandidate(prompt, {
+      providerId: "openai",
+      candidates: modelStatusCandidates("openai" as ProviderId),
+    });
+
+    expect(descriptions).toEqual([
+      "alpha",
+      "beta",
+      "deprecated",
+      "",
+      "",
+      "",
+    ]);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -1509,6 +1533,42 @@ function trackingPrompt(options: { readonly values?: readonly unknown[]; readonl
     value: () => secretPromptCount,
   });
   return prompt;
+}
+
+function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {
+  return [
+    modelStatusCandidate(provider, "model-alpha", "alpha"),
+    modelStatusCandidate(provider, "model-beta", "beta"),
+    modelStatusCandidate(provider, "model-deprecated", "deprecated"),
+    modelStatusCandidate(provider, "model-unknown", "unknown"),
+    modelStatusCandidate(provider, "model-stable", "stable"),
+    modelStatusCandidate(provider, "model-missing"),
+  ];
+}
+
+function modelStatusCandidate(
+  provider: ProviderId,
+  id: string,
+  status?: ModelCandidate["profile"]["status"]
+): ModelCandidate {
+  return {
+    id,
+    provider,
+    configured: true,
+    executable: true,
+    catalogOnly: false,
+    supportsVision: false,
+    profile: {
+      id,
+      provider,
+      contextWindowTokens: 128000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsReasoning: false,
+      supportsStructuredOutput: true,
+      ...(status !== undefined ? { status } : {}),
+    },
+  };
 }
 
 async function writeUserConfig(homeDir: string, config: unknown, profileId = "default"): Promise<void> {
