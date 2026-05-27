@@ -16,6 +16,12 @@ The preferred storage location for secrets is:
 
 Setup flows write secrets there with `0600` permissions. You can also reference an existing environment variable by name in config.
 
+## State isolation
+
+| Variable | Purpose |
+|----------|---------|
+| `ESTACODA_HOME` | Override the default state root (`~/.estacoda`). Use this to run dev builds against isolated state without touching your real user data. |
+
 ## LLM provider API keys
 
 | Variable | Provider | Status |
