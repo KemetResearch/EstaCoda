@@ -24,6 +24,7 @@ export const TOOL_ARGS_MAX = 1_500;
 export const TOOL_ARGS_HEAD = 1_200;
 export const TOOL_RESULT_PRUNE_THRESHOLD = 2_000;
 export const TOOL_RESULT_SNIPPET_CHARS = 240;
+export const TOOL_CONTEXT_SUMMARY_CHARS = 500;
 export const MIN_SUMMARY_TOKENS = 2_000;
 export const MAX_SUMMARY_CONTEXT_RATIO = 0.05;
 export const MAX_SUMMARY_TOKENS_CEILING = 12_000;
@@ -501,6 +502,9 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
   let prunedToolResults = 0;
   const text = messages.map((message) => {
     const content = truncateMessageContent(message.content);
+    const contextSummary = message.role === "tool"
+      ? toolContextSummary(message.metadata)
+      : undefined;
     if (message.role === "tool" && content !== message.content) {
       prunedToolResults += 1;
       warnings.push(`tool result ${message.id} was truncated before summarization`);
@@ -511,6 +515,7 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
       `role: ${message.role}`,
       `created_at: ${message.createdAt}`,
       metadata === undefined ? undefined : `metadata: ${metadata}`,
+      contextSummary === undefined ? undefined : `Tool result context summary: ${contextSummary}`,
       content
     ].filter((line): line is string => line !== undefined).join("\n");
   }).join("\n\n");
@@ -646,6 +651,10 @@ function hasUsefulToolMetadata(metadata: Record<string, unknown> | undefined): b
 
 function buildPrunedToolResultPlaceholder(message: SessionMessage): string {
   const metadata = message.metadata ?? {};
+  const contextSummary = toolContextSummary(metadata);
+  if (contextSummary !== undefined) {
+    return `Tool result context summary: ${contextSummary}`;
+  }
   const content = redactSensitiveText(message.content);
   const charCount = message.content.length;
   const lineCount = message.content.length === 0 ? 0 : message.content.split(/\r\n|\r|\n/u).length;
@@ -666,6 +675,20 @@ function buildPrunedToolResultPlaceholder(message: SessionMessage): string {
     head === undefined ? undefined : `head: ${head}`,
     tail === undefined || tail === head ? undefined : `tail: ${tail}`
   ].filter((line): line is string => line !== undefined && line.length > 0).join("\n");
+}
+
+function toolContextSummary(metadata: Record<string, unknown> | undefined): string | undefined {
+  const summary = metadata?._estacoda_context_summary;
+  if (typeof summary !== "string") {
+    return undefined;
+  }
+  const redacted = redactSensitiveText(summary).trim();
+  if (redacted.length === 0) {
+    return undefined;
+  }
+  return redacted.length <= TOOL_CONTEXT_SUMMARY_CHARS
+    ? redacted
+    : `${redacted.slice(0, TOOL_CONTEXT_SUMMARY_CHARS)}...`;
 }
 
 function metadataValue(label: string, value: unknown): string | undefined {

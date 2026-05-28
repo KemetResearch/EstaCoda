@@ -184,6 +184,19 @@ describe("terminal.run hardline floor", () => {
     await expect(access(join(root, "build"))).rejects.toBeDefined();
   });
 
+  it("emits bounded terminal context summary metadata", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 1000 });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "printf 'one\\ntwo\\n'; printf 'err\\n' >&2" });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?._estacoda_context_summary).toContain("exited with code 0.");
+    expect(result?.metadata?._estacoda_context_summary).toContain("stdout: 2 lines / 8 chars.");
+    expect(result?.metadata?._estacoda_context_summary).toContain("stderr: 1 lines / 4 chars.");
+  });
+
   it("rejects hardBlock commands inside the tool handler", async () => {
     const root = await makeTempDir();
     const tools = createWorkspaceTools({ workspaceRoot: root });

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
 import { IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 
@@ -420,6 +421,24 @@ describe("assembleProviderPrompt", () => {
     expect(sessionHistoryLayer(withImageMetadata).estimatedTokens)
       .toBeGreaterThanOrEqual(sessionHistoryLayer(textOnly).estimatedTokens + IMAGE_TOKEN_ESTIMATE);
   });
+
+  it("renders tool context summaries without replacing bounded excerpts", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      toolExecutions: [
+        toolExecution({
+          content: "actual command output",
+          metadata: {
+            _estacoda_context_summary: "Command exited 0 with 1 line."
+          }
+        })
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Context summary: Command exited 0 with 1 line.");
+    expect(rendered).toContain("Excerpt:\nactual command output");
+    expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
+  });
 });
 
 describe("assembleProviderContinuationPrompt", () => {
@@ -528,6 +547,31 @@ function providerExecution(content: string): Parameters<typeof assembleProviderC
         argumentsText: "{\"path\":\"src/index.ts\"}"
       }
     ]
+  };
+}
+
+function toolExecution(input: {
+  content: string;
+  metadata?: Record<string, unknown>;
+}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "terminal.run",
+      description: "Run command",
+      inputSchema: {},
+      riskClass: "workspace-write",
+      toolsets: ["shell-write"],
+      progressLabel: "running",
+      maxResultSizeChars: 2_000
+    },
+    input: {},
+    decision: "allow",
+    riskClass: "workspace-write",
+    result: {
+      ok: true,
+      content: input.content,
+      metadata: input.metadata
+    }
   };
 }
 

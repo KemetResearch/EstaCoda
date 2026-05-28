@@ -155,6 +155,58 @@ describe("SemanticCompressor", () => {
     expect(first.diagnostics.warnings).toContain("tool result tool-result was pruned before summarization");
   });
 
+  it("uses tool context summary for pruned tool result placeholders", () => {
+    const large = "raw output\n".repeat(300);
+    const messages = [
+      message("tool-call", "agent", "calling shell", {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal"
+      }),
+      message("tool-result", "tool", large, {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        _estacoda_context_summary: "Command completed with 300 lines."
+      })
+    ];
+
+    const result = pruneOldToolResults(messages).messages[1]!;
+
+    expect(result.content).toBe("Tool result context summary: Command completed with 300 lines.");
+    expect(result.content).not.toContain("raw output");
+  });
+
+  it("redacts tool context summary text in pruned placeholders", () => {
+    const secret = "sk-secret1234567890abcdef";
+    const messages = [
+      message("tool-call", "agent", "calling shell", {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal"
+      }),
+      message("tool-result", "tool", "raw output\n".repeat(300), {
+        tool_call_id: "call-old",
+        tool_call_name: "terminal",
+        _estacoda_context_summary: `Command printed ${secret}`
+      })
+    ];
+
+    const result = pruneOldToolResults(messages).messages[1]!;
+
+    expect(result.content).toContain("[REDACTED]");
+    expect(result.content).not.toContain(secret);
+  });
+
+  it("includes tool context summary in serialized summarizer transcripts", () => {
+    const serialized = serializeMessagesForSummary([
+      message("tool-result", "tool", "short output", {
+        tool_call_name: "terminal",
+        _estacoda_context_summary: "Command exited 0 with 1 line."
+      })
+    ]);
+
+    expect(serialized.text).toContain("Tool result context summary: Command exited 0 with 1 line.");
+    expect(serialized.text).toContain("short output");
+  });
+
   it("does not prune protected tail, active, or metadata-insufficient tool results", () => {
     const large = "important output\n".repeat(180);
     const messages = [

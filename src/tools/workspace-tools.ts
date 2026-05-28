@@ -810,11 +810,35 @@ async function runCommand(root: string, command: string, timeoutMs: number): Pro
           code,
           signal,
           timeoutMs,
-          timedOut
+          timedOut,
+          _estacoda_context_summary: terminalContextSummary({
+            command,
+            code,
+            stdout,
+            stderr
+          })
         }
       });
     });
   });
+}
+
+function terminalContextSummary(input: {
+  command: string;
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}): string {
+  return [
+    `Command ${JSON.stringify(input.command)} exited with code ${input.code ?? "signal"}.`,
+    `stdout: ${lineCount(input.stdout)} lines / ${input.stdout.length} chars.`,
+    `stderr: ${lineCount(input.stderr)} lines / ${input.stderr.length} chars.`
+  ].join(" ");
+}
+
+function lineCount(value: string): number {
+  const trimmed = value.replace(/(?:\r\n|\r|\n)$/u, "");
+  return trimmed.length === 0 ? 0 : trimmed.split(/\r\n|\r|\n/u).length;
 }
 
 function resolveShell(): { command: string; args: string[] } {
