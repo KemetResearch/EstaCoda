@@ -2,7 +2,7 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
-import type { ModelProfile, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ModelProfile, ProviderId, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
@@ -150,6 +150,8 @@ export class ProviderTurnLoop {
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
+    let emptyContentRetries = 0;
+    let retryEmptyInitialResponse = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -192,8 +194,10 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase = iteration === 0 ? "initial" : "continuation";
-      const execution = phase === "initial"
+      const phase = iteration === 0 || retryEmptyInitialResponse ? "initial" : "continuation";
+      retryEmptyInitialResponse = false;
+
+      let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             iteration
@@ -215,8 +219,6 @@ export class ProviderTurnLoop {
       }
 
       iterations += 1;
-      effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
-      previousProviderExecution = execution;
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
@@ -270,14 +272,24 @@ export class ProviderTurnLoop {
         repeatedFailureBudgetExceeded !== undefined
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
 
-      await this.#runRecorder.recordProviderIteration({
-        iteration,
-        phase,
-        ok: execution.ok,
-        toolCalls: execution.toolCalls.length,
-        executedTools: providerToolExecutions.length - beforeExecutions,
-        exhausted
-      });
+      if (
+        execution.ok !== true &&
+        execution.toolCalls.length === 0 &&
+        execution.partialContent?.trim().length &&
+        lastAttemptErrorClass(execution) === "incomplete-stream"
+      ) {
+        const lastAttempt = execution.attempts[execution.attempts.length - 1];
+        execution = {
+          ...execution,
+          ok: true,
+          response: {
+            ok: true,
+            content: execution.partialContent.trim(),
+            model: lastAttempt?.model ?? this.#model?.id ?? "unknown",
+            provider: (lastAttempt?.provider ?? this.#model?.provider ?? "unknown") as ProviderId
+          }
+        };
+      }
 
       let terminalPostToolEmpty =
         execution.ok === true &&
@@ -296,6 +308,19 @@ export class ProviderTurnLoop {
         terminalPostToolEmpty = false;
       }
 
+      if (execution.ok === true && execution.response?.content.trim().length) {
+        emptyContentRetries = 0;
+      }
+
+      await this.#runRecorder.recordProviderIteration({
+        iteration,
+        phase,
+        ok: execution.ok,
+        toolCalls: execution.toolCalls.length,
+        executedTools: providerToolExecutions.length - beforeExecutions,
+        exhausted
+      });
+
       if (
         terminalPostToolEmpty &&
         !postToolEmptyRetried &&
@@ -303,8 +328,32 @@ export class ProviderTurnLoop {
       ) {
         postToolEmptyRetried = true;
         pendingEmptyResponseNudge = true;
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
         continue;
       }
+
+      const successfulEmptyWithoutTools =
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        execution.response?.content.trim().length === 0;
+
+      if (
+        successfulEmptyWithoutTools &&
+        emptyContentRetries < 3 &&
+        iteration + 1 < this.#budgets.maxProviderIterations
+      ) {
+        emptyContentRetries += 1;
+        if (phase === "initial") {
+          retryEmptyInitialResponse = true;
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          continue;
+        }
+      }
+
+      effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+      previousProviderExecution = execution;
 
       if (
         execution.ok !== true ||
@@ -754,6 +803,10 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "skill.list_proposals" ||
     name === "skill.review_proposals" ||
     name === "skill.review_proposal";
+}
+
+function lastAttemptErrorClass(execution: ProviderExecutionResult): string | undefined {
+  return execution.attempts[execution.attempts.length - 1]?.errorClass;
 }
 
 function mergeProviderExecutions(

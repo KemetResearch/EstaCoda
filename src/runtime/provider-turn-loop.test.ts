@@ -288,6 +288,25 @@ function providerExecution(content: string, toolCalls: ProviderExecutionResult["
   };
 }
 
+function incompleteStreamExecution(partialContent: string | undefined): ProviderExecutionResult {
+  return {
+    ok: false,
+    partialContent,
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "test-provider",
+        model: "test-model",
+        ok: false,
+        errorClass: "incomplete-stream",
+        content: "Provider stream ended before completion after partial output.",
+        ...(partialContent === undefined ? {} : { partialContent })
+      }
+    ],
+    toolCalls: []
+  };
+}
+
 function providerToolCall(id: string): ProviderExecutionResult["toolCalls"][number] {
   return {
     id,
@@ -556,6 +575,49 @@ describe("ProviderTurnLoop semantic session compression", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("recovers partial incomplete stream content as the final turn content", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        incompleteStreamExecution("Recovered partial answer.")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(result.providerExecution?.response?.content).toBe("Recovered partial answer.");
+    expect(result.providerExecution?.attempts).toEqual([
+      expect.objectContaining({
+        ok: false,
+        errorClass: "incomplete-stream",
+        partialContent: "Recovered partial answer."
+      })
+    ]);
+  });
+
+  it("does not recover incomplete streams without visible partial content", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        incompleteStreamExecution(undefined)
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(result.providerExecution?.ok).toBe(false);
+    expect(result.providerExecution?.response).toBeUndefined();
+  });
+
   it("uses prior content when an empty continuation follows housekeeping tools", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [
@@ -767,12 +829,14 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(requests.some((request) => request.includes("You just executed tool calls but returned an empty response."))).toBe(false);
   });
 
-  it("does not nudge empty initial provider responses", async () => {
+  it("retries empty initial provider responses through the initial provider path", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [
-        providerExecution("")
+        providerExecution(""),
+        providerExecution("Recovered initial retry.")
       ],
       toolSteps: [
+        {},
         {}
       ],
       maxProviderIterations: 3
@@ -780,8 +844,53 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop);
 
-    expect(result.iterations).toBe(1);
-    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("Recovered initial retry.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events.filter((event) => event.kind === "provider-completion")).toHaveLength(2);
+    expect(events.filter((event) => event.kind === "provider-continuation")).toHaveLength(0);
+  });
+
+  it("stops empty initial retries at the retry budget", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("")
+      ],
+      toolSteps: [
+        {},
+        {},
+        {},
+        {}
+      ],
+      maxProviderIterations: 5
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(4);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    expect(result.providerExecution?.response?.content).toBe("");
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events.filter((event) => event.kind === "provider-completion")).toHaveLength(4);
+  });
+
+  it("does not exceed the provider iteration budget for empty initial retries", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("")
+      ],
+      toolSteps: [
+        {},
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
   });
 
   it("does not exceed the provider iteration budget to nudge an empty final iteration", async () => {
