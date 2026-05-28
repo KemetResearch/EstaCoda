@@ -2034,6 +2034,26 @@ export async function setupVoiceConfig(options: {
     secretPaths.push(secret.path);
   }
 
+  const sttConfigPatch = sttProvider === "local"
+    ? {
+        provider: sttProvider,
+        local: {
+          model: options.input.sttModel ?? "base",
+          engine: "faster-whisper" as const,
+          fasterWhisper: {
+            enabled: true,
+            model: options.input.sttModel ?? "base"
+          }
+        }
+      }
+    : {
+        provider: sttProvider,
+        [sttProvider]: {
+          model: options.input.sttModel,
+          apiKeyEnv: sttApiKeyEnv
+        }
+      };
+
   const config = patchConfig(existing.config, {
     tts: {
       provider: ttsProvider,
@@ -2045,14 +2065,7 @@ export async function setupVoiceConfig(options: {
         apiKeyEnv: ttsApiKeyEnv
       }
     },
-    stt: {
-      provider: sttProvider,
-      [sttProvider]: {
-        model: options.input.sttModel,
-        command: options.input.sttCommand,
-        apiKeyEnv: sttApiKeyEnv
-      }
-    }
+    stt: sttConfigPatch
   });
 
   await saveRuntimeConfig(targetPath, config);

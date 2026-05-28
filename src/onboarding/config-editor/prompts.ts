@@ -564,8 +564,25 @@ export async function promptVoiceCapability(
     })),
     defaultValue: current.sttProvider ?? "openai",
   });
-  const sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "gpt-4o-mini-transcribe");
-  const sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? "OPENAI_API_KEY");
+
+  let sttModel: string;
+  let sttApiKeyEnv: string;
+
+  if (sttProvider === "local") {
+    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "base");
+    sttApiKeyEnv = "";
+  } else {
+    const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
+      : sttProvider === "mistral" ? "voxtral-mini-latest"
+      : sttProvider === "xai" ? "whisper-1"
+      : "gpt-4o-mini-transcribe";
+    const defaultSttApiKeyEnv = sttProvider === "groq" ? "GROQ_API_KEY"
+      : sttProvider === "mistral" ? "MISTRAL_API_KEY"
+      : sttProvider === "xai" ? "XAI_API_KEY"
+      : "OPENAI_API_KEY";
+    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? defaultSttModel);
+    sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? defaultSttApiKeyEnv);
+  }
 
   return {
     ttsProvider,
