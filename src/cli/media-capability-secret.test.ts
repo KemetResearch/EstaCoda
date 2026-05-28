@@ -128,7 +128,7 @@ describe("media capability setup does not render raw secrets", () => {
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("TTS provider: openai");
       expect(result.output).toContain("TTS readiness: not ready (Missing VOICE_TOOLS_OPENAI_KEY or OPENAI_API_KEY)");
-      expect(result.output).toContain("STT readiness: not ready (Local STT command not configured)");
+      expect(result.output).toContain("STT readiness: ready");
       expect(result.output).toContain("Auto-TTS replies: disabled");
     });
   });
