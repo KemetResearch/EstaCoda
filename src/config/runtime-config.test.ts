@@ -1404,6 +1404,47 @@ describe("loadRuntimeConfig media boundary", () => {
       model: "whisper-large-v3"
     });
   });
+
+  it("defaults response progress visibility to hidden", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(false);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("loads enabled response progress visibility", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ui: { showResponseProgress: true }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(true);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes non-true response progress visibility to hidden", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ui: { showResponseProgress: "yes" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(false);
+    await rm(workspace, { recursive: true, force: true });
+  });
 });
 
 describe("loadRuntimeConfig profile loading", () => {

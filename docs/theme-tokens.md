@@ -42,7 +42,7 @@ ResolvedTokens
 | `severity.info` | `#5AACFF` | Info banners |
 | `surface.bg` | `#1A1A1A` | Page background |
 | `surface.bgElevated` | `#252525` | Elevated panels |
-| `surface.border` | `#333333` | Strong borders |
+| `surface.border` | `#ededed` | Strong borders |
 | `text.primary` | `#E8E8E8` | Main text |
 | `text.secondary` | `#B0B0B0` | Secondary text |
 | `text.muted` | `#707070` | Dimmed text |
@@ -80,7 +80,7 @@ ResolvedTokens
 
 ## 3. KemetBlue Skin Overlay
 
-The KemetBlue skin overrides glyphs, branding, and tool icons with Egyptian-themed symbols. It does **not** change the base palette — it works on top of both `light` and `dark`.
+The KemetBlue skin overrides glyphs, branding, tool icons, and selected dark-mode brand colors.
 
 ### 3.1 Glyph Overrides
 
@@ -111,6 +111,28 @@ The KemetBlue skin overrides glyphs, branding, and tool icons with Egyptian-them
 | `taglinePrimary` | (empty) | `☥ Kemet Research ☥` |
 | `taglineSecondary` | (empty) | `السيادة التكنولوجية العربية` |
 | `promptPrefix` | (none) | `𓂀 > ` |
+
+### 3.4 Dark Color Overrides
+
+| Token | KemetBlue Dark Value | Usage |
+|-------|----------------------|-------|
+| `palette.brand` | `#236df7` | Assistant title and brand identity |
+
+### 3.5 Assistant Response Progress
+
+Assistant responses can include internal progress metadata below the message body. This metadata is still collected by the runtime, but visible CLI rendering is hidden by default for normal users.
+
+Enable it for development profiles with:
+
+```json
+{
+  "ui": {
+    "showResponseProgress": true
+  }
+}
+```
+
+`showResponseProgress` affects visible CLI rendering only. It does not disable runtime progress collection, provider/tool progress construction, logs, or future diagnostics.
 
 ---
 

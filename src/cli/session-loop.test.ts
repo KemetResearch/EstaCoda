@@ -233,6 +233,82 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("hides assistant response progress by default", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> => ({
+        ...mockResponse(),
+        progress: ["received prompt", "ready for direct response"],
+      }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Mock response");
+    expect(rendered).not.toContain("progress:");
+    expect(rendered).not.toContain("received prompt -> ready for direct response");
+  });
+
+  it("shows assistant response progress when enabled", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> => ({
+        ...mockResponse(),
+        progress: ["received prompt", "ready for direct response"],
+      }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      showResponseProgress: true,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Mock response");
+    expect(rendered).toContain("progress: received prompt -> ready for direct response");
+  });
+
   it("injects a CLI voice transcript as the next user turn", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-voice-"));
     const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });

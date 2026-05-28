@@ -118,6 +118,10 @@ function ansiFgForHex(hex: string): string {
   return `\x1b[38;2;${r};${g};${b}m`;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
   return buildOnboardingPromptCardViewModel({
     title: "Workspace trust",
@@ -1044,7 +1048,8 @@ describe("StandardRenderer — startup dashboard", () => {
   });
 
   it("keeps startup dashboard border styling isolated when title truncates", () => {
-    const r = renderer("dark", narrowCaps());
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: narrowCaps() });
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
       taglines: [],
@@ -1061,7 +1066,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const top = r.renderStartupDashboard(vm).split("\n").find((line) => stripAnsi(line).startsWith("╭"));
     expect(top).toBeDefined();
     expect(top).toContain("...");
-    expect(top).toMatch(/\.\.\.\x1b\[0m\x1b\[0m\x1b\[38;2;51;51;51m─*╮/);
+    expect(top).toMatch(new RegExp(`\\.\\.\\.\\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
   });
 
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {

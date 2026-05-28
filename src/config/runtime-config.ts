@@ -374,6 +374,7 @@ export type EstaCodaConfig = {
     language?: UiLanguage;
     flavor?: UiFlavor;
     activityLabels?: ActivityLabelsLocale;
+    showResponseProgress?: boolean;
   };
   profile?: {
     mode?: AgentProfileMode;
@@ -503,6 +504,7 @@ export type LoadedRuntimeConfig = {
     language: UiLanguage;
     flavor: UiFlavor;
     activityLabels: ActivityLabelsLocale;
+    showResponseProgress: boolean;
   };
   profile: {
     mode: AgentProfileMode;
@@ -1189,11 +1191,13 @@ function normalizeUiConfig(value: EstaCodaConfig["ui"]): LoadedRuntimeConfig["ui
   const activityLabels = value?.activityLabels === "ar" || value?.activityLabels === "en"
     ? value.activityLabels
     : language;
+  const showResponseProgress = value?.showResponseProgress === true;
 
   return {
     language,
     flavor,
-    activityLabels
+    activityLabels,
+    showResponseProgress
   };
 }
 

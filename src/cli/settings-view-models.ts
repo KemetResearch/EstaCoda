@@ -225,6 +225,7 @@ export function buildUiSettingsViewModel(ui: UiConfig): ViewModel {
       kv("Language", ui.language),
       kv("Flavor", ui.flavor),
       kv("Activity labels", ui.activityLabels),
+      kv("Response progress", ui.showResponseProgress ? "shown" : "hidden"),
       kv("Change with", "estacoda settings ui --language ar --flavor arabic-light --activity-labels ar"),
     ],
   });
