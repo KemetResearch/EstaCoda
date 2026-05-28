@@ -17,6 +17,7 @@ import {
   buildWarningErrorViewModel,
   buildStartupDashboardViewModel,
   buildStartupRuntimeViewModel,
+  buildAssistantResponseViewModel,
   buildConversationMessageViewModel,
   buildActiveTurnSpinnerViewModel,
   buildToolActivityRailViewModel,
@@ -1235,9 +1236,27 @@ describe("StandardRenderer — deterministic output", () => {
   });
 });
 
+describe("StandardRenderer — assistant response", () => {
+  it("renders assistant body with agentMessage color while title remains brand", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const vm = buildAssistantResponseViewModel({
+      label: "𓂀 EstaCoda",
+      text: "Hello, body!",
+    });
+    const out = r.renderAssistantResponse(vm);
+    const titleLine = out.split("\n")[1] ?? "";
+
+    expect(titleLine).toContain(ansiFgForHex(tokens.contract.palette.brand));
+    expect(stripAnsi(titleLine)).toContain("𓂀  EstaCoda");
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, body!`);
+  });
+});
+
 describe("StandardRenderer — conversation message", () => {
   it("renders assistant message with open horizontal frame and brand title", () => {
-    const r = renderer("dark", fullCaps());
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
     const vm = buildConversationMessageViewModel({
       role: "assistant",
       text: "Hello, world!",
@@ -1255,7 +1274,9 @@ describe("StandardRenderer — conversation message", () => {
     // Should not have vertical side borders
     expect(out).not.toContain("│");
     // Content should be present, indented by two spaces
-    expect(out).toContain("  Hello, world!");
+    expect(stripAnsi(out)).toContain("  Hello, world!");
+    expect(out.split("\n")[0]).toContain(ansiFgForHex(tokens.contract.palette.brand));
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, world!`);
     expect(hasAnsi(out)).toBe(true);
   });
 

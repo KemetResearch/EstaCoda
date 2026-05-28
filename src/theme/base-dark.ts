@@ -24,6 +24,7 @@ export const darkTheme: UiTokenContract = {
     secondary: "#B0B0B0",
     muted: "#707070",
     inverse: "#1A1A1A",
+    agentMessage: "#E8E8E8",
   },
   interactive: {
     primary: "#5AACFF",

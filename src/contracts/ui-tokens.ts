@@ -33,6 +33,7 @@ export interface TokenText {
   secondary: string;
   muted: string;
   inverse: string;
+  agentMessage: string;
 }
 
 export interface TokenInteractive {

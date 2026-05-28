@@ -50,6 +50,9 @@ export const kemetBlueSkin: ThemeAwareSkin = {
     severity: {
       info: "#5AACFF",
     },
+    text: {
+      agentMessage: "#FFFFFF",
+    },
   },
   light: {
     palette: {

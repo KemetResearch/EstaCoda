@@ -309,9 +309,9 @@ exports[`Session surfaces — /tools > renders in standard light > tools-standar
 exports[`Session surfaces — assistant response > renders in narrow width > assistant-response-narrow width 1`] = `
 "
 [38;2;51;51;51m╭────────────[0m[38;2;90;172;255m[1m 𓂀  EstaCoda [0m[0m[38;2;51;51;51m─────────────╮[0m
-[38;2;51;51;51m│[0m Here is the analysis you requested.  [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;255;255;255mHere is the analysis you requested.[0m  [38;2;51;51;51m│[0m
 [38;2;51;51;51m│[0m                                      [38;2;51;51;51m│[0m
-[38;2;51;51;51m│[0m The codebase is well-structured.     [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;255;255;255mThe codebase is well-structured.[0m     [38;2;51;51;51m│[0m
 [38;2;51;51;51m╰──────────────────────────────────────╯[0m
 [2mskills: code-review, security-audit[0m
 [2mprogress: intent routed -> security assessed -> tools executed[0m"
@@ -320,9 +320,9 @@ exports[`Session surfaces — assistant response > renders in narrow width > ass
 exports[`Session surfaces — assistant response > renders in no Unicode > assistant-response-no Unicode 1`] = `
 "
 [38;2;51;51;51m+------------[0m[38;2;90;172;255m[1m *  EstaCoda [0m[0m[38;2;51;51;51m-------------+[0m
-[38;2;51;51;51m|[0m Here is the analysis you requested.  [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m [38;2;255;255;255mHere is the analysis you requested.[0m  [38;2;51;51;51m|[0m
 [38;2;51;51;51m|[0m                                      [38;2;51;51;51m|[0m
-[38;2;51;51;51m|[0m The codebase is well-structured.     [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m [38;2;255;255;255mThe codebase is well-structured.[0m     [38;2;51;51;51m|[0m
 [38;2;51;51;51m+--------------------------------------+[0m
 [2mskills: code-review, security-audit[0m
 [2mprogress: intent routed -> security assessed -> tools executed[0m"
@@ -352,9 +352,9 @@ progress: intent routed -> security assessed -> tools executed"
 exports[`Session surfaces — assistant response > renders in standard dark > assistant-response-standard dark 1`] = `
 "
 [38;2;51;51;51m╭────────────[0m[38;2;90;172;255m[1m 𓂀  EstaCoda [0m[0m[38;2;51;51;51m─────────────╮[0m
-[38;2;51;51;51m│[0m Here is the analysis you requested.  [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;255;255;255mHere is the analysis you requested.[0m  [38;2;51;51;51m│[0m
 [38;2;51;51;51m│[0m                                      [38;2;51;51;51m│[0m
-[38;2;51;51;51m│[0m The codebase is well-structured.     [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;255;255;255mThe codebase is well-structured.[0m     [38;2;51;51;51m│[0m
 [38;2;51;51;51m╰──────────────────────────────────────╯[0m
 [2mskills: code-review, security-audit[0m
 [2mprogress: intent routed -> security assessed -> tools executed[0m"
@@ -363,9 +363,9 @@ exports[`Session surfaces — assistant response > renders in standard dark > as
 exports[`Session surfaces — assistant response > renders in standard light > assistant-response-standard light 1`] = `
 "
 [38;2;224;224;224m╭────────────[0m[38;2;0;87;217m[1m 𓂀  EstaCoda [0m[0m[38;2;224;224;224m─────────────╮[0m
-[38;2;224;224;224m│[0m Here is the analysis you requested.  [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m [38;2;26;26;26mHere is the analysis you requested.[0m  [38;2;224;224;224m│[0m
 [38;2;224;224;224m│[0m                                      [38;2;224;224;224m│[0m
-[38;2;224;224;224m│[0m The codebase is well-structured.     [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m [38;2;26;26;26mThe codebase is well-structured.[0m     [38;2;224;224;224m│[0m
 [38;2;224;224;224m╰──────────────────────────────────────╯[0m
 [2mskills: code-review, security-audit[0m
 [2mprogress: intent routed -> security assessed -> tools executed[0m"

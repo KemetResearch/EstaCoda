@@ -190,6 +190,10 @@ export class StandardRenderer {
     return this.#color(text, this.#tokens.contract.text.muted);
   }
 
+  #agentMessage(text: string): string {
+    return this.#color(text, this.#tokens.contract.text.agentMessage);
+  }
+
   #caution(text: string): string {
     return this.#color(text, this.#tokens.contract.palette.caution);
   }
@@ -1252,10 +1256,13 @@ export class StandardRenderer {
 
     for (const rawLine of vm.text.split("\n")) {
       for (const wrappedLine of wrapVisibleLine(rawLine, contentWidth)) {
+        const bodyLine = wrappedLine.length === 0
+          ? wrappedLine
+          : this.#agentMessage(wrappedLine);
         lines.push([
           this.#surfaceBorder(vert),
           " ",
-          padVisibleEnd(wrappedLine, contentWidth),
+          padVisibleEnd(bodyLine, contentWidth),
           " ",
           this.#surfaceBorder(vert),
         ].join(""));
@@ -1285,7 +1292,9 @@ export class StandardRenderer {
         ? this.#copy.assistantCardTitleUnicode
         : this.#copy.assistantCardTitleAscii;
       const brandTitle = this.#brand(this.#bold(title));
-      const textLines = vm.text.split("\n");
+      const textLines = vm.text
+        .split("\n")
+        .map((line) => line.length === 0 ? line : this.#agentMessage(line));
 
       const frame = openHorizontalFrame(textLines, {
         useUnicode: this.#useUnicode,
