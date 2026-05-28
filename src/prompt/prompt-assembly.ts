@@ -15,6 +15,7 @@ import { inferMimeType } from "../tools/media-tools.js";
 import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import type { PromptCache } from "./prompt-cache.js";
 import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
@@ -161,7 +162,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       role: "assistant",
       content: input.providerExecution?.response?.content.trim().length
         ? input.providerExecution.response.content
-        : "I requested tools and am waiting for EstaCoda to provide their results."
+        : "I have requested tools and received their results below. I will now process these results to produce the final answer."
     },
     {
       role: "user",
@@ -190,10 +191,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
   const toolSummary = input.toolExecutions.length === 0
     ? "No tools were executed before this response."
     : input.toolExecutions
-        .map((execution) => renderToolResultPacket(packetizeToolExecution({
-          execution,
-          maxChars: 1_400
-        })))
+        .map((execution) => renderToolExecutionWithContextSummary(execution))
         .join("\n\n");
   const artifactSummary = renderArtifactSummary(artifactsFromExecutions(input.toolExecutions));
   const contextBlocks = input.context?.blocks
@@ -398,6 +396,44 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       content: renderResponseGuidance(input)
     })
   ];
+}
+
+function renderToolExecutionWithContextSummary(execution: ToolExecutionRecord): string {
+  const contextSummary = toolContextSummary(execution.result?.metadata);
+  const packet = renderToolResultPacket(packetizeToolExecution({
+    execution: contextSummary === undefined ? execution : {
+      ...execution,
+      result: execution.result === undefined ? undefined : {
+        ...execution.result,
+        metadata: omitToolContextSummary(execution.result.metadata)
+      }
+    },
+    maxChars: 1_400
+  }));
+  return [
+    contextSummary === undefined ? undefined : `Context summary: ${contextSummary}`,
+    packet
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function toolContextSummary(metadata: Record<string, unknown> | undefined): string | undefined {
+  const summary = metadata?._estacoda_context_summary;
+  if (typeof summary !== "string") {
+    return undefined;
+  }
+  const redacted = redactSensitiveText(summary).trim();
+  if (redacted.length === 0) {
+    return undefined;
+  }
+  return redacted.length <= 500 ? redacted : `${redacted.slice(0, 500)}...`;
+}
+
+function omitToolContextSummary(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (metadata === undefined) {
+    return undefined;
+  }
+  const { _estacoda_context_summary: _summary, ...rest } = metadata as Record<string, unknown>;
+  return Object.keys(rest).length === 0 ? undefined : rest;
 }
 
 function renderResponseGuidance(input: ProviderPromptInput): string {

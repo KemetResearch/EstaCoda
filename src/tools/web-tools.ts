@@ -13,7 +13,7 @@ import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider
 } from "./web-research-registry.js";
-import type { WebResearchConfig, WebResearchProvider } from "./web-research-provider.js";
+import type { WebResearchConfig, WebResearchProvider, WebSearchResult } from "./web-research-provider.js";
 
 export type WebToolOptions = {
   fetch?: FetchLike;
@@ -789,7 +789,8 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined): Register
           ].filter((line) => line !== undefined).join("\n")).join("\n\n"),
         metadata: {
           provider: providerSelection.providerName,
-          results: bounded
+          results: bounded,
+          _estacoda_context_summary: webSearchContextSummary(bounded)
         }
       };
     }
@@ -922,9 +923,59 @@ function formatWebExtractProviderResult(
     ].filter((line) => line !== undefined).join("\n"),
     metadata: {
       ...result,
-      provider: provider.name
+      provider: provider.name,
+      _estacoda_context_summary: webExtractContextSummary({
+        url: result.url,
+        title: result.title,
+        contentLength: result.content.length,
+        status: result.status,
+        source: provider.name
+      })
     }
   };
+}
+
+function webSearchContextSummary(results: WebSearchResult[]): string {
+  const sources = results
+    .slice(0, 5)
+    .map((result) => {
+      const domain = safeHostname(result.url);
+      const source = domain === undefined ? result.url : domain;
+      return `${truncate(result.title, 80)} (${truncate(source, 80)})`;
+    })
+    .join("; ");
+  return truncateSummary(
+    results.length === 0
+      ? "Web search returned 0 results."
+      : `Web search returned ${results.length} result(s). Top sources: ${sources}.`,
+    500
+  );
+}
+
+function webExtractContextSummary(input: {
+  url: string;
+  title?: string;
+  contentLength: number;
+  status?: number;
+  source: string;
+}): string {
+  return truncateSummary([
+    `Extracted ${input.contentLength} chars from ${redactUrlForMetadata(input.url)} using ${input.source}.`,
+    input.title === undefined ? undefined : `Title: ${truncate(input.title, 120)}.`,
+    input.status === undefined ? undefined : `Status: ${input.status}.`
+  ].filter((line): line is string => line !== undefined).join(" "), 500);
+}
+
+function truncateSummary(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function safeHostname(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {
@@ -1329,7 +1380,16 @@ async function extractWithFetch(input: {
         "",
         result.content
       ].filter((line) => line !== undefined).join("\n"),
-      metadata: result
+      metadata: {
+        ...result,
+        _estacoda_context_summary: webExtractContextSummary({
+          url: result.url,
+          title: result.title,
+          contentLength: result.content.length,
+          status: result.status,
+          source: "fetch"
+        })
+      }
     }, input.debug);
   } catch (error) {
     if (isUrlGuardFailure(error)) {

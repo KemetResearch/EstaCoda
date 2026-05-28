@@ -14,6 +14,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
+const MAX_CONTEXT_SUMMARY_CHARS = 500;
 const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|passwd|token|secret|credential|authorization|(?:^|[_-])auth(?:$|[_-])/i;
 const REDACTED_SECRET_VALUE = "[REDACTED]";
 const REDACTED_SECRET_URL = "[REDACTED_URL_WITH_SECRET]";
@@ -266,7 +267,8 @@ export class ToolExecutor {
         tool_call_name: request.toolCallName,
         provider_native_tool_call: persistedCall.providerNativeToolCall,
         ok: result.ok,
-        truncated: storedResult.metadata?.truncatedForStorage
+        truncated: storedResult.metadata?.truncatedForStorage,
+        ...contextSummaryMetadata(storedResult.metadata)
       }
     });
     this.#trajectoryRecorder.record("tool-result", {
@@ -500,6 +502,26 @@ function redactToolResultForPersistence(result: ToolResult): ToolResult {
     content: redactPersistedText(result.content),
     metadata: result.metadata === undefined ? undefined : redactValue(result.metadata) as ToolResult["metadata"]
   };
+}
+
+function contextSummaryMetadata(metadata: ToolResult["metadata"] | undefined): {
+  _estacoda_context_summary?: string;
+} {
+  const summary = metadata?._estacoda_context_summary;
+  if (typeof summary !== "string") {
+    return {};
+  }
+  const trimmed = summary.trim();
+  if (trimmed.length === 0) {
+    return {};
+  }
+  return {
+    _estacoda_context_summary: truncate(trimmed, MAX_CONTEXT_SUMMARY_CHARS)
+  };
+}
+
+function truncate(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
 }
 
 function redactValue(value: unknown): unknown {

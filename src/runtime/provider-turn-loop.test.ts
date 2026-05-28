@@ -3,6 +3,8 @@ import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
+import type { ToolCallPlan } from "../contracts/tool-plan.js";
+import type { ToolDefinition } from "../contracts/tool.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -10,6 +12,7 @@ import { SessionCompressionService, type CompactResult } from "../prompt/session
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
@@ -66,6 +69,16 @@ const fallbackRoute: ResolvedModelRoute = {
   },
   baseUrl: "https://fallback.example.com/v1",
   apiKeyEnv: "FALLBACK_KEY"
+};
+
+const testTool: ToolDefinition = {
+  name: "test.tool",
+  description: "Test tool",
+  inputSchema: {},
+  riskClass: "read-only-local",
+  toolsets: ["test"],
+  progressLabel: "testing",
+  maxResultSizeChars: 1000
 };
 
 async function createProviderTurnLoopForTest(
@@ -253,6 +266,180 @@ async function runBasicProviderTurn(
   });
 }
 
+function providerExecution(content: string, toolCalls: ProviderExecutionResult["toolCalls"] = []): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: "test-model",
+      provider: "test-provider"
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "test-provider",
+        model: "test-model",
+        ok: true,
+        content
+      }
+    ],
+    toolCalls
+  };
+}
+
+function incompleteStreamExecution(partialContent: string | undefined): ProviderExecutionResult {
+  return {
+    ok: false,
+    partialContent,
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "test-provider",
+        model: "test-model",
+        ok: false,
+        errorClass: "incomplete-stream",
+        content: "Provider stream ended before completion after partial output.",
+        ...(partialContent === undefined ? {} : { partialContent })
+      }
+    ],
+    toolCalls: []
+  };
+}
+
+function providerToolCall(id: string): ProviderExecutionResult["toolCalls"][number] {
+  return {
+    id,
+    name: testTool.name,
+    argumentsText: "{}"
+  };
+}
+
+function toolExecution(id: string, content = `tool result ${id}`): ToolExecutionRecord {
+  return toolExecutionForTool(id, testTool.name, content);
+}
+
+function toolExecutionForTool(id: string, toolName: string, content = `tool result ${id}`): ToolExecutionRecord {
+  const tool = {
+    ...testTool,
+    name: toolName
+  };
+
+  return {
+    tool,
+    input: {},
+    decision: "allow",
+    riskClass: "read-only-local",
+    toolCallId: id,
+    toolCallName: toolName,
+    result: {
+      ok: true,
+      content
+    }
+  };
+}
+
+function toolPlan(id: string, status: ToolCallPlan["status"] = "executed"): ToolCallPlan {
+  return {
+    id,
+    tool: testTool.name,
+    input: {},
+    source: "provider-tool-call",
+    status,
+    result: status === "executed"
+      ? {
+          ok: true,
+          content: `tool result ${id}`
+        }
+      : undefined
+  };
+}
+
+async function createPostToolNudgeHarness(input: {
+  responses: ProviderExecutionResult[];
+  toolSteps: Array<{
+    executions?: ToolExecutionRecord[];
+    plans?: ToolCallPlan[];
+  }>;
+  maxProviderIterations?: number;
+}) {
+  let responseIndex = 0;
+  const completeSpy = vi.fn<ProviderExecutor["complete"]>(async () => {
+    const response = input.responses[Math.min(responseIndex, input.responses.length - 1)] ?? providerExecution("");
+    responseIndex += 1;
+    return response;
+  });
+  const providerExecutor = {
+    complete: completeSpy
+  } as unknown as ProviderExecutor;
+  const sessionDb = new InMemorySessionDB();
+  const sessionId = `nudge-session-${Date.now()}-${Math.random()}`;
+  await sessionDb.createSession({ id: sessionId, profileId: "default", title: "nudge" });
+  const trajectoryRecorder = new TrajectoryRecorder({
+    profileId: "default",
+    sessionId,
+    modelId: "test-model"
+  });
+  const runRecorder = new RunRecorder({
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    profileId: "default"
+  });
+  let toolStepIndex = 0;
+  const executePlans = vi.fn(async (stepInput: Parameters<ToolPlanRunner["executePlans"]>[0]) => {
+    const step = input.toolSteps[toolStepIndex] ?? {};
+    toolStepIndex += 1;
+    for (const plan of step.plans ?? []) {
+      stepInput.toolPlans.push(plan);
+    }
+    for (const execution of step.executions ?? []) {
+      stepInput.toolPlans.push(toolPlan(execution.toolCallId ?? execution.tool.name));
+    }
+    return {
+      executions: step.executions ?? [],
+      maxObservedRisk: stepInput.riskBaseline
+    };
+  });
+  const toolPlanRunner = {
+    executePlans
+  } as unknown as ToolPlanRunner;
+  const loop = new ProviderTurnLoop({
+    providerExecutor,
+    model: mockModel,
+    primaryModelRoute: primaryRoute,
+    modelFallbackRoutes: [fallbackRoute],
+    providerPreferences: {
+      providerOrder: ["test-provider"]
+    },
+    sessionDb,
+    sessionId,
+    profileId: "default",
+    trajectoryRecorder,
+    runRecorder,
+    toolPlanRunner,
+    soul: undefined,
+    memoryPromptContext: undefined,
+    skillsIndex: [],
+    ui: undefined,
+    agentProfile: undefined,
+    budgets: {
+      maxProviderIterations: input.maxProviderIterations ?? 3,
+      maxProviderToolCalls: 8,
+      maxRepeatedToolFailures: 3,
+      maxProviderWallClockMs: 10_000
+    }
+  });
+
+  return {
+    loop,
+    completeSpy,
+    executePlans,
+    sessionDb,
+    sessionId
+  };
+}
+
 function compressionDiagnostics(
   overrides: Partial<CompactResult["diagnostics"]> = {}
 ): CompactResult["diagnostics"] {
@@ -384,6 +571,388 @@ describe("ProviderTurnLoop semantic session compression", () => {
       }
     ]));
     expect(usageEvents.find((event) => event.source === "assembled-prompt")?.filled).toBeGreaterThan(0);
+  });
+});
+
+describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("recovers partial incomplete stream content as the final turn content", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        incompleteStreamExecution("Recovered partial answer.")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(result.providerExecution?.response?.content).toBe("Recovered partial answer.");
+    expect(result.providerExecution?.attempts).toEqual([
+      expect.objectContaining({
+        ok: false,
+        errorClass: "incomplete-stream",
+        partialContent: "Recovered partial answer."
+      })
+    ]);
+  });
+
+  it("does not recover incomplete streams without visible partial content", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        incompleteStreamExecution(undefined)
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(result.providerExecution?.ok).toBe(false);
+    expect(result.providerExecution?.response).toBeUndefined();
+  });
+
+  it("uses prior content when an empty continuation follows housekeeping tools", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("Housekeeping-visible answer.", [providerToolCall("call-memory")]),
+        providerExecution("")
+      ],
+      toolSteps: [
+        { executions: [toolExecutionForTool("call-memory", "memory.curate")] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("Housekeeping-visible answer.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
+    expect(requests.some((request) => request.includes("You just executed tool calls but returned an empty response."))).toBe(false);
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    const continuationEvents = events.filter((event) => event.kind === "provider-continuation");
+    expect(continuationEvents.map((event) => "nudge" in event ? event.nudge : undefined)).toEqual([
+      false
+    ]);
+  });
+
+  it("does not reuse content from substantive tools and keeps the post-tool nudge", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("Substantive progress text.", [providerToolCall("call-terminal")]),
+        providerExecution(""),
+        providerExecution("Nudge recovered after terminal.")
+      ],
+      toolSteps: [
+        { executions: [toolExecutionForTool("call-terminal", "terminal.run")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(3);
+    expect(result.providerExecution?.response?.content).toBe("Nudge recovered after terminal.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const nudgeRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest | undefined;
+    expect(JSON.stringify(nudgeRequest?.messages ?? [])).toContain(
+      "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+    );
+  });
+
+  it("does not treat mutating skill promotion as housekeeping", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("Promotion progress text.", [providerToolCall("call-promote")]),
+        providerExecution(""),
+        providerExecution("Nudge recovered after promotion.")
+      ],
+      toolSteps: [
+        { executions: [toolExecutionForTool("call-promote", "skill.promote_patch")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(3);
+    expect(result.providerExecution?.response?.content).toBe("Nudge recovered after promotion.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
+    expect(requests.filter((request) => request.includes("You just executed tool calls but returned an empty response."))).toHaveLength(1);
+  });
+
+  it("clears stale housekeeping content when a later substantive tool executes", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("Housekeeping-visible answer.", [providerToolCall("call-memory")]),
+        providerExecution("Substantive progress text.", [providerToolCall("call-terminal")]),
+        providerExecution(""),
+        providerExecution("Nudge recovered after stale capture cleared.")
+      ],
+      toolSteps: [
+        { executions: [toolExecutionForTool("call-memory", "memory.curate")] },
+        { executions: [toolExecutionForTool("call-terminal", "terminal.run")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(4);
+    expect(result.providerExecution?.response?.content).toBe("Nudge recovered after stale capture cleared.");
+    expect(result.providerExecution?.response?.content).not.toBe("Housekeeping-visible answer.");
+    const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
+    expect(requests.filter((request) => request.includes("You just executed tool calls but returned an empty response."))).toHaveLength(1);
+  });
+
+  it("adds a nudge on the next iteration when a post-tool continuation is empty and budget remains", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution(""),
+        providerExecution("Recovered final answer.")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(3);
+    expect(result.providerExecution?.response?.content).toBe("Recovered final answer.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const nudgeRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest | undefined;
+    expect(nudgeRequest).toBeDefined();
+    expect(JSON.stringify(nudgeRequest!.messages)).toContain(
+      "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+    );
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    const continuationEvents = events.filter((event) => event.kind === "provider-continuation");
+    expect(continuationEvents.map((event) => "nudge" in event ? event.nudge : undefined)).toEqual([
+      false,
+      true
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-continuation",
+      iteration: 2,
+      nudge: true
+    }));
+  });
+
+  it("uses nudge text as the final response", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution(""),
+        providerExecution("Nudge produced visible text.")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(result.providerExecution?.response?.content).toBe("Nudge produced visible text.");
+  });
+
+  it("executes tool calls returned by the nudge through the normal tool path", async () => {
+    const nudgeToolExecution = toolExecution("call-nudge", "nudge tool result");
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution(""),
+        providerExecution("", [providerToolCall("call-nudge")])
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {},
+        { executions: [nudgeToolExecution] }
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(harness.executePlans).toHaveBeenCalledTimes(3);
+    const nudgeToolRunInput = harness.executePlans.mock.calls[2]?.[0];
+    expect(nudgeToolRunInput).toBeDefined();
+    expect(nudgeToolRunInput?.providerExecution?.toolCalls).toEqual([
+      expect.objectContaining({ id: "call-nudge" })
+    ]);
+    expect(result.toolExecutions).toContain(nudgeToolExecution);
+  });
+
+  it("does not nudge empty continuations when no tools executed earlier in the loop", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution("")
+      ],
+      toolSteps: [
+        { plans: [toolPlan("call-initial", "blocked")] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
+    expect(requests.some((request) => request.includes("You just executed tool calls but returned an empty response."))).toBe(false);
+  });
+
+  it("retries empty initial provider responses through the initial provider path", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution(""),
+        providerExecution("Recovered initial retry.")
+      ],
+      toolSteps: [
+        {},
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("Recovered initial retry.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events.filter((event) => event.kind === "provider-completion")).toHaveLength(2);
+    expect(events.filter((event) => event.kind === "provider-continuation")).toHaveLength(0);
+  });
+
+  it("stops empty initial retries at the retry budget", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("")
+      ],
+      toolSteps: [
+        {},
+        {},
+        {},
+        {}
+      ],
+      maxProviderIterations: 5
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(4);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    expect(result.providerExecution?.response?.content).toBe("");
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events.filter((event) => event.kind === "provider-completion")).toHaveLength(4);
+  });
+
+  it("does not exceed the provider iteration budget for empty initial retries", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("")
+      ],
+      toolSteps: [
+        {},
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not exceed the provider iteration budget to nudge an empty final iteration", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution("")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("nudges only once when the nudge also returns empty", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution(""),
+        providerExecution("")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {},
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(3);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
+    expect(requests.filter((request) => request.includes("You just executed tool calls but returned an empty response."))).toHaveLength(1);
+  });
+
+  it("leaves existing non-empty continuation behavior unchanged", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")]),
+        providerExecution("Normal continuation answer.")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("Normal continuation answer.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
   });
 });
 

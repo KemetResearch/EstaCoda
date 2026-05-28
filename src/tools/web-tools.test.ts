@@ -171,6 +171,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Example snippet");
     expect(result.metadata).toMatchObject({
       provider: "mock-search",
+      _estacoda_context_summary: "Web search returned 1 result(s). Top sources: Example Result (example.com).",
       results: [{
         title: "Example Result",
         url: "https://example.com/result",
@@ -252,9 +253,53 @@ describe("web and browser tools baselines", () => {
       content: "Example Title Hello world.",
       contentType: "text/html",
       status: 200,
-      source: "fetch"
+      source: "fetch",
+      _estacoda_context_summary: "Extracted 26 chars from https://example.com/article using fetch. Title: Example Title. Status: 200."
     });
     expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET", redirect: "manual" }));
+  });
+
+  it("emits bounded web.search context summary metadata", async () => {
+    registerWebResearchProvider({
+      name: "mock-search",
+      displayName: "Mock Search",
+      capabilities: { search: true },
+      getAvailability: () => ({ available: true }),
+      search: async () => Array.from({ length: 8 }, (_, index) => ({
+        title: `Very long result title ${index + 1} `.repeat(10),
+        url: `https://example${index + 1}.com/result`,
+        snippet: `Snippet ${index + 1}`
+      }))
+    });
+    const search = tool("web.search", createWebTools({ webConfig: { searchBackend: "mock-search" } }));
+
+    const result = await search.run({ query: "estacoda", maxResults: 8 });
+    const summary = result.metadata?._estacoda_context_summary;
+
+    expect(result.ok).toBe(true);
+    expect(typeof summary).toBe("string");
+    expect(summary).toContain("Web search returned 8 result(s).");
+    expect(summary).toContain("example1.com");
+    expect(String(summary).length).toBeLessThanOrEqual(500);
+    expect(summary).not.toContain("Snippet");
+  });
+
+  it("emits bounded web.extract context summary metadata", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({
+      body: "<html><head><title>Long Extract</title></head><body><main>Readable content.</main></body></html>"
+    }));
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true, resolveHostname: publicResolver }));
+
+    const result = await extract.run({ url: "https://example.com/long" });
+    const summary = result.metadata?._estacoda_context_summary;
+
+    expect(result.ok).toBe(true);
+    expect(typeof summary).toBe("string");
+    expect(summary).toContain("Extracted");
+    expect(summary).toContain("https://example.com/long");
+    expect(summary).toContain("Long Extract");
+    expect(String(summary).length).toBeLessThanOrEqual(500);
+    expect(summary).not.toContain("Readable content.");
   });
 
   it("omits debug payloads when browser debug is disabled", async () => {

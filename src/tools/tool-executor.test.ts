@@ -626,6 +626,61 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       provider_native_tool_call: providerNativeToolCall
     });
   });
+
+  it("persists redacted tool context summary metadata on tool result messages", async () => {
+    const contextTool: RegisteredTool = {
+      ...createEchoTool("context-tool"),
+      run: async (): Promise<ToolResult> => ({
+        ok: true,
+        content: "result",
+        metadata: {
+          _estacoda_context_summary: "Read file with token sk-secret1234567890abcdef"
+        }
+      })
+    };
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [contextTool]
+    });
+
+    await executor.executeTool({
+      tool: "context-tool",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const messages = await sessionDb.listMessages("test-session");
+    const toolMessage = messages.find((message) => message.role === "tool");
+    expect(toolMessage?.metadata?._estacoda_context_summary).toBe("[REDACTED_URL_WITH_SECRET]");
+    expect(JSON.stringify(toolMessage)).not.toContain("sk-secret1234567890abcdef");
+  });
+
+  it("ignores non-string tool context summary metadata on tool result messages", async () => {
+    const contextTool: RegisteredTool = {
+      ...createEchoTool("context-tool"),
+      run: async (): Promise<ToolResult> => ({
+        ok: true,
+        content: "result",
+        metadata: {
+          _estacoda_context_summary: 123
+        } as unknown as ToolResult["metadata"]
+      })
+    };
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [contextTool]
+    });
+
+    await executor.executeTool({
+      tool: "context-tool",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const messages = await sessionDb.listMessages("test-session");
+    const toolMessage = messages.find((message) => message.role === "tool");
+    expect(toolMessage?.metadata).not.toHaveProperty("_estacoda_context_summary");
+  });
 });
 
 describe("ToolExecutor command environment", () => {

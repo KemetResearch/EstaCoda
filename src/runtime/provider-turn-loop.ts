@@ -2,7 +2,7 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
-import type { ModelProfile, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ModelProfile, ProviderId, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
@@ -147,6 +147,11 @@ export class ProviderTurnLoop {
     const loopStartedAt = Date.now();
     const repeatedFailures = new Map<string, number>();
     let maxObservedRisk = input.initialRiskClass;
+    let pendingEmptyResponseNudge = false;
+    let postToolEmptyRetried = false;
+    let capturedContentWithHousekeepingTools: string | undefined;
+    let emptyContentRetries = 0;
+    let retryEmptyInitialResponse = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -189,29 +194,31 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase = iteration === 0 ? "initial" : "continuation";
-      const execution = phase === "initial"
+      const phase = iteration === 0 || retryEmptyInitialResponse ? "initial" : "continuation";
+      retryEmptyInitialResponse = false;
+
+      let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             iteration
           })
         : await this.#continueProviderAfterTools({
-            ...input,
-            toolExecutions: [
-              ...input.toolExecutions,
-              ...providerToolExecutions
-            ],
-            providerExecution: previousProviderExecution,
-            iteration
-          });
+          ...input,
+          toolExecutions: [
+            ...input.toolExecutions,
+            ...providerToolExecutions
+          ],
+          providerExecution: previousProviderExecution,
+          iteration,
+          emptyResponseNudge: pendingEmptyResponseNudge
+        });
+      pendingEmptyResponseNudge = false;
 
       if (execution === undefined) {
         break;
       }
 
       iterations += 1;
-      effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
-      previousProviderExecution = execution;
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
@@ -227,6 +234,15 @@ export class ProviderTurnLoop {
       const loopToolExecutions = loopToolExecutionResult.executions;
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
+      if (loopToolExecutions.some((execution) => !isHousekeepingToolName(execution.tool.name))) {
+        capturedContentWithHousekeepingTools = undefined;
+      } else if (
+        execution.ok === true &&
+        loopToolExecutions.length > 0 &&
+        execution.response?.content.trim().length
+      ) {
+        capturedContentWithHousekeepingTools = execution.response.content;
+      }
       if (loopToolExecutions.length > 0 && this.#model !== undefined) {
         await emit(input.onEvent, {
           kind: "context-usage",
@@ -256,6 +272,46 @@ export class ProviderTurnLoop {
         repeatedFailureBudgetExceeded !== undefined
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
 
+      if (
+        execution.ok !== true &&
+        execution.toolCalls.length === 0 &&
+        execution.partialContent?.trim().length &&
+        lastAttemptErrorClass(execution) === "incomplete-stream"
+      ) {
+        const lastAttempt = execution.attempts[execution.attempts.length - 1];
+        execution = {
+          ...execution,
+          ok: true,
+          response: {
+            ok: true,
+            content: execution.partialContent.trim(),
+            model: lastAttempt?.model ?? this.#model?.id ?? "unknown",
+            provider: (lastAttempt?.provider ?? this.#model?.provider ?? "unknown") as ProviderId
+          }
+        };
+      }
+
+      let terminalPostToolEmpty =
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        phase === "continuation" &&
+        providerToolExecutions.length > 0 &&
+        execution.response?.content.trim().length === 0;
+
+      if (
+        terminalPostToolEmpty &&
+        capturedContentWithHousekeepingTools !== undefined &&
+        execution.response !== undefined
+      ) {
+        execution.response.content = capturedContentWithHousekeepingTools;
+        capturedContentWithHousekeepingTools = undefined;
+        terminalPostToolEmpty = false;
+      }
+
+      if (execution.ok === true && execution.response?.content.trim().length) {
+        emptyContentRetries = 0;
+      }
+
       await this.#runRecorder.recordProviderIteration({
         iteration,
         phase,
@@ -264,6 +320,40 @@ export class ProviderTurnLoop {
         executedTools: providerToolExecutions.length - beforeExecutions,
         exhausted
       });
+
+      if (
+        terminalPostToolEmpty &&
+        !postToolEmptyRetried &&
+        iteration + 1 < this.#budgets.maxProviderIterations
+      ) {
+        postToolEmptyRetried = true;
+        pendingEmptyResponseNudge = true;
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        continue;
+      }
+
+      const successfulEmptyWithoutTools =
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        execution.response?.content.trim().length === 0;
+
+      if (
+        successfulEmptyWithoutTools &&
+        emptyContentRetries < 3 &&
+        iteration + 1 < this.#budgets.maxProviderIterations
+      ) {
+        emptyContentRetries += 1;
+        if (phase === "initial") {
+          retryEmptyInitialResponse = true;
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          continue;
+        }
+      }
+
+      effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+      previousProviderExecution = execution;
 
       if (
         execution.ok !== true ||
@@ -452,6 +542,7 @@ export class ProviderTurnLoop {
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     iteration: number;
+    emptyResponseNudge?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -459,7 +550,7 @@ export class ProviderTurnLoop {
       this.#model === undefined ||
       this.#model.provider === "unconfigured" ||
       input.providerExecution?.ok !== true ||
-      input.providerExecution.toolCalls.length === 0 ||
+      (input.providerExecution.toolCalls.length === 0 && input.emptyResponseNudge !== true) ||
       !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
     ) {
       return undefined;
@@ -482,6 +573,12 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    if (input.emptyResponseNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+      });
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
@@ -521,8 +618,8 @@ export class ProviderTurnLoop {
       });
     }
 
-    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
-      kind: "provider-continuation",
+    const continuationEvent = {
+      kind: "provider-continuation" as const,
       iteration: input.iteration,
       ok: execution.ok,
       attempts: execution.attempts.map((attempt) => ({
@@ -537,8 +634,10 @@ export class ProviderTurnLoop {
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage
-    });
+      usage: execution.response?.usage,
+      nudge: input.emptyResponseNudge === true
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
       iteration: input.iteration,
       ok: execution.ok,
@@ -554,7 +653,8 @@ export class ProviderTurnLoop {
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage
+      usage: execution.response?.usage,
+      nudge: input.emptyResponseNudge === true
     });
 
     if (!execution.ok) {
@@ -690,6 +790,23 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
 
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
+}
+
+function isHousekeepingToolName(name: string | undefined): boolean {
+  return name === "memory.curate" ||
+    name === "knowledge.memory.inspect" ||
+    name === "skill.observe" ||
+    name === "skill.list" ||
+    name === "skill.view" ||
+    name === "skill.inspect" ||
+    name === "skill.usage" ||
+    name === "skill.list_proposals" ||
+    name === "skill.review_proposals" ||
+    name === "skill.review_proposal";
+}
+
+function lastAttemptErrorClass(execution: ProviderExecutionResult): string | undefined {
+  return execution.attempts[execution.attempts.length - 1]?.errorClass;
 }
 
 function mergeProviderExecutions(

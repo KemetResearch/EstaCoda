@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
-import { assembleProviderPrompt } from "./prompt-assembly.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
 import { IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 
 const model: ModelProfile = {
@@ -420,6 +421,60 @@ describe("assembleProviderPrompt", () => {
     expect(sessionHistoryLayer(withImageMetadata).estimatedTokens)
       .toBeGreaterThanOrEqual(sessionHistoryLayer(textOnly).estimatedTokens + IMAGE_TOKEN_ESTIMATE);
   });
+
+  it("renders tool context summaries without replacing bounded excerpts", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      toolExecutions: [
+        toolExecution({
+          content: "actual command output",
+          metadata: {
+            _estacoda_context_summary: "Command exited 0 with 1 line."
+          }
+        })
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Context summary: Command exited 0 with 1 line.");
+    expect(rendered).toContain("Excerpt:\nactual command output");
+    expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
+  });
+});
+
+describe("assembleProviderContinuationPrompt", () => {
+  it("uses active continuation wording when prior provider content is empty", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      providerExecution: providerExecution("")
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain(
+      "I have requested tools and received their results below. I will now process these results to produce the final answer."
+    );
+    expect(rendered).not.toContain("I requested tools and am waiting for EstaCoda to provide their results.");
+    expect(rendered).toContain("Use these results to produce the final answer now.");
+  });
+
+  it("preserves non-empty prior provider content unchanged", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      providerExecution: providerExecution("I found the relevant files and will summarize them.")
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("I found the relevant files and will summarize them.");
+    expect(rendered).not.toContain(
+      "I have requested tools and received their results below. I will now process these results to produce the final answer."
+    );
+  });
+
+  it("keeps final-answer continuation guidance with executed tool results", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput());
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("EstaCoda executed the requested tools. Use these results to produce the final answer now.");
+    expect(rendered).toContain("Executed tool results:");
+    expect(rendered).toContain("Tool: files.read");
+  });
 });
 
 function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPrompt>[0]> = {}): Parameters<typeof assembleProviderPrompt>[0] {
@@ -440,6 +495,83 @@ function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPr
     providerTools: [],
     fallbackText: "fallback",
     ...overrides
+  };
+}
+
+function baseContinuationInput(
+  overrides: Partial<Parameters<typeof assembleProviderContinuationPrompt>[0]> = {}
+): Parameters<typeof assembleProviderContinuationPrompt>[0] {
+  return {
+    ...basePromptInput(),
+    providerExecution: providerExecution(""),
+    toolPlans: [
+      {
+        id: "call-read",
+        tool: "files.read",
+        input: { path: "src/index.ts" },
+        source: "provider-tool-call",
+        status: "executed",
+        result: {
+          ok: true,
+          content: "file contents"
+        }
+      }
+    ],
+    ...overrides
+  };
+}
+
+function providerExecution(content: string): Parameters<typeof assembleProviderContinuationPrompt>[0]["providerExecution"] {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: model.id,
+      provider: model.provider
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: model.provider,
+        model: model.id,
+        ok: true,
+        content
+      }
+    ],
+    toolCalls: [
+      {
+        index: 0,
+        id: "call-read",
+        name: "files.read",
+        argumentsText: "{\"path\":\"src/index.ts\"}"
+      }
+    ]
+  };
+}
+
+function toolExecution(input: {
+  content: string;
+  metadata?: Record<string, unknown>;
+}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "terminal.run",
+      description: "Run command",
+      inputSchema: {},
+      riskClass: "workspace-write",
+      toolsets: ["shell-write"],
+      progressLabel: "running",
+      maxResultSizeChars: 2_000
+    },
+    input: {},
+    decision: "allow",
+    riskClass: "workspace-write",
+    result: {
+      ok: true,
+      content: input.content,
+      metadata: input.metadata
+    }
   };
 }
 

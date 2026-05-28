@@ -242,7 +242,8 @@ describe("semantic compression deterministic evals", () => {
     });
 
     const summary = summaryContent(result.messages);
-    expect(observedPrompt).toContain("Previous summary:");
+    expect(observedPrompt).toContain("## Previous Summary");
+    expect(observedPrompt).toContain("## New Turns to Incorporate");
     expect(observedPrompt).toContain("Phase 7D provider-turn compression is complete");
     expect(observedPrompt).toContain("Phase 7E manual /compact surfaces are implemented");
     expect(summary.match(/\[CONTEXT COMPACTION/g)).toHaveLength(1);

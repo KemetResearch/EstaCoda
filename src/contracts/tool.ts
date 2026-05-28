@@ -39,10 +39,14 @@ export type ToolDefinition = {
   requiredConfig?: string[];
 };
 
+export type ToolResultMetadata = Record<string, unknown> & {
+  _estacoda_context_summary?: string;
+};
+
 export type ToolResult = {
   ok: boolean;
   content: string;
-  metadata?: Record<string, unknown>;
+  metadata?: ToolResultMetadata;
 };
 
 export type ToolExecutionContext = {
