@@ -573,6 +573,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
     );
     const events = await harness.sessionDb.listEvents(harness.sessionId);
+    const continuationEvents = events.filter((event) => event.kind === "provider-continuation");
+    expect(continuationEvents.map((event) => "nudge" in event ? event.nudge : undefined)).toEqual([
+      false,
+      true
+    ]);
     expect(events).toContainEqual(expect.objectContaining({
       kind: "provider-continuation",
       iteration: 2,

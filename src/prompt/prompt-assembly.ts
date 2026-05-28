@@ -161,7 +161,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       role: "assistant",
       content: input.providerExecution?.response?.content.trim().length
         ? input.providerExecution.response.content
-        : "I requested tools and am waiting for EstaCoda to provide their results."
+        : "I have requested tools and received their results below. I will now process these results to produce the final answer."
     },
     {
       role: "user",
