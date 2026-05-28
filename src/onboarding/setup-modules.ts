@@ -404,12 +404,12 @@ export const voiceSetupModule: SetupModule = optionalCapabilityModule({
   titleKey: "setupModules.voice.title",
   scope: ["voice"],
   value: (context) => ({
-    ttsProvider: context.voice?.ttsProvider,
-    ttsModel: context.voice?.ttsModel,
-    ttsApiKeyEnv: context.voice?.ttsApiKeyEnv,
-    sttProvider: context.voice?.sttProvider,
-    sttModel: context.voice?.sttModel,
-    sttApiKeyEnv: context.voice?.sttApiKeyEnv,
+    ...(context.voice?.ttsProvider === undefined ? {} : { ttsProvider: context.voice.ttsProvider }),
+    ...(context.voice?.ttsModel === undefined ? {} : { ttsModel: context.voice.ttsModel }),
+    ...optionalStringReviewValue("ttsApiKeyEnv", context.voice?.ttsApiKeyEnv),
+    ...(context.voice?.sttProvider === undefined ? {} : { sttProvider: context.voice.sttProvider }),
+    ...(context.voice?.sttModel === undefined ? {} : { sttModel: context.voice.sttModel }),
+    ...optionalStringReviewValue("sttApiKeyEnv", context.voice?.sttApiKeyEnv),
     secretValuesIncluded: false,
   }),
 });
@@ -439,6 +439,10 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     autoLaunchWillRunNow: false,
   }),
 });
+
+function optionalStringReviewValue(key: string, value: string | undefined): Record<string, string> {
+  return value === undefined || value.trim().length === 0 ? {} : { [key]: value };
+}
 
 export const SETUP_MODULES: readonly SetupModule[] = [
   providerSetupModule,

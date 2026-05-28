@@ -224,6 +224,12 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.whatsapp.authDir",
   "setupEditor.prompt.whatsapp.allowedUsers",
   "setupEditor.prompt.whatsapp.incomplete.body",
+  "setupEditor.prompt.voice.mode.title",
+  "setupEditor.prompt.voice.mode.body",
+  "setupEditor.prompt.voice.mode.stt",
+  "setupEditor.prompt.voice.mode.stt.description",
+  "setupEditor.prompt.voice.mode.tts",
+  "setupEditor.prompt.voice.mode.tts.description",
   "setupEditor.prompt.voice.summary",
   "setupEditor.prompt.voice.ttsProvider",
   "setupEditor.prompt.voice.ttsModel",
@@ -430,6 +436,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupStateSummary.directProviderExample")).toContain(isolateLtr("estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.summary")).not.toContain("OAuth");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toContain(isolateLtr("STT"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toContain(isolateLtr("TTS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));

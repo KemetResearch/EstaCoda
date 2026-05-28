@@ -22,6 +22,8 @@ export type OptionalCapabilityPromptId = "telegram" | "discord" | "whatsapp" | "
 
 export type ChannelCapabilityPromptId = "telegram" | "whatsapp" | "discord";
 
+export type VoiceCapabilityPromptId = "stt" | "tts";
+
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
 export type CredentialReuseChoice = "existing" | "new";
@@ -701,22 +703,41 @@ export async function promptIncompleteTelegramCapabilityAction(
 
 export async function promptVoiceCapability(
   prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<VoiceCapabilityPromptId> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.voice.mode.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.mode.body")}\n`,
+    choices: [
+      {
+        id: "voice-stt",
+        label: setupCopyText(locale, "setupEditor.prompt.voice.mode.stt"),
+        description: setupCopyText(locale, "setupEditor.prompt.voice.mode.stt.description"),
+        value: "stt" as const,
+      },
+      {
+        id: "voice-tts",
+        label: setupCopyText(locale, "setupEditor.prompt.voice.mode.tts"),
+        description: setupCopyText(locale, "setupEditor.prompt.voice.mode.tts.description"),
+        value: "tts" as const,
+      },
+    ],
+    defaultValue: "stt" as const,
+  });
+}
+
+export async function promptTtsCapability(
+  prompt: Prompt,
   current: {
     readonly ttsProvider?: TtsProvider;
     readonly ttsModel?: string;
     readonly ttsApiKeyEnv?: string;
-    readonly sttProvider?: SttProvider;
-    readonly sttModel?: string;
-    readonly sttApiKeyEnv?: string;
   },
   locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly ttsProvider: TtsProvider;
   readonly ttsModel: string;
   readonly ttsApiKeyEnv: string;
-  readonly sttProvider: SttProvider;
-  readonly sttModel: string;
-  readonly sttApiKeyEnv: string;
 }> {
   const ttsProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
@@ -730,9 +751,30 @@ export async function promptVoiceCapability(
   });
   const ttsModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")}: `, current.ttsModel ?? "gpt-4o-mini-tts");
   const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsApiKeyEnv")}: `, current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
+
+  return {
+    ttsProvider,
+    ttsModel,
+    ttsApiKeyEnv,
+  };
+}
+
+export async function promptSttCapability(
+  prompt: Prompt,
+  current: {
+    readonly sttProvider?: SttProvider;
+    readonly sttModel?: string;
+    readonly sttApiKeyEnv?: string;
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<{
+  readonly sttProvider: SttProvider;
+  readonly sttModel: string;
+  readonly sttApiKeyEnv: string;
+}> {
   const sttProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
       label: provider,
@@ -761,9 +803,6 @@ export async function promptVoiceCapability(
   }
 
   return {
-    ttsProvider,
-    ttsModel,
-    ttsApiKeyEnv,
     sttProvider,
     sttModel,
     sttApiKeyEnv,

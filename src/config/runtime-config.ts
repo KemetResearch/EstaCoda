@@ -2038,6 +2038,12 @@ export async function setupVoiceConfig(options: {
     sttProviderApiKeyEnv(previousStt, sttProvider) ??
     sttDefaultApiKeyEnv(sttProvider);
   const secretPaths: string[] = [];
+  const hasTtsInput = options.input.ttsProvider !== undefined ||
+    options.input.ttsSpeed !== undefined ||
+    options.input.ttsVoice !== undefined ||
+    options.input.ttsModel !== undefined ||
+    options.input.ttsApiKeyEnv !== undefined ||
+    options.input.ttsApiKey !== undefined;
   const hasSttInput = options.input.sttProvider !== undefined ||
     options.input.sttModel !== undefined ||
     options.input.sttCommand !== undefined ||
@@ -2091,17 +2097,21 @@ export async function setupVoiceConfig(options: {
         }
       };
 
+  const ttsConfigPatch: EstaCodaConfig["tts"] | undefined = !hasTtsInput
+    ? undefined
+    : {
+        provider: ttsProvider,
+        speed: options.input.ttsSpeed ?? previousTts.speed,
+        [ttsProvider]: {
+          model: options.input.ttsModel,
+          voice: options.input.ttsVoice,
+          voiceId: options.input.ttsVoice,
+          apiKeyEnv: ttsApiKeyEnv
+        }
+      };
+
   const config = patchConfig(existing.config, {
-    tts: {
-      provider: ttsProvider,
-      speed: options.input.ttsSpeed ?? previousTts.speed,
-      [ttsProvider]: {
-        model: options.input.ttsModel,
-        voice: options.input.ttsVoice,
-        voiceId: options.input.ttsVoice,
-        apiKeyEnv: ttsApiKeyEnv
-      }
-    },
+    tts: ttsConfigPatch,
     stt: sttConfigPatch
   });
 

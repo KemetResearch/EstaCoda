@@ -1573,8 +1573,17 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
-  it("configures voice without drafting other optional capabilities", async () => {
-    await writeUserConfig(tempDir, localReadyConfig());
+  it("configures TTS voice without drafting STT or other optional capabilities", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      stt: {
+        provider: "local",
+        local: {
+          engine: "command",
+          command: "existing-stt-command",
+        },
+      },
+    });
     await trustWorkspace(tempDir, workspaceRoot);
 
     const result = await runConfigEditor({
@@ -1582,13 +1591,11 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
+          "tts",
           "enable",
           "openai",
           "gpt-4o-mini-tts",
           "VOICE_TTS_KEY",
-          "openai",
-          "gpt-4o-mini-transcribe",
-          "VOICE_STT_KEY",
           true,
         ],
       }),
@@ -1609,16 +1616,73 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "VOICE_TTS_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.voice.capability",
     ]);
     expect(config.tts?.provider).toBe("openai");
     expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
-    expect(config.stt?.provider).toBe("openai");
-    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.stt).toEqual({
+      provider: "local",
+      local: {
+        engine: "command",
+        command: "existing-stt-command",
+      },
+    });
     expect(config.channels).toBeUndefined();
     expect(config.imageGen).toBeUndefined();
     expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures STT voice without drafting or writing TTS", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "stt",
+          "enable",
+          "openai",
+          "gpt-4o-mini-transcribe",
+          "VOICE_STT_KEY",
+          true,
+        ],
+      }),
+      defaultActionId: "configure-voice",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      tts?: unknown;
+      stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "VOICE_STT_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
+    expect(config.tts).toBeUndefined();
+    expect(config.stt?.provider).toBe("openai");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });

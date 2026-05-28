@@ -75,7 +75,9 @@ import {
   promptOptionalCapabilityAction,
   promptProviderCandidate,
   promptSecurityMode,
+  promptSttCapability,
   promptTelegramCapability,
+  promptTtsCapability,
   promptVisionCapability,
   promptWhatsAppCapability,
   promptVoiceCapability,
@@ -83,6 +85,7 @@ import {
   promptWorkspaceTrustConfirmation,
   type ConfigEditorPostApplyActionId,
   type OptionalCapabilityPromptId,
+  type VoiceCapabilityPromptId,
 } from "./prompts.js";
 import {
   configEditorActions,
@@ -460,9 +463,15 @@ async function handleOptionalCapabilityAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
-  const module = action.id === "configure-channels"
-    ? channelCapabilityModule(await promptChannelCapability(options.prompt, options.locale))
-    : optionalCapabilityModuleForAction(action.id);
+  const selectedChannel = action.id === "configure-channels"
+    ? await promptChannelCapability(options.prompt, options.locale)
+    : undefined;
+  const selectedVoiceMode = action.id === "configure-voice"
+    ? await promptVoiceCapability(options.prompt, options.locale)
+    : undefined;
+  const module = selectedChannel === undefined
+    ? optionalCapabilityModuleForAction(action.id)
+    : channelCapabilityModule(selectedChannel);
   const promptContext = optionalCapabilityPromptContext(
     baseContext,
     module,
@@ -482,7 +491,7 @@ async function handleOptionalCapabilityAction(
   }
 
   if (selected === "enable") {
-    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
+    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode);
     if (collected.kind === "skip") {
       const configuration = promptContext.module.configure(baseContext, { skip: true });
       selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
@@ -1114,7 +1123,8 @@ function channelCapabilityModule(moduleId: "telegram" | "whatsapp" | "discord"):
 async function collectOptionalCapabilityContext(
   options: LocalizedConfigEditorRunnerOptions,
   baseContext: SetupModuleContext,
-  module: OptionalCapabilityModule
+  module: OptionalCapabilityModule,
+  voiceMode?: VoiceCapabilityPromptId
 ): Promise<OptionalCapabilityCollectionResult> {
   switch (module.id) {
     case "telegram": {
@@ -1221,7 +1231,12 @@ async function collectOptionalCapabilityContext(
       return { kind: "skip" };
     }
     case "voice": {
-      const values = await promptVoiceCapability(options.prompt, baseContext.voice ?? {}, options.locale);
+      if (voiceMode === undefined) {
+        throw new Error("Configure voice must select STT or TTS before collecting provider settings.");
+      }
+      const values = voiceMode === "stt"
+        ? await promptSttCapability(options.prompt, baseContext.voice ?? {}, options.locale)
+        : await promptTtsCapability(options.prompt, baseContext.voice ?? {}, options.locale);
       return {
         kind: "configured",
         context: {

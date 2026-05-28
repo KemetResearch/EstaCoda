@@ -442,6 +442,33 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     });
   });
 
+  it("setupVoiceConfig does not patch TTS during STT-only setup", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({}));
+
+    await setupVoiceConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        sttProvider: "openai",
+        sttModel: "gpt-4o-mini-transcribe",
+        sttApiKeyEnv: "VOICE_STT_KEY"
+      }
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.tts).toBeUndefined();
+    expect(saved.stt).toEqual({
+      provider: "openai",
+      openai: {
+        model: "gpt-4o-mini-transcribe",
+        apiKeyEnv: "VOICE_STT_KEY"
+      }
+    });
+  });
+
   it("setupVoiceConfig writes local faster-whisper schema with python binary", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -459,6 +486,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     });
 
     const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.tts).toBeUndefined();
     expect(saved.stt).toEqual({
       provider: "local",
       local: {
