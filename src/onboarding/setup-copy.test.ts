@@ -68,6 +68,15 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.shell.labels.model",
   "setupEditor.shell.labels.userConfig",
   "setupEditor.shell.labels.projectConfig",
+  "setupEditor.shell.labels.stateWritable",
+  "setupEditor.shell.labels.blockers",
+  "setupEditor.shell.labels.warnings",
+  "setupEditor.shell.labels.status",
+  "setupEditor.shell.labels.blocker",
+  "setupEditor.shell.labels.warning",
+  "setupEditor.shell.labels.none",
+  "setupEditor.shell.values.yes",
+  "setupEditor.shell.values.no",
   "setupEditor.sections.heading",
   "setupEditor.actions.heading",
   "setupEditor.summary.configuredReady",
@@ -93,18 +102,22 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.repairMissingCredential",
   "setupEditor.actions.editSecurityMode",
   "setupEditor.actions.editWorkflowLearning",
+  "setupEditor.actions.editLanguage",
   "setupEditor.actions.repairWorkspaceTrust",
   "setupEditor.actions.configureChannels",
   "setupEditor.actions.configureVoice",
   "setupEditor.actions.configureImageGeneration",
   "setupEditor.actions.configureBrowser",
   "setupEditor.actions.runReadonlyVerification",
+  "setupEditor.actions.showDiagnostics",
+  "setupEditor.actions.exitWithoutChanges",
   "setupEditor.actions.repairBrokenConfig",
   "setupEditor.actions.repairStateDirectory",
   "setupEditor.actions.cancelSetupEditor",
   "setupEditor.actions.repairWorkspaceTrust.description",
   "setupEditor.actions.editSecurityMode.description",
   "setupEditor.actions.editWorkflowLearning.description",
+  "setupEditor.actions.editLanguage.description",
   "setupEditor.actions.repairPrimaryProvider.description",
   "setupEditor.actions.editPrimaryModelRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
@@ -116,17 +129,37 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureVoice.description",
   "setupEditor.actions.configureImageGeneration.description",
   "setupEditor.actions.configureBrowser.description",
+  "setupEditor.actions.runReadonlyVerification.description",
+  "setupEditor.actions.showDiagnostics.description",
+  "setupEditor.actions.exitWithoutChanges.description",
+  "setupEditor.result.unsupportedState",
+  "setupEditor.result.noActions",
+  "setupEditor.result.unavailableAction",
+  "setupEditor.result.unimplementedAction",
+  "setupEditor.result.verifyPrepared",
+  "setupEditor.result.exitWithoutChanges",
+  "setupEditor.result.repairAgainSelected",
+  "setupEditor.result.activeModelMissing",
+  "setupEditor.result.activeModelUnavailable",
+  "setupEditor.result.activeModelCredentialUnsupported",
   "setupEditor.diagnostics.title",
+  "setupEditor.diagnostics.labels.error",
+  "setupEditor.diagnostics.manualRepair.heading",
   "setupEditor.diagnostics.manualRepair.brokenConfig",
   "setupEditor.diagnostics.manualRepair.stateNotWritable",
+  "setupEditor.diagnostics.manualRepair.availableActions",
   "setupEditor.prompt.action.title",
   "setupEditor.prompt.action.body",
   "setupEditor.prompt.postApply.title",
   "setupEditor.prompt.postApply.body",
   "setupEditor.prompt.postApply.launch",
+  "setupEditor.prompt.postApply.launch.description",
   "setupEditor.prompt.postApply.acceptLimitedMode",
+  "setupEditor.prompt.postApply.acceptLimitedMode.description",
   "setupEditor.prompt.postApply.repairAgain",
+  "setupEditor.prompt.postApply.repairAgain.description",
   "setupEditor.prompt.postApply.exit",
+  "setupEditor.prompt.postApply.exit.description",
   "setupEditor.postApply.warningList",
   "setupEditor.prompt.credentialReuse.title",
   "setupEditor.prompt.credentialReuse.body",
@@ -407,22 +440,43 @@ describe("setup copy", () => {
   });
 
   it("contains Phase 1 setup editor foundation copy", () => {
-    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Edit fallback provider/model route.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Choose or add a fallback provider/model route through a reviewed setup change.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Edit auxiliary provider/model route.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Choose an auxiliary route for assessor, compression, session search, memory compaction, or profile context.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Configure channels.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Configure voice.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser.");
+    expect(rawSetupCopy("en", "setupEditor.shell.title")).toBe("Setup Editor");
+    expect(rawSetupCopy("en", "setupEditor.prompt.action.title")).toBe("Setup editor");
+    expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).toBe("Choose what to configure.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Edit primary model");
+    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Set the default provider and model used by the agent.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Edit fallback models");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Configure backup providers and models used when the primary model fails.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Edit auxiliary models");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Configure specialist models for assessment, compression, recall, and memory.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Configure channels");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels.description")).toBe("Set up remote-control channels such as Telegram.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Configure voice");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Set speech-to-text and text-to-speech providers.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Set the image generation provider.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
+    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit workflow learning");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Control how reusable workflows are learned from sessions.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editLanguage")).toBe("Edit language");
+    expect(rawSetupCopy("en", "setupEditor.actions.editLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
+    expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");
+    expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");
+    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Show diagnostics");
+    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics.description")).toBe("List blockers, warnings, and detected state.");
+    expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges")).toBe("Exit without changes");
+    expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges.description")).toBe("Leave setup without modifying config.");
     expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
-    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback route {providerId} / {modelId}.");
-    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback route {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
-    expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} route to {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback model {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback model {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} model to {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.credentialReference.summary")).toBe("Store credential env-var reference {envVar} only.");
-    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.add")).toBe("Add another fallback route");
+    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.add")).toBe("Add another fallback model");
     expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.edit")).toBe("Edit fallback {index}: {providerId}/{modelId}");
-    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.title")).toBe("Choose auxiliary route.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.title")).toBe("Choose auxiliary model.");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor")).toBe("Assessor");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.compression")).toBe("Compression");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch")).toBe("Session search");
@@ -430,11 +484,10 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.profileContext")).toBe("Profile context");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("approval assessment");
 
-    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("assessor");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("compression");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("session_search");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("memory_compaction");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("profile_context");
+    expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain("Telegram");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editSecurityMode.description")).toContain("EstaCoda");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");

@@ -13,6 +13,7 @@ import {
   promptSetupStringWithDefault,
   setupCopyText,
 } from "../setup-prompts.js";
+import type { SetupCopyLocale } from "../setup-copy.js";
 import type { ConfigEditorRenderedAction } from "./render.js";
 
 export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
@@ -54,7 +55,8 @@ export type ConfigEditorPostApplyActionId =
 export async function promptConfigEditorAction(
   prompt: Prompt,
   actions: readonly ConfigEditorRenderedAction[],
-  defaultActionId?: string
+  defaultActionId?: string,
+  locale: SetupCopyLocale = "en"
 ): Promise<ConfigEditorRenderedAction | undefined> {
   if (actions.length === 0) {
     return undefined;
@@ -62,8 +64,8 @@ export async function promptConfigEditorAction(
 
   const defaultAction = actions.find((action) => action.id === defaultActionId) ?? actions[0];
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupEditor.prompt.action.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.action.body")}\n`,
+    title: setupCopyText(locale, "setupEditor.prompt.action.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.action.body")}\n`,
     choices: actions.map((action) => ({
       id: action.id,
       label: action.label,
@@ -76,28 +78,29 @@ export async function promptConfigEditorAction(
 
 export async function promptSecurityMode(
   prompt: Prompt,
-  currentValue: SecurityApprovalMode
+  currentValue: SecurityApprovalMode,
+  locale: SetupCopyLocale = "en"
 ): Promise<SecurityApprovalMode> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.security.title"),
-    message: `${setupCopyText("en", "onboarding.security")}\n`,
+    title: setupCopyText(locale, "onboarding.security.title"),
+    message: `${setupCopyText(locale, "onboarding.security")}\n`,
     choices: [
       {
         id: "strict",
-        label: setupCopyText("en", "onboarding.security.options.strict.label"),
-        description: setupCopyText("en", "onboarding.security.options.strict.description"),
+        label: setupCopyText(locale, "onboarding.security.options.strict.label"),
+        description: setupCopyText(locale, "onboarding.security.options.strict.description"),
         value: "strict" as const,
       },
       {
         id: "adaptive",
-        label: setupCopyText("en", "onboarding.security.options.adaptive.label"),
-        description: setupCopyText("en", "onboarding.security.options.adaptive.description"),
+        label: setupCopyText(locale, "onboarding.security.options.adaptive.label"),
+        description: setupCopyText(locale, "onboarding.security.options.adaptive.description"),
         value: "adaptive" as const,
       },
       {
         id: "open",
-        label: setupCopyText("en", "onboarding.security.options.open.label"),
-        description: setupCopyText("en", "onboarding.security.options.open.description"),
+        label: setupCopyText(locale, "onboarding.security.options.open.label"),
+        description: setupCopyText(locale, "onboarding.security.options.open.description"),
         value: "open" as const,
       },
     ],
@@ -107,34 +110,35 @@ export async function promptSecurityMode(
 
 export async function promptWorkflowLearning(
   prompt: Prompt,
-  currentValue: SkillAutonomy
+  currentValue: SkillAutonomy,
+  locale: SetupCopyLocale = "en"
 ): Promise<SkillAutonomy> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.workflowLearning.title"),
-    message: `${setupCopyText("en", "onboarding.workflowLearning")}\n`,
+    title: setupCopyText(locale, "onboarding.workflowLearning.title"),
+    message: `${setupCopyText(locale, "onboarding.workflowLearning")}\n`,
     choices: [
       {
         id: "none",
-        label: setupCopyText("en", "onboarding.workflowLearning.options.none.label"),
-        description: setupCopyText("en", "onboarding.workflowLearning.options.none.description"),
+        label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
+        description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
         value: "none" as const,
       },
       {
         id: "suggest",
-        label: setupCopyText("en", "onboarding.workflowLearning.options.suggest.label"),
-        description: setupCopyText("en", "onboarding.workflowLearning.options.suggest.description"),
+        label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
+        description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
         value: "suggest" as const,
       },
       {
         id: "proactive",
-        label: setupCopyText("en", "onboarding.workflowLearning.options.proactive.label"),
-        description: setupCopyText("en", "onboarding.workflowLearning.options.proactive.description"),
+        label: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.label"),
+        description: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.description"),
         value: "proactive" as const,
       },
       {
         id: "autonomous",
-        label: setupCopyText("en", "onboarding.workflowLearning.options.autonomous.label"),
-        description: setupCopyText("en", "onboarding.workflowLearning.options.autonomous.description"),
+        label: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.label"),
+        description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
         value: "autonomous" as const,
       },
     ],
@@ -147,12 +151,13 @@ export async function promptWorkspaceTrustConfirmation(
   input: {
     readonly workspaceRoot: string;
     readonly trustStorePath: string;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<boolean> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.workspace.trust.title"),
+    title: setupCopyText(locale, "onboarding.workspace.trust.title"),
     message: [
-      setupCopyText("en", "onboarding.workspace.trust"),
+      setupCopyText(locale, "onboarding.workspace.trust"),
       `Workspace: ${input.workspaceRoot}`,
       `Trust store: ${input.trustStorePath}`,
       "",
@@ -160,14 +165,14 @@ export async function promptWorkspaceTrustConfirmation(
     choices: [
       {
         id: "trust",
-        label: setupCopyText("en", "onboarding.workspace.trustAction.label"),
-        description: setupCopyText("en", "onboarding.workspace.trustAction.description"),
+        label: setupCopyText(locale, "onboarding.workspace.trustAction.label"),
+        description: setupCopyText(locale, "onboarding.workspace.trustAction.description"),
         value: true,
       },
       {
         id: "cancel",
-        label: setupCopyText("en", "onboarding.review.cancelAction"),
-        description: setupCopyText("en", "setupApply.review.cancelled"),
+        label: setupCopyText(locale, "onboarding.review.cancelAction"),
+        description: setupCopyText(locale, "setupApply.review.cancelled"),
         value: false,
       },
     ],
@@ -180,11 +185,12 @@ export async function promptProviderCandidate(
   input: {
     readonly candidates: readonly ProviderCandidate[];
     readonly currentProviderId?: string;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<ProviderCandidate> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.providers.primary.title"),
-    message: `${setupCopyText("en", "onboarding.providers.primary")}\n`,
+    title: setupCopyText(locale, "onboarding.providers.primary.title"),
+    message: `${setupCopyText(locale, "onboarding.providers.primary")}\n`,
     choices: input.candidates.map((candidate) => ({
       id: candidate.id,
       label: candidate.displayName,
@@ -203,18 +209,19 @@ export async function promptModelCandidate(
     readonly providerId: string;
     readonly candidates: readonly ModelCandidate[];
     readonly currentModelId?: string;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<ModelCandidate> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.providers.primaryModel.title"),
-    message: `${setupCopyText("en", "onboarding.providers.primaryModel").replace("{providerId}", input.providerId)}\n`,
+    title: setupCopyText(locale, "onboarding.providers.primaryModel.title"),
+    message: `${setupCopyText(locale, "onboarding.providers.primaryModel").replace("{providerId}", input.providerId)}\n`,
     choices: input.candidates.map((candidate) => ({
       id: candidate.id,
       label: candidate.id,
       description: [
-        candidate.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
-        candidate.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
-        candidate.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
+        candidate.profile.supportsTools ? setupCopyText(locale, "onboarding.catalog.model.features.tools") : undefined,
+        candidate.profile.supportsVision ? setupCopyText(locale, "onboarding.catalog.model.features.vision") : undefined,
+        candidate.profile.supportsReasoning ? setupCopyText(locale, "onboarding.catalog.model.features.reasoning") : undefined,
         renderableModelStatus(candidate.profile.status),
       ].filter((part): part is string => part !== undefined).join(", "),
       value: candidate,
@@ -228,22 +235,23 @@ function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["st
 }
 
 export async function promptConfigEditorReviewApproval(
-  prompt: Prompt
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
 ): Promise<boolean> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "onboarding.review"),
-    message: `${setupCopyText("en", "onboarding.review.validation.accepted")}\n`,
+    title: setupCopyText(locale, "onboarding.review"),
+    message: `${setupCopyText(locale, "onboarding.review.validation.accepted")}\n`,
     choices: [
       {
         id: "approve",
-        label: setupCopyText("en", "onboarding.review.approveAction"),
-        description: setupCopyText("en", "setupApply.review.approved"),
+        label: setupCopyText(locale, "onboarding.review.approveAction"),
+        description: setupCopyText(locale, "setupApply.review.approved"),
         value: true,
       },
       {
         id: "cancel",
-        label: setupCopyText("en", "onboarding.review.cancelAction"),
-        description: setupCopyText("en", "setupApply.review.cancelled"),
+        label: setupCopyText(locale, "onboarding.review.cancelAction"),
+        description: setupCopyText(locale, "setupApply.review.cancelled"),
         value: false,
       },
     ],
@@ -252,22 +260,23 @@ export async function promptConfigEditorReviewApproval(
 }
 
 export async function promptCredentialReuseChoice(
-  prompt: Prompt
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
 ): Promise<CredentialReuseChoice> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupEditor.prompt.credentialReuse.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.credentialReuse.body")}\n`,
+    title: setupCopyText(locale, "setupEditor.prompt.credentialReuse.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.credentialReuse.body")}\n`,
     choices: [
       {
         id: "existing",
-        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing"),
-        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.credentialReuse.existing"),
+        description: setupCopyText(locale, "setupEditor.prompt.credentialReuse.existing.description"),
         value: "existing" as const,
       },
       {
         id: "new",
-        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.new"),
-        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.new.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.credentialReuse.new"),
+        description: setupCopyText(locale, "setupEditor.prompt.credentialReuse.new.description"),
         value: "new" as const,
       },
     ],
@@ -277,15 +286,16 @@ export async function promptCredentialReuseChoice(
 
 export async function promptFallbackRouteAction(
   prompt: Prompt,
-  fallbacks: readonly ModelFallbackConfig[]
+  fallbacks: readonly ModelFallbackConfig[],
+  locale: SetupCopyLocale = "en"
 ): Promise<FallbackRouteChoice> {
   const editChoices: SetupChoice<FallbackRouteChoice>[] = fallbacks.map((fallback, index) => ({
     id: `fallback-${index}`,
-    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit")
+    label: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.edit")
       .replace("{index}", String(index + 1))
       .replace("{providerId}", fallback.provider)
       .replace("{modelId}", fallback.id),
-    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit.description"),
+    description: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.edit.description"),
     value: {
       id: `fallback-${index}` as const,
       fallbackOperation: "replace" as const,
@@ -295,8 +305,8 @@ export async function promptFallbackRouteAction(
   }));
   const addChoice: SetupChoice<FallbackRouteChoice> = {
     id: "fallback-add",
-    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add"),
-    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add.description"),
+    label: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.add"),
+    description: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.add.description"),
     value: {
       id: "fallback-add" as const,
       fallbackOperation: "add" as const,
@@ -304,48 +314,49 @@ export async function promptFallbackRouteAction(
   };
 
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupEditor.prompt.fallbackRoute.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.fallbackRoute.body")}\n`,
+    title: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.fallbackRoute.body")}\n`,
     choices: [...editChoices, addChoice],
     defaultValue: editChoices[0]?.value ?? addChoice.value,
   });
 }
 
 export async function promptAuxiliaryModelTask(
-  prompt: Prompt
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
 ): Promise<SetupEditorAuxiliaryTask> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.body")}\n`,
+    title: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.body")}\n`,
     choices: [
       {
         id: "assessor",
-        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor"),
-        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor.description"),
         value: "assessor" as const,
       },
       {
         id: "compression",
-        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression"),
-        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.compression"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.compression.description"),
         value: "compression" as const,
       },
       {
         id: "session_search",
-        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch"),
-        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.sessionSearch"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.sessionSearch.description"),
         value: "session_search" as const,
       },
       {
         id: "memory_compaction",
-        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction"),
-        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.memoryCompaction"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description"),
         value: "memory_compaction" as const,
       },
       {
         id: "profile_context",
-        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext"),
-        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.profileContext"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.profileContext.description"),
         value: "profile_context" as const,
       },
     ],
@@ -359,21 +370,22 @@ export async function promptConfigEditorPostApplyAction(
     readonly state: "ready" | "degraded" | "blocked";
     readonly launchEligible: boolean;
     readonly limitedModeEligible: boolean;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<ConfigEditorPostApplyActionId> {
   const launchChoices = input.launchEligible
     ? [{
         id: "launch",
-        label: setupCopyText("en", "setupEditor.prompt.postApply.launch"),
-        description: "Start the interactive session after verified-ready setup.",
+        label: setupCopyText(locale, "setupEditor.prompt.postApply.launch"),
+        description: setupCopyText(locale, "setupEditor.prompt.postApply.launch.description"),
         value: "launch" as const,
       }]
     : [];
   const limitedChoices = input.limitedModeEligible
     ? [{
         id: "accept-limited-mode",
-        label: setupCopyText("en", "setupEditor.prompt.postApply.acceptLimitedMode"),
-        description: "Launch with the verified warnings shown above.",
+        label: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode"),
+        description: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode.description"),
         value: "accept-limited-mode" as const,
       }]
     : [];
@@ -381,22 +393,22 @@ export async function promptConfigEditorPostApplyAction(
     ? []
     : [{
         id: "repair-again",
-        label: setupCopyText("en", "setupEditor.prompt.postApply.repairAgain"),
-        description: "Re-check setup and return to the guided repair editor.",
+        label: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain"),
+        description: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain.description"),
         value: "repair-again" as const,
       }];
 
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupEditor.prompt.postApply.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.postApply.body")}\n`,
+    title: setupCopyText(locale, "setupEditor.prompt.postApply.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.postApply.body")}\n`,
     choices: [
       ...launchChoices,
       ...limitedChoices,
       ...repairChoices,
       {
         id: "exit",
-        label: setupCopyText("en", "setupEditor.prompt.postApply.exit"),
-        description: "Leave setup without launching.",
+        label: setupCopyText(locale, "setupEditor.prompt.postApply.exit"),
+        description: setupCopyText(locale, "setupEditor.prompt.postApply.exit.description"),
         value: "exit" as const,
       },
     ],
@@ -410,14 +422,15 @@ export async function promptOptionalCapabilityAction(
     readonly id: OptionalCapabilityPromptId;
     readonly title: string;
     readonly configured: boolean;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<OptionalCapabilityPromptAction> {
   const skipChoice = input.configured
     ? []
     : [{
         id: `${input.id}-skip`,
-        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip"),
-        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
       }];
 
@@ -427,15 +440,15 @@ export async function promptOptionalCapabilityAction(
     choices: [
       {
         id: `${input.id}-unchanged`,
-        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
-        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
       },
       ...skipChoice,
       {
         id: `${input.id}-enable`,
-        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure"),
-        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
         value: "enable" as const,
       },
     ],
@@ -449,7 +462,8 @@ export async function promptTelegramCapability(
     readonly botTokenEnv?: string;
     readonly allowedUserIds?: readonly string[];
     readonly allowedChatIds?: readonly string[];
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly botTokenEnv: string;
   readonly botToken?: string;
@@ -459,9 +473,9 @@ export async function promptTelegramCapability(
   const botTokenEnv = await promptSetupStringWithDefault(
     prompt,
     [
-      setupCopyText("en", "setupEditor.prompt.telegram.summary"),
-      setupCopyText("en", "setupEditor.prompt.telegram.remoteControlRisk"),
-      `${setupCopyText("en", "setupEditor.prompt.telegram.botTokenEnv")} [ESTACODA_TELEGRAM_BOT_TOKEN]: `,
+      setupCopyText(locale, "setupEditor.prompt.telegram.summary"),
+      setupCopyText(locale, "setupEditor.prompt.telegram.remoteControlRisk"),
+      `${setupCopyText(locale, "setupEditor.prompt.telegram.botTokenEnv")} [ESTACODA_TELEGRAM_BOT_TOKEN]: `,
     ].join("\n"),
     current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
   );
@@ -469,16 +483,16 @@ export async function promptTelegramCapability(
     prompt,
     providerId: "telegram",
     envVarName: botTokenEnv,
-    question: `${setupCopyText("en", "setupEditor.prompt.telegram.botToken")}: `,
+    question: `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")}: `,
   });
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText("en", "setupEditor.prompt.telegram.allowedUserIds")}, comma-separated: `,
+    `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedUserIds")}, comma-separated: `,
     (current.allowedUserIds ?? []).join(",")
   ));
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText("en", "setupEditor.prompt.telegram.allowedChatIds")}, comma-separated: `,
+    `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedChatIds")}, comma-separated: `,
     (current.allowedChatIds ?? []).join(",")
   ));
 
@@ -491,32 +505,33 @@ export async function promptTelegramCapability(
 }
 
 export async function promptIncompleteTelegramCapabilityAction(
-  prompt: Prompt
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
 ): Promise<IncompleteTelegramCapabilityAction> {
   return promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.telegram.title"),
+    title: setupCopyText(locale, "setupModules.telegram.title"),
     message: [
-      setupCopyText("en", "setupEditor.prompt.telegram.remoteControlRisk"),
-      setupCopyText("en", "setupEditor.prompt.telegram.incomplete.body"),
+      setupCopyText(locale, "setupEditor.prompt.telegram.remoteControlRisk"),
+      setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.body"),
       "",
     ].join("\n"),
     choices: [
       {
         id: "telegram-incomplete-retry",
-        label: setupCopyText("en", "setupEditor.prompt.telegram.incomplete.retry"),
-        description: setupCopyText("en", "setupEditor.prompt.telegram.incomplete.retry.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
+        description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
         value: "retry" as const,
       },
       {
         id: "telegram-incomplete-skip",
-        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip"),
-        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
       },
       {
         id: "telegram-incomplete-unchanged",
-        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
-        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
       },
     ],
@@ -533,7 +548,8 @@ export async function promptVoiceCapability(
     readonly sttProvider?: SttProvider;
     readonly sttModel?: string;
     readonly sttApiKeyEnv?: string;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly ttsProvider: TtsProvider;
   readonly ttsModel: string;
@@ -543,8 +559,8 @@ export async function promptVoiceCapability(
   readonly sttApiKeyEnv: string;
 }> {
   const ttsProvider = await promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.voice.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.voice.summary")}\n${setupCopyText("en", "setupEditor.prompt.voice.ttsProvider")}\n`,
+    title: setupCopyText(locale, "setupModules.voice.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
       label: provider,
@@ -552,11 +568,11 @@ export async function promptVoiceCapability(
     })),
     defaultValue: current.ttsProvider ?? "openai",
   });
-  const ttsModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.ttsModel")}: `, current.ttsModel ?? "gpt-4o-mini-tts");
-  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.ttsApiKeyEnv")}: `, current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
+  const ttsModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")}: `, current.ttsModel ?? "gpt-4o-mini-tts");
+  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsApiKeyEnv")}: `, current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
   const sttProvider = await promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.voice.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.voice.sttProvider")}\n`,
+    title: setupCopyText(locale, "setupModules.voice.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
       label: provider,
@@ -569,7 +585,7 @@ export async function promptVoiceCapability(
   let sttApiKeyEnv: string;
 
   if (sttProvider === "local") {
-    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "base");
+    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "base");
     sttApiKeyEnv = "";
   } else {
     const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
@@ -580,8 +596,8 @@ export async function promptVoiceCapability(
       : sttProvider === "mistral" ? "MISTRAL_API_KEY"
       : sttProvider === "xai" ? "XAI_API_KEY"
       : "OPENAI_API_KEY";
-    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? defaultSttModel);
-    sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? defaultSttApiKeyEnv);
+    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? defaultSttModel);
+    sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? defaultSttApiKeyEnv);
   }
 
   return {
@@ -601,7 +617,8 @@ export async function promptVisionCapability(
     readonly model?: string;
     readonly apiKeyEnv?: string;
     readonly useGateway?: boolean;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly provider: ImageGenerationProvider;
   readonly model: string;
@@ -609,8 +626,8 @@ export async function promptVisionCapability(
   readonly useGateway: boolean;
 }> {
   const provider = await promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.vision.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.vision.summary")}\n${setupCopyText("en", "setupEditor.prompt.vision.provider")}\n`,
+    title: setupCopyText(locale, "setupModules.vision.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
     choices: imageProviders.map((candidate) => ({
       id: candidate,
       label: candidate,
@@ -618,11 +635,11 @@ export async function promptVisionCapability(
     })),
     defaultValue: current.provider ?? "fal",
   });
-  const model = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.vision.model")}: `, current.model ?? "fal-ai/imagen4/preview");
-  const apiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.vision.apiKeyEnv")}: `, current.apiKeyEnv ?? "FAL_KEY");
+  const model = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.vision.model")}: `, current.model ?? "fal-ai/imagen4/preview");
+  const apiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")}: `, current.apiKeyEnv ?? "FAL_KEY");
   const useGateway = await promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.vision.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.vision.useGateway")}?\n`,
+    title: setupCopyText(locale, "setupModules.vision.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.vision.useGateway")}?\n`,
     choices: [
       { id: "gateway-no", label: "No", value: false },
       { id: "gateway-yes", label: "Yes", value: true },
@@ -644,7 +661,8 @@ export async function promptBrowserCapability(
     readonly backend?: BrowserBackendKind;
     readonly cdpUrl?: string;
     readonly launchCommand?: string;
-  }
+  },
+  locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly backend: BrowserBackendKind;
   readonly cdpUrl: string;
@@ -652,8 +670,8 @@ export async function promptBrowserCapability(
   readonly autoLaunch: false;
 }> {
   const backend = await promptSetupChoice(prompt, {
-    title: setupCopyText("en", "setupModules.browser.title"),
-    message: `${setupCopyText("en", "setupEditor.prompt.browser.summary")}\n${setupCopyText("en", "setupEditor.prompt.browser.backend")}\n`,
+    title: setupCopyText(locale, "setupModules.browser.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.browser.summary")}\n${setupCopyText(locale, "setupEditor.prompt.browser.backend")}\n`,
     choices: browserBackends.map((candidate) => ({
       id: candidate,
       label: candidate,
@@ -661,8 +679,8 @@ export async function promptBrowserCapability(
     })),
     defaultValue: current.backend ?? "local-cdp",
   });
-  const cdpUrl = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.browser.cdpUrl")}: `, current.cdpUrl ?? "http://127.0.0.1:9222");
-  const launchCommand = await promptSetupStringWithDefault(prompt, `${setupCopyText("en", "setupEditor.prompt.browser.launchCommand")}: `, current.launchCommand ?? "");
+  const cdpUrl = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl")}: `, current.cdpUrl ?? "http://127.0.0.1:9222");
+  const launchCommand = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.browser.launchCommand")}: `, current.launchCommand ?? "");
 
   return {
     backend,

@@ -10,6 +10,7 @@ import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
 import { promptModelCandidate } from "./prompts.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
+import { isolateLtr } from "../../ui/bidi.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -61,7 +62,7 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.applyEndState).toBeUndefined();
     expect(applyCalled).toBe(false);
-    expect(output.join("")).toContain("EstaCoda guided setup editor");
+    expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
     expect(output.join("")).toContain("edit-auxiliary-model-route");
@@ -73,10 +74,63 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("configure-browser");
     expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Run read-only verification");
+    expect(output.join("")).toContain("verify-setup - Run setup verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("renders setup editor copy with the configured Arabic locale", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const prompts: Array<{ title: string; body: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompt = fakePrompt();
+    prompt.select = async (input) => {
+      prompts.push({
+        title: input.title,
+        body: input.body ?? "",
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+      });
+      const exit = input.options.find((option) =>
+        typeof option.value === "object" &&
+        option.value !== null &&
+        "id" in option.value &&
+        option.value.id === "exit"
+      );
+      return exit?.value ?? input.options[0]!.value;
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(output.join("")).toContain("محرّر الإعدادات");
+    expect(output.join("")).toContain("عدّل النموذج الأساسي");
+    expect(output.join("")).toContain("حدّد المزوّد والنموذج اللي يستخدمه الوكيل.");
+    expect(output.join("")).toContain("فعّل قنوات التحكم عن بُعد مثل");
+    expect(output.join("")).toContain(isolateLtr("Telegram"));
+    expect(prompts[0]?.title).toBe("محرّر الإعدادات");
+    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
+    expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
+    expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
   });
 
   it("renders only actionable model status tags in config-editor model choices", async () => {
@@ -118,7 +172,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("verify-setup");
     expect(result.finalDecision?.kind).toBe("verify-readonly");
     expect(result.finalDecision?.setupEditorPlanSession).toBeUndefined();
-    expect(result.output).toContain("Read-only setup verification route prepared");
+    expect(result.output).toContain("Setup verification prepared");
   });
 
   it("shows diagnostics for configured states without requiring a repair route action", async () => {
@@ -154,7 +208,7 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.selectedActionId).toBe("review-edit-config");
-    expect(result.output).toContain("not available in the guided setup editor");
+    expect(result.output).toContain("not available in the setup editor");
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.applyEndState).toBeUndefined();
@@ -449,8 +503,8 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
-    expect(output.join("").match(/EstaCoda guided setup editor/g)).toHaveLength(2);
-    expect(output.join("")).toContain("Repair again selected. Re-entering guided setup editor.");
+    expect(output.join("").match(/Setup Editor/g)).toHaveLength(2);
+    expect(output.join("")).toContain("Repair again selected. Re-entering setup editor.");
   });
 
   it("applies guided provider route repair through the shared flow and reviewed executor", async () => {
@@ -563,7 +617,7 @@ describe("runConfigEditor", () => {
     const fallbackChoiceTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback provider/model route") {
+      if (input.title === "Fallback models") {
         fallbackChoiceTitles.push(input.title);
       }
       return baseSelect(input);
@@ -628,7 +682,7 @@ describe("runConfigEditor", () => {
     const fallbackChoiceLabels: string[][] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback provider/model route") {
+      if (input.title === "Fallback models") {
         fallbackChoiceLabels.push(input.options.map((option) => option.label));
       }
       return baseSelect(input);
@@ -650,7 +704,7 @@ describe("runConfigEditor", () => {
     expect(fallbackChoiceLabels).toEqual([[
       "Edit fallback 1: openai/gpt-5.5",
       "Edit fallback 2: kimi/kimi-k2",
-      "Add another fallback route",
+      "Add another fallback model",
     ]]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
@@ -723,7 +777,7 @@ describe("runConfigEditor", () => {
     const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Choose auxiliary route.") {
+      if (input.title === "Choose auxiliary model.") {
         taskOptions.push({
           labels: input.options.map((option) => option.label),
           values: input.options.map((option) => option.value),
@@ -1445,13 +1499,16 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.kind).toBe("repair-first-menu");
     expect(result.initialDecision.state.kind).toBe("broken-config");
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
+    expect(output.join("")).toContain("Setup Editor");
+    expect(output.join("")).toContain("Available actions:");
+    expect(output.join("")).not.toContain("محرّر الإعدادات");
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: broken-config");
     expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Run read-only verification");
+    expect(output.join("")).toContain("verify-setup - Run setup verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");
