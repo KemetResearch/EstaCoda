@@ -307,7 +307,7 @@ describe("AgentLoop provider availability gating", () => {
   });
 
   it("renders a dedicated message when a successful provider response is empty", async () => {
-    const { loop } = await createAgentLoop({
+    const { loop, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
       executeSkillWorkflow: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("")
@@ -320,6 +320,10 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
+    expect(trajectoryRecorder.snapshot().outcome).toEqual({
+      success: false,
+      summary: "Provider turn succeeded but returned empty visible content."
+    });
   });
 
   it("renders a dedicated message when a successful provider response is whitespace-only", async () => {
