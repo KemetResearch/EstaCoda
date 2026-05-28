@@ -36,6 +36,42 @@ async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => 
   }
 }
 
+async function withHomeEnv<T>(
+  env: { HOME?: string; ESTACODA_HOME?: string },
+  run: () => Promise<T>
+): Promise<T> {
+  const previousHome = process.env.HOME;
+  const previousEstacodaHome = process.env.ESTACODA_HOME;
+
+  if (env.HOME === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = env.HOME;
+  }
+
+  if (env.ESTACODA_HOME === undefined) {
+    delete process.env.ESTACODA_HOME;
+  } else {
+    process.env.ESTACODA_HOME = env.ESTACODA_HOME;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+
+    if (previousEstacodaHome === undefined) {
+      delete process.env.ESTACODA_HOME;
+    } else {
+      process.env.ESTACODA_HOME = previousEstacodaHome;
+    }
+  }
+}
+
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
     const result = normalizeAuxiliaryModels({});
@@ -1219,6 +1255,38 @@ describe("loadRuntimeConfig profile loading", () => {
     expect(loaded.sources).toEqual([profileConfigPath(workspace)]);
     await rm(workspace, { recursive: true, force: true });
   });
+
+  it("expands configured tilde paths with OS home, not ESTACODA_HOME", async () => {
+    const prodHome = await mkdtemp(join(tmpdir(), "estacoda-config-prod-home-"));
+    const devHome = await mkdtemp(join(tmpdir(), "estacoda-config-dev-home-"));
+
+    try {
+      await withHomeEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, async () => {
+        await mkdir(dirname(profileConfigPath(devHome)), { recursive: true });
+        await writeFile(profileConfigPath(devHome), JSON.stringify({
+          model: { provider: "openai", id: "gpt-4o" },
+          mcpServers: {
+            local: {
+              command: "echo",
+              cwd: "~/mcp-server"
+            }
+          },
+          skills: {
+            externalDirs: ["~/skills"]
+          }
+        }));
+
+        const loaded = await loadRuntimeConfig({ workspaceRoot: devHome, homeDir: devHome });
+
+        expect(loaded.sources).toEqual([profileConfigPath(devHome)]);
+        expect(loaded.skills.externalDirs).toEqual([join(prodHome, "skills")]);
+        expect(loaded.mcp.servers.local?.cwd).toBe(join(prodHome, "mcp-server"));
+      });
+    } finally {
+      await rm(prodHome, { recursive: true, force: true });
+      await rm(devHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("buildProviderRegistry custom provider baseUrl behavior", () => {
@@ -1271,10 +1339,11 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "kimi", id: "kimi-k2.5" },
       providers: {
-        openai: {
+        kimi: {
           kind: "openai-compatible",
-          models: ["gpt-4o"]
+          models: ["kimi-k2.5"]
         }
       }
     }));
@@ -1284,8 +1353,9 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
       homeDir: workspace
     });
 
-    const adapter = loaded.providerRegistry.get("openai");
+    const adapter = loaded.providerRegistry.get("kimi");
     expect(adapter).toBeDefined();
+    expect(adapter?.endpoint?.baseUrl).toBe("https://api.moonshot.ai/v1");
     await rm(workspace, { recursive: true, force: true });
   });
 

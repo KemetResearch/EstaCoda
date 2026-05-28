@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { DEFAULT_ENVIRONMENT_TYPE, assessSecurityPolicy, type EnvironmentType, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -55,10 +55,11 @@ export class WorkspaceApprovalStore {
 
   constructor(options: {
     path?: string;
+    homeDir?: string;
     now?: () => Date;
     idFactory?: () => string;
   } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "workspace-approvals.json");
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "workspace-approvals.json");
     this.#now = options.now ?? (() => new Date());
     this.#idFactory = options.idFactory ?? (() => `approval-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
   }

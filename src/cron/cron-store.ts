@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { assertCronPromptSafe } from "./cron-safety.js";
 
 export type CronJobStatus = "active" | "paused" | "completed";
@@ -52,7 +53,7 @@ export class CronStore {
     now?: () => Date;
     id?: () => string;
   } = {}) {
-    const home = options.homeDir ?? process.env.HOME ?? process.cwd();
+    const home = resolveHomeDir(options.homeDir);
     this.path = options.path ?? join(home, ".estacoda", "cron", "jobs.json");
     this.outputRoot = options.outputRoot ?? join(home, ".estacoda", "cron", "output");
     this.#now = options.now ?? (() => new Date());

@@ -12,6 +12,7 @@ import type {
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SurfaceAdapter } from "../contracts/surface-adapter.js";
 import type { ViewModel } from "../contracts/view-model.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import {
   HookRegistry,
@@ -70,7 +71,7 @@ export class DeliveryRouter {
   #hookRegistry?: HookRegistry;
 
   constructor(options: DeliveryRouterOptions = {}) {
-    this.#homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
+    this.#homeDir = resolveHomeDir(options.homeDir);
     this.#deliveryRoot = options.deliveryRoot ?? join(this.#homeDir, ".estacoda", "delivery");
     this.#deliveryErrorLogPath = options.deliveryErrorLogPath ?? join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
     this.#maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;

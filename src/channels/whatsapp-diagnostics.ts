@@ -1,6 +1,6 @@
 import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveHomeDir } from "../config/home-dir.js";
 
 export type WhatsAppGatewayDiagnostics = {
   adapter: "whatsapp";
@@ -19,8 +19,9 @@ export async function getWhatsAppGatewayDiagnostics(
   options: { homeDir?: string; gatewayStatePath?: string } = {}
 ): Promise<WhatsAppGatewayDiagnostics> {
   const missing: string[] = [];
-  const homeDir = options.homeDir ?? join(homedir(), ".estacoda");
-  const authDir = join(options.gatewayStatePath ?? homeDir, "whatsapp-auth");
+  const homeDir = resolveHomeDir(options.homeDir);
+  const stateRoot = join(homeDir, ".estacoda");
+  const authDir = join(options.gatewayStatePath ?? stateRoot, "whatsapp-auth");
 
   let baileysAvailable = false;
   try {

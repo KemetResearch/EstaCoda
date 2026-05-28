@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCommand, runConstraintGates, ALLOWED_GATES } from "./constraint-gate-runner.js";
+import { join } from "node:path";
+import {
+  normalizeCommand,
+  runConstraintGates,
+  ALLOWED_GATES,
+  __resolveInheritedCorepackHomeForTest
+} from "./constraint-gate-runner.js";
 
 const TEST_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   "node --version": ["node", "--version"],
@@ -16,6 +22,13 @@ describe("normalizeCommand", () => {
 });
 
 describe("runConstraintGates", () => {
+  it("uses OS home, not ESTACODA_HOME, for inherited Corepack cache", () => {
+    expect(__resolveInheritedCorepackHomeForTest({
+      HOME: "/tmp/prod-home",
+      ESTACODA_HOME: "/tmp/dev-home"
+    } as NodeJS.ProcessEnv)).toBe(join("/tmp/prod-home", ".cache", "node", "corepack"));
+  });
+
   it("passes for allowed gate with zero exit code", async () => {
     const results = await runConstraintGates(
       ["node --version"],

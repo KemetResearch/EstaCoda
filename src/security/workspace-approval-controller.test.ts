@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
@@ -69,6 +69,33 @@ function smartApproval(decision: "APPROVE" | "DENY" | "ESCALATE"): SmartApproval
 }
 
 describe("WorkspaceApprovalController smart approvals", () => {
+  it("uses ESTACODA_HOME before HOME for the default persistent approval store path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "estacoda-approval-store-"));
+    const prodHome = join(directory, "prod-home");
+    const devHome = join(directory, "dev-home");
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const store = new WorkspaceApprovalStore();
+
+      expect(store.path).toBe(join(devHome, ".estacoda", "workspace-approvals.json"));
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("allows adaptive flagged commands when smart approval returns APPROVE", async () => {
     const approvals = await controller();
     const smart = smartApproval("APPROVE");

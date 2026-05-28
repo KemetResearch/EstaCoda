@@ -4,6 +4,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import { resolveOsHomeDir } from "../config/home-dir.js";
 import type { IntentRouter } from "./intent-router.js";
 
 export type SkillSetupContext = {
@@ -278,7 +279,7 @@ function credentialFileExists(path: string): boolean {
 
 function expandUserEnvPath(path: string): string {
   const withHome = path.startsWith("~/")
-    ? `${process.env.HOME ?? ""}/${path.slice(2)}`
+    ? `${resolveOsHomeDir()}/${path.slice(2)}`
     : path;
 
   return withHome.replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");

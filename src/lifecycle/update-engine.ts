@@ -9,6 +9,7 @@ import {
   type VersionResolverResult,
   type GitCommandResult
 } from "./version-resolver.js";
+import { resolveOsHomeDir } from "../config/home-dir.js";
 import { backupState, getProtectedPaths } from "./state-preservation.js";
 import type { InstallMethodInfo } from "./install-method.js";
 
@@ -143,13 +144,19 @@ export function prepareUpdateInfo(info: VersionInfo): string {
     `Release notes: ${info.releaseNotesUrl}`,
     "",
     "Protected state paths:",
-    ...getProtectedPaths(process.env.HOME ?? "").map((p) => `  ${p.label}`),
+    ...resolveProtectedUpdatePaths().map((p) => `  ${p.label}`),
     "",
     "Run with --apply to attempt installation."
   ].filter((line): line is string => line !== undefined);
 
   return lines.join("\n");
 }
+
+function resolveProtectedUpdatePaths() {
+  return getProtectedPaths(resolveOsHomeDir());
+}
+
+export const __resolveProtectedUpdatePathsForTest = resolveProtectedUpdatePaths;
 
 export function canApplyUpdate(): ArtifactTestResult {
   const artifactPath = process.env.ESTACODA_UPDATE_ARTIFACT;

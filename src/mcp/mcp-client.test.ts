@@ -1,5 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { MCPClient } from "./mcp-client.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { MCPClient, __resolveNpxCachedBinaryForTest } from "./mcp-client.js";
+
+async function withHomeEnv<T>(
+  env: { HOME?: string; ESTACODA_HOME?: string },
+  run: () => Promise<T>
+): Promise<T> {
+  const previousHome = process.env.HOME;
+  const previousEstacodaHome = process.env.ESTACODA_HOME;
+
+  if (env.HOME === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = env.HOME;
+  }
+
+  if (env.ESTACODA_HOME === undefined) {
+    delete process.env.ESTACODA_HOME;
+  } else {
+    process.env.ESTACODA_HOME = env.ESTACODA_HOME;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+
+    if (previousEstacodaHome === undefined) {
+      delete process.env.ESTACODA_HOME;
+    } else {
+      process.env.ESTACODA_HOME = previousEstacodaHome;
+    }
+  }
+}
 
 describe("MCPClient stdio lifecycle", () => {
   it("rejects startup when a stdio child exits before initialize can complete", async () => {
@@ -44,5 +83,33 @@ describe("MCPClient stdio lifecycle", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     await expect(client.listTools()).rejects.toThrow(/MCP server closes-after-initialize (?:stdin write failed|connection is closed|exited|closed)/u);
     await expect(client.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe("npx cache lookup", () => {
+  it("uses OS home, not ESTACODA_HOME, for user cache lookup", async () => {
+    const prodHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-prod-home-"));
+    const devHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-dev-home-"));
+
+    try {
+      await withHomeEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, async () => {
+        const cacheRoot = join(prodHome, ".npm", "_npx", "fixture-cache");
+        const packageRoot = join(cacheRoot, "node_modules", "fixture-pkg");
+        const binaryPath = join(cacheRoot, "node_modules", ".bin", "fixture");
+
+        await mkdir(packageRoot, { recursive: true });
+        await mkdir(join(cacheRoot, "node_modules", ".bin"), { recursive: true });
+        await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+          name: "fixture-pkg",
+          bin: { fixture: "bin/fixture.js" }
+        }));
+        await writeFile(binaryPath, "");
+
+        await expect(__resolveNpxCachedBinaryForTest("fixture-pkg")).resolves.toBe(binaryPath);
+      });
+    } finally {
+      await rm(prodHome, { recursive: true, force: true });
+      await rm(devHome, { recursive: true, force: true });
+    }
   });
 });

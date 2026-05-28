@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
+import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
 import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const argv = parsedGlobalOptions.argv;
+  const homeDir = resolveHomeDir();
 
   // Handle --version / -v immediately, before any async init
   if (argv.includes("--version") || argv.includes("-v")) {
@@ -45,6 +47,7 @@ async function main(): Promise<void> {
     const helpCommand = await runCliCommand({
       argv,
       workspaceRoot,
+      homeDir,
       profileId: parsedGlobalOptions.profileId
     });
 
@@ -56,12 +59,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const cliSessionStore = new PersistentCliSessionStore();
+  const stateHome = resolveStateHome({ homeDir });
+  const cliSessionStore = new PersistentCliSessionStore({ homeDir: stateHome.homeDir });
   const cliApprovalController = new WorkspaceApprovalController();
   let launchLocale: UiLocale | undefined;
 
-  const stateHome = resolveStateHome();
-  const profileId = parsedGlobalOptions.profileId ?? readActiveProfile()?.profileId ?? defaultProfileId();
+  const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
 
@@ -69,6 +72,7 @@ async function main(): Promise<void> {
     const setupCommand = await runCliCommand({
       argv,
       workspaceRoot,
+      homeDir,
       profileId
     });
 
@@ -84,6 +88,7 @@ async function main(): Promise<void> {
     const helpCommand = await runCliCommand({
       argv,
       workspaceRoot,
+      homeDir,
       profileId
     });
 
@@ -99,6 +104,7 @@ async function main(): Promise<void> {
     const command = await runCliCommand({
       argv,
       workspaceRoot,
+      homeDir,
       profileId,
       output: {
         write: (chunk) => process.stdout.write(chunk)
@@ -115,7 +121,7 @@ async function main(): Promise<void> {
 
   // Bare launch: use interactive launcher for onboarding/session routing
   if (argv.length === 0 && canRunInteractive()) {
-    const launchResult = await launchInteractiveSession({ workspaceRoot, profileId });
+    const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
 
     if (!launchResult.launched) {
       if (launchResult.output.length > 0) {
@@ -136,12 +142,13 @@ async function main(): Promise<void> {
 
   let config: LoadedRuntimeConfig;
   try {
-    config = await loadRuntimeConfig({ workspaceRoot, profileId });
+    config = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId });
   } catch (error) {
     if (argv[0] === "doctor" || argv[0] === "verify") {
       const diagnosticCommand = await runCliCommand({
         argv,
         workspaceRoot,
+        homeDir,
         profileId
       });
 
@@ -161,7 +168,7 @@ async function main(): Promise<void> {
     sessionDb?: SessionDB;
   } = {}) {
     const nowTrusted = await trustStore.isTrusted(workspaceRoot);
-    const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
+    const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId });
     const sessionDb = input.sessionDb;
     const storedOverride = input.sessionId !== undefined && sessionDb !== undefined
       ? await sessionDb.getSessionModelOverride(input.sessionId).catch(() => undefined)
@@ -178,6 +185,7 @@ async function main(): Promise<void> {
       model: effectiveModel,
       primaryModelRoute: effectiveRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
+      homeDir,
       profileId,
       workspaceRoot,
       sessionId: input.sessionId,
@@ -217,7 +225,7 @@ async function main(): Promise<void> {
   }
 
   async function modelSwitchContext(): Promise<ModelSwitchContext> {
-    const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
+    const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId });
     return {
       config: latestConfig.config,
       providerRegistry: latestConfig.providerRegistry
@@ -232,6 +240,7 @@ async function main(): Promise<void> {
     const acpCommand = await runCliCommand({
       argv,
       workspaceRoot,
+      homeDir,
       profileId
     });
 
@@ -260,6 +269,7 @@ async function main(): Promise<void> {
   const command = await runCliCommand({
     argv,
     workspaceRoot,
+    homeDir,
     profileId,
     tools: runtime.tools(),
     runtime

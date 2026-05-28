@@ -1,7 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FileSurfacePointerStore, InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 
 describe("SurfacePointerStore", () => {
+  it("uses ESTACODA_HOME before HOME for the default file store path", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-surface-pointer-store-"));
+    const prodHome = join(tempDir, "prod-home");
+    const devHome = join(tempDir, "dev-home");
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const store = new FileSurfacePointerStore();
+
+      expect(store.path).toBe(join(devHome, ".estacoda", "surface-pointers.json"));
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   describe("getPointer / setPointer", () => {
     it("returns undefined when no pointer is set", async () => {
       const store = new InMemorySurfacePointerStore();

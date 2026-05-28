@@ -33,6 +33,7 @@ import type {
   ModelCatalogEntryReport,
   ModelRefreshReport
 } from "../reports/model-reports.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -493,7 +494,7 @@ async function refreshImpl(
   options: CreateModelSelectionCatalogOptions
 ): Promise<ModelRefreshReport> {
   const cachePath = options.modelsDevOptions?.cachePath
-    ?? join(options.homeDir ?? process.env.HOME ?? process.cwd(), ".estacoda", "models_dev_cache.json");
+    ?? join(resolveHomeDir(options.homeDir), ".estacoda", "models_dev_cache.json");
 
   let previousRaw: string | undefined;
   try {

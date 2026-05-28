@@ -1,4 +1,5 @@
 import type { ImageGenerationProvider, LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
 import type { ImageGenerationFetchLike } from "./image-generation-tools.js";
@@ -30,7 +31,7 @@ export async function verifyImageGeneration(options: {
     ? options.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus")
     : options.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
   const apiKeyPresent = (process.env[apiKeyEnv] ?? "").length > 0;
-  const homeDir = options.homeDir ?? process.env.HOME ?? options.workspaceRoot;
+  const homeDir = resolveHomeDir(options.homeDir);
   const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
   const cachePath = options.imageCachePath ?? resolveProfileStateHome({ homeDir, profileId }).imageCachePath;
   const telegramDelivery = options.telegramReady === true ? "ready" : "not-configured";

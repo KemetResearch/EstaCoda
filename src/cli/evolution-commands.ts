@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { cp, rm, stat, writeFile } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "./cli.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -16,7 +16,7 @@ import { populateTraces } from "../evolution/export-format.js";
 import type { OptimizationDataset } from "../evolution/export-format.js";
 
 function resolveHome(options: CliOptions): string {
-  return options.homeDir ?? process.env.HOME ?? homedir();
+  return resolveHomeDir(options.homeDir);
 }
 
 async function openStores(options: CliOptions, storeOptions: { includeSessionDb?: boolean } = {}) {

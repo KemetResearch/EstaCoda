@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { resolveHomeDir } from "../config/home-dir.js";
 import type { SurfacePointerRecord, SurfaceType } from "./surface-pointer.js";
 import { surfacePointerKey } from "./surface-pointer.js";
 
@@ -21,8 +21,8 @@ export class FileSurfacePointerStore implements SurfacePointerStore {
   readonly #pointers = new Map<string, SurfacePointerRecord>();
   #loaded = false;
 
-  constructor(options: { path?: string } = {}) {
-    this.#path = options.path ?? join(homedir(), ".estacoda", "surface-pointers.json");
+  constructor(options: { path?: string; homeDir?: string } = {}) {
+    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "surface-pointers.json");
   }
 
   get path(): string {

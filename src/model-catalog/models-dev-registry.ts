@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveHomeDir } from "../config/home-dir.js";
 import type { ModelProfile, ProviderId } from "../contracts/provider.js";
 
 export type ModelModality = "text" | "image" | "pdf" | "audio" | "video";
@@ -608,7 +609,7 @@ function setMemoryCache(snapshot: ModelsDevSnapshot, now: Date): void {
 }
 
 function getCachePath(options: ModelsDevRegistryOptions): string {
-  return options.cachePath ?? join(options.homeDir ?? process.env.HOME ?? process.cwd(), ".estacoda", "models_dev_cache.json");
+  return options.cachePath ?? join(resolveHomeDir(options.homeDir), ".estacoda", "models_dev_cache.json");
 }
 
 function defaultBundledSnapshotPath(): string {

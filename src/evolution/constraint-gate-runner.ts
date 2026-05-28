@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { resolveOsHomeDir } from "../config/home-dir.js";
 
 export type GateResult = {
   gate: string;
@@ -20,8 +21,7 @@ export const ALLOWED_GATES: Readonly<Record<string, readonly string[]>> = {
 };
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const INHERITED_COREPACK_HOME = process.env.COREPACK_HOME ??
-  (process.env.HOME === undefined ? undefined : join(process.env.HOME, ".cache", "node", "corepack"));
+const INHERITED_COREPACK_HOME = resolveInheritedCorepackHome();
 
 export function normalizeCommand(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
@@ -125,3 +125,9 @@ function runSingleGate(
     });
   });
 }
+
+function resolveInheritedCorepackHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.COREPACK_HOME ?? join(resolveOsHomeDir(env), ".cache", "node", "corepack");
+}
+
+export const __resolveInheritedCorepackHomeForTest = resolveInheritedCorepackHome;

@@ -1227,22 +1227,23 @@ export class StandardRenderer {
     const vert = this.#useUnicode ? "│" : "|";
     const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
     const rawTitle = this.#assistantResponseTitle(vm.label, Math.max(1, requestedWidth - 4));
-    const titleWidth = measureVisibleWidth(rawTitle);
+    const titleWidth = measureVisibleWidth(` ${rawTitle} `);
     const maxRawContent = Math.max(0, ...vm.text.split("\n").map((line) => measureVisibleWidth(line)));
     const width = Math.min(
       requestedWidth,
       Math.max(40, titleWidth + 4, maxRawContent + 4)
     );
     const contentWidth = Math.max(8, width - 4);
-    const boundedTitle = truncateVisible(rawTitle, Math.max(1, width - 2));
-    const boundedTitleWidth = measureVisibleWidth(boundedTitle);
+    const boundedTitle = truncateVisible(rawTitle, Math.max(1, width - 4));
+    const framedTitle = ` ${boundedTitle} `;
+    const boundedTitleWidth = measureVisibleWidth(framedTitle);
     const titleAvail = Math.max(0, width - 2 - boundedTitleWidth);
     const titleLeft = Math.floor(titleAvail / 2);
     const titleRight = titleAvail - titleLeft;
 
     const top = [
       this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
-      this.#brand(this.#bold(boundedTitle)),
+      this.#brand(this.#bold(framedTitle)),
       this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
     ].join("");
     const bottom = this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
@@ -1316,7 +1317,7 @@ export class StandardRenderer {
   renderSessionStatusRail(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
     const modelLabel = this.#locale === "ar" ? isolateLtr(vm.modelLabel) : vm.modelLabel;
-    const parts: string[] = [`${this.#brand(eye)}  ${this.#brand(modelLabel)}`];
+    const parts: string[] = [`${this.#brand(eye)}  ${this.#brand(this.#bold(modelLabel))}`];
 
     if (vm.contextUsage !== undefined) {
       const filled = formatContextCount(vm.contextUsage.filled);
@@ -1523,8 +1524,15 @@ function formatDuration(ms: number): string {
 }
 
 function formatRailDuration(ms: number): string {
-  if (ms >= 60000) {
-    const totalSeconds = Math.floor(ms / 1000);
+  if (ms >= 3_600_000) {
+    const totalMinutes = Math.floor(ms / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+  }
+
+  if (ms >= 60_000) {
+    const totalSeconds = Math.floor(ms / 1_000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;

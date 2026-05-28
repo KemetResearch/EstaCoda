@@ -493,9 +493,10 @@ describe("runConfigEditor", () => {
     }));
     expect(config.model).toEqual({ provider: "openai", id: "gpt-5.5", contextWindowTokens: 128000 });
     expect(config.providers?.openai).toEqual(expect.objectContaining({
-      baseUrl: "https://api.openai.com/v1",
       apiKeyEnv: "PR8_OPENAI_KEY",
     }));
+    expect(config.providers?.openai?.baseUrl).toBeUndefined();
+    expect(config.providers?.openai).not.toHaveProperty("baseUrl");
     expect(config.providers?.openai?.models).toContain("gpt-5.5");
     expect(config.model?.apiMode).toBeUndefined();
     expect(config.model?.authMethod).toBeUndefined();

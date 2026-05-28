@@ -156,6 +156,36 @@ describe("createSQLiteSessionDB", () => {
     db.close();
   });
 
+  it("uses ESTACODA_HOME before HOME for the default sessions.sqlite path", async () => {
+    const prodHome = join(tempHome, "prod-home");
+    const devHome = join(tempHome, "dev-home");
+    mkdirSync(prodHome, { recursive: true });
+    mkdirSync(devHome, { recursive: true });
+
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const db = await createSQLiteSessionDB();
+      db.close();
+
+      expect(existsSync(join(devHome, ".estacoda", "sessions.sqlite"))).toBe(true);
+      expect(existsSync(join(prodHome, ".estacoda", "sessions.sqlite"))).toBe(false);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+    }
+  });
+
   it("supports parallel fresh-home session database startup across processes", async () => {
     const sessionPath = join(tempHome, ".estacoda", "sessions.sqlite");
     const startSignalPath = join(tempHome, "start-session-db-startup");

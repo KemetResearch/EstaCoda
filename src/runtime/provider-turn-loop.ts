@@ -16,7 +16,7 @@ import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt
 } from "../prompt/prompt-assembly.js";
-import { packSessionHistory } from "../prompt/history-packer.js";
+import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
@@ -574,7 +574,9 @@ export class ProviderTurnLoop {
   }> {
     const sourceMessages = await this.#sessionDb.listMessages(this.#currentSessionId());
     const messages = sourceMessages;
-    const packed = packSessionHistory(messages);
+    const packed = packSessionHistory(messages, {
+      maxEstimatedTokens: deriveSessionHistoryBudget(this.#model?.contextWindowTokens)
+    });
 
     if (packed.sourceMessageCount > 0) {
       await this.#sessionDb.appendEvent(this.#currentSessionId(), {

@@ -1,6 +1,7 @@
 import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProfileStatePaths } from "../config/profile-home.js";
@@ -408,7 +409,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
 export async function runGatewaySupervisor(options: GatewaySupervisorOptions): Promise<GatewayRunResult> {
   const startedAt = new Date().toISOString();
-  const homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
+  const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const globalStateRoot = join(homeDir, ".estacoda");

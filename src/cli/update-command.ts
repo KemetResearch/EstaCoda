@@ -26,6 +26,7 @@ import {
   type ServiceManagerState,
   type ServiceScope
 } from "../gateway/service-manager.js";
+import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
 
 export type UpdateOptions = {
   check?: boolean;
@@ -64,7 +65,7 @@ export type GatewayRestartHandoffResult = {
 };
 
 export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateResult> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const homeDir = resolveHomeDir(options.homeDir);
 
   if (homeDir.length === 0) {
     return {
@@ -220,7 +221,7 @@ async function restartManagedGatewayService(
   }
 
   const restart = await restartService({
-    homeDir: options.homeDir,
+    serviceUserHomeDir: resolveOsHomeDir(),
     profileId: options.profileId,
     system: detected.scope === "system"
   });
@@ -244,7 +245,7 @@ async function restartManagedGatewayService(
 
 async function detectManagedGatewayService(options: GatewayRestartHandoffOptions): Promise<(ServiceManagerState & { scope: ServiceScope }) | undefined> {
   const userState = await probeServiceState({
-    homeDir: options.homeDir,
+    serviceUserHomeDir: resolveOsHomeDir(),
     profileId: options.profileId,
     system: false
   });
@@ -254,7 +255,7 @@ async function detectManagedGatewayService(options: GatewayRestartHandoffOptions
 
   if (detectServiceManager().startsWith("systemd")) {
     const systemState = await probeServiceState({
-      homeDir: options.homeDir,
+      serviceUserHomeDir: resolveOsHomeDir(),
       profileId: options.profileId,
       system: true
     });

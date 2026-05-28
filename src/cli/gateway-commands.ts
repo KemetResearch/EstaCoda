@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat, readdir } from "node:fs/promises";
+import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
@@ -134,7 +135,7 @@ async function resolveGatewayProfile(
   options: GatewayCommandOptions,
   behavior: { preferRunning?: boolean } = {}
 ): Promise<SelectedGatewayProfile> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId
     ?? (behavior.preferRunning ? await discoverRunningGatewayProfile(homeDir) : undefined)
     ?? readActiveProfile({ homeDir }).profileId
@@ -204,8 +205,9 @@ export async function runGatewayStatus(
   const state = await readGatewayState(selected.paths);
   const pidContent = await readGatewayPid(selected.paths);
   const serviceManagerStates: ServiceManagerState[] = [];
+  const serviceUserHomeDir = resolveOsHomeDir();
   const userServiceState = await probeServiceState({
-    homeDir: selected.homeDir,
+    serviceUserHomeDir,
     profileId: selected.profileId,
     system: false,
   });
@@ -213,7 +215,7 @@ export async function runGatewayStatus(
 
   if (detectServiceManager().startsWith("systemd")) {
     serviceManagerStates.push(await probeServiceState({
-      homeDir: selected.homeDir,
+      serviceUserHomeDir,
       profileId: selected.profileId,
       system: true,
     }));
@@ -274,12 +276,13 @@ export async function runGatewayStatus(
 export async function runGatewayInstallService(
   options: GatewayCommandOptions & { system?: boolean; runAsUser?: string; force?: boolean; serviceHomeDir?: string }
 ): Promise<{ ok: boolean; output: string }> {
-  const stateHomeDir = options.homeDir ?? process.env.HOME ?? "";
-  const homeDir = options.serviceHomeDir ?? stateHomeDir;
+  const stateHomeDir = resolveHomeDir(options.homeDir);
+  const serviceUserHomeDir = options.serviceHomeDir ?? resolveOsHomeDir();
   const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await installService({
-    homeDir,
-    serviceHomeDir: options.serviceHomeDir,
+    stateHomeDir,
+    serviceUserHomeDir,
+    serviceUserHomeDirExplicit: options.serviceHomeDir !== undefined,
     workspaceRoot: options.workspaceRoot,
     profileId,
     system: options.system,
@@ -290,9 +293,10 @@ export async function runGatewayInstallService(
   if (!result.ok) return { ok: false, output: result.error };
 
   const scope = options.system ? "system" : "user";
+  const profileEnvPath = join(resolveProfileStateHome({ homeDir: stateHomeDir, profileId }).profileRoot, ".env");
   const warnings = [
     "Service inherits HOME but not interactive shell environment.",
-    `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ~/.estacoda/profiles/${profileId}/.env, not only shell exports.`,
+    `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ${profileEnvPath}, not only shell exports.`,
   ];
 
   if (!options.system && detectServiceManager().startsWith("systemd")) {
@@ -316,10 +320,11 @@ export async function runGatewayInstallService(
 export async function runGatewayUninstallService(
   options: GatewayCommandOptions & { system?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
-  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const stateHomeDir = resolveHomeDir(options.homeDir);
+  const serviceUserHomeDir = resolveOsHomeDir();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
   const result = await uninstallService({
-    homeDir,
+    serviceUserHomeDir,
     profileId,
     system: options.system,
   });
@@ -565,7 +570,8 @@ export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
-  const preflight = await preflightBackgroundStart(selected);
+  const serviceUserHomeDir = resolveOsHomeDir();
+  const preflight = await preflightBackgroundStart(selected, serviceUserHomeDir);
   if (!preflight.ok) {
     return { ok: false, output: preflight.output };
   }
@@ -590,7 +596,8 @@ export async function runGatewayStartBackground(
       detached: true,
       env: {
         ...process.env,
-        HOME: selected.homeDir,
+        HOME: serviceUserHomeDir,
+        ESTACODA_HOME: selected.homeDir,
       },
       stdio: ["ignore", logFd, logFd],
     });
@@ -616,15 +623,18 @@ export async function runGatewayStartBackground(
   }
 }
 
-async function preflightBackgroundStart(selected: SelectedGatewayProfile): Promise<{ ok: true } | { ok: false; output: string }> {
+async function preflightBackgroundStart(
+  selected: SelectedGatewayProfile,
+  serviceUserHomeDir: string
+): Promise<{ ok: true } | { ok: false; output: string }> {
   const userState = await probeServiceState({
-    homeDir: selected.homeDir,
+    serviceUserHomeDir,
     profileId: selected.profileId,
     system: false,
   });
   const systemState = detectServiceManager().startsWith("systemd")
     ? await probeServiceState({
-        homeDir: selected.homeDir,
+        serviceUserHomeDir,
         profileId: selected.profileId,
         system: true,
       })
@@ -682,7 +692,7 @@ export async function runGatewayStop(
   }
   if (serviceSelection.kind === "service") {
     const result = await stopService({
-      homeDir: selected.homeDir,
+      serviceUserHomeDir: resolveOsHomeDir(),
       profileId: selected.profileId,
       system: serviceSelection.scope === "system",
     });
@@ -736,7 +746,7 @@ export async function runGatewayRestart(
   }
   if (serviceSelection.kind === "service") {
     const result = await restartService({
-      homeDir: selected.homeDir,
+      serviceUserHomeDir: resolveOsHomeDir(),
       profileId: selected.profileId,
       system: serviceSelection.scope === "system",
     });
@@ -780,9 +790,10 @@ async function selectLifecycleService(
   selected: SelectedGatewayProfile,
   systemRequested: boolean | undefined
 ): Promise<LifecycleServiceSelection> {
+  const serviceUserHomeDir = resolveOsHomeDir();
   if (systemRequested === true) {
     const systemState = await probeServiceState({
-      homeDir: selected.homeDir,
+      serviceUserHomeDir,
       profileId: selected.profileId,
       system: true,
     });
@@ -795,7 +806,7 @@ async function selectLifecycleService(
   }
 
   const userState = await probeServiceState({
-    homeDir: selected.homeDir,
+    serviceUserHomeDir,
     profileId: selected.profileId,
     system: false,
   });
@@ -803,7 +814,7 @@ async function selectLifecycleService(
 
   if (detectServiceManager().startsWith("systemd")) {
     const systemState = await probeServiceState({
-      homeDir: selected.homeDir,
+      serviceUserHomeDir,
       profileId: selected.profileId,
       system: true,
     });

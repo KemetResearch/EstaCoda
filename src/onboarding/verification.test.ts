@@ -141,6 +141,37 @@ describe("collectSetupVerificationReport", () => {
     expect(report.stateWritable).toBe(true);
   });
 
+  it("uses ESTACODA_HOME before HOME for verification state paths", async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
+    const prodHome = join(tempHome, "prod-home");
+    const devHome = join(tempHome, "dev-home");
+    const workspaceRoot = join(tempHome, "workspace");
+    await mkdir(prodHome, { recursive: true });
+    await mkdir(workspaceRoot, { recursive: true });
+    const previousHome = process.env.HOME;
+    const previousEstacodaHome = process.env.ESTACODA_HOME;
+    process.env.HOME = prodHome;
+    process.env.ESTACODA_HOME = devHome;
+    try {
+      const report = await collectSetupVerificationReport({ workspaceRoot });
+
+      expect(report.stateWritable).toBe(true);
+      await expect(writeFile(join(devHome, ".estacoda", ".verification-proof"), "ok\n", "utf8")).resolves.toBeUndefined();
+      expect(report.configSources.some((source) => source.includes(join(prodHome, ".estacoda")))).toBe(false);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = previousEstacodaHome;
+      }
+    }
+  });
+
   it("returns workspaceTrusted false when trust store is empty", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
     const workspaceRoot = join(tempHome, "workspace");
