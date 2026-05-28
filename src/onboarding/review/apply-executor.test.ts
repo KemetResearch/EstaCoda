@@ -178,6 +178,49 @@ function auxiliaryPlan(values: ReviewValues): SetupApplyPlan {
   };
 }
 
+function uiPreferencesPlan(values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-ui-preferences-bundle"],
+    operations: [{
+      id: "test-ui-preferences",
+      kind: "config-patch",
+      sourceLineIds: ["test-ui-preferences-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["ui.language", "ui.flavor", "ui.activityLabels"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.uiPreferences.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -220,6 +263,39 @@ describe("reviewed setup apply executor", () => {
     expect(config.security?.approvalMode).toBe("strict");
     expect(config.skills?.autonomy).toBe("none");
     expect(trust.grants?.[0]?.root).toBe(await realpath(workspaceRoot));
+  });
+
+  it("applies reviewed UI preferences through setupUiConfig while preserving unrelated config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      security: { approvalMode: "strict" },
+      ui: { language: "en", flavor: "standard", activityLabels: "en" },
+    }, null, 2), "utf8");
+    const plan = uiPreferencesPlan({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string };
+      security?: { approvalMode?: string };
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.ui).toEqual({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.security).toEqual({ approvalMode: "strict" });
   });
 
   it("applies hosted credential references as provider route refs without raw secret values", async () => {

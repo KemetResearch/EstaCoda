@@ -183,6 +183,9 @@ async function applyConfigPatch(
     case "setupModules.workflow-learning.draft":
       await applyWorkflowLearning(operation, options);
       return;
+    case "setupDrafts.uiPreferences.summary":
+      await applyUiPreferences(operation, options);
+      return;
     case "setupDrafts.optionalCapabilities.summary":
       await applyFirstRunOptionalCapabilities(operation, options);
       return;
@@ -386,6 +389,27 @@ async function applyWorkflowLearning(
   });
 }
 
+async function applyUiPreferences(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const language = uiLanguageValue(operation.review.values.language);
+  const flavor = uiFlavorValue(operation.review.values.flavor);
+  const activityLabels = activityLabelsValue(operation.review.values.activityLabels);
+  if (language === undefined || flavor === undefined || activityLabels === undefined) {
+    throw new Error("UI preferences apply requires language, flavor, and activity label review values.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupUiConfig({
+    ...target,
+    input: {
+      language,
+      flavor,
+      activityLabels,
+    },
+  });
+}
+
 async function applyFirstRunOptionalCapabilities(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
@@ -585,6 +609,18 @@ function skillAutonomyValue(value: unknown): SkillAutonomy | undefined {
     : undefined;
 }
 
+function uiLanguageValue(value: unknown): UiLanguage | undefined {
+  return value === "en" || value === "ar" ? value : undefined;
+}
+
+function uiFlavorValue(value: unknown): UiFlavor | undefined {
+  return value === "standard" || value === "arabic-light" || value === "kemet-full" ? value : undefined;
+}
+
+function activityLabelsValue(value: unknown): ActivityLabelsLocale | undefined {
+  return value === "en" || value === "ar" ? value : undefined;
+}
+
 function ttsProviderValue(value: unknown): TtsProvider | undefined {
   return stringValue(value) as TtsProvider | undefined;
 }
@@ -609,9 +645,22 @@ export async function applyReviewedUiPreferences(
     readonly activityLabels?: ActivityLabelsLocale;
   }
 ): Promise<void> {
+  const target = configApplyTarget({
+    kind: "config-patch",
+    id: "apply.ui-preferences.direct",
+    sourceLineIds: [],
+    review: {
+      copyKey: "setupDrafts.review",
+      summaryKey: "setupDrafts.uiPreferences.summary",
+      redacted: true,
+      values: input,
+    },
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+  }, options);
   await setupUiConfig({
-    workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
+    ...target,
     input,
   });
 }

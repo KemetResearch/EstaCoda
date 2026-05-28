@@ -26,6 +26,7 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
+  "edit-language",
 ];
 
 export function renderConfigEditor(input: {
@@ -267,6 +268,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.editSecurityMode.description");
     case "edit-workflow-learning":
       return setupCopyText(locale, "setupEditor.actions.editWorkflowLearning.description");
+    case "edit-language":
+      return setupCopyText(locale, "setupEditor.actions.editLanguage.description");
     case "configure-channels":
       return setupCopyText(locale, "setupEditor.actions.configureChannels.description");
     case "configure-voice":

@@ -9,6 +9,7 @@ export type SetupEditorSectionId =
   | "credentials"
   | "security-mode"
   | "workflow-learning"
+  | "interface-preference"
   | "workspace-trust"
   | "optional-capabilities"
   | "verification"
@@ -21,6 +22,7 @@ export type SetupEditorSensitiveSurface =
   | "credential-reference"
   | "security-policy"
   | "workflow-learning"
+  | "interface-preference"
   | "workspace-trust"
   | "optional-capability"
   | "setup-verification"
@@ -123,6 +125,7 @@ function normalSections(state: SetupEntryState, mode: SetupEditorPlanMode): Setu
     credentialsSection(state),
     securityModeSection(state),
     workflowLearningSection(state),
+    interfacePreferenceSection(),
     workspaceTrustSection(state),
     optionalCapabilitiesSection(),
     verificationSection(),
@@ -339,6 +342,32 @@ function workflowLearningSection(state: SetupEntryState): SetupEditorSection {
         reviewValues: {
           workflowLearning: state.setupVerification.skillAutonomyValue,
         },
+      }),
+    ],
+  });
+}
+
+function interfacePreferenceSection(): SetupEditorSection {
+  return section({
+    id: "interface-preference",
+    copyKey: "setupEditor.sections.interfacePreference",
+    required: false,
+    sensitiveSurface: "interface-preference",
+    status: "ready",
+    data: {
+      fields: ["ui.language", "ui.flavor", "ui.activityLabels"],
+    },
+    warnings: [],
+    blockers: [],
+    actions: [
+      setupEditorAction({
+        id: "edit-language",
+        copyKey: "setupEditor.actions.editLanguage",
+        sectionId: "interface-preference",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["ui.language", "ui.flavor", "ui.activityLabels"]),
       }),
     ],
   });

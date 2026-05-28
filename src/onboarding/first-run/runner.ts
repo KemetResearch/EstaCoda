@@ -1,9 +1,6 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import {
   loadRuntimeConfig,
-  type ActivityLabelsLocale,
-  type UiFlavor,
-  type UiLanguage,
 } from "../../config/runtime-config.js";
 import { writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
@@ -19,6 +16,7 @@ import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
 } from "../first-run-plan.js";
+import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
 import {
   buildSetupReviewManifest,
@@ -48,7 +46,6 @@ import {
   renderSetupReviewManifest,
   setupCopyText,
   showSetupCard,
-  type SetupChoice,
 } from "../setup-prompts.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
@@ -73,14 +70,6 @@ export type FirstRunSetupRunnerResult = {
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
-};
-
-type InterfaceStyleChoice = SetupChoice<{
-  readonly flavor: UiFlavor;
-  readonly activityLabels: ActivityLabelsLocale;
-}> & {
-  readonly labelKey: SetupCopyKey;
-  readonly descriptionKey: SetupCopyKey;
 };
 
 type PendingCredentialWrite = {
@@ -123,40 +112,12 @@ export async function runFirstRunSetup(
     options: [{ id: "begin", label: setupCopyText(initialLocale, "onboarding.common.begin") }],
   });
 
-  const language = await promptSetupChoice(prompt, {
-    title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
-    message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
-    choices: [
-      {
-        id: "en",
-        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
-        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
-        value: "en" as const,
-      },
-      {
-        id: "ar",
-        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
-        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
-        value: "ar" as const,
-      },
-    ],
-    defaultValue: options.defaultSelections?.language ?? "en",
+  const interfaceChoice = await promptInterfaceLanguageAndStyle(prompt, {
+    initialLocale,
+    currentLanguage: options.defaultSelections?.language ?? "en",
+    currentFlavor: options.defaultSelections?.interfaceFlavor,
   });
-
-  const interfaceChoices = interfaceStyleChoices(language);
-  const defaultInterfaceChoice = interfaceChoices.find((choice) =>
-    choice.value.flavor === options.defaultSelections?.interfaceFlavor
-  )?.value ?? interfaceChoices[0]!.value;
-  const interfaceChoice = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.interfaceStyle.title"),
-    message: `${setupCopyText(language, "onboarding.interfaceStyle.prompt")}\n`,
-    choices: interfaceChoices.map((choice) => ({
-      ...choice,
-      label: setupCopyText(language, choice.labelKey),
-      description: setupCopyText(language, choice.descriptionKey),
-    })),
-    defaultValue: defaultInterfaceChoice,
-  });
+  const language = interfaceChoice.language;
 
   await showSetupCard(prompt, language, {
     title: setupCopyText(language, "onboarding.workspace.title"),
@@ -508,48 +469,6 @@ async function chooseOptionalCapabilities(
   }
 
   return result;
-}
-
-function interfaceStyleChoices(language: UiLanguage): readonly InterfaceStyleChoice[] {
-  if (language === "ar") {
-    return [
-      {
-        id: "arabic-light",
-        label: "",
-        labelKey: "onboarding.interfaceStyle.arabicLight.label",
-        description: "",
-        descriptionKey: "onboarding.interfaceStyle.arabicLight.description",
-        value: { flavor: "arabic-light", activityLabels: "ar" },
-      },
-      {
-        id: "standard",
-        label: "",
-        labelKey: "onboarding.interfaceStyle.standard.label",
-        description: "",
-        descriptionKey: "onboarding.interfaceStyle.arabicStandard.description",
-        value: { flavor: "standard", activityLabels: "ar" },
-      },
-    ];
-  }
-
-  return [
-    {
-      id: "standard",
-      label: "",
-      labelKey: "onboarding.interfaceStyle.standard.label",
-      description: "",
-      descriptionKey: "onboarding.interfaceStyle.standard.description",
-      value: { flavor: "standard", activityLabels: "en" },
-    },
-    {
-      id: "arabic-light",
-      label: "",
-      labelKey: "onboarding.interfaceStyle.arabicLight.label",
-      description: "",
-      descriptionKey: "onboarding.interfaceStyle.englishArabicLight.description",
-      value: { flavor: "arabic-light", activityLabels: "en" },
-    },
-  ];
 }
 
 function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {

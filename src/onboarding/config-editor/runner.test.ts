@@ -68,6 +68,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("edit-auxiliary-model-route");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
+    expect(output.join("")).toContain("edit-language - Edit language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
@@ -323,6 +324,109 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
     expect(config.skills?.autonomy).toBe("autonomous");
     expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
+  });
+
+  it("applies reviewed language changes through shared interface preference prompts", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "en",
+        flavor: "standard",
+        activityLabels: "en",
+      },
+      security: {
+        approvalMode: "adaptive",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompt = fakePrompt({ values: ["ar"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      prompts.push({
+        title: input.title,
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+      });
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-language",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+      security?: { approvalMode?: string };
+      model?: unknown;
+    };
+    const uiLine = result.reviewManifest?.sections["files-to-write-update"]
+      .find((line) => line.review.summaryKey === "setupDrafts.uiPreferences.summary");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-language");
+    expect(prompts[0]?.title).toBe("Setup language");
+    expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
+    expect(prompts[1]?.title).toBe("أسلوب الواجهة");
+    expect(prompts[1]?.labels).toContain("عربي خفيف");
+    expect(uiLine?.review.values).toEqual(expect.objectContaining({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    }));
+    expect(config.ui).toEqual({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+    expect(config.security?.approvalMode).toBe("adaptive");
+    expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+  });
+
+  it("resets Arabic activity labels when changing language back to English", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["en"] }),
+      defaultActionId: "edit-language",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+    const uiLine = result.reviewManifest?.sections["files-to-write-update"]
+      .find((line) => line.review.summaryKey === "setupDrafts.uiPreferences.summary");
+
+    expect(result.completed).toBe(true);
+    expect(uiLine?.review.values).toEqual(expect.objectContaining({
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    }));
+    expect(config.ui).toEqual({
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    });
   });
 
   it("launches only after reviewed apply, verification, route re-collection, and explicit launch choice", async () => {

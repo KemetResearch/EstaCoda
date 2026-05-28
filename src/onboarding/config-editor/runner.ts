@@ -29,6 +29,7 @@ import {
   executeSetupApplyPlan,
   planSetupApply,
 } from "../setup-apply-plan.js";
+import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { buildSetupEditorActionDraftBundle } from "../setup-drafts.js";
 import type { SetupDraft, SetupDraftBundle } from "../setup-drafts.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
@@ -304,6 +305,8 @@ async function handleAction(
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":
       return handleWorkflowLearningAction(options, initialDecision, session, action);
+    case "edit-language":
+      return handleLanguageAction(options, initialDecision, session, action);
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return handleProviderRouteAction(options, initialDecision, session, action);
@@ -405,6 +408,32 @@ async function handleWorkflowLearningAction(
     reviewValues: {
       ...editorAction.reviewValues,
       workflowLearning,
+    },
+  });
+}
+
+async function handleLanguageAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const loaded = await loadRuntimeConfig(options);
+  const ui = loaded.config.ui;
+  const preferences = await promptInterfaceLanguageAndStyle(options.prompt, {
+    initialLocale: options.locale,
+    currentLanguage: ui?.language ?? "en",
+    currentFlavor: ui?.flavor,
+  });
+
+  return reviewAndApplyAction(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      language: preferences.language,
+      flavor: preferences.flavor,
+      activityLabels: preferences.activityLabels,
     },
   });
 }
