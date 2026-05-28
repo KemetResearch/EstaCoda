@@ -147,6 +147,8 @@ export class ProviderTurnLoop {
     const loopStartedAt = Date.now();
     const repeatedFailures = new Map<string, number>();
     let maxObservedRisk = input.initialRiskClass;
+    let pendingEmptyResponseNudge = false;
+    let postToolEmptyRetried = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -196,14 +198,16 @@ export class ProviderTurnLoop {
             iteration
           })
         : await this.#continueProviderAfterTools({
-            ...input,
-            toolExecutions: [
-              ...input.toolExecutions,
-              ...providerToolExecutions
-            ],
-            providerExecution: previousProviderExecution,
-            iteration
-          });
+          ...input,
+          toolExecutions: [
+            ...input.toolExecutions,
+            ...providerToolExecutions
+          ],
+          providerExecution: previousProviderExecution,
+          iteration,
+          emptyResponseNudge: pendingEmptyResponseNudge
+        });
+      pendingEmptyResponseNudge = false;
 
       if (execution === undefined) {
         break;
@@ -264,6 +268,23 @@ export class ProviderTurnLoop {
         executedTools: providerToolExecutions.length - beforeExecutions,
         exhausted
       });
+
+      const terminalPostToolEmpty =
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        phase === "continuation" &&
+        providerToolExecutions.length > 0 &&
+        execution.response?.content.trim().length === 0;
+
+      if (
+        terminalPostToolEmpty &&
+        !postToolEmptyRetried &&
+        iteration + 1 < this.#budgets.maxProviderIterations
+      ) {
+        postToolEmptyRetried = true;
+        pendingEmptyResponseNudge = true;
+        continue;
+      }
 
       if (
         execution.ok !== true ||
@@ -452,6 +473,7 @@ export class ProviderTurnLoop {
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     iteration: number;
+    emptyResponseNudge?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -459,7 +481,7 @@ export class ProviderTurnLoop {
       this.#model === undefined ||
       this.#model.provider === "unconfigured" ||
       input.providerExecution?.ok !== true ||
-      input.providerExecution.toolCalls.length === 0 ||
+      (input.providerExecution.toolCalls.length === 0 && input.emptyResponseNudge !== true) ||
       !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
     ) {
       return undefined;
@@ -482,6 +504,12 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    if (input.emptyResponseNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+      });
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
@@ -521,8 +549,8 @@ export class ProviderTurnLoop {
       });
     }
 
-    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
-      kind: "provider-continuation",
+    const continuationEvent = {
+      kind: "provider-continuation" as const,
       iteration: input.iteration,
       ok: execution.ok,
       attempts: execution.attempts.map((attempt) => ({
@@ -537,8 +565,10 @@ export class ProviderTurnLoop {
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage
-    });
+      usage: execution.response?.usage,
+      nudge: input.emptyResponseNudge === true
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
       iteration: input.iteration,
       ok: execution.ok,
@@ -554,7 +584,8 @@ export class ProviderTurnLoop {
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage
+      usage: execution.response?.usage,
+      nudge: input.emptyResponseNudge === true
     });
 
     if (!execution.ok) {
