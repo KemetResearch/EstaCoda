@@ -22,11 +22,13 @@ export type ProviderAttempt = {
   ok: boolean;
   errorClass?: string;
   content: string;
+  partialContent?: string;
 };
 
 export type ProviderExecutionResult = {
   ok: boolean;
   response?: ProviderResponse;
+  partialContent?: string;
   fallbackUsed: boolean;
   attempts: ProviderAttempt[];
   toolCalls: Array<{
@@ -135,10 +137,12 @@ export class ProviderExecutor {
 
     for (let index = 0; index < chain.length; index++) {
       if (options.signal?.aborted === true) {
+        const partialContent = lastPartialContent(attempts);
         return {
           ok: false,
           fallbackUsed: attempts.length > 1,
           attempts,
+          ...(partialContent === undefined ? {} : { partialContent }),
           toolCalls
         };
       }
@@ -319,7 +323,8 @@ export class ProviderExecutor {
           credentialId: credential?.id,
           ok: callResponse.ok,
           errorClass: callResponse.errorClass,
-          content: callResponse.content
+          content: callResponse.content,
+          ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent })
         });
 
         if (!callResponse.ok) {
@@ -461,10 +466,12 @@ export class ProviderExecutor {
       }
     }
 
+    const partialContent = lastPartialContent(attempts);
     return {
       ok: false,
       fallbackUsed: attempts.length > 1,
       attempts,
+      ...(partialContent === undefined ? {} : { partialContent }),
       toolCalls
     };
   }
@@ -579,15 +586,30 @@ async function collectProviderStream(input: {
     return finalResponse;
   }
 
+  const partialContent = partialContentFromIncompleteStream(content);
   return {
     ok: false,
     content: content.length === 0
       ? "Provider stream ended before a done or error event."
       : `Provider stream ended before completion after partial output:\n${content}`,
+    ...(partialContent === undefined ? {} : { partialContent }),
     model: input.model,
     provider: input.provider,
     errorClass: "incomplete-stream"
   };
+}
+
+function stripThinkBlocks(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/giu, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/giu, "")
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/giu, "")
+    .trim();
+}
+
+function partialContentFromIncompleteStream(content: string): string | undefined {
+  const stripped = stripThinkBlocks(content);
+  return stripped.length === 0 ? undefined : stripped;
 }
 
 function mergeToolCallFragment(
@@ -678,6 +700,16 @@ function isCredentialIndependent(a: ResolvedModelRoute, b: ResolvedModelRoute): 
     return false;
   }
   return true;
+}
+
+function lastPartialContent(attempts: readonly ProviderAttempt[]): string | undefined {
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const partialContent = attempts[index].partialContent;
+    if (partialContent !== undefined && partialContent.trim().length > 0) {
+      return partialContent;
+    }
+  }
+  return undefined;
 }
 
 function extractToolCallsFromProviderResponse(raw: unknown): ProviderExecutionResult["toolCalls"] {

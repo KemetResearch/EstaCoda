@@ -173,6 +173,7 @@ export type ProviderCompletionOptions = {
 export type ProviderResponse = {
   ok: boolean;
   content: string;
+  partialContent?: string;
   model: string;
   provider: ProviderId;
   errorClass?: ProviderErrorClass;

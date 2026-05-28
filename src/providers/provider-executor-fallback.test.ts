@@ -496,6 +496,118 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(fallback.calls.length).toBe(2);
   });
 
+  it("returns failed incomplete stream executions with sanitized partial content", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        { kind: "token", provider: "stream-primary" as any, model: "m1", text: "<think>hidden chain</think>Visible partial answer." }
+      ]
+    });
+    const fallback = createMockAdapter({
+      id: "stream-fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "stream-fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        fallbackChain: [createRoute("stream-fallback", "m2")],
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.response).toBeUndefined();
+    expect(result.partialContent).toBe("Visible partial answer.");
+    expect(result.attempts).toEqual([
+      expect.objectContaining({
+        provider: "stream-primary",
+        ok: false,
+        errorClass: "incomplete-stream",
+        partialContent: "Visible partial answer."
+      })
+    ]);
+    expect(result.attempts[0].content).toContain("Provider stream ended before completion after partial output:");
+    expect(fallback.calls.length).toBe(0);
+  });
+
+  it("does not expose partial content for incomplete streams with only reasoning tags", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        { kind: "token", provider: "stream-primary" as any, model: "m1", text: "<think>hidden chain</think><reasoning>private scratch</reasoning>" }
+      ]
+    });
+    registry.register(primary);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.partialContent).toBeUndefined();
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      provider: "stream-primary",
+      ok: false,
+      errorClass: "incomplete-stream"
+    }));
+    expect(result.attempts[0].partialContent).toBeUndefined();
+  });
+
+  it("keeps completed streams successful when final content is empty after visible tokens", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        { kind: "token", provider: "stream-primary" as any, model: "m1", text: "Completed streamed answer." },
+        {
+          kind: "done",
+          provider: "stream-primary" as any,
+          model: "m1",
+          response: { ok: true, content: "", model: "m1", provider: "stream-primary" as any }
+        }
+      ]
+    });
+    const fallback = createMockAdapter({
+      id: "stream-fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "stream-fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        fallbackChain: [createRoute("stream-fallback", "m2")],
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("Completed streamed answer.");
+    expect(result.partialContent).toBeUndefined();
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      provider: "stream-primary",
+      ok: true,
+      content: "Completed streamed answer."
+    }));
+    expect(fallback.calls.length).toBe(0);
+  });
+
   it.each([
     ["rate-limit", true],
     ["quota", true],
