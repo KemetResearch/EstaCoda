@@ -17,6 +17,7 @@ import {
   buildWarningErrorViewModel,
   buildStartupDashboardViewModel,
   buildStartupRuntimeViewModel,
+  buildAssistantResponseViewModel,
   buildConversationMessageViewModel,
   buildActiveTurnSpinnerViewModel,
   buildToolActivityRailViewModel,
@@ -115,6 +116,10 @@ function hexToRgbForTest(hex: string): { r: number; g: number; b: number } {
 function ansiFgForHex(hex: string): string {
   const { r, g, b } = hexToRgbForTest(hex);
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
@@ -1043,7 +1048,8 @@ describe("StandardRenderer — startup dashboard", () => {
   });
 
   it("keeps startup dashboard border styling isolated when title truncates", () => {
-    const r = renderer("dark", narrowCaps());
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: narrowCaps() });
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
       taglines: [],
@@ -1060,7 +1066,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const top = r.renderStartupDashboard(vm).split("\n").find((line) => stripAnsi(line).startsWith("╭"));
     expect(top).toBeDefined();
     expect(top).toContain("...");
-    expect(top).toMatch(/\.\.\.\x1b\[0m\x1b\[0m\x1b\[38;2;51;51;51m─*╮/);
+    expect(top).toMatch(new RegExp(`\\.\\.\\.\\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
   });
 
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
@@ -1235,9 +1241,27 @@ describe("StandardRenderer — deterministic output", () => {
   });
 });
 
+describe("StandardRenderer — assistant response", () => {
+  it("renders assistant body with agentMessage color while title remains brand", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const vm = buildAssistantResponseViewModel({
+      label: "𓂀 EstaCoda",
+      text: "Hello, body!",
+    });
+    const out = r.renderAssistantResponse(vm);
+    const titleLine = out.split("\n")[1] ?? "";
+
+    expect(titleLine).toContain(ansiFgForHex(tokens.contract.palette.brand));
+    expect(stripAnsi(titleLine)).toContain("𓂀  EstaCoda");
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, body!`);
+  });
+});
+
 describe("StandardRenderer — conversation message", () => {
   it("renders assistant message with open horizontal frame and brand title", () => {
-    const r = renderer("dark", fullCaps());
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
     const vm = buildConversationMessageViewModel({
       role: "assistant",
       text: "Hello, world!",
@@ -1255,7 +1279,9 @@ describe("StandardRenderer — conversation message", () => {
     // Should not have vertical side borders
     expect(out).not.toContain("│");
     // Content should be present, indented by two spaces
-    expect(out).toContain("  Hello, world!");
+    expect(stripAnsi(out)).toContain("  Hello, world!");
+    expect(out.split("\n")[0]).toContain(ansiFgForHex(tokens.contract.palette.brand));
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, world!`);
     expect(hasAnsi(out)).toBe(true);
   });
 

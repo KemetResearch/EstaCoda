@@ -178,6 +178,92 @@ function auxiliaryPlan(values: ReviewValues): SetupApplyPlan {
   };
 }
 
+function uiPreferencesPlan(values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-ui-preferences-bundle"],
+    operations: [{
+      id: "test-ui-preferences",
+      kind: "config-patch",
+      sourceLineIds: ["test-ui-preferences-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["ui.language", "ui.flavor", "ui.activityLabels"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.uiPreferences.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
+function channelCapabilityPlan(summaryKey: "setupModules.discord.draft" | "setupModules.whatsapp.draft", values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-channel-bundle"],
+    operations: [{
+      id: "test-channel",
+      kind: "config-patch",
+      sourceLineIds: ["test-channel-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["channels"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey,
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -220,6 +306,39 @@ describe("reviewed setup apply executor", () => {
     expect(config.security?.approvalMode).toBe("strict");
     expect(config.skills?.autonomy).toBe("none");
     expect(trust.grants?.[0]?.root).toBe(await realpath(workspaceRoot));
+  });
+
+  it("applies reviewed UI preferences through setupUiConfig while preserving unrelated config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      security: { approvalMode: "strict" },
+      ui: { language: "en", flavor: "standard", activityLabels: "en" },
+    }, null, 2), "utf8");
+    const plan = uiPreferencesPlan({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string };
+      security?: { approvalMode?: string };
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.ui).toEqual({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.security).toEqual({ approvalMode: "strict" });
   });
 
   it("applies hosted credential references as provider route refs without raw secret values", async () => {
@@ -551,6 +670,85 @@ describe("reviewed setup apply executor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Remote-control capabilities require");
+  });
+
+  it("applies reviewed Discord and WhatsApp beta channel config through channel dispatch", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+    }, null, 2), "utf8");
+
+    const discordResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.discord.draft", {
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-1"],
+      allowedGuilds: ["guild-1"],
+      allowedChannels: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const whatsappResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      authDir: join(tempDir, ".estacoda", "profiles", "default", "gateway", "whatsapp-auth"),
+      allowedUsers: ["971501234567"],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      channels?: {
+        discord?: { enabled?: boolean; botTokenEnv?: string; allowedUsers?: string[]; allowedGuilds?: string[] };
+        whatsapp?: { enabled?: boolean; experimental?: boolean; authDir?: string; allowedUsers?: string[] };
+      };
+    };
+
+    expect(discordResult.ok).toBe(true);
+    expect(whatsappResult.ok).toBe(true);
+    expect(config.channels?.discord).toEqual(expect.objectContaining({
+      enabled: true,
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-1"],
+      allowedGuilds: ["guild-1"],
+    }));
+    expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
+      enabled: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+    }));
+  });
+
+  it("rejects reviewed Discord and WhatsApp beta channel config without allowlists", async () => {
+    const discordResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.discord.draft", {
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: [],
+      allowedChannels: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const whatsappResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      allowedUsers: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(discordResult.ok).toBe(false);
+    expect(discordResult.error).toContain("Discord apply requires");
+    expect(whatsappResult.ok).toBe(false);
+    expect(whatsappResult.error).toContain("WhatsApp apply requires");
+  });
+
+  it("rejects reviewed WhatsApp beta auth directories outside selected profile gateway state", async () => {
+    const result = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      authDir: join(tempDir, "outside-whatsapp-auth"),
+      allowedUsers: ["971501234567"],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("profile gateway state");
   });
 
   it("stops verification when save/apply fails", async () => {

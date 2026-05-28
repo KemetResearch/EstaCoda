@@ -23,6 +23,8 @@ export type SetupModuleId =
   | "security-mode"
   | "workflow-learning"
   | "telegram"
+  | "discord"
+  | "whatsapp"
   | "voice"
   | "vision"
   | "browser";
@@ -52,6 +54,20 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly botToken?: string;
     readonly allowedUserIds?: readonly string[];
     readonly allowedChatIds?: readonly string[];
+  };
+  readonly discord?: {
+    readonly enabled?: boolean;
+    readonly botTokenEnv?: string;
+    readonly botToken?: string;
+    readonly allowedUsers?: readonly string[];
+    readonly allowedGuilds?: readonly string[];
+    readonly allowedChannels?: readonly string[];
+  };
+  readonly whatsapp?: {
+    readonly enabled?: boolean;
+    readonly experimental?: boolean;
+    readonly authDir?: string;
+    readonly allowedUsers?: readonly string[];
   };
   readonly browser?: {
     readonly backend?: BrowserBackendKind;
@@ -322,7 +338,7 @@ export const telegramSetupModule: SetupModule = optionalCapabilityModule({
     tokenValueIncluded: false,
     allowedUserIds: context.telegram?.allowedUserIds ?? [],
     allowedChatIds: context.telegram?.allowedChatIds ?? [],
-    remoteControlIdentityConstraint: "allowed-user-or-chat-id",
+    remoteControlIdentityConstraint: context.telegram?.enabled === true ? "allowed-user-or-chat-id" : undefined,
   }),
   blockers: (context) => [
     ...(context.telegram?.enabled === true && context.telegram.botTokenEnv === undefined
@@ -334,17 +350,66 @@ export const telegramSetupModule: SetupModule = optionalCapabilityModule({
   ],
 });
 
+export const discordSetupModule: SetupModule = optionalCapabilityModule({
+  id: "discord",
+  titleKey: "setupModules.discord.title",
+  scope: ["channels"],
+  value: (context) => ({
+    enabled: context.discord?.enabled === true,
+    beta: context.discord?.enabled === true ? true : undefined,
+    botTokenEnv: context.discord?.botTokenEnv,
+    tokenValueIncluded: false,
+    allowedUsers: context.discord?.allowedUsers ?? [],
+    allowedGuilds: context.discord?.allowedGuilds ?? [],
+    allowedChannels: context.discord?.allowedChannels ?? [],
+    remoteControlIdentityConstraint: context.discord?.enabled === true ? "allowed-discord-user-or-channel" : undefined,
+  }),
+  blockers: (context) => [
+    ...(context.discord?.enabled === true && context.discord.botTokenEnv === undefined
+      ? ["Discord bot token must be referenced by environment-variable name."]
+      : []),
+    ...(context.discord?.enabled === true && (context.discord.allowedUsers?.length ?? 0) === 0 && (context.discord.allowedChannels?.length ?? 0) === 0
+      ? ["Discord remote control requires at least one allowed user or channel."]
+      : []),
+  ],
+});
+
+export const whatsappSetupModule: SetupModule = optionalCapabilityModule({
+  id: "whatsapp",
+  titleKey: "setupModules.whatsapp.title",
+  scope: ["channels"],
+  value: (context) => ({
+    enabled: context.whatsapp?.enabled === true,
+    beta: context.whatsapp?.enabled === true ? true : undefined,
+    experimental: context.whatsapp?.experimental === true,
+    authDir: context.whatsapp?.authDir,
+    allowedUsers: context.whatsapp?.allowedUsers ?? [],
+    remoteControlIdentityConstraint: context.whatsapp?.enabled === true ? "allowed-whatsapp-users" : undefined,
+  }),
+  blockers: (context) => [
+    ...(context.whatsapp?.enabled === true && context.whatsapp.experimental !== true
+      ? ["WhatsApp beta setup requires experimental mode."]
+      : []),
+    ...(context.whatsapp?.enabled === true && context.whatsapp.authDir === undefined
+      ? ["WhatsApp setup requires a profile-local auth directory."]
+      : []),
+    ...(context.whatsapp?.enabled === true && (context.whatsapp.allowedUsers?.length ?? 0) === 0
+      ? ["WhatsApp remote control requires allowed user numbers."]
+      : []),
+  ],
+});
+
 export const voiceSetupModule: SetupModule = optionalCapabilityModule({
   id: "voice",
   titleKey: "setupModules.voice.title",
   scope: ["voice"],
   value: (context) => ({
-    ttsProvider: context.voice?.ttsProvider,
-    ttsModel: context.voice?.ttsModel,
-    ttsApiKeyEnv: context.voice?.ttsApiKeyEnv,
-    sttProvider: context.voice?.sttProvider,
-    sttModel: context.voice?.sttModel,
-    sttApiKeyEnv: context.voice?.sttApiKeyEnv,
+    ...(context.voice?.ttsProvider === undefined ? {} : { ttsProvider: context.voice.ttsProvider }),
+    ...(context.voice?.ttsModel === undefined ? {} : { ttsModel: context.voice.ttsModel }),
+    ...optionalStringReviewValue("ttsApiKeyEnv", context.voice?.ttsApiKeyEnv),
+    ...(context.voice?.sttProvider === undefined ? {} : { sttProvider: context.voice.sttProvider }),
+    ...(context.voice?.sttModel === undefined ? {} : { sttModel: context.voice.sttModel }),
+    ...optionalStringReviewValue("sttApiKeyEnv", context.voice?.sttApiKeyEnv),
     secretValuesIncluded: false,
   }),
 });
@@ -375,6 +440,10 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
   }),
 });
 
+function optionalStringReviewValue(key: string, value: string | undefined): Record<string, string> {
+  return value === undefined || value.trim().length === 0 ? {} : { [key]: value };
+}
+
 export const SETUP_MODULES: readonly SetupModule[] = [
   providerSetupModule,
   credentialsSetupModule,
@@ -382,6 +451,8 @@ export const SETUP_MODULES: readonly SetupModule[] = [
   securityModeSetupModule,
   workflowLearningSetupModule,
   telegramSetupModule,
+  discordSetupModule,
+  whatsappSetupModule,
   voiceSetupModule,
   visionSetupModule,
   browserSetupModule,
@@ -478,7 +549,7 @@ function simpleConfigModule(input: {
 }
 
 function optionalCapabilityModule(input: {
-  readonly id: Extract<SetupModuleId, "telegram" | "voice" | "vision" | "browser">;
+  readonly id: Extract<SetupModuleId, "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "browser">;
   readonly titleKey: SetupModule["titleKey"];
   readonly scope: readonly SetupEditorPatchField[];
   readonly value: (context: SetupModuleContext) => SetupDraftReviewMetadata["values"];

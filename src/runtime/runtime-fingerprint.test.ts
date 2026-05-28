@@ -681,7 +681,7 @@ describe("computeRuntimeFingerprint", () => {
     const fp1 = computeRuntimeFingerprint(base, opts);
     const fp2 = computeRuntimeFingerprint(
       fakeLoadedRuntimeConfig({
-        ui: { language: "ar", flavor: "kemet-full", activityLabels: "ar" },
+        ui: { language: "ar", flavor: "kemet-full", activityLabels: "ar", showResponseProgress: false },
       }),
       opts
     );

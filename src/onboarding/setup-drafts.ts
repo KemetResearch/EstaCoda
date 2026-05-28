@@ -26,6 +26,7 @@ export type SetupDraftKind =
   | "credential-reference"
   | "security-mode"
   | "workflow-learning"
+  | "ui-preferences"
   | "workspace-trust"
   | "optional-capability"
   | "verification"
@@ -38,6 +39,7 @@ export type SetupDraftRiskSurface =
   | "credential-reference"
   | "security-policy"
   | "workflow-learning"
+  | "interface-preference"
   | "workspace-trust"
   | "optional-capability"
   | "setup-verification"
@@ -356,6 +358,19 @@ function draftFromEditorAction(
     });
   }
 
+  if (action.id === "edit-language") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "ui-preferences",
+      source,
+      riskSurface: "interface-preference",
+      scope: action.patch?.fields ?? ["ui.language", "ui.flavor", "ui.activityLabels"],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.uiPreferences.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
   if (action.id === "edit-primary-model-route" || action.id === "repair-primary-provider") {
     return configDraft({
       id: editorDraftId(action),
@@ -646,6 +661,8 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
       return "security-mode";
     case "edit-workflow-learning":
       return "workflow-learning";
+    case "edit-language":
+      return "ui-preferences";
     case "review-optional-capabilities":
     case "configure-channels":
     case "configure-voice":
@@ -672,6 +689,7 @@ function riskSurfaceForAction(action: SetupEditorActionDraft): SetupDraftRiskSur
     "credential-reference": "credential-reference",
     "security-policy": "security-policy",
     "workflow-learning": "workflow-learning",
+    "interface-preference": "interface-preference",
     "workspace-trust": "workspace-trust",
     "optional-capability": "optional-capability",
     "setup-verification": "setup-verification",
@@ -685,10 +703,12 @@ function riskSurfaceForAction(action: SetupEditorActionDraft): SetupDraftRiskSur
       : action.sectionId === "security-mode"
         ? "security-policy"
         : action.sectionId === "workflow-learning"
-          ? "workflow-learning"
-          : action.sectionId === "optional-capabilities"
-            ? "optional-capability"
-            : action.sectionId === "config-safety"
-              ? "config-repair"
-              : "none"];
+        ? "workflow-learning"
+          : action.sectionId === "interface-preference"
+            ? "interface-preference"
+            : action.sectionId === "optional-capabilities"
+              ? "optional-capability"
+              : action.sectionId === "config-safety"
+                ? "config-repair"
+                : "none"];
 }

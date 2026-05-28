@@ -465,7 +465,7 @@ describe("runFirstRunSetup", () => {
   it("renders Arabic review text from setup copy tokens", async () => {
     const output: string[] = [];
 
-    await runFirstRunSetup({
+    const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Setup language": "العربية" }),
@@ -474,6 +474,9 @@ describe("runFirstRunSetup", () => {
     });
 
     const rendered = output.join("");
+    expect(result.selections.language).toBe("ar");
+    expect(result.selections.interfaceFlavor).toBe("arabic-light");
+    expect(result.selections.activityLabels).toBe("ar");
     expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.title"));
     expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
     expect(rendered).not.toContain("Files to write/update");

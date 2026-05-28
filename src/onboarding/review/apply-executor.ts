@@ -20,8 +20,10 @@ import {
   setupSkillConfig,
   setupModelFallbackConfig,
   setupAuxiliaryModelConfig,
+  setupDiscordConfig,
   setupTelegramConfig,
   setupUiConfig,
+  setupWhatsAppConfig,
   setupVoiceConfig,
   type ActivityLabelsLocale,
   type ImageGenerationProvider,
@@ -183,11 +185,20 @@ async function applyConfigPatch(
     case "setupModules.workflow-learning.draft":
       await applyWorkflowLearning(operation, options);
       return;
+    case "setupDrafts.uiPreferences.summary":
+      await applyUiPreferences(operation, options);
+      return;
     case "setupDrafts.optionalCapabilities.summary":
       await applyFirstRunOptionalCapabilities(operation, options);
       return;
     case "setupModules.telegram.draft":
       await applyTelegramCapability(operation, options);
+      return;
+    case "setupModules.discord.draft":
+      await applyDiscordCapability(operation, options);
+      return;
+    case "setupModules.whatsapp.draft":
+      await applyWhatsAppCapability(operation, options);
       return;
     case "setupModules.voice.draft":
       await applyVoiceCapability(operation, options);
@@ -386,6 +397,27 @@ async function applyWorkflowLearning(
   });
 }
 
+async function applyUiPreferences(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const language = uiLanguageValue(operation.review.values.language);
+  const flavor = uiFlavorValue(operation.review.values.flavor);
+  const activityLabels = activityLabelsValue(operation.review.values.activityLabels);
+  if (language === undefined || flavor === undefined || activityLabels === undefined) {
+    throw new Error("UI preferences apply requires language, flavor, and activity label review values.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupUiConfig({
+    ...target,
+    input: {
+      language,
+      flavor,
+      activityLabels,
+    },
+  });
+}
+
 async function applyFirstRunOptionalCapabilities(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
@@ -429,6 +461,51 @@ async function applyTelegramCapability(
       botTokenEnv,
       allowedUserIds,
       allowedChatIds,
+    },
+  });
+}
+
+async function applyDiscordCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const botTokenEnv = stringValue(operation.review.values.botTokenEnv ?? operation.review.values.envVar) ?? "ESTACODA_DISCORD_BOT_TOKEN";
+  const allowedUsers = arrayValue(operation.review.values.allowedUsers);
+  const allowedGuilds = arrayValue(operation.review.values.allowedGuilds);
+  const allowedChannels = arrayValue(operation.review.values.allowedChannels);
+  if (allowedUsers.length === 0 && allowedChannels.length === 0) {
+    throw new Error("Discord apply requires at least one allowed user or channel.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupDiscordConfig({
+    ...target,
+    input: {
+      enabled: true,
+      botTokenEnv,
+      allowedUsers,
+      allowedGuilds,
+      allowedChannels,
+    },
+  });
+}
+
+async function applyWhatsAppCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const allowedUsers = arrayValue(operation.review.values.allowedUsers);
+  const authDir = stringValue(operation.review.values.authDir);
+  if (allowedUsers.length === 0) {
+    throw new Error("WhatsApp apply requires allowed user numbers.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupWhatsAppConfig({
+    ...target,
+    input: {
+      enabled: true,
+      experimental: true,
+      authDir,
+      allowedUsers,
     },
   });
 }
@@ -585,6 +662,18 @@ function skillAutonomyValue(value: unknown): SkillAutonomy | undefined {
     : undefined;
 }
 
+function uiLanguageValue(value: unknown): UiLanguage | undefined {
+  return value === "en" || value === "ar" ? value : undefined;
+}
+
+function uiFlavorValue(value: unknown): UiFlavor | undefined {
+  return value === "standard" || value === "arabic-light" || value === "kemet-full" ? value : undefined;
+}
+
+function activityLabelsValue(value: unknown): ActivityLabelsLocale | undefined {
+  return value === "en" || value === "ar" ? value : undefined;
+}
+
 function ttsProviderValue(value: unknown): TtsProvider | undefined {
   return stringValue(value) as TtsProvider | undefined;
 }
@@ -609,9 +698,22 @@ export async function applyReviewedUiPreferences(
     readonly activityLabels?: ActivityLabelsLocale;
   }
 ): Promise<void> {
+  const target = configApplyTarget({
+    kind: "config-patch",
+    id: "apply.ui-preferences.direct",
+    sourceLineIds: [],
+    review: {
+      copyKey: "setupDrafts.review",
+      summaryKey: "setupDrafts.uiPreferences.summary",
+      redacted: true,
+      values: input,
+    },
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+  }, options);
   await setupUiConfig({
-    workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
+    ...target,
     input,
   });
 }

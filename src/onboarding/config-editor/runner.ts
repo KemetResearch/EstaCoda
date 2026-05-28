@@ -29,14 +29,17 @@ import {
   executeSetupApplyPlan,
   planSetupApply,
 } from "../setup-apply-plan.js";
+import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { buildSetupEditorActionDraftBundle } from "../setup-drafts.js";
 import type { SetupDraft, SetupDraftBundle } from "../setup-drafts.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
 import {
   browserSetupModule,
+  discordSetupModule,
   telegramSetupModule,
   visionSetupModule,
   voiceSetupModule,
+  whatsappSetupModule,
   type SetupModuleContext,
 } from "../setup-modules.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
@@ -48,7 +51,9 @@ import {
   type SetupRouteDecision,
 } from "../setup-router.js";
 import type { SetupVerificationReport } from "../verification.js";
+import type { SetupCopyLocale } from "../setup-copy.js";
 import {
+  formatSetupCopy,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
   renderSetupReviewManifest,
@@ -59,7 +64,10 @@ import {
   promptConfigEditorReviewApproval,
   promptAuxiliaryModelTask,
   promptBrowserCapability,
+  promptChannelCapability,
   promptCredentialReuseChoice,
+  promptDiscordCapability,
+  promptIncompleteChannelCapabilityAction,
   promptFallbackRouteAction,
   promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
@@ -67,19 +75,23 @@ import {
   promptOptionalCapabilityAction,
   promptProviderCandidate,
   promptSecurityMode,
+  promptSttCapability,
   promptTelegramCapability,
+  promptTtsCapability,
   promptVisionCapability,
+  promptWhatsAppCapability,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
   type ConfigEditorPostApplyActionId,
   type OptionalCapabilityPromptId,
+  type VoiceCapabilityPromptId,
 } from "./prompts.js";
 import {
   configEditorActions,
   isConfigEditorActionId,
   renderConfigEditor,
-  renderConfigEditorDiagnostics,
+  renderConfigEditorDiagnosticsForLocale,
   type ConfigEditorRenderedAction,
 } from "./render.js";
 
@@ -108,12 +120,22 @@ export type ConfigEditorRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
 };
 
+type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
+  readonly locale: SetupCopyLocale;
+};
+
 type PendingCredentialWrite = {
   readonly envVarName: string;
   readonly value: string;
 };
 
-type OptionalCapabilityModule = typeof telegramSetupModule | typeof voiceSetupModule | typeof visionSetupModule | typeof browserSetupModule;
+type OptionalCapabilityModule =
+  | typeof telegramSetupModule
+  | typeof discordSetupModule
+  | typeof whatsappSetupModule
+  | typeof voiceSetupModule
+  | typeof visionSetupModule
+  | typeof browserSetupModule;
 
 type OptionalCapabilityPromptContext = {
   readonly module: OptionalCapabilityModule;
@@ -171,10 +193,12 @@ async function runConfigEditorOnce(
   initialDecision: SetupRouteDecision,
   defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<RunOnceResult> {
+  const locale = await resolveConfigEditorLocale(options);
+  const localizedOptions: LocalizedConfigEditorRunnerOptions = { ...options, locale };
   const session = initialDecision.setupEditorPlanSession;
 
   if (session === undefined) {
-    const output = "Guided setup editor is available only for configured, degraded, or repair setup states.";
+    const output = setupCopyText(locale, "setupEditor.result.unsupportedState");
     write(options, `${output}\n`);
     return {
       completed: false,
@@ -186,15 +210,15 @@ async function runConfigEditorOnce(
 
   const actions = configEditorActions(initialDecision, session, {
     workspacePath: options.workspaceRoot,
-  });
+  }, locale);
   if (options.renderInitialOverview !== false) {
-    const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
+    const rendered = renderConfigEditor({ decision: initialDecision, session, actions, locale });
     write(options, `${rendered}\n`);
   }
 
-  const selectedAction = await selectAction(options, actions, defaultActionId);
+  const selectedAction = await selectAction(localizedOptions, actions, defaultActionId);
   if (selectedAction === undefined) {
-    const output = "No setup editor actions are available.";
+    const output = setupCopyText(locale, "setupEditor.result.noActions");
     write(options, `${output}\n`);
     return {
       completed: false,
@@ -205,7 +229,9 @@ async function runConfigEditorOnce(
   }
 
   if (!isConfigEditorActionId(selectedAction.id, actions)) {
-    const output = `Action ${selectedAction.id} is not available in the guided setup editor.`;
+    const output = formatSetupCopy(locale, "setupEditor.result.unavailableAction", {
+      actionId: selectedAction.id,
+    });
     write(options, `${output}\n`);
     return {
       completed: false,
@@ -221,11 +247,20 @@ async function runConfigEditorOnce(
     throw new Error(`Allowed setup editor action ${selectedAction.id} was not found.`);
   }
 
-  return handleAction(options, initialDecision, session, allowedAction);
+  return handleAction(localizedOptions, initialDecision, session, allowedAction);
+}
+
+async function resolveConfigEditorLocale(options: ConfigEditorRunnerOptions): Promise<SetupCopyLocale> {
+  try {
+    const loaded = await loadRuntimeConfig(options);
+    return loaded.config.ui?.language === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
+  }
 }
 
 async function selectAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   actions: readonly ConfigEditorRenderedAction[],
   defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<ConfigEditorRenderedAction | { readonly id: string } | undefined> {
@@ -234,11 +269,11 @@ async function selectAction(
     return actions.find((action) => action.id === normalizedActionId) ?? { id: normalizedActionId };
   }
 
-  return promptConfigEditorAction(options.prompt, actions);
+  return promptConfigEditorAction(options.prompt, actions, undefined, options.locale);
 }
 
 async function handleAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -246,7 +281,7 @@ async function handleAction(
   switch (action.id) {
     case "verify-setup": {
       const finalDecision = await collectSetupRoute({ ...options, selection: "verify" });
-      const output = "Read-only setup verification route prepared.";
+      const output = setupCopyText(options.locale, "setupEditor.result.verifyPrepared");
       write(options, `${output}\n`);
       return {
         completed: true,
@@ -258,7 +293,7 @@ async function handleAction(
       };
     }
     case "show-diagnostics": {
-      const output = renderConfigEditorDiagnostics(initialDecision);
+      const output = renderConfigEditorDiagnosticsForLocale(initialDecision, options.locale);
       write(options, `${output}\n`);
       return {
         completed: true,
@@ -269,7 +304,7 @@ async function handleAction(
       };
     }
     case "exit": {
-      const output = "Exited setup editor without applying changes.";
+      const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
       write(options, `${output}\n`);
       return {
         completed: true,
@@ -285,6 +320,8 @@ async function handleAction(
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":
       return handleWorkflowLearningAction(options, initialDecision, session, action);
+    case "edit-language":
+      return handleLanguageAction(options, initialDecision, session, action);
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return handleProviderRouteAction(options, initialDecision, session, action);
@@ -301,7 +338,9 @@ async function handleAction(
     case "configure-browser":
       return handleOptionalCapabilityAction(options, initialDecision, session, action);
     default: {
-      const output = `Action ${action.id} is not implemented in the guided setup editor.`;
+      const output = formatSetupCopy(options.locale, "setupEditor.result.unimplementedAction", {
+        actionId: action.id,
+      });
       write(options, `${output}\n`);
       return {
         completed: false,
@@ -315,7 +354,7 @@ async function handleAction(
 }
 
 async function handleWorkspaceTrustAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -326,7 +365,7 @@ async function handleWorkspaceTrustAction(
   const confirmed = await promptWorkspaceTrustConfirmation(options.prompt, {
     workspaceRoot: options.workspaceRoot,
     trustStorePath,
-  });
+  }, options.locale);
   if (!confirmed) {
     const output = "Workspace trust was not changed.";
     write(options, `${output}\n`);
@@ -345,7 +384,7 @@ async function handleWorkspaceTrustAction(
 }
 
 async function handleSecurityModeAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -353,7 +392,8 @@ async function handleSecurityModeAction(
   const editorAction = requireEditorAction(action);
   const securityMode = await promptSecurityMode(
     options.prompt,
-    securityModeValue(initialDecision.state.setupVerification.securityModeValue)
+    securityModeValue(initialDecision.state.setupVerification.securityModeValue),
+    options.locale
   );
 
   return reviewAndApplyAction(options, initialDecision, session, {
@@ -366,7 +406,7 @@ async function handleSecurityModeAction(
 }
 
 async function handleWorkflowLearningAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -374,7 +414,8 @@ async function handleWorkflowLearningAction(
   const editorAction = requireEditorAction(action);
   const workflowLearning = await promptWorkflowLearning(
     options.prompt,
-    skillAutonomyValue(initialDecision.state.setupVerification.skillAutonomyValue)
+    skillAutonomyValue(initialDecision.state.setupVerification.skillAutonomyValue),
+    options.locale
   );
 
   return reviewAndApplyAction(options, initialDecision, session, {
@@ -386,8 +427,34 @@ async function handleWorkflowLearningAction(
   });
 }
 
+async function handleLanguageAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const loaded = await loadRuntimeConfig(options);
+  const ui = loaded.config.ui;
+  const preferences = await promptInterfaceLanguageAndStyle(options.prompt, {
+    initialLocale: options.locale,
+    currentLanguage: ui?.language ?? "en",
+    currentFlavor: ui?.flavor,
+  });
+
+  return reviewAndApplyAction(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      language: preferences.language,
+      flavor: preferences.flavor,
+      activityLabels: preferences.activityLabels,
+    },
+  });
+}
+
 async function handleOptionalCapabilityAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -396,9 +463,19 @@ async function handleOptionalCapabilityAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
+  const selectedChannel = action.id === "configure-channels"
+    ? await promptChannelCapability(options.prompt, options.locale)
+    : undefined;
+  const selectedVoiceMode = action.id === "configure-voice"
+    ? await promptVoiceCapability(options.prompt, options.locale)
+    : undefined;
+  const module = selectedChannel === undefined
+    ? optionalCapabilityModuleForAction(action.id)
+    : channelCapabilityModule(selectedChannel);
   const promptContext = optionalCapabilityPromptContext(
     baseContext,
-    optionalCapabilityModuleForAction(action.id)
+    module,
+    options.locale
   );
   const selectedDrafts: SetupDraft[] = [];
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
@@ -406,7 +483,7 @@ async function handleOptionalCapabilityAction(
     id: optionalPromptId(promptContext.module.id),
     title: promptContext.title,
     configured: promptContext.configured,
-  });
+  }, options.locale);
 
   if (selected === "skip") {
     const configuration = promptContext.module.configure(baseContext, { skip: true });
@@ -414,7 +491,7 @@ async function handleOptionalCapabilityAction(
   }
 
   if (selected === "enable") {
-    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
+    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode);
     if (collected.kind === "skip") {
       const configuration = promptContext.module.configure(baseContext, { skip: true });
       selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
@@ -463,7 +540,7 @@ async function handleOptionalCapabilityAction(
 }
 
 async function handleProviderRouteAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -478,7 +555,7 @@ async function handleProviderRouteAction(
 }
 
 async function handleFallbackRouteAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -488,7 +565,7 @@ async function handleFallbackRouteAction(
   const fallbacks = loaded.config.model?.fallbacks ?? [];
   const choice = fallbacks.length === 0
     ? { id: "fallback-add" as const, fallbackOperation: "add" as const }
-    : await promptFallbackRouteAction(options.prompt, fallbacks);
+    : await promptFallbackRouteAction(options.prompt, fallbacks, options.locale);
   const currentFallback = choice.fallbackOperation === "replace" ? choice.fallback : undefined;
   const resolved = await selectResolvedProviderRoute(options, initialDecision, {
     currentProviderId: currentFallback?.provider,
@@ -515,13 +592,13 @@ async function handleFallbackRouteAction(
 }
 
 async function handleAuxiliaryRouteAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
-  const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt);
+  const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt, options.locale);
   const resolved = await selectResolvedProviderRoute(options, initialDecision);
   if (resolved.kind === "diagnostic") {
     return diagnosticResult(options, initialDecision, action.id, resolved.output);
@@ -537,7 +614,7 @@ async function handleAuxiliaryRouteAction(
 }
 
 async function handleCredentialAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
@@ -554,7 +631,7 @@ async function handleCredentialAction(
 }
 
 async function reviewAndApplyAction(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   editorAction: SetupEditorActionDraft,
@@ -578,7 +655,7 @@ async function reviewAndApplyAction(
 }
 
 function verificationDraftBundle(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   stateHome: ReturnType<typeof resolveStateHome>
@@ -594,7 +671,7 @@ function verificationDraftBundle(
 }
 
 async function reviewAndApplyBundles(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
   bundles: readonly SetupDraftBundle[],
@@ -607,7 +684,7 @@ async function reviewAndApplyBundles(
 }
 
 async function reviewAndApplyManifest(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
   reviewManifest: SetupReviewManifest,
@@ -615,9 +692,9 @@ async function reviewAndApplyManifest(
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
   } = {}
 ): Promise<ConfigEditorRunnerResult> {
-  const reviewText = renderSetupReviewManifest(reviewManifest, "en");
+  const reviewText = renderSetupReviewManifest(reviewManifest, options.locale);
   write(options, `${reviewText}\n`);
-  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, options.locale);
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
@@ -639,7 +716,7 @@ async function reviewAndApplyManifest(
 }
 
 async function finalizeReviewedApply(input: {
-  readonly options: ConfigEditorRunnerOptions;
+  readonly options: LocalizedConfigEditorRunnerOptions;
   readonly initialDecision: SetupRouteDecision;
   readonly selectedActionId: string;
   readonly reviewManifest: SetupReviewManifest;
@@ -653,8 +730,8 @@ async function finalizeReviewedApply(input: {
       })
     : undefined;
   const output = applyEndState === undefined
-    ? renderSetupApplyPlanningResult(applyPlanningResult, "en")
-    : renderSetupApplyEndState(applyEndState, "en");
+    ? renderSetupApplyPlanningResult(applyPlanningResult, options.locale)
+    : renderSetupApplyEndState(applyEndState, options.locale);
   write(options, `${output}\n`);
 
   if (applyEndState === undefined) {
@@ -684,7 +761,7 @@ async function finalizeReviewedApply(input: {
 }
 
 async function writePendingCredentialWrites(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   writes: readonly PendingCredentialWrite[]
 ): Promise<void> {
   const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
@@ -700,7 +777,7 @@ async function writePendingCredentialWrites(
 }
 
 async function handlePostApplyHandoff(input: {
-  readonly options: ConfigEditorRunnerOptions;
+  readonly options: LocalizedConfigEditorRunnerOptions;
   readonly initialDecision: SetupRouteDecision;
   readonly selectedActionId: string;
   readonly reviewManifest: SetupReviewManifest;
@@ -734,7 +811,7 @@ async function handlePostApplyHandoff(input: {
   const postApplyRouteDecision = await collectSetupRoute(options);
   const handoffState = postApplyHandoffState(applyEndState, postApplyRouteDecision);
   const handoffWarningOutput = handoffState === "degraded"
-    ? renderConcreteVerificationWarnings(applyEndState)
+    ? renderConcreteVerificationWarnings(applyEndState, options.locale)
     : undefined;
   if (handoffWarningOutput !== undefined) {
     write(options, `${handoffWarningOutput}\n`);
@@ -743,15 +820,16 @@ async function handlePostApplyHandoff(input: {
     state: handoffState,
     launchEligible: handoffState === "ready",
     limitedModeEligible: handoffState === "degraded",
-  });
+  }, options.locale);
 
   if (nextActionId === "repair-again") {
+    const repairAgainSelected = setupCopyText(options.locale, "setupEditor.result.repairAgainSelected");
     const output = [
       renderedApplyOutput,
       handoffWarningOutput,
-      "Repair again selected. Re-entering guided setup editor.",
+      repairAgainSelected,
     ].filter((line): line is string => line !== undefined).join("\n");
-    write(options, "Repair again selected. Re-entering guided setup editor.\n");
+    write(options, `${repairAgainSelected}\n`);
     return {
       completed: true,
       exitCode: 0,
@@ -779,7 +857,7 @@ async function handlePostApplyHandoff(input: {
       launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
       acceptedDegraded: false,
     };
-    const launchOutput = renderSetupApplyEndState(launchedEndState, "en");
+    const launchOutput = renderSetupApplyEndState(launchedEndState, options.locale);
     write(options, `${launchOutput}\n`);
     return {
       completed: true,
@@ -812,7 +890,7 @@ async function handlePostApplyHandoff(input: {
       launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
       acceptedDegraded: true,
     };
-    const launchOutput = renderSetupApplyEndState(launchedEndState, "en");
+    const launchOutput = renderSetupApplyEndState(launchedEndState, options.locale);
     write(options, `${launchOutput}\n`);
     return {
       completed: true,
@@ -855,7 +933,10 @@ async function handlePostApplyHandoff(input: {
   };
 }
 
-function renderConcreteVerificationWarnings(endState: SetupApplyEndState): string | undefined {
+function renderConcreteVerificationWarnings(
+  endState: SetupApplyEndState,
+  locale: SetupCopyLocale
+): string | undefined {
   const launchableEndState = launchableApplyEndState(endState);
   if (launchableEndState === undefined) return undefined;
   const warnings = [
@@ -864,7 +945,7 @@ function renderConcreteVerificationWarnings(endState: SetupApplyEndState): strin
   ].filter((warning, index, allWarnings) => warning.trim().length > 0 && allWarnings.indexOf(warning) === index);
   if (warnings.length === 0) return undefined;
   return [
-    `${setupCopyText("en", "setupEditor.postApply.warningList")}:`,
+    `${setupCopyText(locale, "setupEditor.postApply.warningList")}:`,
     ...warnings.map((warning) => `- ${warning}`),
   ].join("\n");
 }
@@ -937,12 +1018,14 @@ function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeD
 }
 
 function setupModuleContextFromConfig(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   stateHome: ReturnType<typeof resolveStateHome>,
   config: LoadedConfig
 ): SetupModuleContext {
   const telegram = recordValue(recordValue(config.channels)?.telegram);
+  const discord = recordValue(recordValue(config.channels)?.discord);
+  const whatsapp = recordValue(recordValue(config.channels)?.whatsapp);
   const browser = recordValue(config.browser);
   const voice = voiceContext(config);
   const vision = visionContext(config);
@@ -968,6 +1051,23 @@ function setupModuleContextFromConfig(
           allowedUserIds: stringArrayValue(telegram.allowedUserIds),
           allowedChatIds: stringArrayValue(telegram.allowedChatIds),
         },
+    discord: discord === undefined
+      ? undefined
+      : {
+          enabled: booleanValue(discord.enabled),
+          botTokenEnv: stringValue(discord.botTokenEnv),
+          allowedUsers: stringArrayValue(discord.allowedUsers),
+          allowedGuilds: stringArrayValue(discord.allowedGuilds),
+          allowedChannels: stringArrayValue(discord.allowedChannels),
+        },
+    whatsapp: whatsapp === undefined
+      ? undefined
+      : {
+          enabled: booleanValue(whatsapp.enabled),
+          experimental: booleanValue(whatsapp.experimental),
+          authDir: stringValue(whatsapp.authDir),
+          allowedUsers: stringArrayValue(whatsapp.allowedUsers),
+        },
     browser: browser === undefined
       ? undefined
       : {
@@ -983,12 +1083,13 @@ function setupModuleContextFromConfig(
 
 function optionalCapabilityPromptContext(
   context: SetupModuleContext,
-  module: OptionalCapabilityModule
+  module: OptionalCapabilityModule,
+  locale: SetupCopyLocale
 ): OptionalCapabilityPromptContext {
   const detection = module.detect(context);
   return {
     module,
-    title: optionalCapabilityTitle(module.id),
+    title: optionalCapabilityTitle(module.id, locale),
     configured: detection.status === "configured",
   };
 }
@@ -996,7 +1097,7 @@ function optionalCapabilityPromptContext(
 function optionalCapabilityModuleForAction(actionId: string): OptionalCapabilityModule {
   switch (actionId) {
     case "configure-channels":
-      return telegramSetupModule;
+      throw new Error("Configure channels must select a channel capability before module resolution.");
     case "configure-voice":
       return voiceSetupModule;
     case "configure-image-generation":
@@ -1008,10 +1109,22 @@ function optionalCapabilityModuleForAction(actionId: string): OptionalCapability
   }
 }
 
+function channelCapabilityModule(moduleId: "telegram" | "whatsapp" | "discord"): OptionalCapabilityModule {
+  switch (moduleId) {
+    case "telegram":
+      return telegramSetupModule;
+    case "whatsapp":
+      return whatsappSetupModule;
+    case "discord":
+      return discordSetupModule;
+  }
+}
+
 async function collectOptionalCapabilityContext(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   baseContext: SetupModuleContext,
-  module: OptionalCapabilityModule
+  module: OptionalCapabilityModule,
+  voiceMode?: VoiceCapabilityPromptId
 ): Promise<OptionalCapabilityCollectionResult> {
   switch (module.id) {
     case "telegram": {
@@ -1020,7 +1133,7 @@ async function collectOptionalCapabilityContext(
           botTokenEnv: baseContext.telegram?.botTokenEnv,
           allowedUserIds: baseContext.telegram?.allowedUserIds,
           allowedChatIds: baseContext.telegram?.allowedChatIds,
-        });
+        }, options.locale);
 
         if (hasTelegramAllowedIdentity(values)) {
           const pendingCredentialWrite = values.botToken === undefined
@@ -1039,7 +1152,77 @@ async function collectOptionalCapabilityContext(
           };
         }
 
-        const next = await promptIncompleteTelegramCapabilityAction(options.prompt);
+        const next = await promptIncompleteTelegramCapabilityAction(options.prompt, options.locale);
+        if (next !== "retry") {
+          return { kind: next };
+        }
+      }
+
+      return { kind: "skip" };
+    }
+    case "discord": {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const values = await promptDiscordCapability(options.prompt, {
+          botTokenEnv: baseContext.discord?.botTokenEnv,
+          allowedUsers: baseContext.discord?.allowedUsers,
+          allowedGuilds: baseContext.discord?.allowedGuilds,
+          allowedChannels: baseContext.discord?.allowedChannels,
+        }, options.locale);
+
+        if (hasDiscordAllowedIdentity(values)) {
+          const pendingCredentialWrite = values.botToken === undefined
+            ? undefined
+            : { envVarName: values.botTokenEnv, value: values.botToken };
+          return {
+            kind: "configured",
+            context: {
+              ...baseContext,
+              discord: {
+                enabled: true,
+                ...values,
+              },
+            },
+            pendingCredentialWrite,
+          };
+        }
+
+        const next = await promptIncompleteChannelCapabilityAction(options.prompt, {
+          title: optionalCapabilityTitle("discord", options.locale),
+          bodyKey: "setupEditor.prompt.discord.incomplete.body",
+        }, options.locale);
+        if (next !== "retry") {
+          return { kind: next };
+        }
+      }
+
+      return { kind: "skip" };
+    }
+    case "whatsapp": {
+      const defaultAuthDir = defaultWhatsAppAuthDir(options);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const values = await promptWhatsAppCapability(options.prompt, {
+          authDir: baseContext.whatsapp?.authDir ?? defaultAuthDir,
+          allowedUsers: baseContext.whatsapp?.allowedUsers,
+        }, options.locale);
+
+        if (values.allowedUsers.length > 0) {
+          return {
+            kind: "configured",
+            context: {
+              ...baseContext,
+              whatsapp: {
+                enabled: true,
+                ...values,
+                authDir: values.authDir.trim().length > 0 ? values.authDir : defaultAuthDir,
+              },
+            },
+          };
+        }
+
+        const next = await promptIncompleteChannelCapabilityAction(options.prompt, {
+          title: optionalCapabilityTitle("whatsapp", options.locale),
+          bodyKey: "setupEditor.prompt.whatsapp.incomplete.body",
+        }, options.locale);
         if (next !== "retry") {
           return { kind: next };
         }
@@ -1048,7 +1231,12 @@ async function collectOptionalCapabilityContext(
       return { kind: "skip" };
     }
     case "voice": {
-      const values = await promptVoiceCapability(options.prompt, baseContext.voice ?? {});
+      if (voiceMode === undefined) {
+        throw new Error("Configure voice must select STT or TTS before collecting provider settings.");
+      }
+      const values = voiceMode === "stt"
+        ? await promptSttCapability(options.prompt, baseContext.voice ?? {}, options.locale)
+        : await promptTtsCapability(options.prompt, baseContext.voice ?? {}, options.locale);
       return {
         kind: "configured",
         context: {
@@ -1058,7 +1246,7 @@ async function collectOptionalCapabilityContext(
       };
     }
     case "vision": {
-      const values = await promptVisionCapability(options.prompt, baseContext.vision ?? {});
+      const values = await promptVisionCapability(options.prompt, baseContext.vision ?? {}, options.locale);
       return {
         kind: "configured",
         context: {
@@ -1068,7 +1256,7 @@ async function collectOptionalCapabilityContext(
       };
     }
     case "browser": {
-      const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {});
+      const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {}, options.locale);
       return {
         kind: "configured",
         context: {
@@ -1089,23 +1277,58 @@ function hasTelegramAllowedIdentity(values: {
   return (values.allowedUserIds?.length ?? 0) > 0 || (values.allowedChatIds?.length ?? 0) > 0;
 }
 
+function hasDiscordAllowedIdentity(values: {
+  readonly allowedUsers?: readonly string[];
+  readonly allowedChannels?: readonly string[];
+}): boolean {
+  return (values.allowedUsers?.length ?? 0) > 0 || (values.allowedChannels?.length ?? 0) > 0;
+}
+
+function defaultWhatsAppAuthDir(options: Pick<ConfigEditorRunnerOptions, "homeDir" | "profileId">): string {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  return `${resolveProfileStateHome({ homeDir: options.homeDir, profileId }).gatewayStatePath}/whatsapp-auth`;
+}
+
 function optionalPromptId(moduleId: string): OptionalCapabilityPromptId {
-  if (moduleId === "telegram" || moduleId === "voice" || moduleId === "vision" || moduleId === "browser") {
+  if (moduleId === "telegram" || moduleId === "discord" || moduleId === "whatsapp" || moduleId === "voice" || moduleId === "vision" || moduleId === "browser") {
     return moduleId;
   }
   throw new Error(`Unsupported optional capability module: ${moduleId}`);
 }
 
-function optionalCapabilityTitle(moduleId: string): string {
+function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocale): string {
+  if (locale === "en") {
+    switch (moduleId) {
+      case "telegram":
+        return "Telegram/channels";
+      case "discord":
+        return "Discord beta";
+      case "whatsapp":
+        return "WhatsApp beta";
+      case "voice":
+        return "Voice";
+      case "vision":
+        return "Vision and image generation";
+      case "browser":
+        return "Browser";
+      default:
+        return moduleId;
+    }
+  }
+
   switch (moduleId) {
     case "telegram":
-      return "Telegram/channels";
+      return setupCopyText(locale, "setupModules.telegram.title");
+    case "discord":
+      return setupCopyText(locale, "setupModules.discord.title");
+    case "whatsapp":
+      return setupCopyText(locale, "setupModules.whatsapp.title");
     case "voice":
-      return "Voice";
+      return setupCopyText(locale, "setupModules.voice.title");
     case "vision":
-      return "Vision and image generation";
+      return setupCopyText(locale, "setupModules.vision.title");
     case "browser":
-      return "Browser";
+      return setupCopyText(locale, "setupModules.browser.title");
     default:
       return moduleId;
   }
@@ -1147,7 +1370,7 @@ function visionContext(config: LoadedConfig): SetupModuleContext["vision"] {
 }
 
 async function reviewAndApplyResolvedRoute(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   editorAction: SetupEditorActionDraft,
@@ -1189,9 +1412,9 @@ async function reviewAndApplyResolvedRoute(
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const reviewText = renderSetupReviewManifest(reviewManifest, "en");
+  const reviewText = renderSetupReviewManifest(reviewManifest, options.locale);
   write(options, `${reviewText}\n`);
-  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, options.locale);
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
@@ -1218,7 +1441,7 @@ async function reviewAndApplyResolvedRoute(
 }
 
 async function selectResolvedProviderRoute(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   currentRoute: {
     readonly currentProviderId?: string;
@@ -1237,7 +1460,7 @@ async function selectResolvedProviderRoute(
   const provider = await promptProviderCandidate(options.prompt, {
     candidates: providers,
     currentProviderId: currentRoute.currentProviderId ?? initialDecision.state.model?.provider,
-  });
+  }, options.locale);
   const models = await flowEngine.listModelCandidates(provider.id);
   if (models.length === 0) {
     return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
@@ -1249,7 +1472,7 @@ async function selectResolvedProviderRoute(
     currentModelId: currentRoute.currentProviderId === provider.id
       ? currentRoute.currentModelId
       : initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
-  });
+  }, options.locale);
   const resolved = await flowEngine.resolveSelection(provider.id, model.id);
   if (resolved.kind === "diagnostic") {
     return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
@@ -1259,7 +1482,7 @@ async function selectResolvedProviderRoute(
 }
 
 async function resolveActiveProviderRoute(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision
 ): Promise<
   | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
@@ -1269,7 +1492,7 @@ async function resolveActiveProviderRoute(
   if (activeRoute === undefined) {
     return {
       kind: "diagnostic",
-      output: "No active provider/model route is configured. Use provider/model repair to choose a setup-visible route.",
+      output: setupCopyText(options.locale, "setupEditor.result.activeModelMissing"),
     };
   }
 
@@ -1279,7 +1502,10 @@ async function resolveActiveProviderRoute(
   if (provider === undefined) {
     return {
       kind: "diagnostic",
-      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+      output: formatSetupCopy(options.locale, "setupEditor.result.activeModelUnavailable", {
+        providerId: activeRoute.provider,
+        modelId: activeRoute.id,
+      }),
     };
   }
 
@@ -1288,7 +1514,10 @@ async function resolveActiveProviderRoute(
   if (model === undefined) {
     return {
       kind: "diagnostic",
-      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+      output: formatSetupCopy(options.locale, "setupEditor.result.activeModelUnavailable", {
+        providerId: activeRoute.provider,
+        modelId: activeRoute.id,
+      }),
     };
   }
 
@@ -1296,7 +1525,11 @@ async function resolveActiveProviderRoute(
   if (resolved.kind === "diagnostic") {
     return {
       kind: "diagnostic",
-      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} cannot be repaired through credential-only setup: ${resolved.reason}. Use provider/model repair to choose a setup-visible route.`,
+      output: formatSetupCopy(options.locale, "setupEditor.result.activeModelCredentialUnsupported", {
+        providerId: activeRoute.provider,
+        modelId: activeRoute.id,
+        reason: resolved.reason,
+      }),
     };
   }
 
@@ -1304,7 +1537,7 @@ async function resolveActiveProviderRoute(
 }
 
 async function resolveCredentialForReview(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   resolution: ProviderModelSelectionResult
 ): Promise<
   | {
@@ -1332,7 +1565,7 @@ async function resolveCredentialForReview(
       });
 
       if (savedSecret.exists) {
-        const reuseChoice = await promptCredentialReuseChoice(options.prompt);
+        const reuseChoice = await promptCredentialReuseChoice(options.prompt, options.locale);
         if (reuseChoice === "new") {
           const promptResult = await promptForApiKeyInput({
             prompt: options.prompt,
@@ -1408,7 +1641,7 @@ function credentialReferenceAction(
 }
 
 function diagnosticResult(
-  options: ConfigEditorRunnerOptions,
+  options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
   output: string

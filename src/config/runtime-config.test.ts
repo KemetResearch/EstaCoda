@@ -442,6 +442,33 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     });
   });
 
+  it("setupVoiceConfig does not patch TTS during STT-only setup", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({}));
+
+    await setupVoiceConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        sttProvider: "openai",
+        sttModel: "gpt-4o-mini-transcribe",
+        sttApiKeyEnv: "VOICE_STT_KEY"
+      }
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.tts).toBeUndefined();
+    expect(saved.stt).toEqual({
+      provider: "openai",
+      openai: {
+        model: "gpt-4o-mini-transcribe",
+        apiKeyEnv: "VOICE_STT_KEY"
+      }
+    });
+  });
+
   it("setupVoiceConfig writes local faster-whisper schema with python binary", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -459,6 +486,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     });
 
     const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.tts).toBeUndefined();
     expect(saved.stt).toEqual({
       provider: "local",
       local: {
@@ -741,13 +769,13 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
-  it("discord ready = enabled && botTokenEnv present", async () => {
+  it("discord ready = enabled && botTokenEnv plus allowlist present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN", allowedUsers: ["user-1"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -756,7 +784,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("discord not ready when enabled but botTokenEnv missing", async () => {
+  it("discord not ready when enabled but botTokenEnv or allowlist missing", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
@@ -768,6 +796,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.discord.ready).toBe(false);
     expect(loaded.channels.discord.missing).toContain("botTokenEnv");
+    expect(loaded.channels.discord.missing).toContain("allowedUsersOrChannels");
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -777,7 +806,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN", allowedUsers: ["user-1"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -798,6 +827,7 @@ describe("loadRuntimeConfig channel readiness", () => {
         discord: {
           enabled: true,
           botTokenEnv: "DISCORD_BOT_TOKEN",
+          allowedChannels: ["channel-1"],
           voiceChannel: { enabled: true, autoJoinOnCommand: false }
         }
       }
@@ -850,13 +880,13 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("whatsapp ready = enabled && experimental true", async () => {
+  it("whatsapp ready = enabled && experimental true with auth dir and allowlist", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { whatsapp: { enabled: true, experimental: true } }
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: "/tmp/estacoda-whatsapp-auth", allowedUsers: ["971501234567"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -877,6 +907,8 @@ describe("loadRuntimeConfig channel readiness", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(false);
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
+    expect(loaded.channels.whatsapp.missing).toContain("authDir");
+    expect(loaded.channels.whatsapp.missing).toContain("allowedUsers");
     await rm(workspace, { recursive: true, force: true });
   });
 });
@@ -1371,6 +1403,47 @@ describe("loadRuntimeConfig media boundary", () => {
       provider: "groq",
       model: "whisper-large-v3"
     });
+  });
+
+  it("defaults response progress visibility to hidden", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(false);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("loads enabled response progress visibility", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ui: { showResponseProgress: true }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(true);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes non-true response progress visibility to hidden", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      ui: { showResponseProgress: "yes" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.ui.showResponseProgress).toBe(false);
+    await rm(workspace, { recursive: true, force: true });
   });
 });
 

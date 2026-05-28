@@ -71,6 +71,7 @@ export type SessionLoopOptions = {
   workspaceRoot?: string;
   homeDir?: string;
   locale?: import("../contracts/ui.js").UiLocale;
+  showResponseProgress?: boolean;
   capabilities?: TerminalCapabilities;
   cliVoice?: {
     recorder?: CliVoiceRecorder;
@@ -810,7 +811,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           label: response.label,
           text: response.text,
           matchedSkills: response.matchedSkills,
-          progress: response.progress,
+          progress: options.showResponseProgress === true ? response.progress : undefined,
         });
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));

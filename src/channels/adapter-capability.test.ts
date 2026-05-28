@@ -117,10 +117,10 @@ describe("buildAdapterCapability", () => {
     expect(cap.supportsAttachments).toBe(false);
   });
 
-  it("discord ready only when enabled and botTokenEnv is set", () => {
+  it("discord ready only when enabled and required config is present", () => {
     const capReady = buildAdapterCapability({
       kind: "discord",
-      config: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" },
+      config: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN", allowedUsers: ["user-1"] },
       missing: [],
     });
     expect(capReady.enabled).toBe(true);
@@ -162,10 +162,10 @@ describe("buildAdapterCapability", () => {
     expect(capMissing.missingConfig).toEqual(["imapHost", "smtpHost"]);
   });
 
-  it("whatsapp ready only when enabled and experimental is true", () => {
+  it("whatsapp ready only when enabled and required beta config is present", () => {
     const capReady = buildAdapterCapability({
       kind: "whatsapp",
-      config: { enabled: true, experimental: true },
+      config: { enabled: true, experimental: true, authDir: "/tmp/estacoda-whatsapp-auth", allowedUsers: ["971501234567"] },
       missing: [],
     });
     expect(capReady.enabled).toBe(true);

@@ -109,6 +109,7 @@ describe("buildSetupEditorPlan", () => {
       "credentials",
       "security-mode",
       "workflow-learning",
+      "interface-preference",
       "workspace-trust",
       "optional-capabilities",
       "verification",
@@ -233,6 +234,20 @@ describe("buildSetupEditorPlan", () => {
     expect(workflow?.reviewValues).toEqual({ workflowLearning: "suggest" });
   });
 
+  it("exposes language editing as a scoped reviewed UI preferences action", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const language = plan.actions.find((action) => action.id === "edit-language");
+
+    expect(language).toEqual(expect.objectContaining({
+      sectionId: "interface-preference",
+      effect: "draft-config-patch",
+      patch: expect.objectContaining({
+        fields: ["ui.language", "ui.flavor", "ui.activityLabels"],
+        preserveUnrelatedConfig: true,
+      }),
+    }));
+  });
+
   it("represents optional capabilities as independent placeholders", () => {
     const capabilities = section(buildSetupEditorPlan(state("configured-ready")), "optional-capabilities");
 
@@ -266,6 +281,7 @@ describe("buildSetupEditorPlan", () => {
       "edit-auxiliary-model-route",
       "edit-security-mode",
       "edit-workflow-learning",
+      "edit-language",
       "configure-channels",
       "configure-voice",
       "configure-image-generation",

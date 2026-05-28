@@ -286,6 +286,7 @@ async function main(): Promise<void> {
       runtime,
       workspaceRoot,
       locale: launchLocale ?? (config.ui.language === "ar" ? "ar" : "en"),
+      showResponseProgress: config.ui.showResponseProgress,
       refreshRuntime: async (options) => {
         const nextRuntime = await buildRuntime({
           sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),

@@ -16,7 +16,7 @@ export const darkTheme: UiTokenContract = {
     bg: "#1A1A1A",
     bgElevated: "#252525",
     bgInset: "#111111",
-    border: "#333333",
+    border: "#ededed",
     borderSubtle: "#2A2A2A",
   },
   text: {
@@ -24,6 +24,7 @@ export const darkTheme: UiTokenContract = {
     secondary: "#B0B0B0",
     muted: "#707070",
     inverse: "#1A1A1A",
+    agentMessage: "#E8E8E8",
   },
   interactive: {
     primary: "#5AACFF",

@@ -10,6 +10,7 @@ import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
 import { promptModelCandidate } from "./prompts.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
+import { isolateLtr } from "../../ui/bidi.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -61,22 +62,76 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.applyEndState).toBeUndefined();
     expect(applyCalled).toBe(false);
-    expect(output.join("")).toContain("EstaCoda guided setup editor");
+    expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
     expect(output.join("")).toContain("edit-auxiliary-model-route");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
+    expect(output.join("")).toContain("edit-language - Edit language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
     expect(output.join("")).toContain("configure-browser");
     expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Run read-only verification");
+    expect(output.join("")).toContain("verify-setup - Run setup verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("renders setup editor copy with the configured Arabic locale", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const prompts: Array<{ title: string; body: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompt = fakePrompt();
+    prompt.select = async (input) => {
+      prompts.push({
+        title: input.title,
+        body: input.body ?? "",
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+      });
+      const exit = input.options.find((option) =>
+        typeof option.value === "object" &&
+        option.value !== null &&
+        "id" in option.value &&
+        option.value.id === "exit"
+      );
+      return exit?.value ?? input.options[0]!.value;
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(output.join("")).toContain("محرّر الإعدادات");
+    expect(output.join("")).toContain("عدّل النموذج الأساسي");
+    expect(output.join("")).toContain("حدّد المزوّد والنموذج اللي يستخدمه الوكيل.");
+    expect(output.join("")).toContain("فعّل قنوات التحكم عن بُعد مثل");
+    expect(output.join("")).toContain(isolateLtr("Telegram"));
+    expect(prompts[0]?.title).toBe("محرّر الإعدادات");
+    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
+    expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
+    expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
   });
 
   it("renders only actionable model status tags in config-editor model choices", async () => {
@@ -118,7 +173,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("verify-setup");
     expect(result.finalDecision?.kind).toBe("verify-readonly");
     expect(result.finalDecision?.setupEditorPlanSession).toBeUndefined();
-    expect(result.output).toContain("Read-only setup verification route prepared");
+    expect(result.output).toContain("Setup verification prepared");
   });
 
   it("shows diagnostics for configured states without requiring a repair route action", async () => {
@@ -154,7 +209,7 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.selectedActionId).toBe("review-edit-config");
-    expect(result.output).toContain("not available in the guided setup editor");
+    expect(result.output).toContain("not available in the setup editor");
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.applyEndState).toBeUndefined();
@@ -269,6 +324,109 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
     expect(config.skills?.autonomy).toBe("autonomous");
     expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
+  });
+
+  it("applies reviewed language changes through shared interface preference prompts", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "en",
+        flavor: "standard",
+        activityLabels: "en",
+      },
+      security: {
+        approvalMode: "adaptive",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompt = fakePrompt({ values: ["ar"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      prompts.push({
+        title: input.title,
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+      });
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-language",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+      security?: { approvalMode?: string };
+      model?: unknown;
+    };
+    const uiLine = result.reviewManifest?.sections["files-to-write-update"]
+      .find((line) => line.review.summaryKey === "setupDrafts.uiPreferences.summary");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-language");
+    expect(prompts[0]?.title).toBe("Setup language");
+    expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
+    expect(prompts[1]?.title).toBe("أسلوب الواجهة");
+    expect(prompts[1]?.labels).toContain("عربي خفيف");
+    expect(uiLine?.review.values).toEqual(expect.objectContaining({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    }));
+    expect(config.ui).toEqual({
+      language: "ar",
+      flavor: "arabic-light",
+      activityLabels: "ar",
+    });
+    expect(config.security?.approvalMode).toBe("adaptive");
+    expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+  });
+
+  it("resets Arabic activity labels when changing language back to English", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      ui: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["en"] }),
+      defaultActionId: "edit-language",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+    const uiLine = result.reviewManifest?.sections["files-to-write-update"]
+      .find((line) => line.review.summaryKey === "setupDrafts.uiPreferences.summary");
+
+    expect(result.completed).toBe(true);
+    expect(uiLine?.review.values).toEqual(expect.objectContaining({
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    }));
+    expect(config.ui).toEqual({
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    });
   });
 
   it("launches only after reviewed apply, verification, route re-collection, and explicit launch choice", async () => {
@@ -449,8 +607,8 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
-    expect(output.join("").match(/EstaCoda guided setup editor/g)).toHaveLength(2);
-    expect(output.join("")).toContain("Repair again selected. Re-entering guided setup editor.");
+    expect(output.join("").match(/Setup Editor/g)).toHaveLength(2);
+    expect(output.join("")).toContain("Repair again selected. Re-entering setup editor.");
   });
 
   it("applies guided provider route repair through the shared flow and reviewed executor", async () => {
@@ -563,7 +721,7 @@ describe("runConfigEditor", () => {
     const fallbackChoiceTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback provider/model route") {
+      if (input.title === "Fallback models") {
         fallbackChoiceTitles.push(input.title);
       }
       return baseSelect(input);
@@ -628,7 +786,7 @@ describe("runConfigEditor", () => {
     const fallbackChoiceLabels: string[][] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback provider/model route") {
+      if (input.title === "Fallback models") {
         fallbackChoiceLabels.push(input.options.map((option) => option.label));
       }
       return baseSelect(input);
@@ -650,7 +808,7 @@ describe("runConfigEditor", () => {
     expect(fallbackChoiceLabels).toEqual([[
       "Edit fallback 1: openai/gpt-5.5",
       "Edit fallback 2: kimi/kimi-k2",
-      "Add another fallback route",
+      "Add another fallback model",
     ]]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
@@ -723,7 +881,7 @@ describe("runConfigEditor", () => {
     const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Choose auxiliary route.") {
+      if (input.title === "Choose auxiliary model.") {
         taskOptions.push({
           labels: input.options.map((option) => option.label),
           values: input.options.map((option) => option.value),
@@ -1177,8 +1335,9 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(optionLabels[0]).toEqual(["Leave unchanged", "Enable/configure"]);
-    expect(optionLabels).toHaveLength(1);
+    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
+    expect(optionLabels[1]).toEqual(["Leave unchanged", "Enable/configure"]);
+    expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
   });
 
@@ -1191,7 +1350,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
+        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
       }),
       defaultActionId: "configure-channels",
     });
@@ -1213,6 +1372,7 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
+          "telegram",
           "enable",
           "TELEGRAM_BOT_TOKEN",
           "",
@@ -1242,7 +1402,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
+        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
         secret: "123456:stored-telegram-token",
       }),
       defaultActionId: "configure-channels",
@@ -1276,7 +1436,7 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
-  it("configures voice without drafting other optional capabilities", async () => {
+  it("applies reviewed Discord beta channel with env ref and fail-closed allowlist", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -1284,14 +1444,158 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
+        values: ["discord", "enable", "DISCORD_BOT_TOKEN", "user-42", "guild-7", "channel-9", true],
+        secret: "discord-token-value",
+      }),
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: {
+        discord?: {
+          enabled?: boolean;
+          botTokenEnv?: string;
+          allowedUsers?: string[];
+          allowedGuilds?: string[];
+          allowedChannels?: string[];
+        };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-channels");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.discord.capability",
+    ]);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-discord-user-or-channel");
+    expect(config.channels?.discord).toEqual(expect.objectContaining({
+      enabled: true,
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-42"],
+      allowedGuilds: ["guild-7"],
+      allowedChannels: ["channel-9"],
+    }));
+    expect(rawConfig).not.toContain("discord-token-value");
+    expect(envFile).toContain('DISCORD_BOT_TOKEN="discord-token-value"');
+    expect(JSON.stringify(result)).not.toContain("discord-token-value");
+  });
+
+  it("does not draft Discord beta channel enablement without allowed users or channels", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["discord", "enable", "DISCORD_BOT_TOKEN", "", "", "", "skip", true],
+        secret: "discord-token-value",
+      }),
+      defaultActionId: "configure-channels",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
+    expect(JSON.stringify(result)).not.toContain("discord-token-value");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("applies reviewed WhatsApp beta channel with profile-local auth and allowed users", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["whatsapp", "enable", "971501234567", true],
+      }),
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: {
+        whatsapp?: {
+          enabled?: boolean;
+          experimental?: boolean;
+          authDir?: string;
+          allowedUsers?: string[];
+        };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.whatsapp.capability",
+    ]);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values).toEqual(expect.objectContaining({
+      beta: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+      remoteControlIdentityConstraint: "allowed-whatsapp-users",
+    }));
+    expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
+      enabled: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+    }));
+    expect(config.channels?.whatsapp?.authDir).toContain("/gateway/whatsapp-auth");
+  });
+
+  it("does not draft WhatsApp beta channel enablement without allowed users", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["whatsapp", "enable", "", "skip", true],
+      }),
+      defaultActionId: "configure-channels",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("configures TTS voice without drafting STT or other optional capabilities", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      stt: {
+        provider: "local",
+        local: {
+          engine: "command",
+          command: "existing-stt-command",
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
         values: [
+          "tts",
           "enable",
           "openai",
           "gpt-4o-mini-tts",
           "VOICE_TTS_KEY",
-          "openai",
-          "gpt-4o-mini-transcribe",
-          "VOICE_STT_KEY",
           true,
         ],
       }),
@@ -1312,16 +1616,73 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "VOICE_TTS_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.voice.capability",
     ]);
     expect(config.tts?.provider).toBe("openai");
     expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
-    expect(config.stt?.provider).toBe("openai");
-    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.stt).toEqual({
+      provider: "local",
+      local: {
+        engine: "command",
+        command: "existing-stt-command",
+      },
+    });
     expect(config.channels).toBeUndefined();
     expect(config.imageGen).toBeUndefined();
     expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures STT voice without drafting or writing TTS", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "stt",
+          "enable",
+          "openai",
+          "gpt-4o-mini-transcribe",
+          "VOICE_STT_KEY",
+          true,
+        ],
+      }),
+      defaultActionId: "configure-voice",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      tts?: unknown;
+      stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "VOICE_STT_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
+    expect(config.tts).toBeUndefined();
+    expect(config.stt?.provider).toBe("openai");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
@@ -1445,13 +1806,16 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.kind).toBe("repair-first-menu");
     expect(result.initialDecision.state.kind).toBe("broken-config");
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
+    expect(output.join("")).toContain("Setup Editor");
+    expect(output.join("")).toContain("Available actions:");
+    expect(output.join("")).not.toContain("محرّر الإعدادات");
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: broken-config");
     expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Run read-only verification");
+    expect(output.join("")).toContain("verify-setup - Run setup verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");

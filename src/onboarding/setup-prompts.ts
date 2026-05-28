@@ -223,7 +223,7 @@ function reviewPlaceholderValues(
     providerId: values.providerId ?? values.provider,
     modelId: values.modelId ?? values.model,
     envVar: values.envVar ?? values.botTokenEnv ?? (Array.isArray(envVars) ? envVars.join(", ") : envVars),
-    identityRefs: values.identityRefs ?? telegramIdentityRefs(values),
+    identityRefs: values.identityRefs ?? remoteControlIdentityRefs(values),
     workspacePath: values.workspacePath ?? values.workspaceRoot,
     workflowMode: values.workflowMode ?? values.workflowLearning,
     capabilities: values.capabilities,
@@ -231,12 +231,18 @@ function reviewPlaceholderValues(
   };
 }
 
-function telegramIdentityRefs(values: Record<string, SetupPromptValue>): string | undefined {
+function remoteControlIdentityRefs(values: Record<string, SetupPromptValue>): string | undefined {
   const allowedUserIds = Array.isArray(values.allowedUserIds) ? values.allowedUserIds : [];
   const allowedChatIds = Array.isArray(values.allowedChatIds) ? values.allowedChatIds : [];
+  const allowedUsers = Array.isArray(values.allowedUsers) ? values.allowedUsers : [];
+  const allowedGuilds = Array.isArray(values.allowedGuilds) ? values.allowedGuilds : [];
+  const allowedChannels = Array.isArray(values.allowedChannels) ? values.allowedChannels : [];
   const refs = [
     ...allowedUserIds.map((id) => `user:${id}`),
     ...allowedChatIds.map((id) => `chat:${id}`),
+    ...allowedUsers.map((id) => `user:${id}`),
+    ...allowedGuilds.map((id) => `guild:${id}`),
+    ...allowedChannels.map((id) => `channel:${id}`),
   ];
   return refs.length > 0 ? refs.join(", ") : undefined;
 }

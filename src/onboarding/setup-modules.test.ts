@@ -200,6 +200,51 @@ describe("setup modules", () => {
     expect(json).not.toContain("sk-voice-do-not-render");
   });
 
+  it("voice module review values only include the configured side", () => {
+    const sttDraft = voiceSetupModule.toDrafts(context({
+      voice: {
+        sttProvider: "openai",
+        sttModel: "gpt-4o-mini-transcribe",
+        sttApiKeyEnv: "OPENAI_API_KEY",
+      },
+    }))[0];
+    const ttsDraft = voiceSetupModule.toDrafts(context({
+      voice: {
+        ttsProvider: "openai",
+        ttsModel: "gpt-4o-mini-tts",
+        ttsApiKeyEnv: "OPENAI_API_KEY",
+      },
+    }))[0];
+    const localSttDraft = voiceSetupModule.toDrafts(context({
+      voice: {
+        sttProvider: "local",
+        sttModel: "base",
+        sttApiKeyEnv: "",
+      },
+    }))[0];
+
+    expect(sttDraft?.review.values).toMatchObject({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(sttDraft?.review.values).not.toHaveProperty("ttsProvider");
+    expect(ttsDraft?.review.values).toMatchObject({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    });
+    expect(ttsDraft?.review.values).not.toHaveProperty("sttProvider");
+    expect(localSttDraft?.review.values).toMatchObject({
+      sttProvider: "local",
+      sttModel: "base",
+      secretValuesIncluded: false,
+    });
+    expect(localSttDraft?.review.values).not.toHaveProperty("sttApiKeyEnv");
+  });
+
   it("image and vision module lists provider and model without secret value", () => {
     const draft = visionSetupModule.toDrafts(context({
       vision: {
