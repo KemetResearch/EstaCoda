@@ -35,9 +35,11 @@ import type { SetupDraft, SetupDraftBundle } from "../setup-drafts.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
 import {
   browserSetupModule,
+  discordSetupModule,
   telegramSetupModule,
   visionSetupModule,
   voiceSetupModule,
+  whatsappSetupModule,
   type SetupModuleContext,
 } from "../setup-modules.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
@@ -62,7 +64,10 @@ import {
   promptConfigEditorReviewApproval,
   promptAuxiliaryModelTask,
   promptBrowserCapability,
+  promptChannelCapability,
   promptCredentialReuseChoice,
+  promptDiscordCapability,
+  promptIncompleteChannelCapabilityAction,
   promptFallbackRouteAction,
   promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
@@ -72,6 +77,7 @@ import {
   promptSecurityMode,
   promptTelegramCapability,
   promptVisionCapability,
+  promptWhatsAppCapability,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
@@ -120,7 +126,13 @@ type PendingCredentialWrite = {
   readonly value: string;
 };
 
-type OptionalCapabilityModule = typeof telegramSetupModule | typeof voiceSetupModule | typeof visionSetupModule | typeof browserSetupModule;
+type OptionalCapabilityModule =
+  | typeof telegramSetupModule
+  | typeof discordSetupModule
+  | typeof whatsappSetupModule
+  | typeof voiceSetupModule
+  | typeof visionSetupModule
+  | typeof browserSetupModule;
 
 type OptionalCapabilityPromptContext = {
   readonly module: OptionalCapabilityModule;
@@ -448,9 +460,12 @@ async function handleOptionalCapabilityAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
+  const module = action.id === "configure-channels"
+    ? channelCapabilityModule(await promptChannelCapability(options.prompt, options.locale))
+    : optionalCapabilityModuleForAction(action.id);
   const promptContext = optionalCapabilityPromptContext(
     baseContext,
-    optionalCapabilityModuleForAction(action.id),
+    module,
     options.locale
   );
   const selectedDrafts: SetupDraft[] = [];
@@ -1000,6 +1015,8 @@ function setupModuleContextFromConfig(
   config: LoadedConfig
 ): SetupModuleContext {
   const telegram = recordValue(recordValue(config.channels)?.telegram);
+  const discord = recordValue(recordValue(config.channels)?.discord);
+  const whatsapp = recordValue(recordValue(config.channels)?.whatsapp);
   const browser = recordValue(config.browser);
   const voice = voiceContext(config);
   const vision = visionContext(config);
@@ -1024,6 +1041,23 @@ function setupModuleContextFromConfig(
           botTokenEnv: stringValue(telegram.botTokenEnv),
           allowedUserIds: stringArrayValue(telegram.allowedUserIds),
           allowedChatIds: stringArrayValue(telegram.allowedChatIds),
+        },
+    discord: discord === undefined
+      ? undefined
+      : {
+          enabled: booleanValue(discord.enabled),
+          botTokenEnv: stringValue(discord.botTokenEnv),
+          allowedUsers: stringArrayValue(discord.allowedUsers),
+          allowedGuilds: stringArrayValue(discord.allowedGuilds),
+          allowedChannels: stringArrayValue(discord.allowedChannels),
+        },
+    whatsapp: whatsapp === undefined
+      ? undefined
+      : {
+          enabled: booleanValue(whatsapp.enabled),
+          experimental: booleanValue(whatsapp.experimental),
+          authDir: stringValue(whatsapp.authDir),
+          allowedUsers: stringArrayValue(whatsapp.allowedUsers),
         },
     browser: browser === undefined
       ? undefined
@@ -1054,7 +1088,7 @@ function optionalCapabilityPromptContext(
 function optionalCapabilityModuleForAction(actionId: string): OptionalCapabilityModule {
   switch (actionId) {
     case "configure-channels":
-      return telegramSetupModule;
+      throw new Error("Configure channels must select a channel capability before module resolution.");
     case "configure-voice":
       return voiceSetupModule;
     case "configure-image-generation":
@@ -1063,6 +1097,17 @@ function optionalCapabilityModuleForAction(actionId: string): OptionalCapability
       return browserSetupModule;
     default:
       throw new Error(`Unsupported optional capability action: ${actionId}`);
+  }
+}
+
+function channelCapabilityModule(moduleId: "telegram" | "whatsapp" | "discord"): OptionalCapabilityModule {
+  switch (moduleId) {
+    case "telegram":
+      return telegramSetupModule;
+    case "whatsapp":
+      return whatsappSetupModule;
+    case "discord":
+      return discordSetupModule;
   }
 }
 
@@ -1098,6 +1143,76 @@ async function collectOptionalCapabilityContext(
         }
 
         const next = await promptIncompleteTelegramCapabilityAction(options.prompt, options.locale);
+        if (next !== "retry") {
+          return { kind: next };
+        }
+      }
+
+      return { kind: "skip" };
+    }
+    case "discord": {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const values = await promptDiscordCapability(options.prompt, {
+          botTokenEnv: baseContext.discord?.botTokenEnv,
+          allowedUsers: baseContext.discord?.allowedUsers,
+          allowedGuilds: baseContext.discord?.allowedGuilds,
+          allowedChannels: baseContext.discord?.allowedChannels,
+        }, options.locale);
+
+        if (hasDiscordAllowedIdentity(values)) {
+          const pendingCredentialWrite = values.botToken === undefined
+            ? undefined
+            : { envVarName: values.botTokenEnv, value: values.botToken };
+          return {
+            kind: "configured",
+            context: {
+              ...baseContext,
+              discord: {
+                enabled: true,
+                ...values,
+              },
+            },
+            pendingCredentialWrite,
+          };
+        }
+
+        const next = await promptIncompleteChannelCapabilityAction(options.prompt, {
+          title: optionalCapabilityTitle("discord", options.locale),
+          bodyKey: "setupEditor.prompt.discord.incomplete.body",
+        }, options.locale);
+        if (next !== "retry") {
+          return { kind: next };
+        }
+      }
+
+      return { kind: "skip" };
+    }
+    case "whatsapp": {
+      const defaultAuthDir = defaultWhatsAppAuthDir(options);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const values = await promptWhatsAppCapability(options.prompt, {
+          authDir: baseContext.whatsapp?.authDir ?? defaultAuthDir,
+          allowedUsers: baseContext.whatsapp?.allowedUsers,
+        }, options.locale);
+
+        if (values.allowedUsers.length > 0) {
+          return {
+            kind: "configured",
+            context: {
+              ...baseContext,
+              whatsapp: {
+                enabled: true,
+                ...values,
+                authDir: values.authDir.trim().length > 0 ? values.authDir : defaultAuthDir,
+              },
+            },
+          };
+        }
+
+        const next = await promptIncompleteChannelCapabilityAction(options.prompt, {
+          title: optionalCapabilityTitle("whatsapp", options.locale),
+          bodyKey: "setupEditor.prompt.whatsapp.incomplete.body",
+        }, options.locale);
         if (next !== "retry") {
           return { kind: next };
         }
@@ -1147,8 +1262,20 @@ function hasTelegramAllowedIdentity(values: {
   return (values.allowedUserIds?.length ?? 0) > 0 || (values.allowedChatIds?.length ?? 0) > 0;
 }
 
+function hasDiscordAllowedIdentity(values: {
+  readonly allowedUsers?: readonly string[];
+  readonly allowedChannels?: readonly string[];
+}): boolean {
+  return (values.allowedUsers?.length ?? 0) > 0 || (values.allowedChannels?.length ?? 0) > 0;
+}
+
+function defaultWhatsAppAuthDir(options: Pick<ConfigEditorRunnerOptions, "homeDir" | "profileId">): string {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  return `${resolveProfileStateHome({ homeDir: options.homeDir, profileId }).gatewayStatePath}/whatsapp-auth`;
+}
+
 function optionalPromptId(moduleId: string): OptionalCapabilityPromptId {
-  if (moduleId === "telegram" || moduleId === "voice" || moduleId === "vision" || moduleId === "browser") {
+  if (moduleId === "telegram" || moduleId === "discord" || moduleId === "whatsapp" || moduleId === "voice" || moduleId === "vision" || moduleId === "browser") {
     return moduleId;
   }
   throw new Error(`Unsupported optional capability module: ${moduleId}`);
@@ -1159,6 +1286,10 @@ function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocale): str
     switch (moduleId) {
       case "telegram":
         return "Telegram/channels";
+      case "discord":
+        return "Discord beta";
+      case "whatsapp":
+        return "WhatsApp beta";
       case "voice":
         return "Voice";
       case "vision":
@@ -1173,6 +1304,10 @@ function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocale): str
   switch (moduleId) {
     case "telegram":
       return setupCopyText(locale, "setupModules.telegram.title");
+    case "discord":
+      return setupCopyText(locale, "setupModules.discord.title");
+    case "whatsapp":
+      return setupCopyText(locale, "setupModules.whatsapp.title");
     case "voice":
       return setupCopyText(locale, "setupModules.voice.title");
     case "vision":

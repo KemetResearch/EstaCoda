@@ -20,8 +20,10 @@ import {
   setupSkillConfig,
   setupModelFallbackConfig,
   setupAuxiliaryModelConfig,
+  setupDiscordConfig,
   setupTelegramConfig,
   setupUiConfig,
+  setupWhatsAppConfig,
   setupVoiceConfig,
   type ActivityLabelsLocale,
   type ImageGenerationProvider,
@@ -191,6 +193,12 @@ async function applyConfigPatch(
       return;
     case "setupModules.telegram.draft":
       await applyTelegramCapability(operation, options);
+      return;
+    case "setupModules.discord.draft":
+      await applyDiscordCapability(operation, options);
+      return;
+    case "setupModules.whatsapp.draft":
+      await applyWhatsAppCapability(operation, options);
       return;
     case "setupModules.voice.draft":
       await applyVoiceCapability(operation, options);
@@ -453,6 +461,51 @@ async function applyTelegramCapability(
       botTokenEnv,
       allowedUserIds,
       allowedChatIds,
+    },
+  });
+}
+
+async function applyDiscordCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const botTokenEnv = stringValue(operation.review.values.botTokenEnv ?? operation.review.values.envVar) ?? "ESTACODA_DISCORD_BOT_TOKEN";
+  const allowedUsers = arrayValue(operation.review.values.allowedUsers);
+  const allowedGuilds = arrayValue(operation.review.values.allowedGuilds);
+  const allowedChannels = arrayValue(operation.review.values.allowedChannels);
+  if (allowedUsers.length === 0 && allowedChannels.length === 0) {
+    throw new Error("Discord apply requires at least one allowed user or channel.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupDiscordConfig({
+    ...target,
+    input: {
+      enabled: true,
+      botTokenEnv,
+      allowedUsers,
+      allowedGuilds,
+      allowedChannels,
+    },
+  });
+}
+
+async function applyWhatsAppCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const allowedUsers = arrayValue(operation.review.values.allowedUsers);
+  const authDir = stringValue(operation.review.values.authDir);
+  if (allowedUsers.length === 0) {
+    throw new Error("WhatsApp apply requires allowed user numbers.");
+  }
+  const target = configApplyTarget(operation, options);
+  await setupWhatsAppConfig({
+    ...target,
+    input: {
+      enabled: true,
+      experimental: true,
+      authDir,
+      allowedUsers,
     },
   });
 }

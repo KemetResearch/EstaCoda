@@ -1335,8 +1335,9 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(optionLabels[0]).toEqual(["Leave unchanged", "Enable/configure"]);
-    expect(optionLabels).toHaveLength(1);
+    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
+    expect(optionLabels[1]).toEqual(["Leave unchanged", "Enable/configure"]);
+    expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
   });
 
@@ -1349,7 +1350,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
+        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
       }),
       defaultActionId: "configure-channels",
     });
@@ -1371,6 +1372,7 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
+          "telegram",
           "enable",
           "TELEGRAM_BOT_TOKEN",
           "",
@@ -1400,7 +1402,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
+        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
         secret: "123456:stored-telegram-token",
       }),
       defaultActionId: "configure-channels",
@@ -1432,6 +1434,143 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("123456:");
     expect(envFile).toContain('TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
     expect(JSON.stringify(result)).not.toContain("123456:");
+  });
+
+  it("applies reviewed Discord beta channel with env ref and fail-closed allowlist", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["discord", "enable", "DISCORD_BOT_TOKEN", "user-42", "guild-7", "channel-9", true],
+        secret: "discord-token-value",
+      }),
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: {
+        discord?: {
+          enabled?: boolean;
+          botTokenEnv?: string;
+          allowedUsers?: string[];
+          allowedGuilds?: string[];
+          allowedChannels?: string[];
+        };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-channels");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.discord.capability",
+    ]);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-discord-user-or-channel");
+    expect(config.channels?.discord).toEqual(expect.objectContaining({
+      enabled: true,
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-42"],
+      allowedGuilds: ["guild-7"],
+      allowedChannels: ["channel-9"],
+    }));
+    expect(rawConfig).not.toContain("discord-token-value");
+    expect(envFile).toContain('DISCORD_BOT_TOKEN="discord-token-value"');
+    expect(JSON.stringify(result)).not.toContain("discord-token-value");
+  });
+
+  it("does not draft Discord beta channel enablement without allowed users or channels", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["discord", "enable", "DISCORD_BOT_TOKEN", "", "", "", "skip", true],
+        secret: "discord-token-value",
+      }),
+      defaultActionId: "configure-channels",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
+    expect(JSON.stringify(result)).not.toContain("discord-token-value");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("applies reviewed WhatsApp beta channel with profile-local auth and allowed users", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["whatsapp", "enable", "971501234567", true],
+      }),
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: {
+        whatsapp?: {
+          enabled?: boolean;
+          experimental?: boolean;
+          authDir?: string;
+          allowedUsers?: string[];
+        };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.whatsapp.capability",
+    ]);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values).toEqual(expect.objectContaining({
+      beta: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+      remoteControlIdentityConstraint: "allowed-whatsapp-users",
+    }));
+    expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
+      enabled: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+    }));
+    expect(config.channels?.whatsapp?.authDir).toContain("/gateway/whatsapp-auth");
+  });
+
+  it("does not draft WhatsApp beta channel enablement without allowed users", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["whatsapp", "enable", "", "skip", true],
+      }),
+      defaultActionId: "configure-channels",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("configures voice without drafting other optional capabilities", async () => {

@@ -18,7 +18,9 @@ import type { ConfigEditorRenderedAction } from "./render.js";
 
 export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 
-export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "browser";
+export type OptionalCapabilityPromptId = "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "browser";
+
+export type ChannelCapabilityPromptId = "telegram" | "whatsapp" | "discord";
 
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
@@ -256,6 +258,37 @@ export async function promptConfigEditorReviewApproval(
       },
     ],
     defaultValue: true,
+  });
+}
+
+export async function promptChannelCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<ChannelCapabilityPromptId> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.channels.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.channels.body")}\n`,
+    choices: [
+      {
+        id: "channel-telegram",
+        label: setupCopyText(locale, "setupEditor.prompt.channels.telegram"),
+        description: setupCopyText(locale, "setupEditor.prompt.channels.telegram.description"),
+        value: "telegram" as const,
+      },
+      {
+        id: "channel-whatsapp",
+        label: setupCopyText(locale, "setupEditor.prompt.channels.whatsapp"),
+        description: setupCopyText(locale, "setupEditor.prompt.channels.whatsapp.description"),
+        value: "whatsapp" as const,
+      },
+      {
+        id: "channel-discord",
+        label: setupCopyText(locale, "setupEditor.prompt.channels.discord"),
+        description: setupCopyText(locale, "setupEditor.prompt.channels.discord.description"),
+        value: "discord" as const,
+      },
+    ],
+    defaultValue: "telegram" as const,
   });
 }
 
@@ -502,6 +535,133 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+export async function promptDiscordCapability(
+  prompt: Prompt,
+  current: {
+    readonly botTokenEnv?: string;
+    readonly allowedUsers?: readonly string[];
+    readonly allowedGuilds?: readonly string[];
+    readonly allowedChannels?: readonly string[];
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<{
+  readonly botTokenEnv: string;
+  readonly botToken?: string;
+  readonly allowedUsers: readonly string[];
+  readonly allowedGuilds: readonly string[];
+  readonly allowedChannels: readonly string[];
+}> {
+  const botTokenEnv = await promptSetupStringWithDefault(
+    prompt,
+    [
+      setupCopyText(locale, "setupEditor.prompt.discord.summary"),
+      setupCopyText(locale, "setupEditor.prompt.discord.beta"),
+      setupCopyText(locale, "setupEditor.prompt.discord.remoteControlRisk"),
+      `${setupCopyText(locale, "setupEditor.prompt.discord.botTokenEnv")} [ESTACODA_DISCORD_BOT_TOKEN]: `,
+    ].join("\n"),
+    current.botTokenEnv ?? "ESTACODA_DISCORD_BOT_TOKEN"
+  );
+  const botTokenInput = await promptForApiKeyInput({
+    prompt,
+    providerId: "discord",
+    envVarName: botTokenEnv,
+    question: `${setupCopyText(locale, "setupEditor.prompt.discord.botToken")}: `,
+  });
+  const allowedUsers = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedUsers")}, comma-separated: `,
+    (current.allowedUsers ?? []).join(",")
+  ));
+  const allowedGuilds = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedGuilds")}, comma-separated: `,
+    (current.allowedGuilds ?? []).join(",")
+  ));
+  const allowedChannels = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedChannels")}, comma-separated: `,
+    (current.allowedChannels ?? []).join(",")
+  ));
+
+  return {
+    botTokenEnv,
+    botToken: botTokenInput.kind === "entered" ? botTokenInput.value : undefined,
+    allowedUsers,
+    allowedGuilds,
+    allowedChannels,
+  };
+}
+
+export async function promptWhatsAppCapability(
+  prompt: Prompt,
+  current: {
+    readonly authDir?: string;
+    readonly allowedUsers?: readonly string[];
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<{
+  readonly experimental: true;
+  readonly authDir: string;
+  readonly allowedUsers: readonly string[];
+}> {
+  const authDir = current.authDir ?? "";
+  const allowedUsers = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    [
+      setupCopyText(locale, "setupEditor.prompt.whatsapp.summary"),
+      setupCopyText(locale, "setupEditor.prompt.whatsapp.beta"),
+      setupCopyText(locale, "setupEditor.prompt.whatsapp.remoteControlRisk"),
+      `${setupCopyText(locale, "setupEditor.prompt.whatsapp.authDir")}: ${authDir}`,
+      `${setupCopyText(locale, "setupEditor.prompt.whatsapp.allowedUsers")}, comma-separated: `,
+    ].join("\n"),
+    (current.allowedUsers ?? []).join(",")
+  ));
+
+  return {
+    experimental: true,
+    authDir,
+    allowedUsers,
+  };
+}
+
+export async function promptIncompleteChannelCapabilityAction(
+  prompt: Prompt,
+  input: {
+    readonly title: string;
+    readonly bodyKey: "setupEditor.prompt.discord.incomplete.body" | "setupEditor.prompt.whatsapp.incomplete.body";
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<IncompleteTelegramCapabilityAction> {
+  return promptSetupChoice(prompt, {
+    title: input.title,
+    message: [
+      setupCopyText(locale, input.bodyKey),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "channel-incomplete-retry",
+        label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
+        description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
+        value: "retry" as const,
+      },
+      {
+        id: "channel-incomplete-skip",
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
+        value: "skip" as const,
+      },
+      {
+        id: "channel-incomplete-unchanged",
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
+        value: "unchanged" as const,
+      },
+    ],
+    defaultValue: "skip" as const,
+  });
 }
 
 export async function promptIncompleteTelegramCapabilityAction(

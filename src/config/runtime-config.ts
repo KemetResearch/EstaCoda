@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type {
   AuxiliaryModelConfig,
@@ -625,6 +625,22 @@ export type TelegramSetupInput = {
   enabled?: boolean;
 };
 
+export type DiscordSetupInput = {
+  botTokenEnv?: string;
+  botToken?: string;
+  allowedUsers?: string[];
+  allowedGuilds?: string[];
+  allowedChannels?: string[];
+  enabled?: boolean;
+};
+
+export type WhatsAppSetupInput = {
+  experimental?: boolean;
+  authDir?: string;
+  allowedUsers?: string[];
+  enabled?: boolean;
+};
+
 export type TelegramPairingInput = {
   code?: string;
   ttlMinutes?: number;
@@ -705,6 +721,9 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const discordMissing: string[] = [];
   if (discord.enabled === true) {
     if (discord.botTokenEnv === undefined) discordMissing.push("botTokenEnv");
+    if ((discord.allowedUsers?.length ?? 0) === 0 && (discord.allowedChannels?.length ?? 0) === 0) {
+      discordMissing.push("allowedUsersOrChannels");
+    }
   }
 
   const email = config.channels?.email ?? {};
@@ -721,6 +740,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const whatsappMissing: string[] = [];
   if (whatsapp.enabled === true) {
     if (whatsapp.experimental !== true) whatsappMissing.push("experimental");
+    if (whatsapp.authDir === undefined) whatsappMissing.push("authDir");
+    if ((whatsapp.allowedUsers?.length ?? 0) === 0) whatsappMissing.push("allowedUsers");
   }
   const warnedInvalidBusyPolicies = new Set<string>();
   const normalizedFallbacks = normalizeModelFallbacks(config);
@@ -2343,6 +2364,7 @@ function isToolRiskClass(value: unknown): value is ToolRiskClass {
 export async function setupTelegramConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
   input: TelegramSetupInput;
 }): Promise<{
   path: string;
@@ -2395,6 +2417,104 @@ export async function setupTelegramConfig(options: {
     path: targetPath,
     config,
     secretPath
+  };
+}
+
+export async function setupDiscordConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  input: DiscordSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+  secretPath?: string;
+}> {
+  validateDiscordSetupInput(options.input);
+  const allowedUsers = uniqueStrings(options.input.allowedUsers ?? []);
+  const allowedGuilds = uniqueStrings(options.input.allowedGuilds ?? []);
+  const allowedChannels = uniqueStrings(options.input.allowedChannels ?? []);
+  if ((options.input.enabled ?? true) && allowedUsers.length === 0 && allowedChannels.length === 0) {
+    throw new Error("Discord setup requires at least one allowed user or channel.");
+  }
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const envName = options.input.botTokenEnv ?? "ESTACODA_DISCORD_BOT_TOKEN";
+  let secretPath: string | undefined;
+  if (options.input.botToken !== undefined && options.input.botToken.trim().length > 0) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      profileId: resolveSelectedProfileId(options),
+      key: envName,
+      value: options.input.botToken
+    });
+    process.env[secret.key] = options.input.botToken;
+    secretPath = secret.path;
+  }
+
+  const discordPatch: DiscordChannelConfig = {
+    ...(existing.config.channels?.discord ?? {}),
+    enabled: options.input.enabled ?? true,
+    botTokenEnv: envName,
+    allowedUsers,
+    allowedGuilds,
+    allowedChannels
+  };
+  const config = patchConfig(existing.config, {
+    channels: {
+      discord: discordPatch
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config,
+    secretPath
+  };
+}
+
+export async function setupWhatsAppConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  input: WhatsAppSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  validateWhatsAppSetupInput(options.input);
+  const allowedUsers = uniqueStrings(options.input.allowedUsers ?? []);
+  if ((options.input.enabled ?? true) && allowedUsers.length === 0) {
+    throw new Error("WhatsApp setup requires allowed user numbers.");
+  }
+  const enabled = options.input.enabled ?? true;
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const profileId = resolveSelectedProfileId(options);
+  const gatewayStatePath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).gatewayStatePath;
+  const defaultAuthDir = join(gatewayStatePath, "whatsapp-auth");
+  const authDir = options.input.authDir ?? defaultAuthDir;
+  if (!isPathInside(gatewayStatePath, authDir)) {
+    throw new Error("WhatsApp authDir must stay under the selected profile gateway state directory.");
+  }
+  const whatsappPatch: WhatsAppChannelConfig = {
+    ...(existing.config.channels?.whatsapp ?? {}),
+    enabled,
+    experimental: enabled ? true : options.input.experimental ?? false,
+    authDir,
+    allowedUsers
+  };
+  const config = patchConfig(existing.config, {
+    channels: {
+      whatsapp: whatsappPatch
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config
   };
 }
 
@@ -2666,6 +2786,24 @@ function validateTelegramSetupInput(input: TelegramSetupInput): void {
   }
 }
 
+function validateDiscordSetupInput(input: DiscordSetupInput): void {
+  validateOptionalEnvName(input.botTokenEnv, "botTokenEnv");
+  for (const value of [
+    ...(input.allowedUsers ?? []),
+    ...(input.allowedGuilds ?? []),
+    ...(input.allowedChannels ?? [])
+  ]) {
+    requireNonEmpty(value, "Discord allowlist entry");
+  }
+}
+
+function validateWhatsAppSetupInput(input: WhatsAppSetupInput): void {
+  requireOptionalNonEmpty(input.authDir, "authDir");
+  for (const value of input.allowedUsers ?? []) {
+    requireNonEmpty(value, "WhatsApp allowed user");
+  }
+}
+
 function validateRiskClass(value: ToolRiskClass | undefined, field: string): void {
   if (value !== undefined && !isToolRiskClass(value)) {
     throw new Error(`Expected ${field} to be a supported tool risk class`);
@@ -2825,6 +2963,11 @@ function normalizePairingCode(code: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const relativePath = relative(resolve(parent), resolve(child));
+  return relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
 }
 
 function fallbackRouteKey(fallback: ModelFallbackConfig): string {

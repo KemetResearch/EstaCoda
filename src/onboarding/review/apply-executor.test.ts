@@ -221,6 +221,49 @@ function uiPreferencesPlan(values: ReviewValues): SetupApplyPlan {
   };
 }
 
+function channelCapabilityPlan(summaryKey: "setupModules.discord.draft" | "setupModules.whatsapp.draft", values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-channel-bundle"],
+    operations: [{
+      id: "test-channel",
+      kind: "config-patch",
+      sourceLineIds: ["test-channel-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["channels"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey,
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -627,6 +670,85 @@ describe("reviewed setup apply executor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Remote-control capabilities require");
+  });
+
+  it("applies reviewed Discord and WhatsApp beta channel config through channel dispatch", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+    }, null, 2), "utf8");
+
+    const discordResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.discord.draft", {
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-1"],
+      allowedGuilds: ["guild-1"],
+      allowedChannels: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const whatsappResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      authDir: join(tempDir, ".estacoda", "profiles", "default", "gateway", "whatsapp-auth"),
+      allowedUsers: ["971501234567"],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      channels?: {
+        discord?: { enabled?: boolean; botTokenEnv?: string; allowedUsers?: string[]; allowedGuilds?: string[] };
+        whatsapp?: { enabled?: boolean; experimental?: boolean; authDir?: string; allowedUsers?: string[] };
+      };
+    };
+
+    expect(discordResult.ok).toBe(true);
+    expect(whatsappResult.ok).toBe(true);
+    expect(config.channels?.discord).toEqual(expect.objectContaining({
+      enabled: true,
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: ["user-1"],
+      allowedGuilds: ["guild-1"],
+    }));
+    expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
+      enabled: true,
+      experimental: true,
+      allowedUsers: ["971501234567"],
+    }));
+  });
+
+  it("rejects reviewed Discord and WhatsApp beta channel config without allowlists", async () => {
+    const discordResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.discord.draft", {
+      botTokenEnv: "DISCORD_BOT_TOKEN",
+      allowedUsers: [],
+      allowedChannels: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const whatsappResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      allowedUsers: [],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(discordResult.ok).toBe(false);
+    expect(discordResult.error).toContain("Discord apply requires");
+    expect(whatsappResult.ok).toBe(false);
+    expect(whatsappResult.error).toContain("WhatsApp apply requires");
+  });
+
+  it("rejects reviewed WhatsApp beta auth directories outside selected profile gateway state", async () => {
+    const result = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
+      authDir: join(tempDir, "outside-whatsapp-auth"),
+      allowedUsers: ["971501234567"],
+    }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("profile gateway state");
   });
 
   it("stops verification when save/apply fails", async () => {

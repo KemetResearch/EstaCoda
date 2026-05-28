@@ -741,13 +741,13 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
-  it("discord ready = enabled && botTokenEnv present", async () => {
+  it("discord ready = enabled && botTokenEnv plus allowlist present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN", allowedUsers: ["user-1"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -756,7 +756,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("discord not ready when enabled but botTokenEnv missing", async () => {
+  it("discord not ready when enabled but botTokenEnv or allowlist missing", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
@@ -768,6 +768,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.discord.ready).toBe(false);
     expect(loaded.channels.discord.missing).toContain("botTokenEnv");
+    expect(loaded.channels.discord.missing).toContain("allowedUsersOrChannels");
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -777,7 +778,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
+      channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN", allowedUsers: ["user-1"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -798,6 +799,7 @@ describe("loadRuntimeConfig channel readiness", () => {
         discord: {
           enabled: true,
           botTokenEnv: "DISCORD_BOT_TOKEN",
+          allowedChannels: ["channel-1"],
           voiceChannel: { enabled: true, autoJoinOnCommand: false }
         }
       }
@@ -850,13 +852,13 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("whatsapp ready = enabled && experimental true", async () => {
+  it("whatsapp ready = enabled && experimental true with auth dir and allowlist", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { whatsapp: { enabled: true, experimental: true } }
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: "/tmp/estacoda-whatsapp-auth", allowedUsers: ["971501234567"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
@@ -877,6 +879,8 @@ describe("loadRuntimeConfig channel readiness", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(false);
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
+    expect(loaded.channels.whatsapp.missing).toContain("authDir");
+    expect(loaded.channels.whatsapp.missing).toContain("allowedUsers");
     await rm(workspace, { recursive: true, force: true });
   });
 });
