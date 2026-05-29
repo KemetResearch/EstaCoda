@@ -159,7 +159,7 @@ describe("cli setup command", () => {
     });
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("EstaCoda setup");
+    expect(result.stdout).toContain("EstaCoda Onboarding Wizard");
     expect(result.stdout).toContain("Setup language");
     expect(result.stderr).not.toContain("unsettled top-level await");
     expect(result.stderr).not.toContain("Warning: Detected unsettled");

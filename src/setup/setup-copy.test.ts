@@ -400,7 +400,7 @@ describe("setup copy", () => {
   it("selects screenshot-approved Arabic copy", () => {
     const copy = setupCopy("ar");
 
-    expect(copy["onboarding.welcome"]).toContain("سنضع القواعد");
+    expect(copy["onboarding.welcome"]).toContain("اضبط مساحة العمل");
     expect(copy["onboarding.welcome"]).toContain(isolateLtr("EstaCoda"));
     expect(copy["setupEditor.summary.repairFirst"]).toContain("لا جدوى من تلميع إعداد لا يعمل");
     expect(copy["setupModules.telegram.review"]).toContain("التحكم عن بعد لا يستجيب إلا للقائمة المسموح بها");
@@ -498,8 +498,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit workflow learning");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Control how reusable workflows are learned from sessions.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit Agent Evolution");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls whether EstaCoda may learn reusable Skills from your workflow patterns.");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");

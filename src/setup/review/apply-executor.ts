@@ -386,7 +386,7 @@ async function applyWorkflowLearning(
 ): Promise<void> {
   const autonomy = skillAutonomyValue(operation.review.values.workflowLearning ?? operation.review.values.workflowMode);
   if (autonomy === undefined) {
-    throw new Error("Workflow learning apply requires a valid autonomy value.");
+    throw new Error("Agent Evolution apply requires a valid autonomy value.");
   }
   const target = configApplyTarget(operation, options);
   await setupSkillConfig({

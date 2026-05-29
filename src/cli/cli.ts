@@ -641,7 +641,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       handled: true,
       exitCode: 0,
       output: [
-        `Workflow learning: ${result.config.skills?.autonomy ?? parsed}.`,
+        `Agent Evolution: ${result.config.skills?.autonomy ?? parsed}.`,
         `Config: ${result.path}`
       ].join("\n")
     };
