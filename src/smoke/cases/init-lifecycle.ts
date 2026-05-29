@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { SmokeCase } from "../smoke-case.js";
 import { runInitCommand } from "../../cli/init-command.js";
-import { runSetupVerification } from "../../onboarding/verification.js";
+import { runSetupVerification } from "../../setup/verification.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 
 export const init_lifecycle_case: SmokeCase = {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { collectStartupReadinessSnapshot } from "./startup-readiness.js";
-import type { SetupVerificationReport } from "../onboarding/verification.js";
+import type { SetupVerificationReport } from "../setup/verification.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 
 function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: string[] = []): ProviderDiagnostic {

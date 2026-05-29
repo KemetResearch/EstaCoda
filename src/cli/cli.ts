@@ -36,13 +36,13 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
-import { runFirstRunSetup } from "../onboarding/first-run/runner.js";
-import { runConfigEditorSetup } from "../onboarding/config-editor/runner.js";
-import { createReviewedSetupApplyExecutor } from "../onboarding/review/apply-executor.js";
-import { collectSetupEntryState } from "../onboarding/setup-entry-state.js";
-import { collectSetupRoute } from "../onboarding/setup-router.js";
-import { renderSetupRouteSummary } from "../onboarding/setup-state-renderer.js";
-import { runSetupVerification } from "../onboarding/verification.js";
+import { runFirstRunSetup } from "../setup/first-run/runner.js";
+import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
+import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
+import { collectSetupEntryState } from "../setup/setup-entry-state.js";
+import { collectSetupRoute } from "../setup/setup-router.js";
+import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
+import { runSetupVerification } from "../setup/verification.js";
 import { checkSttProviderStatus, checkTtsProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";

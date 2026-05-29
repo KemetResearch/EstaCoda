@@ -88,7 +88,7 @@ import { NativeToolExecutor } from "./native-tool-executor.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
-import { collectSetupVerificationReport } from "../onboarding/verification.js";
+import { collectSetupVerificationReport } from "../setup/verification.js";
 import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
 import { detectInstallMethod } from "../lifecycle/install-method.js";
 import { buildStartupUpdateHint } from "../lifecycle/startup-update.js";

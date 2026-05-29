@@ -1,6 +1,6 @@
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { WarningErrorViewModel } from "../contracts/view-model.js";
-import type { SetupVerificationReport } from "../onboarding/verification.js";
+import type { SetupVerificationReport } from "../setup/verification.js";
 
 export type StartupReadinessSnapshot = {
   readonly workspaceTrust: "trusted" | "untrusted" | "unknown";

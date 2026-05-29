@@ -1,7 +1,7 @@
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
 import type { UiLocale } from "../contracts/ui.js";
-import { collectSetupRoute, type SetupRouteDecision } from "../onboarding/setup-router.js";
+import { collectSetupRoute, type SetupRouteDecision } from "../setup/setup-router.js";
 
 export type LaunchOptions = {
   workspaceRoot: string;

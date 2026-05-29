@@ -87,9 +87,9 @@ estacoda/
 │   ├── acp/                   # ACP editor integration
 │   ├── artifacts/             # Artifact store and formatting
 │   ├── browser/               # Browser backend (CDP, Browserbase, etc.)
-│   ├── capabilities/          # Capability manifest and trust (stub: capability-setup.ts only)
+│   ├── capabilities/          # Capability setup helpers and secret references
 │   ├── channels/              # Telegram gateway and adapters
-│   ├── cli/                   # CLI, interactive session loop, onboarding
+│   ├── cli/                   # CLI and interactive session loop
 │   ├── config/                # Runtime config loading and defaults
 │   ├── context/               # Context reference expansion, project context
 │   ├── contracts/             # Pure TypeScript types shared across layers
@@ -98,13 +98,13 @@ estacoda/
 │   ├── mcp/                   # MCP server integration
 │   ├── memory/                # Memory stores, promotion, rendering
 │   ├── model-catalog/         # Offline model registry and profiles
-│   ├── onboarding/            # First-run setup flows
 │   ├── process/               # Process manager and tools
 │   ├── prompt/                # Prompt assembly, caching, history packing
 │   ├── providers/             # Provider registry, executor, adapters
 │   ├── runtime/               # AgentLoop, router, turn loop, tool runner, recorder
 │   ├── security/              # Command policy, approvals, trust checks
 │   ├── session/               # Session DB (SQLite + in-memory)
+│   ├── setup/                 # First-run setup, setup editor, verification, review/apply
 │   ├── skills/                # Skill loading, registry, tools, learning, evolution
 │   ├── theme/                 # UI theme definitions
 │   ├── tools/                 # Tool schemas, registry, executor, planners

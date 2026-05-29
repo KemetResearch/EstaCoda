@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Bare launch: use interactive launcher for onboarding/session routing
+  // Bare launch: use interactive launcher for setup/session routing
   if (argv.length === 0 && canRunInteractive()) {
     const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
 
