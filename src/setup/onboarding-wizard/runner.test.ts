@@ -298,6 +298,11 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.primaryCredential).toEqual({ kind: "none" });
     expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
     expect(result.selections.primaryAuthMethod).toBe("none");
+    expect(result.wizardState.primaryRoute).toEqual(expect.objectContaining({
+      provider: "local",
+      model: "hermes-local",
+    }));
+    expect(result.draftBundle.sourceKind).toBe("onboarding-wizard-state");
     expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(1);
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
@@ -455,6 +460,10 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(result.wizardState.credential).toEqual({
+      status: "not_set",
+      envVarName: "OPENAI_API_KEY",
+    });
     expect(result.selections.primaryBaseUrl).toBe("https://api.openai.com/v1");
     expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
     expect(result.selections.primaryAuthMethod).toBe("api_key");
@@ -479,6 +488,7 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "SHARED_FLOW_OPENAI_KEY" });
+    expect(result.draftBundle.sourceKind).toBe("onboarding-wizard-state");
     expect(JSON.stringify(result.reviewManifest)).toContain("SHARED_FLOW_OPENAI_KEY");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("OPENAI_API_KEY");
     expect(outputLines.join("")).toContain("Config will expect SHARED_FLOW_OPENAI_KEY to be available externally");

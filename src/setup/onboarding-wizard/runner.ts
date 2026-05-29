@@ -15,12 +15,13 @@ import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
 } from "./plan.js";
+import type { OnboardingCredentialSummaryStatus, OnboardingWizardState } from "./state.js";
 import {
   validateOnboardingWorkspacePath,
   type OnboardingInvalidWorkspaceAction,
 } from "./workspace.js";
 import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
-import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
+import { buildOnboardingWizardDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
 import {
   buildSetupReviewManifest,
   type SetupReviewManifest,
@@ -39,7 +40,6 @@ import {
   type CollectSetupEntryStateOptions,
   type SetupEntryState,
 } from "../setup-entry-state.js";
-import { routeSetupEntryState, type FirstRunPlanSession } from "../setup-router.js";
 import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
@@ -69,7 +69,7 @@ export type FirstRunSetupRunnerResult = {
   readonly output: string;
   readonly state: SetupEntryState;
   readonly selections: FirstRunOnboardingSelections;
-  readonly planSession: FirstRunPlanSession;
+  readonly wizardState: OnboardingWizardState;
   readonly draftBundle: SetupDraftBundle;
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
@@ -171,6 +171,7 @@ export async function runFirstRunSetup(
 
   let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
   let pendingCredentialWrite: PendingCredentialWrite | undefined;
+  let credentialStatus: OnboardingCredentialSummaryStatus = "not_set";
 
   switch (resolution.credentialAction.kind) {
     case "none": {
@@ -185,6 +186,7 @@ export async function runFirstRunSetup(
       }
       const envVarName = ref.slice(4);
       primaryCredential = { kind: "env", name: envVarName };
+      credentialStatus = "existing_detected";
       write(options, `Using existing credential from ${envVarName}.\n`);
       break;
     }
@@ -201,6 +203,7 @@ export async function runFirstRunSetup(
       if (promptResult.kind === "skipped") {
         write(options, `Config will expect ${envVarName} to be available externally.\n`);
       } else {
+        credentialStatus = "new_pending";
         pendingCredentialWrite = {
           envVarName: promptResult.envVarName,
           value: promptResult.value,
@@ -313,16 +316,9 @@ export async function runFirstRunSetup(
     launchSelected,
   };
 
-  const routeDecision = routeSetupEntryState(state, {
-    selection: "run-first-run",
-    firstRunSelections: selections,
-  });
-  if (routeDecision.firstRunPlanSession === undefined) {
-    throw new Error("Setup router did not produce a first-run plan session.");
-  }
-
   const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const draftBundle = buildFirstRunDraftBundle(routeDecision.firstRunPlanSession, {
+  const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus);
+  const draftBundle = buildOnboardingWizardDraftBundle(wizardState, {
     configPath: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
     workspaceRoot,
     trustStorePath: stateHome.trustJsonPath,
@@ -383,11 +379,58 @@ export async function runFirstRunSetup(
     output,
     state,
     selections: finalSelections,
-    planSession: routeDecision.firstRunPlanSession,
+    wizardState,
     draftBundle,
     reviewManifest,
     applyPlanningResult,
     applyEndState,
+  };
+}
+
+function onboardingWizardStateFromSelections(
+  selections: FirstRunOnboardingSelections,
+  credentialStatus: OnboardingCredentialSummaryStatus
+): OnboardingWizardState {
+  const credentialEnvVarName = selections.primaryCredential?.kind === "env"
+    ? selections.primaryCredential.name
+    : undefined;
+
+  return {
+    interfacePreferences: {
+      language: selections.language,
+      flavor: selections.interfaceFlavor,
+      activityLabels: selections.activityLabels,
+    },
+    workspace: {
+      path: selections.workspaceRoot,
+      trustStatus: selections.workspaceTrusted === true ? "trusted" : "untrusted",
+    },
+    primaryRoute: {
+      provider: selections.primaryProvider,
+      model: selections.primaryModel,
+      baseUrl: selections.primaryBaseUrl,
+      contextWindowTokens: selections.primaryContextWindowTokens,
+      apiMode: selections.primaryApiMode,
+      authMethod: selections.primaryAuthMethod,
+    },
+    credential: {
+      status: credentialStatus,
+      envVarName: credentialEnvVarName,
+    },
+    securityMode: selections.securityMode,
+    agentEvolution: selections.workflowLearning,
+    optionalCapabilities: {
+      selected: selections.optionalCapabilities ?? [],
+      channels: {
+        telegram: selections.optionalCapabilities?.includes("channels") === true ? "configured" : "not_set",
+      },
+      voice: {
+        stt: selections.optionalCapabilities?.includes("voice") === true ? "configured" : "not_set",
+        tts: selections.optionalCapabilities?.includes("voice") === true ? "configured" : "not_set",
+      },
+      browser: selections.optionalCapabilities?.includes("browser") === true ? "configured" : "not_set",
+    },
+    launchSelected: selections.launchSelected,
   };
 }
 

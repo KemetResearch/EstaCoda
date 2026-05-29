@@ -1,5 +1,6 @@
 import type { FirstRunPlanSession, SetupEditorPlanSession } from "./setup-router.js";
 import type { FirstRunOnboardingStepId, FirstRunOnboardingSelections } from "./onboarding-wizard/plan.js";
+import type { OnboardingOptionalCapabilityDraftId, OnboardingWizardState } from "./onboarding-wizard/state.js";
 import type { SetupEditorActionDraft, SetupEditorActionId, SetupEditorPatchField } from "./setup-editor-actions.js";
 import type { SetupEditorSectionId, SetupEditorSensitiveSurface } from "./setup-editor-plan.js";
 
@@ -110,6 +111,7 @@ export type SetupDraft = {
 
 export type SetupDraftBundleSourceKind =
   | "first-run-plan-session"
+  | "onboarding-wizard-state"
   | "setup-editor-plan-session"
   | "setup-module-session";
 
@@ -151,6 +153,25 @@ export function buildFirstRunDraftBundle(
   ].filter((draft): draft is SetupDraft => draft !== undefined);
 
   return bundle("first-run-plan-session", "first-run:welcome", drafts, [], []);
+}
+
+export function buildOnboardingWizardDraftBundle(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions = {}
+): SetupDraftBundle {
+  const drafts = [
+    onboardingUiPreferencesDraft(state, options),
+    onboardingProviderModelDraft(state, options),
+    onboardingCredentialDraft(state, options),
+    onboardingSecurityDraft(state, options),
+    onboardingAgentEvolutionDraft(state, options),
+    onboardingWorkspaceTrustDraft(state, options),
+    onboardingOptionalCapabilitiesDraft(state, options),
+    verificationDraft({ kind: "first-run", stepId: "verify" }),
+    onboardingLaunchDraft(state),
+  ].filter((draft): draft is SetupDraft => draft !== undefined);
+
+  return bundle("onboarding-wizard-state", "onboarding-wizard:state", drafts, [], []);
 }
 
 export function buildSetupEditorDraftBundle(
@@ -206,6 +227,179 @@ function firstRunProviderModelDraft(
       authMethod: selections.primaryAuthMethod,
     },
   });
+}
+
+function onboardingUiPreferencesDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  const preferences = state.interfacePreferences;
+  if (preferences?.language === undefined || preferences.flavor === undefined || preferences.activityLabels === undefined) {
+    return undefined;
+  }
+  return configDraft({
+    id: "onboarding-wizard.ui-preferences",
+    kind: "ui-preferences",
+    source: { kind: "first-run", stepId: "interface-language" },
+    riskSurface: "interface-preference",
+    scope: ["ui.language", "ui.flavor", "ui.activityLabels"],
+    configPath: options.configPath,
+    summaryKey: "setupDrafts.uiPreferences.summary",
+    values: {
+      language: preferences?.language,
+      flavor: preferences?.flavor,
+      activityLabels: preferences?.activityLabels,
+    },
+  });
+}
+
+function onboardingProviderModelDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  const route = state.primaryRoute;
+  if (route?.provider === undefined && route?.model === undefined) return undefined;
+  return configDraft({
+    id: "onboarding-wizard.provider-model-route",
+    kind: "provider-model-route",
+    source: { kind: "first-run", stepId: "primary-model" },
+    riskSurface: "provider-selection",
+    scope: ["model.provider", "model.id"],
+    configPath: options.configPath,
+    summaryKey: "setupDrafts.providerModelRoute.summary",
+    values: {
+      provider: route?.provider,
+      model: route?.model,
+      baseUrl: route?.baseUrl,
+      contextWindowTokens: route?.contextWindowTokens,
+      apiMode: route?.apiMode,
+      authMethod: route?.authMethod,
+    },
+  });
+}
+
+function onboardingCredentialDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  const envVarName = state.credential?.envVarName;
+  if (envVarName === undefined || envVarName.trim().length === 0) return undefined;
+  return credentialDraft({
+    id: "onboarding-wizard.credential-reference",
+    source: { kind: "first-run", stepId: "primary-credential" },
+    configPath: options.configPath,
+    envVars: [envVarName],
+    provider: state.primaryRoute?.provider,
+    model: state.primaryRoute?.model,
+  });
+}
+
+function onboardingSecurityDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  if (state.securityMode === undefined) return undefined;
+  return configDraft({
+    id: "onboarding-wizard.security-mode",
+    kind: "security-mode",
+    source: { kind: "first-run", stepId: "security-mode" },
+    riskSurface: "security-policy",
+    scope: ["security.approvalMode"],
+    configPath: options.configPath,
+    summaryKey: "setupDrafts.securityMode.summary",
+    values: { securityMode: state.securityMode },
+  });
+}
+
+function onboardingAgentEvolutionDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  if (state.agentEvolution === undefined) return undefined;
+  return configDraft({
+    id: "onboarding-wizard.workflow-learning",
+    kind: "workflow-learning",
+    source: { kind: "first-run", stepId: "workflow-learning" },
+    riskSurface: "workflow-learning",
+    scope: ["skills.autonomy"],
+    configPath: options.configPath,
+    summaryKey: "setupDrafts.workflowLearning.summary",
+    values: { workflowLearning: state.agentEvolution },
+  });
+}
+
+function onboardingWorkspaceTrustDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  if (state.workspace?.trustStatus !== "trusted") return undefined;
+  return workspaceTrustDraft({
+    id: "onboarding-wizard.workspace-trust",
+    source: { kind: "first-run", stepId: "workspace-trust" },
+    workspaceRoot: options.workspaceRoot ?? state.workspace.path ?? "",
+    trustStorePath: options.trustStorePath ?? "",
+  });
+}
+
+function onboardingOptionalCapabilitiesDraft(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): SetupDraft | undefined {
+  const capabilities = onboardingSelectedOptionalCapabilities(state);
+  const hasExplicitSelection = state.optionalCapabilities?.selected !== undefined;
+  if (capabilities.length === 0 && !hasExplicitSelection) return undefined;
+  return configDraft({
+    id: "onboarding-wizard.optional-capabilities",
+    kind: "optional-capability",
+    source: { kind: "first-run", stepId: "optional-capabilities" },
+    riskSurface: "optional-capability",
+    scope: ["channels", "voice", "vision", "browser"],
+    configPath: options.configPath,
+    summaryKey: "setupDrafts.optionalCapabilities.summary",
+    values: {
+      skipped: capabilities.length === 0,
+      capabilities,
+    },
+    requiresReview: false,
+  });
+}
+
+function onboardingSelectedOptionalCapabilities(
+  state: OnboardingWizardState
+): readonly OnboardingOptionalCapabilityDraftId[] {
+  const selected = state.optionalCapabilities?.selected;
+  if (selected !== undefined) return selected;
+
+  const capabilities: OnboardingOptionalCapabilityDraftId[] = [];
+  if (state.optionalCapabilities?.channels?.telegram === "configured") capabilities.push("channels");
+  if (
+    state.optionalCapabilities?.voice?.stt === "configured" ||
+    state.optionalCapabilities?.voice?.tts === "configured"
+  ) {
+    capabilities.push("voice");
+  }
+  if (state.optionalCapabilities?.browser === "configured") capabilities.push("browser");
+  return capabilities;
+}
+
+function onboardingLaunchDraft(state: OnboardingWizardState): SetupDraft | undefined {
+  if (state.launchSelected === undefined) return undefined;
+  return {
+    id: "onboarding-wizard.launch-handoff",
+    kind: "launch-handoff",
+    source: { kind: "first-run", stepId: "launch" },
+    riskSurface: "agent-launch",
+    target: {
+      kind: "launch",
+      preference: state.launchSelected ? "offer-after-verify" : "skip-launch",
+    },
+    review: review("setupDrafts.launch.summary", { launchSelected: state.launchSelected }),
+    applyIntent: intent("launch-handoff"),
+    requiresReview: false,
+    readOnly: true,
+    blockers: [],
+    warnings: [],
+  };
 }
 
 function firstRunCredentialDraft(
