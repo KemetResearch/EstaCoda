@@ -8,7 +8,7 @@ import {
   type FirstRunOnboardingSelections,
   type FirstRunOnboardingState,
   type FirstRunOnboardingStep,
-} from "./first-run-plan.js";
+} from "./onboarding-wizard/plan.js";
 import { buildSetupEditorPlan, type SetupEditorPlan, type SetupEditorSection } from "./setup-editor-plan.js";
 
 export type SetupRouterSelection =

@@ -15,7 +15,7 @@ import {
 import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
-} from "../first-run-plan.js";
+} from "./plan.js";
 import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
 import {

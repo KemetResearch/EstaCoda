@@ -1,5 +1,5 @@
 import type { FirstRunPlanSession, SetupEditorPlanSession } from "./setup-router.js";
-import type { FirstRunOnboardingStepId, FirstRunOnboardingSelections } from "./first-run-plan.js";
+import type { FirstRunOnboardingStepId, FirstRunOnboardingSelections } from "./onboarding-wizard/plan.js";
 import type { SetupEditorActionDraft, SetupEditorActionId, SetupEditorPatchField } from "./setup-editor-actions.js";
 import type { SetupEditorSectionId, SetupEditorSensitiveSurface } from "./setup-editor-plan.js";
 

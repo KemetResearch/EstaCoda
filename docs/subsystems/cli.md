@@ -19,7 +19,7 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
 | `src/setup/setup-entry-state.ts` | 283 | Setup readiness classifier |
 | `src/setup/setup-router.ts` | 364 | Setup route planner |
-| `src/setup/first-run/runner.ts` | 718 | Reviewed first-run setup runner |
+| `src/setup/onboarding-wizard/runner.ts` | 718 | Reviewed first-run setup runner |
 | `src/setup/review/apply-executor.ts` | 483 | Reviewed setup apply executor |
 | `src/setup/setup-copy.ts` | 372 | Token-based setup copy registry |
 | `src/setup/setup-verification-copy.ts` | 111 | Setup verification labels and actions |

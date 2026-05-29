@@ -12,7 +12,7 @@ import {
   getNextFirstRunStepId,
   getRequiredCredentialReference,
   type FirstRunOnboardingStep,
-} from "./first-run-plan.js";
+} from "./plan.js";
 
 function step(plan: ReturnType<typeof buildFirstRunOnboardingPlan>, id: FirstRunOnboardingStep["id"]): FirstRunOnboardingStep {
   const match = plan.steps.find((candidate) => candidate.id === id);

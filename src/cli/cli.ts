@@ -36,7 +36,7 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
-import { runFirstRunSetup } from "../setup/first-run/runner.js";
+import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { collectSetupEntryState } from "../setup/setup-entry-state.js";
