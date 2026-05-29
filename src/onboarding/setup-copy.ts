@@ -263,7 +263,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.actions.repairMissingCredential", "Repair missing credential reference {envVar}.", "أصلح مرجع بيانات الاعتماد المفقود {envVar}.", ["{envVar}"], "credential-reference"),
   copy("setupEditor.actions.editSecurityMode", "Edit security mode", "عدّل وضع الأمان", [], "security-policy"),
   copy("setupEditor.actions.editWorkflowLearning", "Edit workflow learning", "عدّل تعلّم سير العمل", [], "workflow-learning"),
-  copy("setupEditor.actions.chooseLanguage", "Edit language", "عدّل اللغة", [], "interface-preference"),
+  copy("setupEditor.actions.chooseLanguage", "Choose language", "اختار اللغة", [], "interface-preference"),
   copy("setupEditor.actions.repairWorkspaceTrust", "Review workspace trust grant for {workspacePath}.", "راجع منح الثقة لمساحة العمل {workspacePath}.", ["{workspacePath}"], "workspace-trust"),
   copy("setupEditor.actions.configureChannels", "Configure channels", "اضبط القنوات", [], "optional-capability"),
   copy("setupEditor.actions.configureVoice", "Configure voice", "اضبط الصوت", [], "optional-capability"),

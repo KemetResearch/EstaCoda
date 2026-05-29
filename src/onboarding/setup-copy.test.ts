@@ -500,7 +500,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit workflow learning");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Control how reusable workflows are learned from sessions.");
-    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Edit language");
+    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");

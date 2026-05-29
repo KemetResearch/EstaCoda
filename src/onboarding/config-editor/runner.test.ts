@@ -70,7 +70,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Configure specialist models for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("edit-language - Edit language");
+    expect(output.join("")).toContain("edit-language - Choose language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
