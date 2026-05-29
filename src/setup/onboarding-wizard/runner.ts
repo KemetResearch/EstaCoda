@@ -4,7 +4,6 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
-import type { ModelProfile, ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
@@ -51,6 +50,10 @@ import {
   setupCopyText,
   showSetupCard,
 } from "../setup-prompts.js";
+import {
+  promptModelCandidate,
+  promptProviderCandidate,
+} from "../config-editor/prompts.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
@@ -128,36 +131,26 @@ export async function runFirstRunSetup(
 
 
   const providerCandidates = await flowEngine.listProviderCandidates();
-  const primaryProvider = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.providers.primary.title"),
-    message: `${setupCopyText(language, "onboarding.providers.primary")}\n`,
-    choices: providerCandidates.map((provider) => ({
-      id: provider.id,
-      label: provider.displayName,
-      description: provider.baseUrl ? `${provider.baseUrl} (${provider.modelsCount} models)` : `${provider.modelsCount} models`,
-      value: provider.id,
-    })),
-    defaultValue: options.defaultSelections?.primaryProvider ?? providerCandidates[0]?.id,
-  });
+  if (providerCandidates.length === 0) {
+    throw new Error("No setup-visible provider candidates are available.");
+  }
+  const primaryProviderCandidate = await promptProviderCandidate(prompt, {
+    candidates: providerCandidates,
+    currentProviderId: options.defaultSelections?.primaryProvider,
+  }, language);
+  const primaryProvider = primaryProviderCandidate.id;
 
 
   const modelCandidates = await flowEngine.listModelCandidates(primaryProvider);
-  const primaryModel = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.providers.primaryModel.title"),
-    message: `${setupCopyText(language, "onboarding.providers.primaryModel").replace("{providerId}", primaryProvider)}\n`,
-    choices: modelCandidates.map((model) => ({
-      id: model.id,
-      label: model.id,
-      description: [
-        model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
-        model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
-        model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-        renderableModelStatus(model.profile.status),
-      ].filter((part): part is string => part !== undefined).join(", "),
-      value: model.id,
-    })),
-    defaultValue: options.defaultSelections?.primaryModel ?? modelCandidates[0]?.id,
-  });
+  if (modelCandidates.length === 0) {
+    throw new Error(`No setup-visible models are available for ${primaryProviderCandidate.displayName}.`);
+  }
+  const primaryModelCandidate = await promptModelCandidate(prompt, {
+    providerId: primaryProvider,
+    candidates: modelCandidates,
+    currentModelId: options.defaultSelections?.primaryModel,
+  }, language);
+  const primaryModel = primaryModelCandidate.id;
 
   const resolution = await flowEngine.resolveSelection(primaryProvider, primaryModel);
   if (resolution.kind === "diagnostic") {
@@ -596,10 +589,6 @@ async function chooseOptionalCapabilities(
   }
 
   return result;
-}
-
-function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
-  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {

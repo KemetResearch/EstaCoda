@@ -9,6 +9,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
+import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import type { SetupApplyExecutor } from "../setup-apply-plan.js";
@@ -543,6 +544,119 @@ describe("runFirstRunSetup", () => {
     expect(optionalDraft?.review.values.capabilities).toEqual(["voice", "vision"]);
     expect(result.reviewManifest.sections["provider-model-network"]).toHaveLength(1);
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
+  });
+
+  it("exposes the same provider candidates as the setup editor provider prompt helper", async () => {
+    const providers: ProviderCandidate[] = [
+      {
+        id: "local" as ProviderId,
+        displayName: "Local",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 1,
+        credentialReady: true,
+      },
+      {
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 5,
+        credentialReady: false,
+        baseUrl: "https://api.openai.com/v1",
+      },
+    ];
+    const onboardingOptions: Record<string, readonly string[]> = {};
+    const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const editorOptions: Record<string, readonly string[]> = {};
+    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions),
+      flowEngine: flowEngine({ providerCandidates: providers }),
+    });
+    await promptProviderCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
+      candidates: providers,
+    }, "en");
+
+    expect(onboardingOptions["Primary provider"]).toEqual(editorOptions["Primary provider"]);
+    expect(onboardingDescriptions["Primary provider"]).toEqual(editorDescriptions["Primary provider"]);
+  });
+
+  it("exposes the same model candidates for a chosen provider as the setup editor model prompt helper", async () => {
+    const models = modelStatusCandidates("openai" as ProviderId);
+    const onboardingOptions: Record<string, readonly string[]> = {};
+    const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const editorOptions: Record<string, readonly string[]> = {};
+    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const customFlow: FlowEngine = {
+      ...flowEngine({ credentialAction: "reuse" }),
+      listProviderCandidates: async () => [{
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: models.length,
+        credentialReady: true,
+      }],
+      listModelCandidates: async () => models,
+    };
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions),
+      flowEngine: customFlow,
+    });
+    await promptModelCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
+      providerId: "openai",
+      candidates: models,
+    }, "en");
+
+    expect(onboardingOptions["Primary model"]).toEqual(editorOptions["Primary model"]);
+    expect(onboardingDescriptions["Primary model"]).toEqual(editorDescriptions["Primary model"]);
+  });
+
+  it("uses the setup editor provider rejection wording when no provider candidates are available", async () => {
+    const customFlow: FlowEngine = {
+      ...flowEngine(),
+      listProviderCandidates: async () => [],
+    };
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      flowEngine: customFlow,
+    })).rejects.toThrow("No setup-visible provider candidates are available.");
+  });
+
+  it("uses the setup editor model rejection wording when no model candidates are available", async () => {
+    const customFlow: FlowEngine = {
+      ...flowEngine(),
+      listProviderCandidates: async () => [{
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 0,
+        credentialReady: false,
+      }],
+      listModelCandidates: async () => [],
+    };
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }),
+      flowEngine: customFlow,
+    })).rejects.toThrow("No setup-visible models are available for OpenAI.");
   });
 
   it("renders only actionable model status tags in first-run model choices", async () => {

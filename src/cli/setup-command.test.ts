@@ -382,7 +382,7 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
       return valueOrDefault(selection, true);
     }
     if (title.includes("provider")) {
-      return valueOrDefault(selection, "local");
+      return valueWithIdOrDefault(selection, "local");
     }
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
