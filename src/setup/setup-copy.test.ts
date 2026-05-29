@@ -340,6 +340,7 @@ const APPLY_HANDOFF_KEYS = [
   "setupApply.endState.verifiedReady",
   "setupApply.endState.verifiedDegraded",
   "setupApply.endState.verificationBlocked",
+  "setupApply.endState.verificationBlockedAfterPersistence",
   "setupApply.endState.savedNotLaunched",
   "setupApply.endState.launched",
   "setupApply.endState.acceptedDegraded",

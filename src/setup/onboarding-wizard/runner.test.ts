@@ -11,6 +11,7 @@ import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
+import type { SetupApplyExecutor } from "../setup-apply-plan.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -593,6 +594,54 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
   });
 
+  it("does not write a collected API key when reviewed apply is blocked before deferred secrets", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      flowEngine: flowEngine(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", Telegram: true, __secret: "sk-blocked-apply-secret" }),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    expect(result.applyEndState?.kind).toBe("blocked");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
+    expect(JSON.stringify(result)).not.toContain("sk-blocked-apply-secret");
+  });
+
+  it("does not write a collected API key when the apply executor fails before deferred secrets", async () => {
+    let deferredSecretCalls = 0;
+    const failingExecutor: SetupApplyExecutor = {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "intentional apply failure",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      flowEngine: flowEngine(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-apply-failed-secret" }),
+      applyExecutor: failingExecutor,
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyEndState?.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
+    expect(JSON.stringify(result)).not.toContain("sk-apply-failed-secret");
+  });
+
   it("lets real prompts select optional capabilities independently", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
@@ -682,16 +731,25 @@ describe("runFirstRunSetup", () => {
   });
 
   it("writes collected API key to .env only after approved reviewed apply", async () => {
+    let envFileDuringApply: string | undefined;
+    const reviewed = reviewedExecutor(tempDir, workspaceRoot);
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-approved-secret" }),
       flowEngine: flowEngine(),
-      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      applyExecutor: {
+        ...reviewed,
+        apply: async (plan) => {
+          envFileDuringApply = await readFile(profileEnvPath(tempDir), "utf8");
+          return reviewed.apply(plan);
+        },
+      },
     });
 
     expect(result.completed).toBe(true);
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(envFileDuringApply).toBe("");
     const envContent = await readFile(profileEnvPath(tempDir), "utf8");
     expect(envContent).toContain('OPENAI_API_KEY="sk-approved-secret"');
     expect(JSON.stringify(result)).not.toContain("sk-approved-secret");

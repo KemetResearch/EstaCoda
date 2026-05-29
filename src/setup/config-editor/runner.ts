@@ -1,5 +1,5 @@
 import { resolveStateHome } from "../../config/state-home.js";
-import { hasSavedEnvSecret, writeEnvSecret } from "../../config/env-secret-store.js";
+import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import {
   loadRuntimeConfig,
@@ -19,6 +19,7 @@ import {
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
+  SetupDeferredSecretWrite,
   SetupApplyExecutor,
   SetupApplyFlowOptions,
   SetupApplyPlanningResult,
@@ -124,10 +125,7 @@ type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
   readonly locale: SetupCopyLocale;
 };
 
-type PendingCredentialWrite = {
-  readonly envVarName: string;
-  readonly value: string;
-};
+type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type OptionalCapabilityModule =
   | typeof telegramSetupModule
@@ -698,20 +696,13 @@ async function reviewAndApplyManifest(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
-  if (
-    sideEffects.pendingCredentialWrites !== undefined &&
-    sideEffects.pendingCredentialWrites.length > 0 &&
-    applyPlanningResult.kind === "apply-plan-ready" &&
-    options.applyExecutor !== undefined
-  ) {
-    await writePendingCredentialWrites(options, sideEffects.pendingCredentialWrites);
-  }
   return finalizeReviewedApply({
     options,
     initialDecision,
     selectedActionId,
     reviewManifest,
     applyPlanningResult,
+    deferredSecretWrites: sideEffects.pendingCredentialWrites,
   });
 }
 
@@ -721,12 +712,16 @@ async function finalizeReviewedApply(input: {
   readonly selectedActionId: string;
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
+  readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
 }): Promise<RunOnceResult> {
   const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
         allowAutomaticLaunch: false,
+        ...(input.deferredSecretWrites !== undefined && input.deferredSecretWrites.length > 0
+          ? { deferredSecretWrites: input.deferredSecretWrites }
+          : {}),
       })
     : undefined;
   const output = applyEndState === undefined
@@ -758,22 +753,6 @@ async function finalizeReviewedApply(input: {
     renderedApplyOutput: output,
   });
   return postApply;
-}
-
-async function writePendingCredentialWrites(
-  options: LocalizedConfigEditorRunnerOptions,
-  writes: readonly PendingCredentialWrite[]
-): Promise<void> {
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  for (const pendingWrite of writes) {
-    const result = await writeEnvSecret({
-      homeDir: options.homeDir,
-      profileId,
-      key: pendingWrite.envVarName,
-      value: pendingWrite.value,
-    });
-    process.env[result.key] = pendingWrite.value;
-  }
 }
 
 async function handlePostApplyHandoff(input: {
@@ -1419,24 +1398,15 @@ async function reviewAndApplyResolvedRoute(
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
 
-  if (
-    credentialResult.pendingCredentialWrite !== undefined &&
-    applyPlanningResult.kind === "apply-plan-ready" &&
-    options.applyExecutor !== undefined
-  ) {
-    await writeEnvSecret({
-      homeDir: options.homeDir,
-      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
-      key: credentialResult.pendingCredentialWrite.envVarName,
-      value: credentialResult.pendingCredentialWrite.value,
-    });
-  }
   return finalizeReviewedApply({
     options,
     initialDecision,
     selectedActionId: editorAction.id,
     reviewManifest,
     applyPlanningResult,
+    deferredSecretWrites: credentialResult.pendingCredentialWrite === undefined
+      ? undefined
+      : [credentialResult.pendingCredentialWrite],
   });
 }
 

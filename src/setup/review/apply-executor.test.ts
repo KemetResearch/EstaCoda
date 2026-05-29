@@ -365,6 +365,63 @@ describe("reviewed setup apply executor", () => {
     expect(rawConfig).not.toContain("sk-");
   });
 
+  it("persists deferred secrets only through the reviewed apply execution hook", async () => {
+    const plan = firstRunPlan({
+      homeDir: tempDir,
+      workspaceRoot,
+      provider: "openai",
+      model: "gpt-5.5",
+      credentialEnv: "OPENAI_APPLY_SECRET_KEY",
+    });
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    const applyResult = await executor.apply(plan);
+
+    expect(applyResult.ok).toBe(true);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+
+    const secretResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "OPENAI_APPLY_SECRET_KEY",
+      value: "sk-reviewed-boundary-secret",
+    }]);
+
+    expect(secretResult).toEqual({
+      ok: true,
+      appliedSecretCount: 1,
+    });
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toContain(
+      'OPENAI_APPLY_SECRET_KEY="sk-reviewed-boundary-secret"'
+    );
+  });
+
+  it("rejects deferred secret writes that were not present in the reviewed credential plan", async () => {
+    const plan = firstRunPlan({
+      homeDir: tempDir,
+      workspaceRoot,
+      provider: "openai",
+      model: "gpt-5.5",
+      credentialEnv: "OPENAI_REVIEWED_KEY",
+    });
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    const secretResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "UNREVIEWED_KEY",
+      value: "sk-unreviewed-secret",
+    }]);
+
+    expect(secretResult.ok).toBe(false);
+    expect(secretResult.appliedSecretCount).toBe(0);
+    expect(secretResult.error).toContain("UNREVIEWED_KEY");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
   it("applies custom provider baseUrl and contextWindowTokens from review values", async () => {
     const plan = firstRunPlan({
       homeDir: tempDir,

@@ -184,6 +184,11 @@ export function renderSetupApplyEndState(endState: SetupApplyEndState, locale: S
         });
       }
       if (endState.reason === "verification-blocked") {
+        if ((endState.persistedSecretCount ?? 0) > 0) {
+          return formatSetupCopy(locale, "setupApply.endState.verificationBlockedAfterPersistence", {
+            blocker: endState.blockers[0] ?? "unknown",
+          });
+        }
         return formatSetupCopy(locale, "setupApply.endState.verificationBlocked", {
           blocker: endState.blockers[0] ?? "unknown",
         });

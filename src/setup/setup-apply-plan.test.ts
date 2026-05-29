@@ -20,6 +20,7 @@ import {
   planSetupApply,
   type SetupApplyExecutor,
 } from "./setup-apply-plan.js";
+import { renderSetupApplyEndState } from "./setup-prompts.js";
 
 function firstRunManifest(overrides: {
   readonly launchSelected?: boolean;
@@ -446,6 +447,69 @@ describe("setup apply plan", () => {
     expect(endState.reason).toBe("save-failed");
     expect(verifyCalls).toBe(0);
     expect(endState.launchHandoffIntent).toBeUndefined();
+  });
+
+  it("does not apply deferred secrets when the reviewed save fails", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    let deferredSecretCalls = 0;
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "Config writer unavailable.",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    }, {
+      deferredSecretWrites: [{ envVarName: "OPENAI_API_KEY", value: "sk-not-written" }],
+    });
+
+    expect(endState.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
+  });
+
+  it("reports verification failure honestly after deferred secret persistence", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest({ launchSelected: false }),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: true,
+        appliedOperationIds: planned.applyPlan.operations.map((operation) => operation.id),
+      }),
+      applyDeferredSecrets: () => ({
+        ok: true,
+        appliedSecretCount: 1,
+      }),
+      verify: () => verificationReport({
+        workspaceTrusted: false,
+        warnings: ["Workspace is not trusted yet"],
+        issueCodes: ["workspace-not-trusted"],
+      }),
+    }, {
+      deferredSecretWrites: [{ envVarName: "OPENAI_API_KEY", value: "sk-persisted-before-verify" }],
+    });
+
+    expect(endState.kind).toBe("blocked");
+    if (endState.kind !== "blocked") throw new Error("expected blocked");
+    expect(endState.reason).toBe("verification-blocked");
+    expect(endState.persistedSecretCount).toBe(1);
+    expect(renderSetupApplyEndState(endState, "en")).toBe(
+      "Setup was saved, including credential persistence, but verification failed because of Workspace is not trusted yet. No rollback was performed."
+    );
   });
 
   it("verified-ready can produce launch handoff intent", async () => {

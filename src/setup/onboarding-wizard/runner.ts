@@ -2,7 +2,6 @@ import { resolveStateHome } from "../../config/state-home.js";
 import {
   loadRuntimeConfig,
 } from "../../config/runtime-config.js";
-import { writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
 import type { ModelProfile, ProviderId } from "../../contracts/provider.js";
@@ -30,6 +29,7 @@ import {
   executeSetupApplyPlan,
   planSetupApply,
   type SetupApplyEndState,
+  type SetupDeferredSecretWrite,
   type SetupApplyExecutor,
   type SetupApplyFlowOptions,
   type SetupApplyPlanningResult,
@@ -76,10 +76,7 @@ export type FirstRunSetupRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
 };
 
-type PendingCredentialWrite = {
-  readonly envVarName: string;
-  readonly value: string;
-};
+type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
 
@@ -362,20 +359,13 @@ export async function runFirstRunSetup(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
-  if (
-    pendingCredentialWrite !== undefined &&
-    applyPlanningResult.kind === "apply-plan-ready" &&
-    options.applyExecutor !== undefined
-  ) {
-    await writeEnvSecret({
-      homeDir: options.homeDir,
-      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
-      key: pendingCredentialWrite.envVarName,
-      value: pendingCredentialWrite.value,
-    });
-  }
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
-    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
+    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
+        ...options.applyFlowOptions,
+        ...(pendingCredentialWrite !== undefined
+          ? { deferredSecretWrites: [pendingCredentialWrite] }
+          : {}),
+      })
     : undefined;
   const renderedApplyOutput = applyEndState === undefined
     ? renderSetupApplyPlanningResult(applyPlanningResult, language)

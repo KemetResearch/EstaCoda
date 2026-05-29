@@ -503,6 +503,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupApply.endState.verifiedReady", "Verification passed. Setup is ready.", "نجح التحقق. الإعداد جاهز.", [], "setup-verification"),
   copy("setupApply.endState.verifiedDegraded", "Verification completed with warnings. Continue only with an explicit limited-mode decision.", "اكتمل التحقق مع تحذيرات. تابع فقط بقرار صريح للوضع المحدود.", [], "setup-verification"),
   copy("setupApply.endState.verificationBlocked", "Verification blocked setup because of {blocker}. Launch will not continue.", "أوقف التحقق الإعداد بسبب: {blocker}. لن يستمر التشغيل.", ["{blocker}"], "setup-verification"),
+  copy("setupApply.endState.verificationBlockedAfterPersistence", "Setup was saved, including credential persistence, but verification failed because of {blocker}. No rollback was performed.", "تم حفظ الإعداد، بما في ذلك حفظ بيانات الاعتماد، لكن فشل التحقق بسبب: {blocker}. لم يتم تنفيذ تراجع.", ["{blocker}"], "setup-verification"),
   copy("setupApply.endState.savedNotLaunched", "Setup prepared without launch handoff.", "تم تجهيز الإعداد دون تسليم للتشغيل.", [], "agent-launch"),
   copy("setupApply.endState.launched", "Launch handoff accepted.", "تم قبول تسليم التشغيل.", [], "agent-launch"),
   copy("setupApply.endState.acceptedDegraded", "Limited mode accepted for launch.", "تم قبول الوضع المحدود للتشغيل.", [], "agent-launch"),
