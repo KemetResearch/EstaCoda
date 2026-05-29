@@ -103,7 +103,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.repairMissingCredential",
   "setupEditor.actions.editSecurityMode",
   "setupEditor.actions.editWorkflowLearning",
-  "setupEditor.actions.editLanguage",
+  "setupEditor.actions.chooseLanguage",
   "setupEditor.actions.repairWorkspaceTrust",
   "setupEditor.actions.configureChannels",
   "setupEditor.actions.configureVoice",
@@ -118,7 +118,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.repairWorkspaceTrust.description",
   "setupEditor.actions.editSecurityMode.description",
   "setupEditor.actions.editWorkflowLearning.description",
-  "setupEditor.actions.editLanguage.description",
+  "setupEditor.actions.chooseLanguage.description",
   "setupEditor.actions.repairPrimaryProvider.description",
   "setupEditor.actions.editPrimaryModelRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
@@ -500,8 +500,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit workflow learning");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Control how reusable workflows are learned from sessions.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editLanguage")).toBe("Edit language");
-    expect(rawSetupCopy("en", "setupEditor.actions.editLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
+    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Edit language");
+    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");
     expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Show diagnostics");

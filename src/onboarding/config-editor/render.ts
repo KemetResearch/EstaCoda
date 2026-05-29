@@ -269,7 +269,7 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
     case "edit-workflow-learning":
       return setupCopyText(locale, "setupEditor.actions.editWorkflowLearning.description");
     case "edit-language":
-      return setupCopyText(locale, "setupEditor.actions.editLanguage.description");
+      return setupCopyText(locale, "setupEditor.actions.chooseLanguage.description");
     case "configure-channels":
       return setupCopyText(locale, "setupEditor.actions.configureChannels.description");
     case "configure-voice":
@@ -282,6 +282,10 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":
       return setupCopyText(locale, "setupEditor.actions.editPrimaryModelRoute.description");
+    case "edit-fallback-model-route":
+      return setupCopyText(locale, "setupEditor.actions.editFallbackModelRoute.description");
+    case "edit-auxiliary-model-route":
+      return setupCopyText(locale, "setupEditor.actions.editAuxiliaryModelRoute.description");
     case "repair-missing-credential":
       return setupCopyText(locale, "setupEditor.actions.repairMissingCredential.description");
     default:

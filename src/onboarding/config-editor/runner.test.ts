@@ -65,7 +65,9 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
+    expect(output.join("")).toContain("Configure backup providers and models used when the primary model fails.");
     expect(output.join("")).toContain("edit-auxiliary-model-route");
+    expect(output.join("")).toContain("Configure specialist models for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
     expect(output.join("")).toContain("edit-language - Edit language");

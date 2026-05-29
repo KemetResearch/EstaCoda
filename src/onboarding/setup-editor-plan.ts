@@ -362,7 +362,7 @@ function interfacePreferenceSection(): SetupEditorSection {
     actions: [
       setupEditorAction({
         id: "edit-language",
-        copyKey: "setupEditor.actions.editLanguage",
+        copyKey: "setupEditor.actions.chooseLanguage",
         sectionId: "interface-preference",
         effect: "draft-config-patch",
         readOnly: false,
