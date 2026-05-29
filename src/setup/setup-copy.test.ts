@@ -55,15 +55,9 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.cancelAction",
   "onboarding.review",
   "onboarding.review.validation.accepted",
-  "onboarding.save",
-  "onboarding.save.validation.confirmed",
-  "onboarding.verification",
-  "onboarding.verification.validation.selected",
-  "onboarding.launch",
   "onboarding.launch.startNow",
   "onboarding.launch.startNow.yes",
   "onboarding.launch.startNow.no",
-  "onboarding.launch.validation.explicit",
 ] as const;
 
 const SETUP_EDITOR_KEYS = [
@@ -336,7 +330,6 @@ const REVIEW_MANIFEST_KEYS = [
   "setupDrafts.uiPreferences.summary",
   "setupDrafts.optionalCapabilities.summary",
   "setupDrafts.verification.summary",
-  "setupDrafts.launch.summary",
   "setupDrafts.exit.summary",
   "setupDrafts.brokenConfig.summary",
 ] as const;

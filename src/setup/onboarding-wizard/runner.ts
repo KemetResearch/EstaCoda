@@ -10,11 +10,13 @@ import {
   createProviderModelSelectionFlow,
   type FlowEngine,
 } from "../../providers/provider-model-selection-flow.js";
-import {
-  type FirstRunOnboardingSelections,
-  type OptionalCapabilityId,
-} from "./plan.js";
-import type { OnboardingCredentialSummaryStatus, OnboardingOptionalCapabilitySummaries, OnboardingWizardState } from "./state.js";
+import type {
+  OnboardingCredentialSummaryStatus,
+  OnboardingOptionalCapabilitySummaries,
+  OnboardingSupportedOptionalCapabilityId,
+  OnboardingWizardSelections,
+  OnboardingWizardState,
+} from "./state.js";
 import { renderOnboardingWizardSummary } from "./summary.js";
 import {
   validateOnboardingWorkspacePath,
@@ -69,7 +71,7 @@ import {
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
   readonly flowEngine?: FlowEngine;
-  readonly defaultSelections?: FirstRunOnboardingSelections;
+  readonly defaultSelections?: OnboardingWizardSelections;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly output?: {
@@ -83,7 +85,7 @@ export type FirstRunSetupRunnerResult = {
   readonly output: string;
   readonly launchRequested?: boolean;
   readonly state: SetupEntryState;
-  readonly selections: FirstRunOnboardingSelections;
+  readonly selections: OnboardingWizardSelections;
   readonly wizardState: OnboardingWizardState;
   readonly draftBundle: SetupDraftBundle;
   readonly reviewManifest: SetupReviewManifest;
@@ -94,8 +96,6 @@ export type FirstRunSetupRunnerResult = {
 type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
-
-type OnboardingSupportedOptionalCapabilityId = Exclude<OptionalCapabilityId, "vision">;
 
 type OnboardingOptionalCapabilityFlowResult = {
   readonly selected: readonly OnboardingSupportedOptionalCapabilityId[];
@@ -164,7 +164,7 @@ export async function runFirstRunSetup(
   const primaryApiMode = resolution.apiMode;
   const primaryAuthMethod = resolution.authMethod;
 
-  let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
+  let primaryCredential: OnboardingWizardSelections["primaryCredential"];
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
   let credentialStatus: OnboardingCredentialSummaryStatus = "not_set";
 
@@ -281,9 +281,8 @@ export async function runFirstRunSetup(
   });
   pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
   const optionalCapabilities = optionalCapabilityFlow.selected;
-  const launchSelected = false;
 
-  const selections: FirstRunOnboardingSelections = {
+  const selections: OnboardingWizardSelections = {
     language,
     interfaceFlavor: interfaceChoice.flavor,
     activityLabels: interfaceChoice.activityLabels,
@@ -299,9 +298,6 @@ export async function runFirstRunSetup(
     securityMode,
     workflowLearning,
     optionalCapabilities,
-    optionalCapabilitiesSkipped: optionalCapabilities.length === 0,
-    verifySelected: true,
-    launchSelected,
   };
 
   const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus, optionalCapabilityFlow);
@@ -423,7 +419,7 @@ function isPostSetupLaunchOfferableEndState(endState: SetupApplyEndState): boole
 }
 
 function onboardingWizardStateFromSelections(
-  selections: FirstRunOnboardingSelections,
+  selections: OnboardingWizardSelections,
   credentialStatus: OnboardingCredentialSummaryStatus,
   optionalCapabilityFlow: OnboardingOptionalCapabilityFlowResult
 ): OnboardingWizardState {
@@ -457,7 +453,6 @@ function onboardingWizardStateFromSelections(
     agentEvolution: selections.workflowLearning,
     optionalCapabilities: optionalCapabilityFlow.summaries,
     optionalCapabilityDrafts: optionalCapabilityFlow.drafts,
-    launchSelected: selections.launchSelected,
   };
 }
 
@@ -593,10 +588,10 @@ async function chooseOptionalCapabilities(
     readonly profileId: string;
     readonly workspaceRoot: string;
     readonly workspaceTrusted: boolean;
-    readonly primaryProvider: FirstRunOnboardingSelections["primaryProvider"];
-    readonly primaryModel: FirstRunOnboardingSelections["primaryModel"];
-    readonly securityMode: FirstRunOnboardingSelections["securityMode"];
-    readonly workflowLearning: FirstRunOnboardingSelections["workflowLearning"];
+    readonly primaryProvider: OnboardingWizardSelections["primaryProvider"];
+    readonly primaryModel: OnboardingWizardSelections["primaryModel"];
+    readonly securityMode: OnboardingWizardSelections["securityMode"];
+    readonly workflowLearning: OnboardingWizardSelections["workflowLearning"];
   }
 ): Promise<OnboardingOptionalCapabilityFlowResult> {
   const configureNow = await promptSetupChoice(options.prompt, {

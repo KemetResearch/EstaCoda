@@ -1,14 +1,5 @@
 import { collectSetupEntryState, type CollectSetupEntryStateOptions, type SetupEntryState } from "./setup-entry-state.js";
 import { setupCopyText } from "./setup-prompts.js";
-import {
-  buildFirstRunOnboardingPlan,
-  createFirstRunOnboardingState,
-  getActiveFirstRunSteps,
-  type FirstRunOnboardingPlan,
-  type FirstRunOnboardingSelections,
-  type FirstRunOnboardingState,
-  type FirstRunOnboardingStep,
-} from "./onboarding-wizard/plan.js";
 import { buildSetupEditorPlan, type SetupEditorPlan, type SetupEditorSection } from "./setup-editor-plan.js";
 
 export type SetupRouterSelection =
@@ -44,23 +35,6 @@ export type SetupRouteAction = {
   readonly mutatesConfig: boolean;
 };
 
-export type FirstRunPlanSession = {
-  readonly kind: "first-run-plan-session";
-  readonly initialState: FirstRunOnboardingState;
-  readonly currentStep: FirstRunOnboardingStep;
-  readonly activeSteps: readonly FirstRunOnboardingStep[];
-  readonly selectedLocale: FirstRunOnboardingPlan["copyLocale"];
-  readonly copyLocale: FirstRunOnboardingPlan["copyLocale"];
-  readonly plan: FirstRunOnboardingPlan;
-  readonly metadata: {
-    readonly source: "setup-router";
-    readonly planKind: FirstRunOnboardingPlan["kind"];
-    readonly currentStepId: FirstRunOnboardingState["currentStepId"];
-    readonly totalStepCount: number;
-    readonly activeStepCount: number;
-  };
-};
-
 export type SetupEditorPlanSession = {
   readonly kind: "guided-setup-editor-session";
   readonly plan: SetupEditorPlan;
@@ -84,20 +58,17 @@ export type SetupRouteDecision = {
   readonly warnings: readonly string[];
   readonly blockers: readonly string[];
   readonly readOnly: boolean;
-  readonly firstRunPlanSession?: FirstRunPlanSession;
   readonly setupEditorPlanSession?: SetupEditorPlanSession;
 };
 
 export type CollectSetupRouteOptions = CollectSetupEntryStateOptions & {
   readonly selection?: SetupRouterSelection;
-  readonly firstRunSelections?: FirstRunOnboardingSelections;
 };
 
 export async function collectSetupRoute(options: CollectSetupRouteOptions): Promise<SetupRouteDecision> {
   const state = await collectSetupEntryState(options);
   return routeSetupEntryState(state, {
     selection: options.selection,
-    firstRunSelections: options.firstRunSelections,
   });
 }
 
@@ -105,7 +76,6 @@ export function routeSetupEntryState(
   state: SetupEntryState,
   options: {
     readonly selection?: SetupRouterSelection;
-    readonly firstRunSelections?: FirstRunOnboardingSelections;
   } = {}
 ): SetupRouteDecision {
   if (options.selection === "verify") {
@@ -113,12 +83,12 @@ export function routeSetupEntryState(
   }
 
   if (options.selection === "run-first-run") {
-    return firstRunDecision(state, options.firstRunSelections);
+    return firstRunDecision(state);
   }
 
   switch (state.kind) {
     case "new-user":
-      return firstRunDecision(state, options.firstRunSelections);
+      return firstRunDecision(state);
     case "configured-ready":
       return configuredDecision(state);
     case "configured-degraded":
@@ -162,8 +132,7 @@ export function renderSetupRouteDecision(decision: SetupRouteDecision): string {
 }
 
 function firstRunDecision(
-  state: SetupEntryState,
-  selections: FirstRunOnboardingSelections = {}
+  state: SetupEntryState
 ): SetupRouteDecision {
   return {
     kind: "first-run-onboarding",
@@ -178,37 +147,6 @@ function firstRunDecision(
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
-    firstRunPlanSession: createFirstRunPlanSession(selections),
-  };
-}
-
-function createFirstRunPlanSession(selections: FirstRunOnboardingSelections): FirstRunPlanSession {
-  const initialState = createFirstRunOnboardingState(selections, "welcome");
-  const plan = buildFirstRunOnboardingPlan({
-    currentStepId: initialState.currentStepId,
-    selections: initialState.selections,
-  });
-  const activeSteps = getActiveFirstRunSteps(plan);
-  const currentStep = activeSteps.find((step) => step.id === initialState.currentStepId) ?? activeSteps[0] ?? plan.steps[0];
-  if (currentStep === undefined) {
-    throw new Error("First-run onboarding plan has no steps.");
-  }
-
-  return {
-    kind: "first-run-plan-session",
-    initialState,
-    currentStep,
-    activeSteps,
-    selectedLocale: plan.selections.language ?? "en",
-    copyLocale: plan.copyLocale,
-    plan,
-    metadata: {
-      source: "setup-router",
-      planKind: plan.kind,
-      currentStepId: initialState.currentStepId,
-      totalStepCount: plan.steps.length,
-      activeStepCount: activeSteps.length,
-    },
   };
 }
 

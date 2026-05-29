@@ -138,7 +138,7 @@ describe("setup modules", () => {
     }));
   });
 
-  it("workflow learning module produces a scoped draft", () => {
+  it("Agent Evolution module produces a scoped draft", () => {
     const draft = workflowLearningSetupModule.toDrafts(context())[0];
 
     expect(draft?.kind).toBe("workflow-learning");

@@ -295,7 +295,7 @@ describe("runConfigEditor", () => {
   });
 
 
-  it("applies reviewed workflow learning changes while preserving unrelated skill config", async () => {
+  it("applies reviewed Agent Evolution changes while preserving unrelated skill config", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
       skills: {

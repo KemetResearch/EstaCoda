@@ -4,28 +4,41 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
-import { buildFirstRunDraftBundle } from "./setup-drafts.js";
+import { buildOnboardingWizardDraftBundle } from "./setup-drafts.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "./setup-modules.js";
 import { buildSetupReviewManifest } from "./setup-review-manifest.js";
-import type { FirstRunPlanSession } from "./setup-router.js";
+import type { OnboardingWizardState } from "./onboarding-wizard/state.js";
 
-function firstRunBundle(): SetupDraftBundle {
-  return buildFirstRunDraftBundle({
-    plan: {
-      selections: {
-        workspaceRoot: "/tmp/workspace",
-        workspaceTrusted: true,
-        primaryProvider: "openai",
-        primaryModel: "gpt-4.1-mini",
-        primaryCredential: { kind: "env", name: "OPENAI_API_KEY" },
-        securityMode: "adaptive",
-        workflowLearning: "suggest",
-        optionalCapabilitiesSkipped: true,
-        verifySelected: true,
-        launchSelected: true,
-      },
+function onboardingBundle(overrides: Partial<OnboardingWizardState> = {}): SetupDraftBundle {
+  return buildOnboardingWizardDraftBundle({
+    interfacePreferences: {
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
     },
-  } as FirstRunPlanSession, {
+    workspace: {
+      path: "/tmp/workspace",
+      trustStatus: "trusted",
+    },
+    primaryRoute: {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+    },
+    credential: {
+      status: "new_pending",
+      envVarName: "OPENAI_API_KEY",
+    },
+    securityMode: "adaptive",
+    agentEvolution: "suggest",
+    optionalCapabilities: {
+      selected: [],
+      channels: { telegram: "not_set" },
+      voice: { stt: "not_set", tts: "not_set" },
+      browser: "not_set",
+    },
+    optionalCapabilityDrafts: [],
+    ...overrides,
+  }, {
     configPath: "/tmp/home/.estacoda/config.json",
     workspaceRoot: "/tmp/workspace",
     trustStorePath: "/tmp/home/.estacoda/trust.json",
@@ -82,20 +95,20 @@ function moduleContext(overrides: SetupModuleContext = {}): SetupModuleContext {
 
 describe("setup review manifest", () => {
   it("includes config file write/update lines for provider/model/security/workflow drafts", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const fileLines = manifest.sections["files-to-write-update"];
 
     expect(fileLines.map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
-      "first-run.provider-model-route",
-      "first-run.security-mode",
-      "first-run.workflow-learning",
+      "onboarding-wizard.provider-model-route",
+      "onboarding-wizard.security-mode",
+      "onboarding-wizard.workflow-learning",
     ]));
     expect(fileLines.every((line) => line.target?.kind === "config-scope")).toBe(true);
     expect(fileLines.every((line) => line.preserveUnrelatedConfig === true)).toBe(true);
   });
 
   it("includes secret refs by env var name only", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const secretLine = manifest.sections["secret-refs-to-store"][0];
 
     expect(secretLine?.review.values.envVars).toEqual(["OPENAI_API_KEY"]);
@@ -135,7 +148,7 @@ describe("setup review manifest", () => {
   });
 
   it("lists workspace trust grant with exact workspace and trust-store paths", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const line = manifest.sections["workspace-trust-grants"][0];
 
     expect(line?.target).toEqual({
@@ -147,7 +160,7 @@ describe("setup review manifest", () => {
   });
 
   it("lists provider/model/network changes", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const line = manifest.sections["provider-model-network"][0];
 
     expect(line?.review.values.provider).toBe("openai");
@@ -277,22 +290,11 @@ describe("setup review manifest", () => {
   });
 
   it("lists verification checks as read-only", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const line = manifest.sections["verification-checks"][0];
 
     expect(line?.readOnly).toBe(true);
     expect(line?.target).toEqual({ kind: "verification", readOnly: true });
-  });
-
-  it("includes launch handoff preference when present", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
-    const line = manifest.sections["launch-handoff"][0];
-
-    expect(line?.target).toEqual({
-      kind: "launch",
-      preference: "offer-after-verify",
-    });
-    expect(line?.review.values.launchSelected).toBe(true);
   });
 
   it("preserves blockers and warnings", () => {
@@ -384,15 +386,15 @@ describe("setup review manifest", () => {
   });
 
   it("omits skipped capabilities from review lines", () => {
-    const manifest = buildSetupReviewManifest([firstRunBundle()]);
+    const manifest = buildSetupReviewManifest([onboardingBundle()]);
 
     expect(manifest.lines.some((line) => line.review.values.skipped === true)).toBe(false);
-    expect(manifest.lines.some((line) => line.sourceDraftIds.includes("first-run.optional-capabilities"))).toBe(false);
+    expect(manifest.lines.some((line) => line.sourceDraftIds.includes("onboarding-wizard.optional-capabilities"))).toBe(false);
   });
 
   it("contains no terminal rendering fields", () => {
     const manifest = buildSetupReviewManifest([
-      firstRunBundle(),
+      onboardingBundle(),
       buildSetupModuleDraftBundle(moduleContext()),
     ]);
     const json = JSON.stringify(manifest);
@@ -423,7 +425,7 @@ describe("setup review manifest", () => {
 
   it("does not reintroduce backupForMain", () => {
     const manifest = buildSetupReviewManifest([
-      firstRunBundle(),
+      onboardingBundle(),
       buildSetupModuleDraftBundle(moduleContext()),
     ]);
 

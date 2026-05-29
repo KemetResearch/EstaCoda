@@ -2,11 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildFirstRunDraftBundle } from "../setup-drafts.js";
+import { buildOnboardingWizardDraftBundle } from "../setup-drafts.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "../setup-modules.js";
 import { buildSetupReviewManifest } from "../setup-review-manifest.js";
 import { executeSetupApplyPlan, planSetupApply, type SetupApplyPlan } from "../setup-apply-plan.js";
-import type { FirstRunPlanSession } from "../setup-router.js";
 import {
   applyReviewedSetupPlanOperations,
   createReviewedSetupApplyExecutor,
@@ -28,7 +27,7 @@ function profileEnvPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
-function firstRunPlan(input: {
+function onboardingPlan(input: {
   readonly homeDir: string;
   readonly workspaceRoot: string;
   readonly provider?: string;
@@ -38,33 +37,33 @@ function firstRunPlan(input: {
   readonly credentialEnv?: string;
   readonly securityMode?: "strict" | "adaptive" | "open";
   readonly workflowLearning?: "none" | "suggest" | "proactive" | "autonomous";
-  readonly optionalCapabilities?: readonly ("channels" | "voice" | "vision" | "browser")[];
-  readonly launchSelected?: boolean;
-  readonly verifySelected?: boolean;
 }): SetupApplyPlan {
   const provider = input.provider ?? "local";
   const credential = input.credentialEnv === undefined
-    ? { kind: "none" as const }
-    : { kind: "env" as const, name: input.credentialEnv };
-  const bundle = buildFirstRunDraftBundle({
-    plan: {
-      selections: {
-        workspaceRoot: input.workspaceRoot,
-        workspaceTrusted: true,
-        primaryProvider: provider,
-        primaryModel: input.model ?? "hermes-local",
-        primaryBaseUrl: input.baseUrl,
-        primaryContextWindowTokens: input.contextWindowTokens,
-        primaryCredential: credential,
-        securityMode: input.securityMode ?? "adaptive",
-        workflowLearning: input.workflowLearning ?? "suggest",
-        optionalCapabilities: input.optionalCapabilities ?? [],
-        optionalCapabilitiesSkipped: (input.optionalCapabilities?.length ?? 0) === 0,
-        verifySelected: input.verifySelected ?? false,
-        launchSelected: input.launchSelected ?? false,
-      },
+    ? undefined
+    : { status: "new_pending" as const, envVarName: input.credentialEnv };
+  const bundle = buildOnboardingWizardDraftBundle({
+    workspace: {
+      path: input.workspaceRoot,
+      trustStatus: "trusted",
     },
-  } as FirstRunPlanSession, {
+    primaryRoute: {
+      provider,
+      model: input.model ?? "hermes-local",
+      baseUrl: input.baseUrl,
+      contextWindowTokens: input.contextWindowTokens,
+    },
+    ...(credential === undefined ? {} : { credential }),
+    securityMode: input.securityMode ?? "adaptive",
+    agentEvolution: input.workflowLearning ?? "suggest",
+    optionalCapabilities: {
+      selected: [],
+      channels: { telegram: "not_set" },
+      voice: { stt: "not_set", tts: "not_set" },
+      browser: "not_set",
+    },
+    optionalCapabilityDrafts: [],
+  }, {
     configPath: join(input.homeDir, ".estacoda", "config.json"),
     workspaceRoot: input.workspaceRoot,
     trustStorePath: join(input.homeDir, ".estacoda", "trust.json"),
@@ -109,6 +108,49 @@ function fallbackPlan(values: ReviewValues): SetupApplyPlan {
         summaryKey: values.fallbackOperation === "replace"
           ? "setupDrafts.fallbackModelRoute.replace.summary"
           : "setupDrafts.fallbackModelRoute.add.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
+function telegramPlan(values: ReviewValues, input: { readonly homeDir: string }): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-telegram-bundle"],
+    operations: [{
+      id: "test-telegram-capability",
+      kind: "config-patch",
+      sourceLineIds: ["test-telegram-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["channels"],
+        path: profileConfigPath(input.homeDir),
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupModules.telegram.review",
+        summaryKey: "setupModules.telegram.draft",
         redacted: true,
         values,
       },
@@ -279,7 +321,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("applies reviewed provider, security, workflow, and workspace trust changes", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
       securityMode: "strict",
@@ -342,7 +384,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("applies hosted credential references as provider route refs without raw secret values", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
       provider: "openai",
@@ -366,7 +408,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("persists deferred secrets only through the reviewed apply execution hook", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
       provider: "openai",
@@ -399,7 +441,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("rejects deferred secret writes that were not present in the reviewed credential plan", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
       provider: "openai",
@@ -423,7 +465,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("applies custom provider baseUrl and contextWindowTokens from review values", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
       provider: "openai",
@@ -714,11 +756,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("blocks remote-control capabilities without allowlisted identities", async () => {
-    const plan = firstRunPlan({
-      homeDir: tempDir,
-      workspaceRoot,
-      optionalCapabilities: ["channels"],
-    });
+    const plan = telegramPlan({ botTokenEnv: "TELEGRAM_BOT_TOKEN" }, { homeDir: tempDir });
 
     const result = await applyReviewedSetupPlanOperations(plan, {
       homeDir: tempDir,
@@ -726,7 +764,7 @@ describe("reviewed setup apply executor", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("Remote-control capabilities require");
+    expect(result.error).toContain("Telegram apply requires allowed user or chat identities.");
   });
 
   it("applies reviewed Discord and WhatsApp beta channel config through channel dispatch", async () => {
@@ -809,11 +847,9 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("stops verification when save/apply fails", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
-      verifySelected: true,
-      launchSelected: true,
     });
     const badPlan: SetupApplyPlan = {
       ...plan,
@@ -848,11 +884,9 @@ describe("reviewed setup apply executor", () => {
   });
 
   it("runs post-save verification through the reviewed executor", async () => {
-    const plan = firstRunPlan({
+    const plan = onboardingPlan({
       homeDir: tempDir,
       workspaceRoot,
-      verifySelected: true,
-      launchSelected: false,
     });
 
     const endState = await executeReviewedSetupApplyPlan(plan, {
@@ -879,8 +913,8 @@ describe("reviewed setup apply executor", () => {
       }),
     });
 
-    expect(endState.kind).toBe("saved-not-launched");
-    if (endState.kind !== "saved-not-launched") throw new Error("expected saved-not-launched");
+    expect(endState.kind).toBe("verified-ready");
+    if (endState.kind !== "verified-ready") throw new Error("expected verified-ready");
     expect(endState.verification?.providerDiagnostic.status).toBe("ready");
   });
 

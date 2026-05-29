@@ -232,7 +232,6 @@ function reviewPlaceholderValues(
     workspacePath: values.workspacePath ?? values.workspaceRoot,
     workflowMode: values.workflowMode ?? values.workflowLearning,
     capabilities: values.capabilities,
-    launchPreference: values.launchPreference ?? launchPreference(values.launchSelected),
   };
 }
 
@@ -250,11 +249,4 @@ function remoteControlIdentityRefs(values: Record<string, SetupPromptValue>): st
     ...allowedChannels.map((id) => `channel:${id}`),
   ];
   return refs.length > 0 ? refs.join(", ") : undefined;
-}
-
-function launchPreference(value: SetupPromptValue): string | undefined {
-  if (value === true) return "offer-after-verify";
-  if (value === false) return "skip-launch";
-  if (typeof value === "string") return value;
-  return undefined;
 }

@@ -1,13 +1,22 @@
-import type { FirstRunPlanSession, SetupEditorPlanSession } from "./setup-router.js";
-import type { FirstRunOnboardingStepId, FirstRunOnboardingSelections } from "./onboarding-wizard/plan.js";
+import type { SetupEditorPlanSession } from "./setup-router.js";
 import type { OnboardingOptionalCapabilityDraftId, OnboardingWizardState } from "./onboarding-wizard/state.js";
 import type { SetupEditorActionDraft, SetupEditorActionId, SetupEditorPatchField } from "./setup-editor-actions.js";
 import type { SetupEditorSectionId, SetupEditorSensitiveSurface } from "./setup-editor-plan.js";
 
+export type OnboardingWizardDraftStepId =
+  | "interface-language"
+  | "workspace-trust"
+  | "primary-model"
+  | "primary-credential"
+  | "security-mode"
+  | "workflow-learning"
+  | "optional-capabilities"
+  | "verify";
+
 export type SetupDraftSource =
   | {
-      readonly kind: "first-run";
-      readonly stepId: FirstRunOnboardingStepId;
+      readonly kind: "onboarding-wizard";
+      readonly stepId: OnboardingWizardDraftStepId;
     }
   | {
       readonly kind: "setup-editor";
@@ -110,7 +119,6 @@ export type SetupDraft = {
 };
 
 export type SetupDraftBundleSourceKind =
-  | "first-run-plan-session"
   | "onboarding-wizard-state"
   | "setup-editor-plan-session"
   | "setup-module-session";
@@ -136,25 +144,6 @@ export type SetupDraftBundleOptions = {
   readonly trustStorePath?: string;
 };
 
-export function buildFirstRunDraftBundle(
-  session: FirstRunPlanSession,
-  options: SetupDraftBundleOptions = {}
-): SetupDraftBundle {
-  const selections = session.plan.selections;
-  const drafts = [
-    firstRunProviderModelDraft(selections, options),
-    firstRunCredentialDraft(selections, options),
-    firstRunSecurityDraft(selections, options),
-    firstRunWorkflowDraft(selections, options),
-    firstRunWorkspaceTrustDraft(selections, options),
-    firstRunOptionalCapabilitiesDraft(selections, options),
-    verificationDraft({ kind: "first-run", stepId: "verify" }),
-    launchDraft(selections),
-  ].filter((draft): draft is SetupDraft => draft !== undefined);
-
-  return bundle("first-run-plan-session", "first-run:welcome", drafts, [], []);
-}
-
 export function buildOnboardingWizardDraftBundle(
   state: OnboardingWizardState,
   options: SetupDraftBundleOptions = {}
@@ -167,8 +156,7 @@ export function buildOnboardingWizardDraftBundle(
     onboardingAgentEvolutionDraft(state, options),
     onboardingWorkspaceTrustDraft(state, options),
     ...onboardingOptionalCapabilityDrafts(state, options),
-    verificationDraft({ kind: "first-run", stepId: "verify" }),
-    onboardingLaunchDraft(state),
+    verificationDraft({ kind: "onboarding-wizard", stepId: "verify" }),
   ].filter((draft): draft is SetupDraft => draft !== undefined);
 
   return bundle("onboarding-wizard-state", "onboarding-wizard:state", drafts, [], []);
@@ -205,30 +193,6 @@ function buildSetupEditorDraftBundleFromActions(
   );
 }
 
-function firstRunProviderModelDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.primaryProvider === undefined && selections.primaryModel === undefined) return undefined;
-  return configDraft({
-    id: "first-run.provider-model-route",
-    kind: "provider-model-route",
-    source: { kind: "first-run", stepId: "primary-model" },
-    riskSurface: "provider-selection",
-    scope: ["model.provider", "model.id"],
-    configPath: options.configPath,
-    summaryKey: "setupDrafts.providerModelRoute.summary",
-    values: {
-      provider: selections.primaryProvider,
-      model: selections.primaryModel,
-      baseUrl: selections.primaryBaseUrl,
-      contextWindowTokens: selections.primaryContextWindowTokens,
-      apiMode: selections.primaryApiMode,
-      authMethod: selections.primaryAuthMethod,
-    },
-  });
-}
-
 function onboardingUiPreferencesDraft(
   state: OnboardingWizardState,
   options: SetupDraftBundleOptions
@@ -240,7 +204,7 @@ function onboardingUiPreferencesDraft(
   return configDraft({
     id: "onboarding-wizard.ui-preferences",
     kind: "ui-preferences",
-    source: { kind: "first-run", stepId: "interface-language" },
+    source: { kind: "onboarding-wizard", stepId: "interface-language" },
     riskSurface: "interface-preference",
     scope: ["ui.language", "ui.flavor", "ui.activityLabels"],
     configPath: options.configPath,
@@ -262,7 +226,7 @@ function onboardingProviderModelDraft(
   return configDraft({
     id: "onboarding-wizard.provider-model-route",
     kind: "provider-model-route",
-    source: { kind: "first-run", stepId: "primary-model" },
+    source: { kind: "onboarding-wizard", stepId: "primary-model" },
     riskSurface: "provider-selection",
     scope: ["model.provider", "model.id"],
     configPath: options.configPath,
@@ -286,7 +250,7 @@ function onboardingCredentialDraft(
   if (envVarName === undefined || envVarName.trim().length === 0) return undefined;
   return credentialDraft({
     id: "onboarding-wizard.credential-reference",
-    source: { kind: "first-run", stepId: "primary-credential" },
+    source: { kind: "onboarding-wizard", stepId: "primary-credential" },
     configPath: options.configPath,
     envVars: [envVarName],
     provider: state.primaryRoute?.provider,
@@ -302,7 +266,7 @@ function onboardingSecurityDraft(
   return configDraft({
     id: "onboarding-wizard.security-mode",
     kind: "security-mode",
-    source: { kind: "first-run", stepId: "security-mode" },
+    source: { kind: "onboarding-wizard", stepId: "security-mode" },
     riskSurface: "security-policy",
     scope: ["security.approvalMode"],
     configPath: options.configPath,
@@ -319,7 +283,7 @@ function onboardingAgentEvolutionDraft(
   return configDraft({
     id: "onboarding-wizard.workflow-learning",
     kind: "workflow-learning",
-    source: { kind: "first-run", stepId: "workflow-learning" },
+    source: { kind: "onboarding-wizard", stepId: "workflow-learning" },
     riskSurface: "workflow-learning",
     scope: ["skills.autonomy"],
     configPath: options.configPath,
@@ -335,7 +299,7 @@ function onboardingWorkspaceTrustDraft(
   if (state.workspace?.trustStatus !== "trusted") return undefined;
   return workspaceTrustDraft({
     id: "onboarding-wizard.workspace-trust",
-    source: { kind: "first-run", stepId: "workspace-trust" },
+    source: { kind: "onboarding-wizard", stepId: "workspace-trust" },
     workspaceRoot: options.workspaceRoot ?? state.workspace.path ?? "",
     trustStorePath: options.trustStorePath ?? "",
   });
@@ -351,9 +315,9 @@ function onboardingOptionalCapabilitiesDraft(
   return configDraft({
     id: "onboarding-wizard.optional-capabilities",
     kind: "optional-capability",
-    source: { kind: "first-run", stepId: "optional-capabilities" },
+    source: { kind: "onboarding-wizard", stepId: "optional-capabilities" },
     riskSurface: "optional-capability",
-    scope: ["channels", "voice", "vision", "browser"],
+    scope: ["channels", "voice", "browser"],
     configPath: options.configPath,
     summaryKey: "setupDrafts.optionalCapabilities.summary",
     values: {
@@ -390,127 +354,6 @@ function onboardingSelectedOptionalCapabilities(
   }
   if (state.optionalCapabilities?.browser === "configured") capabilities.push("browser");
   return capabilities;
-}
-
-function onboardingLaunchDraft(state: OnboardingWizardState): SetupDraft | undefined {
-  if (state.launchSelected === undefined) return undefined;
-  return {
-    id: "onboarding-wizard.launch-handoff",
-    kind: "launch-handoff",
-    source: { kind: "first-run", stepId: "launch" },
-    riskSurface: "agent-launch",
-    target: {
-      kind: "launch",
-      preference: state.launchSelected ? "offer-after-verify" : "skip-launch",
-    },
-    review: review("setupDrafts.launch.summary", { launchSelected: state.launchSelected }),
-    applyIntent: intent("launch-handoff"),
-    requiresReview: false,
-    readOnly: true,
-    blockers: [],
-    warnings: [],
-  };
-}
-
-function firstRunCredentialDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.primaryCredential === undefined || selections.primaryCredential.kind === "none") return undefined;
-  return credentialDraft({
-    id: "first-run.credential-reference",
-    source: { kind: "first-run", stepId: "primary-credential" },
-    configPath: options.configPath,
-    envVars: [selections.primaryCredential.name],
-  });
-}
-
-function firstRunSecurityDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.securityMode === undefined) return undefined;
-  return configDraft({
-    id: "first-run.security-mode",
-    kind: "security-mode",
-    source: { kind: "first-run", stepId: "security-mode" },
-    riskSurface: "security-policy",
-    scope: ["security.approvalMode"],
-    configPath: options.configPath,
-    summaryKey: "setupDrafts.securityMode.summary",
-    values: { securityMode: selections.securityMode },
-  });
-}
-
-function firstRunWorkflowDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.workflowLearning === undefined) return undefined;
-  return configDraft({
-    id: "first-run.workflow-learning",
-    kind: "workflow-learning",
-    source: { kind: "first-run", stepId: "workflow-learning" },
-    riskSurface: "workflow-learning",
-    scope: ["skills.autonomy"],
-    configPath: options.configPath,
-    summaryKey: "setupDrafts.workflowLearning.summary",
-    values: { workflowLearning: selections.workflowLearning },
-  });
-}
-
-function firstRunWorkspaceTrustDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.workspaceTrusted !== true) return undefined;
-  return workspaceTrustDraft({
-    id: "first-run.workspace-trust",
-    source: { kind: "first-run", stepId: "workspace-trust" },
-    workspaceRoot: options.workspaceRoot ?? selections.workspaceRoot ?? "",
-    trustStorePath: options.trustStorePath ?? "",
-  });
-}
-
-function firstRunOptionalCapabilitiesDraft(
-  selections: FirstRunOnboardingSelections,
-  options: SetupDraftBundleOptions
-): SetupDraft | undefined {
-  if (selections.optionalCapabilities === undefined && selections.optionalCapabilitiesSkipped !== true) return undefined;
-  return configDraft({
-    id: "first-run.optional-capabilities",
-    kind: "optional-capability",
-    source: { kind: "first-run", stepId: "optional-capabilities" },
-    riskSurface: "optional-capability",
-    scope: ["channels", "voice", "vision", "browser"],
-    configPath: options.configPath,
-    summaryKey: "setupDrafts.optionalCapabilities.summary",
-    values: {
-      skipped: selections.optionalCapabilitiesSkipped === true,
-      capabilities: selections.optionalCapabilities ?? [],
-    },
-    requiresReview: false,
-  });
-}
-
-function launchDraft(selections: FirstRunOnboardingSelections): SetupDraft | undefined {
-  if (selections.launchSelected === undefined) return undefined;
-  return {
-    id: "first-run.launch-handoff",
-    kind: "launch-handoff",
-    source: { kind: "first-run", stepId: "launch" },
-    riskSurface: "agent-launch",
-    target: {
-      kind: "launch",
-      preference: selections.launchSelected ? "offer-after-verify" : "skip-launch",
-    },
-    review: review("setupDrafts.launch.summary", { launchSelected: selections.launchSelected }),
-    applyIntent: intent("launch-handoff"),
-    requiresReview: false,
-    readOnly: true,
-    blockers: [],
-    warnings: [],
-  };
 }
 
 function draftFromEditorAction(

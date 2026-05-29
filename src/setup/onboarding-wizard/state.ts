@@ -13,6 +13,17 @@ export type OnboardingWorkspaceTrustStatus = "trusted" | "untrusted";
 
 export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set";
 
+export type OnboardingSupportedOptionalCapabilityId = "channels" | "voice" | "browser";
+
+export type OnboardingCredentialReference =
+  | {
+      readonly kind: "none";
+    }
+  | {
+      readonly kind: "env";
+      readonly name: string;
+    };
+
 export type OnboardingInterfacePreferences = {
   readonly language?: UiLanguage;
   readonly flavor?: UiFlavor;
@@ -38,7 +49,7 @@ export type OnboardingCredentialSummary = {
   readonly envVarName?: string;
 };
 
-export type OnboardingOptionalCapabilityDraftId = "channels" | "voice" | "vision" | "browser";
+export type OnboardingOptionalCapabilityDraftId = OnboardingSupportedOptionalCapabilityId;
 
 export type OnboardingOptionalCapabilitySummaries = {
   readonly channels?: {
@@ -52,6 +63,26 @@ export type OnboardingOptionalCapabilitySummaries = {
   readonly selected?: readonly OnboardingOptionalCapabilityDraftId[];
 };
 
+export type OnboardingWizardSelections = {
+  readonly language?: UiLanguage;
+  readonly interfaceFlavor?: UiFlavor;
+  readonly activityLabels?: ActivityLabelsLocale;
+  readonly workspaceRoot?: string;
+  readonly workspaceTrusted?: boolean;
+  readonly primaryProvider?: ProviderId;
+  readonly primaryModel?: string;
+  readonly primaryBaseUrl?: string;
+  readonly primaryContextWindowTokens?: number;
+  readonly primaryApiMode?: ProviderApiMode;
+  readonly primaryAuthMethod?: ProviderAuthMethod;
+  readonly primaryCredential?: OnboardingCredentialReference;
+  readonly securityMode?: SecurityApprovalMode;
+  readonly workflowLearning?: SkillAutonomy;
+  readonly optionalCapabilities?: readonly OnboardingSupportedOptionalCapabilityId[];
+  readonly reviewAccepted?: boolean;
+  readonly saveAccepted?: boolean;
+};
+
 export type OnboardingWizardState = {
   readonly interfacePreferences?: OnboardingInterfacePreferences;
   readonly workspace?: OnboardingWorkspaceSummary;
@@ -61,5 +92,4 @@ export type OnboardingWizardState = {
   readonly agentEvolution?: SkillAutonomy;
   readonly optionalCapabilities?: OnboardingOptionalCapabilitySummaries;
   readonly optionalCapabilityDrafts?: readonly SetupDraft[];
-  readonly launchSelected?: boolean;
 };

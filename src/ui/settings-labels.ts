@@ -40,7 +40,7 @@ export const SKILL_AUTONOMY_LABELS = {
   none: {
     en: {
       label: "None",
-      description: "No workflow learning or automatic skill creation."
+      description: "No Agent Evolution learning or automatic skill creation."
     },
     ar: {
       label: "متوقف",

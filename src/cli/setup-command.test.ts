@@ -421,7 +421,6 @@ describe("cli setup command", () => {
 
 type FirstRunPromptOptions = {
   readonly reviewAccepted: boolean;
-  readonly launchSelected?: boolean;
   readonly launchRequested?: boolean;
   readonly providerId?: string;
   readonly setupEditorActionId?: string;
@@ -448,9 +447,6 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     }
     if (title.includes("start estacoda")) {
       return valueOrDefault(selection, options.launchRequested ?? false);
-    }
-    if (title.includes("launch")) {
-      return valueOrDefault(selection, options.launchSelected ?? false);
     }
     if (allBooleanOptions(selection)) {
       return valueOrDefault(selection, false);

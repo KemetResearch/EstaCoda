@@ -445,17 +445,15 @@ describe("runFirstRunSetup", () => {
       flowEngine: flowEngine(),
       defaultSelections: {
         workspaceTrusted: false,
-        launchSelected: true,
       },
     });
 
     expect(result.selections.workspaceTrusted).toBe(false);
-    expect(result.selections.launchSelected).toBe(false);
     expect(result.launchRequested).toBeUndefined();
     expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
-      expect(result.applyPlanningResult.applyPlan.launchHandoffIntent?.preference).toBe("skip-launch");
+      expect(result.applyPlanningResult.applyPlan.launchHandoffIntent).toBeUndefined();
     }
   });
 
@@ -471,11 +469,7 @@ describe("runFirstRunSetup", () => {
     expect(result.completed).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.launchRequested).toBe(true);
-    expect(result.selections.launchSelected).toBe(false);
-    expect(result.applyEndState?.kind).toBe("saved-not-launched");
-    if (result.applyEndState?.kind === "saved-not-launched") {
-      expect(result.applyEndState.verification).toBeDefined();
-    }
+    expect(result.applyEndState?.kind).toBe("verified-ready");
   });
 
   it("does not return a launch request after successful setup when the user chooses No", async () => {
@@ -490,11 +484,7 @@ describe("runFirstRunSetup", () => {
     expect(result.completed).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.launchRequested).toBe(false);
-    expect(result.selections.launchSelected).toBe(false);
-    expect(result.applyEndState?.kind).toBe("saved-not-launched");
-    if (result.applyEndState?.kind === "saved-not-launched") {
-      expect(result.applyEndState.verification).toBeDefined();
-    }
+    expect(result.applyEndState?.kind).toBe("verified-ready");
   });
 
   it("does not offer launch when apply succeeds without verification", async () => {
@@ -953,7 +943,6 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.selections.optionalCapabilities).toEqual([]);
-    expect(result.selections.optionalCapabilitiesSkipped).toBe(true);
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(0);
   });
 
@@ -1086,7 +1075,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(result.applyEndState?.kind).toBe("verified-ready");
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
     };
