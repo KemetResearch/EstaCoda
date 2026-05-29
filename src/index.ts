@@ -22,6 +22,7 @@ import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
+import { resolveSetupCopy } from "./setup/setup-copy.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     console.error(parsedGlobalOptions.error);
     process.exit(1);
   }
-  const argv = parsedGlobalOptions.argv;
+  let argv = parsedGlobalOptions.argv;
   const homeDir = resolveHomeDir();
 
   // Handle --version / -v immediately, before any async init
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
   const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
+  let setupLaunchHandoffCompleted = false;
 
   if (argv[0] === "setup") {
     const setupCommand = await runCliCommand({
@@ -80,7 +82,28 @@ async function main(): Promise<void> {
       if (setupCommand.output.length > 0) {
         console.log(setupCommand.output);
       }
-      process.exit(setupCommand.exitCode);
+      if (setupCommand.launchRequested === true && setupCommand.exitCode === 0) {
+        const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
+        if (!launchResult.launched) {
+          if (launchResult.output.length > 0) {
+            console.log(launchResult.output);
+          }
+          process.exit(launchResult.exitCode);
+        }
+        if (launchResult.workspaceRoot !== undefined) {
+          workspaceRoot = launchResult.workspaceRoot;
+        }
+        launchLocale = launchResult.locale;
+        workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
+        if (!workspaceTrusted) {
+          console.log(resolveSetupCopy(launchLocale ?? "en", "onboarding.workspace.trust.deferredFinal"));
+          process.exit(1);
+        }
+        setupLaunchHandoffCompleted = true;
+        argv = [];
+      } else {
+        process.exit(setupCommand.exitCode);
+      }
     }
   }
 
@@ -120,7 +143,7 @@ async function main(): Promise<void> {
   }
 
   // Bare launch: use interactive launcher for setup/session routing
-  if (argv.length === 0 && canRunInteractive()) {
+  if (!setupLaunchHandoffCompleted && argv.length === 0 && canRunInteractive()) {
     const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
 
     if (!launchResult.launched) {

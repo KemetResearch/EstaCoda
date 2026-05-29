@@ -60,6 +60,9 @@ const FIRST_RUN_KEYS = [
   "onboarding.verification",
   "onboarding.verification.validation.selected",
   "onboarding.launch",
+  "onboarding.launch.startNow",
+  "onboarding.launch.startNow.yes",
+  "onboarding.launch.startNow.no",
   "onboarding.launch.validation.explicit",
 ] as const;
 

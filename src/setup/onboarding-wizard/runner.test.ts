@@ -435,12 +435,13 @@ describe("runFirstRunSetup", () => {
   });
 
   it("does not treat deferred workspace trust as launch-ready", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
         "Workspace trust": "Decide Later",
-      }),
+      }, seenOptions),
       flowEngine: flowEngine(),
       defaultSelections: {
         workspaceTrusted: false,
@@ -450,10 +451,111 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.workspaceTrusted).toBe(false);
     expect(result.selections.launchSelected).toBe(false);
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
       expect(result.applyPlanningResult.applyPlan.launchHandoffIntent?.preference).toBe("skip-launch");
     }
+  });
+
+  it("returns a launch request after successful setup when the user chooses Yes", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.launchRequested).toBe(true);
+    expect(result.selections.launchSelected).toBe(false);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    if (result.applyEndState?.kind === "saved-not-launched") {
+      expect(result.applyEndState.verification).toBeDefined();
+    }
+  });
+
+  it("does not return a launch request after successful setup when the user chooses No", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "No" }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.launchRequested).toBe(false);
+    expect(result.selections.launchSelected).toBe(false);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    if (result.applyEndState?.kind === "saved-not-launched") {
+      expect(result.applyEndState.verification).toBeDefined();
+    }
+  });
+
+  it("does not offer launch when apply succeeds without verification", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }, seenOptions),
+      flowEngine: flowEngine(),
+      applyExecutor: {
+        apply: () => ({
+          ok: true,
+          appliedOperationIds: [],
+        }),
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    if (result.applyEndState?.kind === "saved-not-launched") {
+      expect(result.applyEndState.verification).toBeUndefined();
+    }
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
+  });
+
+  it("does not offer launch after degraded verification", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }, seenOptions),
+      flowEngine: flowEngine(),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => ({
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "warning",
+            lines: ["Provider status: warning"],
+            warnings: ["Provider has warnings"],
+          },
+          toolStatus: "skipped",
+          configSources: [],
+          warnings: ["Provider has warnings"],
+          issueCodes: [],
+        }),
+      }),
+    });
+
+    expect(result.applyEndState?.kind).toBe("verified-degraded");
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
   });
 
   it("stores only hosted provider credential references in review data", async () => {

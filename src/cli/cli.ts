@@ -178,6 +178,7 @@ export type CliCommandResult = {
   handled: boolean;
   exitCode: number;
   output: string;
+  launchRequested?: boolean;
 };
 
 export type CliOptions = {
@@ -414,6 +415,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         handled: true,
         exitCode: result.exitCode,
         output: result.output,
+        launchRequested: result.launchRequested === true,
       };
     }
 

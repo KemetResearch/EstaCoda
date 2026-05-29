@@ -81,6 +81,7 @@ export type FirstRunSetupRunnerResult = {
   readonly completed: boolean;
   readonly exitCode: number;
   readonly output: string;
+  readonly launchRequested?: boolean;
   readonly state: SetupEntryState;
   readonly selections: FirstRunOnboardingSelections;
   readonly wizardState: OnboardingWizardState;
@@ -280,27 +281,7 @@ export async function runFirstRunSetup(
   });
   pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
   const optionalCapabilities = optionalCapabilityFlow.selected;
-  const launchSelected = workspaceTrusted
-    ? await promptSetupChoice(prompt, {
-        title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
-        message: `${setupCopyText(language, "onboarding.launch")}\n`,
-        choices: [
-          {
-            id: "skip",
-            label: setupCopyText(language, "onboarding.launch.skipAction.label"),
-            description: setupCopyText(language, "onboarding.launch.skipAction.description"),
-            value: false,
-          },
-          {
-            id: "offer",
-            label: setupCopyText(language, "onboarding.launch.offerAction.label"),
-            description: setupCopyText(language, "onboarding.launch.offerAction.description"),
-            value: true,
-          },
-        ],
-        defaultValue: options.defaultSelections?.launchSelected ?? false,
-      })
-    : false;
+  const launchSelected = false;
 
   const selections: FirstRunOnboardingSelections = {
     language,
@@ -375,6 +356,13 @@ export async function runFirstRunSetup(
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
+  const launchRequested = await promptForPostSetupLaunchRequest({
+    options,
+    locale: language,
+    completed,
+    workspaceTrusted,
+    applyEndState,
+  });
   const output = workspaceTrusted || !completed
     ? renderedApplyOutput
     : setupCopyText(language, "onboarding.workspace.trust.deferredFinal");
@@ -383,6 +371,7 @@ export async function runFirstRunSetup(
     completed,
     exitCode: completed ? 0 : 1,
     output,
+    launchRequested,
     state,
     selections: finalSelections,
     wizardState,
@@ -391,6 +380,46 @@ export async function runFirstRunSetup(
     applyPlanningResult,
     applyEndState,
   };
+}
+
+async function promptForPostSetupLaunchRequest(input: {
+  readonly options: FirstRunSetupRunnerOptions;
+  readonly locale: SetupCopyLocale;
+  readonly completed: boolean;
+  readonly workspaceTrusted: boolean;
+  readonly applyEndState?: SetupApplyEndState;
+}): Promise<boolean | undefined> {
+  if (
+    !input.completed ||
+    !input.workspaceTrusted ||
+    input.applyEndState === undefined ||
+    !isPostSetupLaunchOfferableEndState(input.applyEndState)
+  ) {
+    return undefined;
+  }
+
+  return promptSetupChoice(input.options.prompt, {
+    title: setupCopyText(input.locale, "onboarding.launch.startNow"),
+    message: `${setupCopyText(input.locale, "onboarding.launch.startNow")}\n`,
+    choices: [
+      {
+        id: "yes",
+        label: setupCopyText(input.locale, "onboarding.launch.startNow.yes"),
+        value: true,
+      },
+      {
+        id: "no",
+        label: setupCopyText(input.locale, "onboarding.launch.startNow.no"),
+        value: false,
+      },
+    ],
+    defaultValue: false,
+  });
+}
+
+function isPostSetupLaunchOfferableEndState(endState: SetupApplyEndState): boolean {
+  return endState.kind === "verified-ready" ||
+    (endState.kind === "saved-not-launched" && endState.verification !== undefined);
 }
 
 function onboardingWizardStateFromSelections(

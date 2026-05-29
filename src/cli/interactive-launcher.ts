@@ -1,4 +1,4 @@
-import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
 import type { UiLocale } from "../contracts/ui.js";
 import { collectSetupRoute, type SetupRouteDecision } from "../setup/setup-router.js";
@@ -8,6 +8,12 @@ export type LaunchOptions = {
   homeDir?: string;
   profileId?: string;
   prompt?: Prompt;
+  collectSetupRoute?: typeof collectSetupRoute;
+  loadRuntimeConfig?: (options: {
+    readonly workspaceRoot: string;
+    readonly homeDir?: string;
+    readonly profileId?: string;
+  }) => Promise<LoadedRuntimeConfig>;
 };
 
 export type LaunchResult = {
@@ -29,7 +35,8 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
     };
   }
 
-  const setupRoute = await collectSetupRoute({
+  const collectRoute = options.collectSetupRoute ?? collectSetupRoute;
+  const setupRoute = await collectRoute({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
     profileId: options.profileId
@@ -111,7 +118,8 @@ function canLaunchWithoutSetup(decision: SetupRouteDecision): boolean {
 
 async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
   try {
-    const config = await loadRuntimeConfig({
+    const loadConfig = options.loadRuntimeConfig ?? loadRuntimeConfig;
+    const config = await loadConfig({
       workspaceRoot: options.workspaceRoot,
       homeDir: options.homeDir,
       profileId: options.profileId
