@@ -325,7 +325,7 @@ export const workflowLearningSetupModule: SetupModule = simpleConfigModule({
   kind: "workflow-learning",
   scope: ["skills.autonomy"],
   value: (context) => ({ workflowLearning: context.workflowLearning }),
-  blocker: "Workflow learning mode must be selected.",
+  blocker: "Agent Evolution mode must be selected.",
 });
 
 export const telegramSetupModule: SetupModule = optionalCapabilityModule({

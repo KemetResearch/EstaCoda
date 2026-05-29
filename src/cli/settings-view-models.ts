@@ -58,7 +58,7 @@ export function buildSettingsOverviewViewModel(config: LoadedRuntimeConfig): Vie
           kv("Security", config.security.approvalMode),
           kv("Profile", `${config.profile.mode} (${config.profile.responseLanguage})`),
           kv("UI", `${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`),
-          kv("Workflow learning", config.skills.autonomy),
+          kv("Agent Evolution", config.skills.autonomy),
           kv("Voice", `TTS ${config.tts.provider}, STT ${formatSettingsStt(config.stt)}, auto-TTS ${config.voice.autoTts ? "on" : "off"}, CLI mode via estacoda voice mode`),
           ...(sttPython === undefined ? [] : [kv("Voice STT Python", sttPython)]),
           kv("Web extraction", config.web.enableNetwork ? "enabled" : "disabled"),
@@ -112,7 +112,7 @@ export function buildSkillsSettingsViewModel(
 ): ViewModel {
   const current = formatSkillAutonomy(config.skills.autonomy, locale);
   return buildKeyValueBlockViewModel({
-    title: "EstaCoda settings: workflow learning",
+    title: "EstaCoda settings: Agent Evolution",
     entries: [
       kv("Mode", `${current.label} (${current.value})`),
       kv("Description", current.description),

@@ -2,9 +2,12 @@ import {
   collectSetupVerificationReport,
   type SetupVerificationReport,
 } from "../verification.js";
+import { writeEnvSecret } from "../../config/env-secret-store.js";
 import {
   executeSetupApplyPlan,
   type SetupApplyEndState,
+  type SetupDeferredSecretApplyResult,
+  type SetupDeferredSecretWrite,
   type SetupApplyExecutionResult,
   type SetupApplyExecutor,
   type SetupApplyFlowOptions,
@@ -71,6 +74,7 @@ export function createReviewedSetupApplyExecutor(
 ): SetupApplyExecutor {
   return {
     apply: (plan) => applyReviewedSetupPlanOperations(plan, options),
+    applyDeferredSecrets: (plan, writes) => applyReviewedSetupDeferredSecrets(plan, writes, options),
     verify: (request) => verifyReviewedSetup(request, options),
   };
 }
@@ -137,6 +141,50 @@ export async function applyReviewedSetupPlanOperations(
       ok: false,
       appliedOperationIds,
       error: error instanceof Error ? error.message : "Reviewed setup apply failed.",
+    };
+  }
+}
+
+export async function applyReviewedSetupDeferredSecrets(
+  plan: SetupApplyPlan,
+  writes: readonly SetupDeferredSecretWrite[],
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<SetupDeferredSecretApplyResult> {
+  const allowedEnvVars = new Set(reviewedSecretEnvVarsFromPlan(plan));
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  let appliedSecretCount = 0;
+
+  try {
+    for (const write of writes) {
+      if (!allowedEnvVars.has(write.envVarName)) {
+        return {
+          ok: false,
+          appliedSecretCount,
+          error: `Deferred secret write is not part of the reviewed credential plan: ${write.envVarName}`,
+        };
+      }
+      const result = await writeEnvSecret({
+        homeDir: options.homeDir,
+        profileId,
+        key: write.envVarName,
+        value: write.value,
+      });
+      process.env[result.key] = write.value;
+      appliedSecretCount += 1;
+    }
+
+    return {
+      ok: true,
+      appliedSecretCount,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Deferred secret persistence failed.";
+    return {
+      ok: false,
+      appliedSecretCount,
+      error: appliedSecretCount > 0
+        ? `Deferred secret persistence failed after ${appliedSecretCount} secret write(s) succeeded: ${message}`
+        : message,
     };
   }
 }
@@ -386,7 +434,7 @@ async function applyWorkflowLearning(
 ): Promise<void> {
   const autonomy = skillAutonomyValue(operation.review.values.workflowLearning ?? operation.review.values.workflowMode);
   if (autonomy === undefined) {
-    throw new Error("Workflow learning apply requires a valid autonomy value.");
+    throw new Error("Agent Evolution apply requires a valid autonomy value.");
   }
   const target = configApplyTarget(operation, options);
   await setupSkillConfig({
@@ -608,6 +656,28 @@ function planContext(plan: SetupApplyPlan): PlanContext {
     credentialEnv: arrayValue(credentialOperation?.review.values.envVars)[0] ??
       stringValue(credentialOperation?.review.values.envVar),
   };
+}
+
+function reviewedSecretEnvVarsFromPlan(plan: SetupApplyPlan): string[] {
+  const envVars = new Set<string>();
+  for (const operation of plan.operations) {
+    for (const envVar of arrayValue(operation.review.values.envVars)) {
+      envVars.add(envVar);
+    }
+    for (const key of [
+      "envVar",
+      "apiKeyEnv",
+      "botTokenEnv",
+      "ttsApiKeyEnv",
+      "sttApiKeyEnv",
+    ] as const) {
+      const envVar = stringValue(operation.review.values[key]);
+      if (envVar !== undefined) {
+        envVars.add(envVar);
+      }
+    }
+  }
+  return [...envVars];
 }
 
 function configApplyTarget(

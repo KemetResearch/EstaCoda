@@ -125,14 +125,30 @@ export type SetupApplyExecutionResult = {
   readonly error?: string;
 };
 
+export type SetupDeferredSecretWrite = {
+  readonly envVarName: string;
+  readonly value: string;
+};
+
+export type SetupDeferredSecretApplyResult = {
+  readonly ok: boolean;
+  readonly appliedSecretCount: number;
+  readonly error?: string;
+};
+
 export type SetupApplyExecutor = {
   readonly apply: (plan: SetupApplyPlan) => Promise<SetupApplyExecutionResult> | SetupApplyExecutionResult;
+  readonly applyDeferredSecrets?: (
+    plan: SetupApplyPlan,
+    writes: readonly SetupDeferredSecretWrite[]
+  ) => Promise<SetupDeferredSecretApplyResult> | SetupDeferredSecretApplyResult;
   readonly verify?: (request: SetupPostSaveVerificationRequest) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
 
 export type SetupApplyFlowOptions = {
   readonly acceptDegraded?: boolean;
   readonly allowAutomaticLaunch?: boolean;
+  readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
 };
 
 export type SetupVerificationClassification = "ready" | "degraded" | "blocked";
@@ -155,6 +171,7 @@ export type SetupApplyEndState =
       readonly blockers: readonly string[];
       readonly repairIntents: readonly SetupRepairIntent[];
       readonly verification?: SetupVerificationReport;
+      readonly persistedSecretCount?: number;
       readonly launchHandoffIntent?: undefined;
     }
   | {
@@ -302,6 +319,7 @@ export async function executeSetupApplyPlan(
   options: SetupApplyFlowOptions = {}
 ): Promise<SetupApplyEndState> {
   const allowAutomaticLaunch = options.allowAutomaticLaunch !== false;
+  const deferredSecretWrites = options.deferredSecretWrites ?? [];
   const saveResult = await executor.apply(plan);
   if (!saveResult.ok) {
     return {
@@ -313,6 +331,26 @@ export async function executeSetupApplyPlan(
         sourceLineIds: [],
         blockers: [saveResult.error ?? "Setup save failed."],
       }],
+    };
+  }
+
+  const deferredSecretResult = deferredSecretWrites.length > 0
+    ? await applyDeferredSecretWrites(plan, executor, deferredSecretWrites)
+    : { ok: true, appliedSecretCount: 0 };
+  if (!deferredSecretResult.ok) {
+    const error = deferredSecretResult.error ?? "Deferred secret persistence failed.";
+    return {
+      kind: "blocked",
+      reason: "save-failed",
+      blockers: [error],
+      repairIntents: [{
+        kind: "manual-review",
+        sourceLineIds: [],
+        blockers: [error],
+      }],
+      ...(deferredSecretResult.appliedSecretCount > 0
+        ? { persistedSecretCount: deferredSecretResult.appliedSecretCount }
+        : {}),
     };
   }
 
@@ -337,6 +375,9 @@ export async function executeSetupApplyPlan(
         blockers: verification.warnings.length > 0 ? verification.warnings : ["Post-save verification is blocked."],
       }],
       verification,
+      ...(deferredSecretResult.appliedSecretCount > 0
+        ? { persistedSecretCount: deferredSecretResult.appliedSecretCount }
+        : {}),
     };
   }
 
@@ -389,6 +430,21 @@ export async function executeSetupApplyPlan(
     verification,
     launchHandoffIntent: plan.launchHandoffIntent,
   };
+}
+
+async function applyDeferredSecretWrites(
+  plan: SetupApplyPlan,
+  executor: SetupApplyExecutor,
+  writes: readonly SetupDeferredSecretWrite[]
+): Promise<SetupDeferredSecretApplyResult> {
+  if (executor.applyDeferredSecrets === undefined) {
+    return {
+      ok: false,
+      appliedSecretCount: 0,
+      error: "Deferred secret apply requires reviewed apply executor support.",
+    };
+  }
+  return executor.applyDeferredSecrets(plan, writes);
 }
 
 export function classifySetupVerificationReport(report: SetupVerificationReport): SetupVerificationClassification {

@@ -2,22 +2,28 @@ import { resolveStateHome } from "../../config/state-home.js";
 import {
   loadRuntimeConfig,
 } from "../../config/runtime-config.js";
-import { writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
-import type { ModelProfile, ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
 } from "../../providers/provider-model-selection-flow.js";
+import type {
+  OnboardingCredentialSummaryStatus,
+  OnboardingOptionalCapabilitySummaries,
+  OnboardingSupportedOptionalCapabilityId,
+  OnboardingWizardSelections,
+  OnboardingWizardState,
+} from "./state.js";
+import { renderOnboardingWizardSummary } from "./summary.js";
 import {
-  type FirstRunOnboardingSelections,
-  type OptionalCapabilityId,
-} from "./plan.js";
+  validateOnboardingWorkspacePath,
+  type OnboardingInvalidWorkspaceAction,
+} from "./workspace.js";
 import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
-import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
+import { buildOnboardingWizardDraftBundle, type SetupDraft, type SetupDraftBundle } from "../setup-drafts.js";
 import {
   buildSetupReviewManifest,
   type SetupReviewManifest,
@@ -26,6 +32,7 @@ import {
   executeSetupApplyPlan,
   planSetupApply,
   type SetupApplyEndState,
+  type SetupDeferredSecretWrite,
   type SetupApplyExecutor,
   type SetupApplyFlowOptions,
   type SetupApplyPlanningResult,
@@ -35,23 +42,36 @@ import {
   type CollectSetupEntryStateOptions,
   type SetupEntryState,
 } from "../setup-entry-state.js";
-import { routeSetupEntryState, type FirstRunPlanSession } from "../setup-router.js";
-import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
+import type { SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
-  renderSetupReviewManifest,
   setupCopyText,
   showSetupCard,
 } from "../setup-prompts.js";
+import {
+  promptModelCandidate,
+  promptProviderCandidate,
+  promptVoiceCapability,
+} from "../config-editor/prompts.js";
+import {
+  collectOptionalCapabilityContext,
+  setupModuleContextFromConfig,
+} from "../optional-capability-flow.js";
+import {
+  browserSetupModule,
+  telegramSetupModule,
+  voiceSetupModule,
+  type SetupModuleContext,
+} from "../setup-modules.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
   readonly flowEngine?: FlowEngine;
-  readonly defaultSelections?: FirstRunOnboardingSelections;
+  readonly defaultSelections?: OnboardingWizardSelections;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly output?: {
@@ -63,38 +83,26 @@ export type FirstRunSetupRunnerResult = {
   readonly completed: boolean;
   readonly exitCode: number;
   readonly output: string;
+  readonly launchRequested?: boolean;
   readonly state: SetupEntryState;
-  readonly selections: FirstRunOnboardingSelections;
-  readonly planSession: FirstRunPlanSession;
+  readonly selections: OnboardingWizardSelections;
+  readonly wizardState: OnboardingWizardState;
   readonly draftBundle: SetupDraftBundle;
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
 };
 
-type PendingCredentialWrite = {
-  readonly envVarName: string;
-  readonly value: string;
-};
+type PendingCredentialWrite = SetupDeferredSecretWrite;
 
-const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
-  readonly title: SetupCopyKey;
-}> = {
-  channels: {
-    title: "setupModules.telegram.title",
-  },
-  voice: {
-    title: "setupModules.voice.title",
-  },
-  vision: {
-    title: "setupModules.vision.title",
-  },
-  browser: {
-    title: "setupModules.browser.title",
-  },
-};
+type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
 
-const OPTIONAL_CAPABILITY_IDS: readonly OptionalCapabilityId[] = ["channels", "voice", "vision", "browser"];
+type OnboardingOptionalCapabilityFlowResult = {
+  readonly selected: readonly OnboardingSupportedOptionalCapabilityId[];
+  readonly summaries: OnboardingOptionalCapabilitySummaries;
+  readonly drafts: readonly SetupDraft[];
+  readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+};
 
 export async function runFirstRunSetup(
   options: FirstRunSetupRunnerOptions
@@ -119,70 +127,32 @@ export async function runFirstRunSetup(
   });
   const language = interfaceChoice.language;
 
-  await showSetupCard(prompt, language, {
-    title: setupCopyText(language, "onboarding.workspace.title"),
-    bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
-    technicalLines: [options.workspaceRoot],
-    options: [{ id: "workspace", label: options.workspaceRoot, technical: true }],
-  });
-  const workspaceRoot = await promptSetupStringWithDefault(
-    prompt,
-    `${setupCopyText(language, "onboarding.workspace.root")} [${options.workspaceRoot}]: `,
-    options.defaultSelections?.workspaceRoot ?? options.workspaceRoot
-  );
-
-  const workspaceTrusted = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.workspace.trust.title"),
-    message: `${setupCopyText(language, "onboarding.workspace.trust")}\n`,
-    choices: [
-      {
-        id: "trust",
-        label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
-        description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
-        value: true,
-      },
-      {
-        id: "skip",
-        label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
-        description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
-        value: false,
-      },
-    ],
-    defaultValue: options.defaultSelections?.workspaceTrusted ?? true,
-  });
+  const workspaceSelection = await promptForWorkspaceAndTrust(options, language);
+  const workspaceRoot = workspaceSelection.workspaceRoot;
+  const workspaceTrusted = workspaceSelection.workspaceTrusted;
 
 
   const providerCandidates = await flowEngine.listProviderCandidates();
-  const primaryProvider = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.providers.primary.title"),
-    message: `${setupCopyText(language, "onboarding.providers.primary")}\n`,
-    choices: providerCandidates.map((provider) => ({
-      id: provider.id,
-      label: provider.displayName,
-      description: provider.baseUrl ? `${provider.baseUrl} (${provider.modelsCount} models)` : `${provider.modelsCount} models`,
-      value: provider.id,
-    })),
-    defaultValue: options.defaultSelections?.primaryProvider ?? providerCandidates[0]?.id,
-  });
+  if (providerCandidates.length === 0) {
+    throw new Error("No setup-visible provider candidates are available.");
+  }
+  const primaryProviderCandidate = await promptProviderCandidate(prompt, {
+    candidates: providerCandidates,
+    currentProviderId: options.defaultSelections?.primaryProvider,
+  }, language);
+  const primaryProvider = primaryProviderCandidate.id;
 
 
   const modelCandidates = await flowEngine.listModelCandidates(primaryProvider);
-  const primaryModel = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.providers.primaryModel.title"),
-    message: `${setupCopyText(language, "onboarding.providers.primaryModel").replace("{providerId}", primaryProvider)}\n`,
-    choices: modelCandidates.map((model) => ({
-      id: model.id,
-      label: model.id,
-      description: [
-        model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
-        model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
-        model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-        renderableModelStatus(model.profile.status),
-      ].filter((part): part is string => part !== undefined).join(", "),
-      value: model.id,
-    })),
-    defaultValue: options.defaultSelections?.primaryModel ?? modelCandidates[0]?.id,
-  });
+  if (modelCandidates.length === 0) {
+    throw new Error(`No setup-visible models are available for ${primaryProviderCandidate.displayName}.`);
+  }
+  const primaryModelCandidate = await promptModelCandidate(prompt, {
+    providerId: primaryProvider,
+    candidates: modelCandidates,
+    currentModelId: options.defaultSelections?.primaryModel,
+  }, language);
+  const primaryModel = primaryModelCandidate.id;
 
   const resolution = await flowEngine.resolveSelection(primaryProvider, primaryModel);
   if (resolution.kind === "diagnostic") {
@@ -194,8 +164,9 @@ export async function runFirstRunSetup(
   const primaryApiMode = resolution.apiMode;
   const primaryAuthMethod = resolution.authMethod;
 
-  let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
-  let pendingCredentialWrite: PendingCredentialWrite | undefined;
+  let primaryCredential: OnboardingWizardSelections["primaryCredential"];
+  const pendingCredentialWrites: PendingCredentialWrite[] = [];
+  let credentialStatus: OnboardingCredentialSummaryStatus = "not_set";
 
   switch (resolution.credentialAction.kind) {
     case "none": {
@@ -210,6 +181,7 @@ export async function runFirstRunSetup(
       }
       const envVarName = ref.slice(4);
       primaryCredential = { kind: "env", name: envVarName };
+      credentialStatus = "existing_detected";
       write(options, `Using existing credential from ${envVarName}.\n`);
       break;
     }
@@ -226,10 +198,11 @@ export async function runFirstRunSetup(
       if (promptResult.kind === "skipped") {
         write(options, `Config will expect ${envVarName} to be available externally.\n`);
       } else {
-        pendingCredentialWrite = {
+        credentialStatus = "new_pending";
+        pendingCredentialWrites.push({
           envVarName: promptResult.envVarName,
           value: promptResult.value,
-        };
+        });
       }
       break;
     }
@@ -294,28 +267,22 @@ export async function runFirstRunSetup(
     defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",
   });
 
-  const optionalCapabilities = await chooseOptionalCapabilities(prompt, language, options.defaultSelections);
-  const launchSelected = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
-    message: `${setupCopyText(language, "onboarding.launch")}\n`,
-    choices: [
-      {
-        id: "skip",
-        label: setupCopyText(language, "onboarding.launch.skipAction.label"),
-        description: setupCopyText(language, "onboarding.launch.skipAction.description"),
-        value: false,
-      },
-      {
-        id: "offer",
-        label: setupCopyText(language, "onboarding.launch.offerAction.label"),
-        description: setupCopyText(language, "onboarding.launch.offerAction.description"),
-        value: true,
-      },
-    ],
-    defaultValue: options.defaultSelections?.launchSelected ?? false,
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const configPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+  const optionalCapabilityFlow = await chooseOptionalCapabilities(options, language, {
+    configPath,
+    profileId,
+    workspaceRoot,
+    workspaceTrusted,
+    primaryProvider,
+    primaryModel,
+    securityMode,
+    workflowLearning,
   });
+  pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
+  const optionalCapabilities = optionalCapabilityFlow.selected;
 
-  const selections: FirstRunOnboardingSelections = {
+  const selections: OnboardingWizardSelections = {
     language,
     interfaceFlavor: interfaceChoice.flavor,
     activityLabels: interfaceChoice.activityLabels,
@@ -331,42 +298,31 @@ export async function runFirstRunSetup(
     securityMode,
     workflowLearning,
     optionalCapabilities,
-    optionalCapabilitiesSkipped: optionalCapabilities.length === 0,
-    verifySelected: true,
-    launchSelected,
   };
 
-  const routeDecision = routeSetupEntryState(state, {
-    selection: "run-first-run",
-    firstRunSelections: selections,
-  });
-  if (routeDecision.firstRunPlanSession === undefined) {
-    throw new Error("Setup router did not produce a first-run plan session.");
-  }
-
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const draftBundle = buildFirstRunDraftBundle(routeDecision.firstRunPlanSession, {
-    configPath: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
+  const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus, optionalCapabilityFlow);
+  const draftBundle = buildOnboardingWizardDraftBundle(wizardState, {
+    configPath,
     workspaceRoot,
     trustStorePath: stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const reviewText = renderSetupReviewManifest(reviewManifest, language);
-  write(options, `${setupCopyText(language, "onboarding.review")}\n${reviewText}\n`);
+  const summaryText = renderOnboardingWizardSummary(wizardState);
+  write(options, `${summaryText}\n`);
 
   const reviewAccepted = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.review"),
-    message: `${setupCopyText(language, "onboarding.review.validation.accepted")}\n`,
+    title: setupCopyText(language, "onboarding.summary.confirmTitle"),
+    message: `${summaryText}\n\n${setupCopyText(language, "onboarding.summary.confirmMessage")}\n`,
     choices: [
       {
-        id: "approve",
-        label: setupCopyText(language, "onboarding.review.approveAction"),
+        id: "confirm",
+        label: setupCopyText(language, "onboarding.summary.confirmAction"),
         description: setupCopyText(language, "setupApply.review.approved"),
         value: true,
       },
       {
         id: "cancel",
-        label: setupCopyText(language, "onboarding.review.cancelAction"),
+        label: setupCopyText(language, "onboarding.summary.cancelAction"),
         description: setupCopyText(language, "setupApply.review.cancelled"),
         value: false,
       },
@@ -381,41 +337,234 @@ export async function runFirstRunSetup(
   };
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
-    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
-  if (
-    pendingCredentialWrite !== undefined &&
-    applyPlanningResult.kind === "apply-plan-ready" &&
-    options.applyExecutor !== undefined
-  ) {
-    await writeEnvSecret({
-      homeDir: options.homeDir,
-      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
-      key: pendingCredentialWrite.envVarName,
-      value: pendingCredentialWrite.value,
-    });
-  }
+    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled summary confirmation." });
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
-    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
+      ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
+        ...options.applyFlowOptions,
+        ...(pendingCredentialWrites.length > 0
+          ? { deferredSecretWrites: pendingCredentialWrites }
+          : {}),
+      })
     : undefined;
-  const output = applyEndState === undefined
+  const renderedApplyOutput = applyEndState === undefined
     ? renderSetupApplyPlanningResult(applyPlanningResult, language)
     : renderSetupApplyEndState(applyEndState, language);
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
+  const launchRequested = await promptForPostSetupLaunchRequest({
+    options,
+    locale: language,
+    completed,
+    workspaceTrusted,
+    applyEndState,
+  });
+  const output = workspaceTrusted || !completed
+    ? renderedApplyOutput
+    : setupCopyText(language, "onboarding.workspace.trust.deferredFinal");
 
   return {
     completed,
     exitCode: completed ? 0 : 1,
     output,
+    launchRequested,
     state,
     selections: finalSelections,
-    planSession: routeDecision.firstRunPlanSession,
+    wizardState,
     draftBundle,
     reviewManifest,
     applyPlanningResult,
     applyEndState,
   };
+}
+
+async function promptForPostSetupLaunchRequest(input: {
+  readonly options: FirstRunSetupRunnerOptions;
+  readonly locale: SetupCopyLocale;
+  readonly completed: boolean;
+  readonly workspaceTrusted: boolean;
+  readonly applyEndState?: SetupApplyEndState;
+}): Promise<boolean | undefined> {
+  if (
+    !input.completed ||
+    !input.workspaceTrusted ||
+    input.applyEndState === undefined ||
+    !isPostSetupLaunchOfferableEndState(input.applyEndState)
+  ) {
+    return undefined;
+  }
+
+  return promptSetupChoice(input.options.prompt, {
+    title: setupCopyText(input.locale, "onboarding.launch.startNow"),
+    message: `${setupCopyText(input.locale, "onboarding.launch.startNow")}\n`,
+    choices: [
+      {
+        id: "yes",
+        label: setupCopyText(input.locale, "onboarding.launch.startNow.yes"),
+        value: true,
+      },
+      {
+        id: "no",
+        label: setupCopyText(input.locale, "onboarding.launch.startNow.no"),
+        value: false,
+      },
+    ],
+    defaultValue: false,
+  });
+}
+
+function isPostSetupLaunchOfferableEndState(endState: SetupApplyEndState): boolean {
+  return endState.kind === "verified-ready" ||
+    (endState.kind === "saved-not-launched" && endState.verification !== undefined);
+}
+
+function onboardingWizardStateFromSelections(
+  selections: OnboardingWizardSelections,
+  credentialStatus: OnboardingCredentialSummaryStatus,
+  optionalCapabilityFlow: OnboardingOptionalCapabilityFlowResult
+): OnboardingWizardState {
+  const credentialEnvVarName = selections.primaryCredential?.kind === "env"
+    ? selections.primaryCredential.name
+    : undefined;
+
+  return {
+    interfacePreferences: {
+      language: selections.language,
+      flavor: selections.interfaceFlavor,
+      activityLabels: selections.activityLabels,
+    },
+    workspace: {
+      path: selections.workspaceRoot,
+      trustStatus: selections.workspaceTrusted === true ? "trusted" : "untrusted",
+    },
+    primaryRoute: {
+      provider: selections.primaryProvider,
+      model: selections.primaryModel,
+      baseUrl: selections.primaryBaseUrl,
+      contextWindowTokens: selections.primaryContextWindowTokens,
+      apiMode: selections.primaryApiMode,
+      authMethod: selections.primaryAuthMethod,
+    },
+    credential: {
+      status: credentialStatus,
+      envVarName: credentialEnvVarName,
+    },
+    securityMode: selections.securityMode,
+    agentEvolution: selections.workflowLearning,
+    optionalCapabilities: optionalCapabilityFlow.summaries,
+    optionalCapabilityDrafts: optionalCapabilityFlow.drafts,
+  };
+}
+
+async function promptForWorkspaceAndTrust(
+  options: FirstRunSetupRunnerOptions,
+  language: SetupCopyLocale
+): Promise<{
+  readonly workspaceRoot: string;
+  readonly workspaceTrusted: boolean;
+}> {
+  while (true) {
+    const workspaceRoot = await promptForCanonicalWorkspaceRoot(options, language);
+    const action = await promptSetupChoice<WorkspaceTrustAction>(options.prompt, {
+      title: setupCopyText(language, "onboarding.workspace.trust.title"),
+      message: `${formatSetupCopy(language, "onboarding.workspace.trust", { workspacePath: workspaceRoot })}\n`,
+      choices: [
+        {
+          id: "trust",
+          label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
+          value: "trust",
+        },
+        {
+          id: "change-workspace",
+          label: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.description"),
+          value: "change-workspace",
+        },
+        {
+          id: "decide-later",
+          label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
+          value: "decide-later",
+        },
+      ],
+      defaultValue: options.defaultSelections?.workspaceTrusted === false ? "decide-later" : "trust",
+    });
+
+    if (action === "change-workspace") {
+      continue;
+    }
+
+    return {
+      workspaceRoot,
+      workspaceTrusted: action === "trust",
+    };
+  }
+}
+
+async function promptForCanonicalWorkspaceRoot(
+  options: FirstRunSetupRunnerOptions,
+  language: SetupCopyLocale
+): Promise<string> {
+  let defaultWorkspaceRoot = options.defaultSelections?.workspaceRoot ?? options.workspaceRoot;
+
+  while (true) {
+    await showSetupCard(options.prompt, language, {
+      title: setupCopyText(language, "onboarding.workspace.title"),
+      bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
+      technicalLines: [defaultWorkspaceRoot],
+      options: [{ id: "workspace", label: defaultWorkspaceRoot, technical: true }],
+    });
+    const requestedWorkspaceRoot = await promptSetupStringWithDefault(
+      options.prompt,
+      `${setupCopyText(language, "onboarding.workspace.root")} [${defaultWorkspaceRoot}]: `,
+      defaultWorkspaceRoot
+    );
+    const validation = await validateOnboardingWorkspacePath(requestedWorkspaceRoot);
+    if (validation.ok) {
+      return validation.canonicalPath;
+    }
+
+    write(options, `${validation.message}\n`);
+    const action = await promptSetupChoice<OnboardingInvalidWorkspaceAction>(options.prompt, {
+      title: setupCopyText(language, "onboarding.workspace.invalid.title"),
+      message: `${validation.message}\n`,
+      choices: [
+        {
+          id: "try-again",
+          label: setupCopyText(language, "onboarding.workspace.invalid.tryAgain"),
+          value: "try-again",
+        },
+        {
+          id: "use-current",
+          label: setupCopyText(language, "onboarding.workspace.invalid.useCurrent"),
+          value: "use-current",
+        },
+        {
+          id: "cancel",
+          label: setupCopyText(language, "onboarding.workspace.invalid.cancel"),
+          value: "cancel",
+        },
+      ],
+      defaultValue: "try-again",
+    });
+
+    if (action === "cancel") {
+      throw new Error("Setup cancelled during workspace selection.");
+    }
+
+    if (action === "use-current") {
+      const currentValidation = await validateOnboardingWorkspacePath(options.workspaceRoot);
+      if (currentValidation.ok) {
+        return currentValidation.canonicalPath;
+      }
+      write(options, `${currentValidation.message}\n`);
+      defaultWorkspaceRoot = options.workspaceRoot;
+      continue;
+    }
+
+    defaultWorkspaceRoot = requestedWorkspaceRoot;
+  }
 }
 
 async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): Promise<FlowEngine> {
@@ -432,47 +581,258 @@ async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): 
 }
 
 async function chooseOptionalCapabilities(
-  prompt: Prompt,
+  options: FirstRunSetupRunnerOptions,
   locale: SetupCopyLocale,
-  defaultSelections: FirstRunOnboardingSelections | undefined
-): Promise<readonly OptionalCapabilityId[]> {
-  const selected = new Set(defaultSelections?.optionalCapabilities ?? []);
-  const result: OptionalCapabilityId[] = [];
+  contextInput: {
+    readonly configPath: string;
+    readonly profileId: string;
+    readonly workspaceRoot: string;
+    readonly workspaceTrusted: boolean;
+    readonly primaryProvider: OnboardingWizardSelections["primaryProvider"];
+    readonly primaryModel: OnboardingWizardSelections["primaryModel"];
+    readonly securityMode: OnboardingWizardSelections["securityMode"];
+    readonly workflowLearning: OnboardingWizardSelections["workflowLearning"];
+  }
+): Promise<OnboardingOptionalCapabilityFlowResult> {
+  const configureNow = await promptSetupChoice(options.prompt, {
+    title: setupCopyText(locale, "onboarding.optionalCapabilities.title"),
+    message: [
+      setupCopyText(locale, "onboarding.optionalCapabilities.configureNow"),
+      setupCopyText(locale, "onboarding.optionalCapabilities.note"),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "yes",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.configureNow.yes"),
+        value: true,
+      },
+      {
+        id: "no",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.configureNow.no"),
+        value: false,
+      },
+    ],
+    defaultValue: (options.defaultSelections?.optionalCapabilities?.length ?? 0) > 0,
+  });
 
-  for (const capabilityId of OPTIONAL_CAPABILITY_IDS) {
-    const capabilityCopy = OPTIONAL_CAPABILITY_COPY_KEYS[capabilityId];
-    const title = setupCopyText(locale, capabilityCopy.title);
-    const enabled = await promptSetupChoice(prompt, {
-      title,
-      message: `${formatSetupCopy(locale, "onboarding.optionalCapabilities.promptCapability", {
-        capabilityId: title,
-      })}\n`,
+  const loaded = await loadRuntimeConfig(options);
+  let context = setupModuleContextFromConfig({
+    homeDir: options.homeDir,
+    profileId: contextInput.profileId,
+    workspaceRoot: contextInput.workspaceRoot,
+    trustStorePath: resolveStateHome({ homeDir: options.homeDir }).trustJsonPath,
+    configPath: contextInput.configPath,
+  }, loaded.config, {
+    provider: contextInput.primaryProvider,
+    model: contextInput.primaryModel,
+    workspaceTrusted: contextInput.workspaceTrusted,
+    securityMode: contextInput.securityMode,
+    workflowLearning: contextInput.workflowLearning,
+  });
+  const selected = new Set<OnboardingSupportedOptionalCapabilityId>();
+  const draftMap = new Map<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>();
+  const pendingCredentialWrites: PendingCredentialWrite[] = [];
+
+  if (!configureNow) {
+    return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
+  }
+
+  while (true) {
+    const action = await promptOnboardingOptionalCapabilityAction(options.prompt, locale, context);
+    if (action === "skip") {
+      break;
+    }
+
+    const collected = await collectOnboardingOptionalCapability(options, locale, context, action);
+    if (collected.kind === "configured") {
+      context = collected.context;
+      selected.add(action);
+      draftMap.set(action, collected.drafts);
+      pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+    }
+
+    if (onboardingOptionalCapabilityActions(context).length === 0) {
+      break;
+    }
+
+    const configureMore = await promptSetupChoice(options.prompt, {
+      title: setupCopyText(locale, "onboarding.optionalCapabilities.more.title"),
+      message: `${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
       choices: [
         {
-          id: "enable",
-          label: setupCopyText(locale, "onboarding.optionalCapabilities.enable"),
-          description: formatSetupCopy(locale, "onboarding.optionalCapabilities.enableDescription", { capabilityId: title }),
+          id: "yes",
+          label: setupCopyText(locale, "onboarding.optionalCapabilities.more.yes"),
           value: true,
         },
         {
           id: "skip",
           label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
-          description: formatSetupCopy(locale, "setupValidation.capability.skipped", { capabilityId: title }),
+          description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
           value: false,
         },
       ],
-      defaultValue: selected.has(capabilityId),
+      defaultValue: false,
     });
-    if (enabled) {
-      result.push(capabilityId);
+
+    if (!configureMore) {
+      break;
     }
   }
 
-  return result;
+  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
 }
 
-function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
-  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
+async function promptOnboardingOptionalCapabilityAction(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  context: SetupModuleContext
+): Promise<OnboardingSupportedOptionalCapabilityId | "skip"> {
+  const actions = onboardingOptionalCapabilityActions(context);
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "onboarding.optionalCapabilities.menu.title"),
+    message: `${setupCopyText(locale, "onboarding.optionalCapabilities")}\n${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
+    choices: [
+      ...actions.map((action) => onboardingOptionalCapabilityChoice(action, locale)),
+      {
+        id: "skip",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
+        description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
+        value: "skip" as const,
+      },
+    ],
+    defaultValue: "skip" as const,
+  });
+}
+
+function onboardingOptionalCapabilityActions(
+  context: SetupModuleContext
+): readonly OnboardingSupportedOptionalCapabilityId[] {
+  const actions: OnboardingSupportedOptionalCapabilityId[] = [];
+  if (telegramSetupModule.detect(context).status !== "configured") {
+    actions.push("channels");
+  }
+  if (context.voice?.sttProvider === undefined || context.voice.ttsProvider === undefined) {
+    actions.push("voice");
+  }
+  if (browserSetupModule.detect(context).status !== "configured") {
+    actions.push("browser");
+  }
+  return actions;
+}
+
+function onboardingOptionalCapabilityChoice(
+  action: OnboardingSupportedOptionalCapabilityId,
+  locale: SetupCopyLocale
+): {
+  readonly id: OnboardingSupportedOptionalCapabilityId;
+  readonly label: string;
+  readonly description: string;
+  readonly value: OnboardingSupportedOptionalCapabilityId;
+} {
+  switch (action) {
+    case "channels":
+      return {
+        id: "channels",
+        label: setupCopyText(locale, "setupEditor.actions.configureChannels"),
+        description: setupCopyText(locale, "setupEditor.actions.configureChannels.description"),
+        value: "channels",
+      };
+    case "voice":
+      return {
+        id: "voice",
+        label: setupCopyText(locale, "setupEditor.actions.configureVoice"),
+        description: setupCopyText(locale, "setupEditor.actions.configureVoice.description"),
+        value: "voice",
+      };
+    case "browser":
+      return {
+        id: "browser",
+        label: setupCopyText(locale, "setupEditor.actions.configureBrowser"),
+        description: setupCopyText(locale, "setupEditor.actions.configureBrowser.description"),
+        value: "browser",
+      };
+  }
+}
+
+async function collectOnboardingOptionalCapability(
+  options: FirstRunSetupRunnerOptions,
+  locale: SetupCopyLocale,
+  context: SetupModuleContext,
+  action: OnboardingSupportedOptionalCapabilityId
+): Promise<
+  | {
+      readonly kind: "configured";
+      readonly context: SetupModuleContext;
+      readonly drafts: readonly SetupDraft[];
+      readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+    }
+  | {
+      readonly kind: "skip" | "unchanged";
+    }
+> {
+  const module = action === "channels"
+    ? telegramSetupModule
+    : action === "voice" ? voiceSetupModule : browserSetupModule;
+  const voiceMode = action === "voice"
+    ? await promptVoiceCapability(options.prompt, locale)
+    : undefined;
+  const collected = await collectOptionalCapabilityContext({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+    trustStorePath: context.trustStorePath,
+    configPath: context.configPath,
+    prompt: options.prompt,
+    locale,
+  }, context, module, voiceMode);
+
+  if (collected.kind !== "configured") {
+    return collected;
+  }
+
+  const collectedContext = action === "voice"
+    ? {
+        ...collected.context,
+        voice: {
+          ...context.voice,
+          ...collected.context.voice,
+        },
+      }
+    : collected.context;
+  const configuration = module.configure(collectedContext);
+  return {
+    kind: "configured",
+    context: collectedContext,
+    drafts: module.toDrafts(collectedContext, configuration),
+    pendingCredentialWrites: collected.pendingCredentialWrite === undefined
+      ? []
+      : [collected.pendingCredentialWrite],
+  };
+}
+
+function onboardingOptionalCapabilityResult(
+  context: SetupModuleContext,
+  selected: ReadonlySet<OnboardingSupportedOptionalCapabilityId>,
+  draftMap: ReadonlyMap<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>,
+  pendingCredentialWrites: readonly PendingCredentialWrite[]
+): OnboardingOptionalCapabilityFlowResult {
+  return {
+    selected: [...selected],
+    summaries: {
+      selected: [...selected],
+      channels: {
+        telegram: telegramSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+      },
+      voice: {
+        stt: context.voice?.sttProvider === undefined ? "not_set" : "configured",
+        tts: context.voice?.ttsProvider === undefined ? "not_set" : "configured",
+      },
+      browser: browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+    },
+    drafts: [...draftMap.values()].flat(),
+    pendingCredentialWrites,
+  };
 }
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {

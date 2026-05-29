@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
@@ -8,8 +9,10 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
+import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
+import type { SetupApplyExecutor } from "../setup-apply-plan.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -191,23 +194,39 @@ function modelStatusCandidate(
   };
 }
 
+type FakePromptOverrideValue = string | boolean | readonly (string | boolean)[];
+
 function fakePrompt(
-  overrides: Record<string, string | boolean> = {},
+  overrides: Record<string, FakePromptOverrideValue> = {},
   seenOptions: Record<string, readonly string[]> = {},
   seenDescriptions: Record<string, readonly (string | undefined)[]> = {}
 ): Prompt {
+  const overrideQueues = new Map<string, (string | boolean)[]>();
+  function nextOverride(key: string): string | boolean | undefined {
+    const override = overrides[key];
+    if (override === undefined || typeof override === "string" || typeof override === "boolean") {
+      return override;
+    }
+    const queue = overrideQueues.get(key) ?? [...override];
+    const next = queue.shift();
+    overrideQueues.set(key, queue);
+    return next;
+  }
+
   const prompt = Object.assign(
     async (_question: string, options?: { secret?: boolean }) => {
       if (options?.secret === true) {
-        return typeof overrides.__secret === "string" ? overrides.__secret : "";
+        const secret = nextOverride("__secret");
+        return typeof secret === "string" ? secret : "";
       }
-      return "";
+      const answer = nextOverride("__prompt");
+      return typeof answer === "string" ? answer : "";
     },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
         seenOptions[input.title] = input.options.map((option) => option.label);
         seenDescriptions[input.title] = input.options.map((option) => option.description);
-        const requested = overrides[input.title];
+        const requested = nextOverride(input.title);
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
           : undefined;
@@ -280,6 +299,11 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.primaryCredential).toEqual({ kind: "none" });
     expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
     expect(result.selections.primaryAuthMethod).toBe("none");
+    expect(result.wizardState.primaryRoute).toEqual(expect.objectContaining({
+      provider: "local",
+      model: "hermes-local",
+    }));
+    expect(result.draftBundle.sourceKind).toBe("onboarding-wizard-state");
     expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(1);
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
@@ -290,13 +314,238 @@ describe("runFirstRunSetup", () => {
       expect(result.applyPlanningResult.applyPlan.metadata.trustOperationCount).toBe(1);
     }
     const renderedOutput = output.join("");
-    expect(renderedOutput).toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(renderedOutput).toContain("Configuration summary");
+    expect(renderedOutput).toContain(`Workspace: ${result.selections.workspaceRoot}`);
+    expect(renderedOutput).toContain("Primary Provider: local");
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.sections.filesToWriteUpdate"));
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.sections.secretRefsToStore"));
     expect(renderedOutput).not.toMatch(/\bprofiles?\b/iu);
     expect(readActiveProfile({ homeDir: tempDir }).profileId).toBe("default");
     await expect(readFile(activeProfilePath(tempDir), "utf8")).resolves.toContain("\"profileId\": \"default\"");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("blocks a missing workspace path before the trust prompt", async () => {
+    const missingWorkspace = join(tempDir, "missing-workspace");
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace path unavailable": "Cancel setup",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceRoot: missingWorkspace,
+      },
+    })).rejects.toThrow("Setup cancelled during workspace selection.");
+
+    expect(existsSync(missingWorkspace)).toBe(false);
+    expect(seenOptions["Workspace path unavailable"]).toEqual([
+      "Try again",
+      "Use current workspace",
+      "Cancel setup",
+    ]);
+    expect(seenOptions["Workspace trust"]).toBeUndefined();
+  });
+
+  it("blocks a non-directory workspace path before the trust prompt", async () => {
+    const filePath = join(tempDir, "not-a-directory.txt");
+    await writeFile(filePath, "not a workspace\n", "utf8");
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace path unavailable": "Cancel setup",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceRoot: filePath,
+      },
+    })).rejects.toThrow("Setup cancelled during workspace selection.");
+
+    expect(seenOptions["Workspace trust"]).toBeUndefined();
+  });
+
+  it("uses the canonical workspace path in selections and trust drafts", async () => {
+    const nonCanonicalWorkspace = join(workspaceRoot, "..", "workspace");
+    const canonicalWorkspace = await realpath(workspaceRoot);
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot: nonCanonicalWorkspace,
+      prompt: fakePrompt(),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.workspaceRoot).toBe(canonicalWorkspace);
+    const trustDraft = result.draftBundle.drafts.find((draft) => draft.kind === "workspace-trust");
+    expect(trustDraft?.target).toEqual({
+      kind: "trust-store",
+      workspaceRoot: canonicalWorkspace,
+      trustStorePath: join(tempDir, ".estacoda", "trust.json"),
+    });
+    expect(JSON.stringify(result.reviewManifest)).toContain(canonicalWorkspace);
+  });
+
+  it("lets Change Workspace loop back to workspace selection", async () => {
+    const secondWorkspace = join(tempDir, "second-workspace");
+    await mkdir(secondWorkspace, { recursive: true });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": ["Change Workspace", "Trust"],
+        __prompt: ["", secondWorkspace],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.workspaceRoot).toBe(await realpath(secondWorkspace));
+    expect(result.selections.workspaceTrusted).toBe(true);
+  });
+
+  it("lets Decide Later save config without ready or complete wording", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": "Decide Later",
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.selections.workspaceTrusted).toBe(false);
+    expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(0);
+    expect(result.output).toBe("Setup saved. Workspace trust is still required before EstaCoda can run here.");
+    expect(result.output).not.toContain("Setup complete");
+    expect(result.output).not.toContain("Setup is ready");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+    await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("does not treat deferred workspace trust as launch-ready", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": "Decide Later",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceTrusted: false,
+      },
+    });
+
+    expect(result.selections.workspaceTrusted).toBe(false);
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    if (result.applyPlanningResult.kind === "apply-plan-ready") {
+      expect(result.applyPlanningResult.applyPlan.launchHandoffIntent).toBeUndefined();
+    }
+  });
+
+  it("returns a launch request after successful setup when the user chooses Yes", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.launchRequested).toBe(true);
+    expect(result.applyEndState?.kind).toBe("verified-ready");
+  });
+
+  it("does not return a launch request after successful setup when the user chooses No", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "No" }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.launchRequested).toBe(false);
+    expect(result.applyEndState?.kind).toBe("verified-ready");
+  });
+
+  it("does not offer launch when apply succeeds without verification", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }, seenOptions),
+      flowEngine: flowEngine(),
+      applyExecutor: {
+        apply: () => ({
+          ok: true,
+          appliedOperationIds: [],
+        }),
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    if (result.applyEndState?.kind === "saved-not-launched") {
+      expect(result.applyEndState.verification).toBeUndefined();
+    }
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
+  });
+
+  it("does not offer launch after degraded verification", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Start EstaCoda now?": "Yes" }, seenOptions),
+      flowEngine: flowEngine(),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => ({
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "warning",
+            lines: ["Provider status: warning"],
+            warnings: ["Provider has warnings"],
+          },
+          toolStatus: "skipped",
+          configSources: [],
+          warnings: ["Provider has warnings"],
+          issueCodes: [],
+        }),
+      }),
+    });
+
+    expect(result.applyEndState?.kind).toBe("verified-degraded");
+    expect(result.launchRequested).toBeUndefined();
+    expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
   });
 
   it("stores only hosted provider credential references in review data", async () => {
@@ -309,6 +558,10 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(result.wizardState.credential).toEqual({
+      status: "not_set",
+      envVarName: "OPENAI_API_KEY",
+    });
     expect(result.selections.primaryBaseUrl).toBe("https://api.openai.com/v1");
     expect(result.selections.primaryApiMode).toBe("custom_openai_compatible");
     expect(result.selections.primaryAuthMethod).toBe("api_key");
@@ -333,6 +586,7 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "SHARED_FLOW_OPENAI_KEY" });
+    expect(result.draftBundle.sourceKind).toBe("onboarding-wizard-state");
     expect(JSON.stringify(result.reviewManifest)).toContain("SHARED_FLOW_OPENAI_KEY");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("OPENAI_API_KEY");
     expect(outputLines.join("")).toContain("Config will expect SHARED_FLOW_OPENAI_KEY to be available externally");
@@ -345,8 +599,9 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Primary provider": "OpenAI",
-        Voice: true,
-        "Vision and Image Generation": true,
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure other capabilities now": "Skip",
       }, seenOptions),
       flowEngine: flowEngine({
         credentialAction: "reuse",
@@ -375,18 +630,139 @@ describe("runFirstRunSetup", () => {
       "Voice",
       "Vision and Image Generation",
     ]));
+    expect(seenOptions["Configure optional capability"]).toEqual([
+      "Configure channels",
+      "Configure voice",
+      "Configure browser",
+      "Skip",
+    ]);
+    expect(seenOptions["Configure optional capability"]).not.toContain("Configure image generation");
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryModel).toBe("gpt-5.5");
-    expect(result.selections.optionalCapabilities).toEqual(["voice", "vision"]);
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
 
     const providerDraft = result.draftBundle.drafts.find((draft) => draft.kind === "provider-model-route");
-    const optionalDraft = result.draftBundle.drafts.find((draft) => draft.kind === "optional-capability");
+    const optionalDraft = result.draftBundle.drafts.find((draft) => draft.id === "setup-module.voice.capability");
     expect(providerDraft?.review.values.provider).toBe("openai");
     expect(providerDraft?.review.values.model).toBe("gpt-5.5");
     expect(providerDraft?.review.values.provider).not.toBe("codex");
-    expect(optionalDraft?.review.values.capabilities).toEqual(["voice", "vision"]);
+    expect(optionalDraft?.review.values.sttProvider).toBe("openai");
+    expect(optionalDraft?.review.values).not.toHaveProperty("ttsProvider");
     expect(result.reviewManifest.sections["provider-model-network"]).toHaveLength(1);
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
+  });
+
+  it("exposes the same provider candidates as the setup editor provider prompt helper", async () => {
+    const providers: ProviderCandidate[] = [
+      {
+        id: "local" as ProviderId,
+        displayName: "Local",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 1,
+        credentialReady: true,
+      },
+      {
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 5,
+        credentialReady: false,
+        baseUrl: "https://api.openai.com/v1",
+      },
+    ];
+    const onboardingOptions: Record<string, readonly string[]> = {};
+    const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const editorOptions: Record<string, readonly string[]> = {};
+    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions),
+      flowEngine: flowEngine({ providerCandidates: providers }),
+    });
+    await promptProviderCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
+      candidates: providers,
+    }, "en");
+
+    expect(onboardingOptions["Primary provider"]).toEqual(editorOptions["Primary provider"]);
+    expect(onboardingDescriptions["Primary provider"]).toEqual(editorDescriptions["Primary provider"]);
+  });
+
+  it("exposes the same model candidates for a chosen provider as the setup editor model prompt helper", async () => {
+    const models = modelStatusCandidates("openai" as ProviderId);
+    const onboardingOptions: Record<string, readonly string[]> = {};
+    const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const editorOptions: Record<string, readonly string[]> = {};
+    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const customFlow: FlowEngine = {
+      ...flowEngine({ credentialAction: "reuse" }),
+      listProviderCandidates: async () => [{
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: models.length,
+        credentialReady: true,
+      }],
+      listModelCandidates: async () => models,
+    };
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions),
+      flowEngine: customFlow,
+    });
+    await promptModelCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
+      providerId: "openai",
+      candidates: models,
+    }, "en");
+
+    expect(onboardingOptions["Primary model"]).toEqual(editorOptions["Primary model"]);
+    expect(onboardingDescriptions["Primary model"]).toEqual(editorDescriptions["Primary model"]);
+  });
+
+  it("uses the setup editor provider rejection wording when no provider candidates are available", async () => {
+    const customFlow: FlowEngine = {
+      ...flowEngine(),
+      listProviderCandidates: async () => [],
+    };
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      flowEngine: customFlow,
+    })).rejects.toThrow("No setup-visible provider candidates are available.");
+  });
+
+  it("uses the setup editor model rejection wording when no model candidates are available", async () => {
+    const customFlow: FlowEngine = {
+      ...flowEngine(),
+      listProviderCandidates: async () => [{
+        id: "openai" as ProviderId,
+        displayName: "OpenAI",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: 0,
+        credentialReady: false,
+      }],
+      listModelCandidates: async () => [],
+    };
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }),
+      flowEngine: customFlow,
+    })).rejects.toThrow("No setup-visible models are available for OpenAI.");
   });
 
   it("renders only actionable model status tags in first-run model choices", async () => {
@@ -448,27 +824,229 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
   });
 
+  it("does not write a collected API key when reviewed apply is blocked before deferred secrets", async () => {
+    let deferredSecretCalls = 0;
+    const blockingExecutor: SetupApplyExecutor = {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "blocked before deferred secrets",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      flowEngine: flowEngine(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-blocked-apply-secret" }),
+      applyExecutor: blockingExecutor,
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    expect(result.applyEndState?.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
+    expect(JSON.stringify(result)).not.toContain("sk-blocked-apply-secret");
+  });
+
+  it("does not write a collected API key when the apply executor fails before deferred secrets", async () => {
+    let deferredSecretCalls = 0;
+    const failingExecutor: SetupApplyExecutor = {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "intentional apply failure",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      flowEngine: flowEngine(),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-apply-failed-secret" }),
+      applyExecutor: failingExecutor,
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyEndState?.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
+    expect(JSON.stringify(result)).not.toContain("sk-apply-failed-secret");
+  });
+
   it("lets real prompts select optional capabilities independently", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ Telegram: true, Browser: true }),
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": ["Configure channels", "Configure browser"],
+        "Configure other capabilities now": ["Yes", "Skip"],
+        __prompt: ["", "", "12345", "", "", ""],
+        __secret: "",
+      }),
       flowEngine: flowEngine(),
     });
 
     expect(result.selections.optionalCapabilities).toEqual(["channels", "browser"]);
-    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(2);
+    expect(result.reviewManifest.sections["remote-control-surfaces"]).toHaveLength(1);
     expect(JSON.stringify(result.reviewManifest)).toContain("channels");
+    expect(JSON.stringify(result.reviewManifest)).toContain("telegram");
     expect(JSON.stringify(result.reviewManifest)).toContain("browser");
   });
 
-  it("renders Arabic review text from setup copy tokens", async () => {
-    const output: string[] = [];
+  it("removes configured onboarding capabilities from the remaining capability menu", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Setup language": "العربية" }),
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": ["Configure browser", "Skip"],
+        "Configure other capabilities now": "Yes",
+        __prompt: ["", ""],
+      }, seenOptions),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["browser"]);
+    expect(seenOptions["Configure optional capability"]).toEqual([
+      "Configure channels",
+      "Configure voice",
+      "Skip",
+    ]);
+  });
+
+  it("skips the onboarding optional capability flow cleanly", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Optional capabilities": "No" }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual([]);
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(0);
+  });
+
+  it("configures onboarding voice STT without TTS", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure other capabilities now": "Skip",
+        __prompt: ["", ""],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
+    expect(result.wizardState.optionalCapabilities?.voice).toEqual({
+      stt: "configured",
+      tts: "not_set",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
+  });
+
+  it("configures onboarding voice TTS without STT", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure voice": "Set Text to Speech (TTS) Provider",
+        "Configure other capabilities now": "Skip",
+        __prompt: ["", ""],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
+    expect(result.wizardState.optionalCapabilities?.voice).toEqual({
+      stt: "not_set",
+      tts: "configured",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
+  });
+
+  it("normal onboarding confirms the user-facing summary instead of the technical manifest", async () => {
+    const output: string[] = [];
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, seenOptions),
+      flowEngine: flowEngine(),
+      output: { write: (value) => output.push(value) },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(seenOptions["Configuration summary"]).toEqual(["Confirm", "Cancel"]);
+    expect(seenOptions[resolveSetupCopy("en", "onboarding.review")]).toBeUndefined();
+
+    const rendered = output.join("");
+    expect(rendered).toContain("Configuration summary");
+    expect(rendered).toContain("Credential status: Not set");
+    expect(rendered).not.toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(rendered).not.toContain(resolveSetupCopy("en", "setupReview.sections.filesToWriteUpdate"));
+  });
+
+  it("keeps redacted manifest and apply plan inspectable through the runner result", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-inspect-secret" }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.reviewManifest.metadata.lineCount).toBeGreaterThan(0);
+    expect(result.reviewManifest.sections["secret-refs-to-store"]).toHaveLength(1);
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-inspect-secret");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-inspect-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-inspect-secret");
+  });
+
+  it("renders Arabic summary confirmation without the technical review manifest", async () => {
+    const output: string[] = [];
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Setup language": "العربية" }, seenOptions),
       flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
@@ -477,8 +1055,13 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
-    expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.title"));
-    expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
+    expect(seenOptions[resolveSetupCopy("ar", "onboarding.summary.confirmTitle")]).toEqual([
+      resolveSetupCopy("ar", "onboarding.summary.confirmAction"),
+      resolveSetupCopy("ar", "onboarding.summary.cancelAction"),
+    ]);
+    expect(rendered).toContain("Configuration summary");
+    expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.title"));
+    expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
     expect(rendered).not.toContain("Files to write/update");
   });
 
@@ -492,7 +1075,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(result.applyEndState?.kind).toBe("verified-ready");
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
     };
@@ -537,16 +1120,25 @@ describe("runFirstRunSetup", () => {
   });
 
   it("writes collected API key to .env only after approved reviewed apply", async () => {
+    let envFileDuringApply: string | undefined;
+    const reviewed = reviewedExecutor(tempDir, workspaceRoot);
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-approved-secret" }),
       flowEngine: flowEngine(),
-      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      applyExecutor: {
+        ...reviewed,
+        apply: async (plan) => {
+          envFileDuringApply = await readFile(profileEnvPath(tempDir), "utf8");
+          return reviewed.apply(plan);
+        },
+      },
     });
 
     expect(result.completed).toBe(true);
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(envFileDuringApply).toBe("");
     const envContent = await readFile(profileEnvPath(tempDir), "utf8");
     expect(envContent).toContain('OPENAI_API_KEY="sk-approved-secret"');
     expect(JSON.stringify(result)).not.toContain("sk-approved-secret");

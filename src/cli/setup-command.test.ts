@@ -132,6 +132,48 @@ describe("cli setup command", () => {
     expect(result.output).not.toContain("Dry-run apply plan");
   });
 
+  it("returns a launch request after first-run setup when requested", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    try {
+      const result = await runCliCommand({
+        argv: ["setup", "--interactive"],
+        workspaceRoot,
+        homeDir: tempDir,
+        prompt: firstRunPrompt({
+          reviewAccepted: true,
+          launchRequested: true,
+          providerId: "openai",
+        }),
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.launchRequested).toBe(true);
+    } finally {
+      if (previousOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousOpenAiKey;
+      }
+    }
+  });
+
+  it("exits normally after first-run setup when launch is not requested", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const result = await runCliCommand({
+      argv: ["setup", "--interactive"],
+      workspaceRoot,
+      homeDir: tempDir,
+      prompt: firstRunPrompt({ reviewAccepted: true, launchRequested: false }),
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.launchRequested).toBe(false);
+  });
+
   it("cancels reviewed setup without applying config changes or trust", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({
@@ -159,7 +201,7 @@ describe("cli setup command", () => {
     });
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("EstaCoda setup");
+    expect(result.stdout).toContain("EstaCoda Onboarding Wizard");
     expect(result.stdout).toContain("Setup language");
     expect(result.stderr).not.toContain("unsettled top-level await");
     expect(result.stderr).not.toContain("Warning: Detected unsettled");
@@ -363,11 +405,24 @@ describe("cli setup command", () => {
     expect(cliSource).not.toContain("runInteractiveOnboarding");
     expect(launcherSource).not.toContain("runInteractiveOnboarding");
   });
+
+  it("entrypoint setup launch handoff re-enters the fresh interactive launch path", async () => {
+    const entrypointSource = await readFile(join(process.cwd(), "src", "index.ts"), "utf8");
+
+    expect(entrypointSource).toContain("setupCommand.launchRequested === true");
+    expect(entrypointSource).toContain("launchInteractiveSession({ workspaceRoot, homeDir, profileId })");
+    expect(entrypointSource).toContain("argv = []");
+    expect(entrypointSource).toContain("const nowTrusted = await trustStore.isTrusted(workspaceRoot)");
+    expect(entrypointSource).toContain("const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId })");
+    expect(entrypointSource).toContain("onboarding.workspace.trust.deferredFinal");
+    expect(entrypointSource).toContain("return createRuntime({");
+  });
 });
 
 type FirstRunPromptOptions = {
   readonly reviewAccepted: boolean;
-  readonly launchSelected?: boolean;
+  readonly launchRequested?: boolean;
+  readonly providerId?: string;
   readonly setupEditorActionId?: string;
 };
 
@@ -382,16 +437,16 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
       return valueOrDefault(selection, true);
     }
     if (title.includes("provider")) {
-      return valueOrDefault(selection, "local");
+      return valueWithIdOrDefault(selection, options.providerId ?? "local");
     }
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
-    if (title.includes("review")) {
+    if (title.includes("configuration summary") || title.includes("review")) {
       return valueOrDefault(selection, options.reviewAccepted);
     }
-    if (title.includes("launch")) {
-      return valueOrDefault(selection, options.launchSelected ?? false);
+    if (title.includes("start estacoda")) {
+      return valueOrDefault(selection, options.launchRequested ?? false);
     }
     if (allBooleanOptions(selection)) {
       return valueOrDefault(selection, false);

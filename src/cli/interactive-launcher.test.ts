@@ -194,6 +194,45 @@ describe("launchInteractiveSession", () => {
     expect(result.onboardingTriggered).toBe(false);
     expect(result.output).toContain("Workspace trust is required");
   });
+
+  it("reloads config and trust state at launch time", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const workspaceRoot = join(tempDir, "workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    await setupProviderConfig({
+      workspaceRoot,
+      homeDir: tempDir,
+      input: {
+        provider: "local",
+        model: "ollama/auto",
+        enableNetwork: false
+      }
+    });
+
+    const beforeTrust = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir });
+    await setupUiConfig({
+      workspaceRoot,
+      homeDir: tempDir,
+      input: {
+        language: "ar"
+      }
+    });
+    await trustWorkspace(workspaceRoot, tempDir);
+    const afterTrust = await launchInteractiveSession({
+      workspaceRoot,
+      homeDir: tempDir,
+      prompt: confirmationPrompt("y")
+    });
+
+    expect(beforeTrust.launched).toBe(false);
+    expect(beforeTrust.output).toContain("Workspace trust is required");
+    expect(afterTrust.launched).toBe(true);
+    expect(afterTrust.exitCode).toBe(0);
+    expect(afterTrust.locale).toBe("ar");
+  });
 });
 
 async function trustWorkspace(workspaceRoot: string, homeDir: string): Promise<void> {

@@ -7,14 +7,16 @@ import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { SetupEntryRecommendedAction, SetupEntryState, SetupEntryStateKind } from "./setup-entry-state.js";
 import type { SetupVerificationReport } from "./verification.js";
 import { routeSetupEntryState } from "./setup-router.js";
+import { planSetupApply } from "./setup-apply-plan.js";
 import {
-  buildFirstRunDraftBundle,
+  buildOnboardingWizardDraftBundle,
   buildSetupEditorActionDraftBundle,
   buildSetupEditorDraftBundle,
   type SetupDraftBundle,
 } from "./setup-drafts.js";
+import { buildSetupReviewManifest } from "./setup-review-manifest.js";
 import { scopedPatch, setupEditorAction } from "./setup-editor-actions.js";
-import type { ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
+import type { OnboardingWizardState } from "./onboarding-wizard/state.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
@@ -95,56 +97,84 @@ function recommendedAction(kind: SetupEntryStateKind): SetupEntryRecommendedActi
   }
 }
 
-function firstRunBundle(overrides: Partial<{
+function onboardingBundle(overrides: Partial<{
   primaryBaseUrl?: string;
   primaryContextWindowTokens?: number;
-  primaryApiMode?: ProviderApiMode;
-  primaryAuthMethod?: ProviderAuthMethod;
+  primaryApiMode?: OnboardingWizardState["primaryRoute"] extends infer Route ? Route extends { apiMode?: infer Mode } ? Mode : never : never;
+  primaryAuthMethod?: OnboardingWizardState["primaryRoute"] extends infer Route ? Route extends { authMethod?: infer Method } ? Method : never : never;
 }> = {}): SetupDraftBundle {
-  const decision = routeSetupEntryState(state("new-user"), {
-    firstRunSelections: {
-      workspaceRoot: "/tmp/workspace",
-      workspaceTrusted: true,
-      primaryProvider: "openai",
-      primaryModel: "gpt-4.1-mini",
-      primaryBaseUrl: overrides.primaryBaseUrl,
-      primaryContextWindowTokens: overrides.primaryContextWindowTokens,
-      primaryApiMode: overrides.primaryApiMode,
-      primaryAuthMethod: overrides.primaryAuthMethod,
-      primaryCredential: { kind: "env", name: "OPENAI_API_KEY" },
-      securityMode: "adaptive",
-      workflowLearning: "suggest",
-      optionalCapabilities: [],
-      optionalCapabilitiesSkipped: true,
-      verifySelected: true,
-      launchSelected: false,
+  return buildOnboardingWizardDraftBundle(onboardingWizardState({
+    primaryRoute: {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      baseUrl: overrides.primaryBaseUrl,
+      contextWindowTokens: overrides.primaryContextWindowTokens,
+      apiMode: overrides.primaryApiMode,
+      authMethod: overrides.primaryAuthMethod,
     },
-  });
-  if (decision.firstRunPlanSession === undefined) {
-    throw new Error("Expected first-run plan session");
-  }
-  return buildFirstRunDraftBundle(decision.firstRunPlanSession, {
+    optionalCapabilities: {
+      selected: [],
+      channels: { telegram: "not_set" },
+      voice: { stt: "not_set", tts: "not_set" },
+      browser: "not_set",
+    },
+    optionalCapabilityDrafts: [],
+  }), {
     configPath: "/tmp/home/.estacoda/config.json",
     workspaceRoot: "/tmp/workspace",
     trustStorePath: "/tmp/home/.estacoda/trust.json",
   });
 }
 
+function onboardingWizardState(overrides: Partial<OnboardingWizardState> = {}): OnboardingWizardState {
+  return {
+    interfacePreferences: {
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    },
+    workspace: {
+      path: "/tmp/workspace",
+      trustStatus: "trusted",
+    },
+    primaryRoute: {
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      contextWindowTokens: 128000,
+      apiMode: "custom_openai_compatible",
+      authMethod: "api_key",
+    },
+    credential: {
+      status: "new_pending",
+      envVarName: "OPENAI_API_KEY",
+    },
+    securityMode: "adaptive",
+    agentEvolution: "suggest",
+    optionalCapabilities: {
+      selected: ["channels", "voice", "browser"],
+      channels: { telegram: "configured" },
+      voice: { stt: "configured", tts: "configured" },
+      browser: "configured",
+    },
+    ...overrides,
+  };
+}
+
 describe("setup draft bundles", () => {
-  it("builds first-run draft bundles without mutation", () => {
-    const bundle = firstRunBundle();
+  it("builds onboarding wizard draft bundles without mutation", () => {
+    const bundle = onboardingBundle();
 
     expect(bundle.kind).toBe("setup-draft-bundle");
-    expect(bundle.sourceKind).toBe("first-run-plan-session");
+    expect(bundle.sourceKind).toBe("onboarding-wizard-state");
     expect(bundle.drafts.map((draft) => draft.kind)).toEqual([
+      "ui-preferences",
       "provider-model-route",
       "credential-reference",
       "security-mode",
       "workflow-learning",
       "workspace-trust",
-      "optional-capability",
       "verification",
-      "launch-handoff",
     ]);
     expect(bundle.drafts.every((draft) => draft.applyIntent.writesConfig === false)).toBe(true);
     expect(bundle.drafts.every((draft) => draft.applyIntent.writesTrustStore === false)).toBe(true);
@@ -165,8 +195,135 @@ describe("setup draft bundles", () => {
     expect(bundle.drafts.every((draft) => draft.applyIntent.writesConfig === false)).toBe(true);
   });
 
+  it("builds onboarding wizard draft bundles directly from wizard state", () => {
+    const bundle = buildOnboardingWizardDraftBundle(onboardingWizardState(), {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+
+    expect(bundle.sourceKind).toBe("onboarding-wizard-state");
+    expect(bundle.drafts.map((draft) => draft.kind)).toEqual([
+      "ui-preferences",
+      "provider-model-route",
+      "credential-reference",
+      "security-mode",
+      "workflow-learning",
+      "workspace-trust",
+      "optional-capability",
+      "verification",
+    ]);
+    expect(bundle.drafts.every((draft) => draft.applyIntent.dryRunOnly)).toBe(true);
+    expect(bundle.drafts.every((draft) => draft.applyIntent.writesConfig === false)).toBe(true);
+    expect(bundle.drafts.every((draft) => draft.applyIntent.writesTrustStore === false)).toBe(true);
+  });
+
+  it("preserves onboarding wizard state fields in safe reviewed drafts", () => {
+    const bundle = buildOnboardingWizardDraftBundle(onboardingWizardState(), {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+
+    const ui = bundle.drafts.find((draft) => draft.kind === "ui-preferences");
+    const route = bundle.drafts.find((draft) => draft.kind === "provider-model-route");
+    const credential = bundle.drafts.find((draft) => draft.kind === "credential-reference");
+    const security = bundle.drafts.find((draft) => draft.kind === "security-mode");
+    const evolution = bundle.drafts.find((draft) => draft.kind === "workflow-learning");
+    const workspace = bundle.drafts.find((draft) => draft.kind === "workspace-trust");
+    const optional = bundle.drafts.find((draft) => draft.kind === "optional-capability");
+
+    expect(ui?.review.values).toEqual({
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    });
+    expect(route?.review.values).toEqual(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      contextWindowTokens: 128000,
+      apiMode: "custom_openai_compatible",
+      authMethod: "api_key",
+    }));
+    expect(credential?.review.values).toEqual(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.5",
+      envVars: ["OPENAI_API_KEY"],
+      credentialValuesIncluded: false,
+    }));
+    expect(security?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["security.approvalMode"],
+    }));
+    expect(evolution?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["skills.autonomy"],
+    }));
+    expect(workspace?.target).toEqual({
+      kind: "trust-store",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+    expect(optional?.review.values).toEqual({
+      skipped: false,
+      capabilities: ["channels", "voice", "browser"],
+    });
+  });
+
+  it("keeps onboarding wizard credential data redacted through draft building", () => {
+    const unsafeState = onboardingWizardState({
+      credential: {
+        status: "new_pending",
+        envVarName: "OPENAI_API_KEY",
+        rawSecret: "sk-not-for-drafts",
+        prefix: "sk-",
+        suffix: "zzzz",
+        length: 17,
+        hash: "abc123",
+      } as unknown as OnboardingWizardState["credential"],
+    });
+    const bundle = buildOnboardingWizardDraftBundle(unsafeState, {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+    const json = JSON.stringify(bundle);
+
+    expect(json).toContain("OPENAI_API_KEY");
+    expect(json).not.toContain("sk-not-for-drafts");
+    expect(json).not.toContain("sk-");
+    expect(json).not.toContain("zzzz");
+    expect(json).not.toContain("abc123");
+  });
+
+  it("keeps onboarding wizard raw credential data out of manifest and apply planning output", () => {
+    const unsafeState = onboardingWizardState({
+      credential: {
+        status: "new_pending",
+        envVarName: "OPENAI_API_KEY",
+        rawSecret: "sk-direct-builder-secret",
+      } as unknown as OnboardingWizardState["credential"],
+    });
+    const bundle = buildOnboardingWizardDraftBundle(unsafeState, {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+    const manifest = buildSetupReviewManifest([bundle]);
+    const applyPlanningResult = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+    const json = JSON.stringify({ manifest, applyPlanningResult });
+
+    expect(json).toContain("OPENAI_API_KEY");
+    expect(json).not.toContain("sk-direct-builder-secret");
+    expect(json).not.toContain("rawSecret");
+  });
+
   it("creates provider/model drafts with scoped target and preserveUnrelatedConfig", () => {
-    const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "provider-model-route");
+    const draft = onboardingBundle().drafts.find((candidate) => candidate.kind === "provider-model-route");
 
     expect(draft?.target).toEqual({
       kind: "config-scope",
@@ -178,7 +335,7 @@ describe("setup draft bundles", () => {
   });
 
   it("carries route metadata in provider-model draft review values", () => {
-    const bundle = firstRunBundle({
+    const bundle = onboardingBundle({
       primaryBaseUrl: "https://custom.example.com/v1",
       primaryContextWindowTokens: 256000,
       primaryApiMode: "custom_openai_compatible",
@@ -195,7 +352,7 @@ describe("setup draft bundles", () => {
   });
 
   it("redacts credential drafts and shows env var refs only", () => {
-    const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "credential-reference");
+    const draft = onboardingBundle().drafts.find((candidate) => candidate.kind === "credential-reference");
     const json = JSON.stringify(draft);
 
     expect(draft?.review.values.envVars).toEqual(["OPENAI_API_KEY"]);
@@ -206,7 +363,7 @@ describe("setup draft bundles", () => {
   });
 
   it("creates workspace trust drafts with exact paths without granting trust", () => {
-    const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "workspace-trust");
+    const draft = onboardingBundle().drafts.find((candidate) => candidate.kind === "workspace-trust");
 
     expect(draft?.target).toEqual({
       kind: "trust-store",
@@ -223,7 +380,7 @@ describe("setup draft bundles", () => {
   });
 
   it("keeps security and workflow drafts scoped while preserving unrelated config", () => {
-    const bundle = firstRunBundle();
+    const bundle = onboardingBundle();
     const security = bundle.drafts.find((candidate) => candidate.kind === "security-mode");
     const workflow = bundle.drafts.find((candidate) => candidate.kind === "workflow-learning");
 
@@ -562,19 +719,21 @@ describe("setup draft bundles", () => {
   });
 
   it("keeps optional capability drafts independent and skippable", () => {
-    const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "optional-capability");
-
-    expect(draft?.requiresReview).toBe(false);
-    expect(draft?.review.values.skipped).toBe(true);
-    expect(draft?.target).toEqual(expect.objectContaining({
-      kind: "config-scope",
-      scope: ["channels", "voice", "vision", "browser"],
-      preserveUnrelatedConfig: true,
+    const bundle = buildOnboardingWizardDraftBundle(onboardingWizardState({
+      optionalCapabilities: {
+        selected: [],
+        channels: { telegram: "not_set" },
+        voice: { stt: "not_set", tts: "not_set" },
+        browser: "not_set",
+      },
+      optionalCapabilityDrafts: [],
     }));
+
+    expect(bundle.drafts.some((candidate) => candidate.kind === "optional-capability")).toBe(false);
   });
 
   it("keeps verification drafts read-only", () => {
-    const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "verification");
+    const draft = onboardingBundle().drafts.find((candidate) => candidate.kind === "verification");
 
     expect(draft?.readOnly).toBe(true);
     expect(draft?.target).toEqual({ kind: "verification", readOnly: true });
@@ -612,11 +771,11 @@ describe("setup draft bundles", () => {
   });
 
   it("does not reintroduce backupForMain", () => {
-    expect(JSON.stringify(firstRunBundle())).not.toContain("backupForMain");
+    expect(JSON.stringify(onboardingBundle())).not.toContain("backupForMain");
   });
 
   it("does not introduce terminal rendering fields", () => {
-    const bundle = firstRunBundle();
+    const bundle = onboardingBundle();
     const json = JSON.stringify(bundle);
 
     expect(json).not.toContain("\u001b[");
@@ -629,20 +788,12 @@ describe("setup draft bundles", () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-setup-drafts-"));
     const workspaceRoot = join(homeDir, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
-    const decision = routeSetupEntryState(state("new-user"), {
-      firstRunSelections: {
-        workspaceRoot,
-        workspaceTrusted: true,
-        primaryProvider: "openai",
-        primaryModel: "gpt-4.1-mini",
-        primaryCredential: { kind: "env", name: "OPENAI_API_KEY" },
+    buildOnboardingWizardDraftBundle(onboardingWizardState({
+      workspace: {
+        path: workspaceRoot,
+        trustStatus: "trusted",
       },
-    });
-
-    if (decision.firstRunPlanSession === undefined) {
-      throw new Error("Expected first-run plan session");
-    }
-    buildFirstRunDraftBundle(decision.firstRunPlanSession, {
+    }), {
       configPath: join(homeDir, ".estacoda", "config.json"),
       workspaceRoot,
       trustStorePath: join(homeDir, ".estacoda", "trust.json"),

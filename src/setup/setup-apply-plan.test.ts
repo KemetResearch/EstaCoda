@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
-import { buildFirstRunDraftBundle } from "./setup-drafts.js";
+import { buildOnboardingWizardDraftBundle } from "./setup-drafts.js";
 import {
   buildSetupModuleDraftBundle,
   type SetupModuleContext,
@@ -13,40 +13,52 @@ import {
   buildSetupReviewManifest,
   type SetupReviewManifest,
 } from "./setup-review-manifest.js";
-import type { FirstRunPlanSession } from "./setup-router.js";
+import type { OnboardingWizardState } from "./onboarding-wizard/state.js";
 import type { SetupVerificationReport } from "./verification.js";
 import {
   executeSetupApplyPlan,
   planSetupApply,
   type SetupApplyExecutor,
 } from "./setup-apply-plan.js";
+import { renderSetupApplyEndState } from "./setup-prompts.js";
 
-function firstRunManifest(overrides: {
-  readonly launchSelected?: boolean;
-  readonly verifySelected?: boolean;
+function onboardingManifest(overrides: {
   readonly configPath?: string;
   readonly workspaceRoot?: string;
   readonly trustStorePath?: string;
 } = {}): SetupReviewManifest {
   const workspaceRoot = overrides.workspaceRoot ?? "/tmp/workspace";
   const trustStorePath = overrides.trustStorePath ?? "/tmp/home/.estacoda/trust.json";
+  const state: OnboardingWizardState = {
+    interfacePreferences: {
+      language: "en",
+      flavor: "standard",
+      activityLabels: "en",
+    },
+    workspace: {
+      path: workspaceRoot,
+      trustStatus: "trusted",
+    },
+    primaryRoute: {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+    },
+    credential: {
+      status: "new_pending",
+      envVarName: "OPENAI_API_KEY",
+    },
+    securityMode: "adaptive",
+    agentEvolution: "suggest",
+    optionalCapabilities: {
+      selected: [],
+      channels: { telegram: "not_set" },
+      voice: { stt: "not_set", tts: "not_set" },
+      browser: "not_set",
+    },
+    optionalCapabilityDrafts: [],
+  };
   return buildSetupReviewManifest([
-    buildFirstRunDraftBundle({
-      plan: {
-        selections: {
-          workspaceRoot,
-          workspaceTrusted: true,
-          primaryProvider: "openai",
-          primaryModel: "gpt-4.1-mini",
-          primaryCredential: { kind: "env", name: "OPENAI_API_KEY" },
-          securityMode: "adaptive",
-          workflowLearning: "suggest",
-          optionalCapabilitiesSkipped: true,
-          verifySelected: overrides.verifySelected ?? true,
-          launchSelected: overrides.launchSelected ?? true,
-        },
-      },
-    } as FirstRunPlanSession, {
+    buildOnboardingWizardDraftBundle(state, {
       configPath: overrides.configPath ?? "/tmp/home/.estacoda/config.json",
       workspaceRoot,
       trustStorePath,
@@ -107,7 +119,7 @@ describe("setup apply plan", () => {
   it("approved manifest produces a dry-run save/apply plan", () => {
     const result = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
 
     expect(result.kind).toBe("apply-plan-ready");
@@ -121,23 +133,18 @@ describe("setup apply plan", () => {
       "credential-reference",
       "workspace-trust-grant",
       "verification-request",
-      "launch-handoff",
     ]));
     expect(result.applyPlan.verificationRequest).toEqual(expect.objectContaining({
       kind: "post-save-verification-request",
       readOnly: true,
     }));
-    expect(result.applyPlan.launchHandoffIntent).toEqual(expect.objectContaining({
-      kind: "launch-handoff-intent",
-      preference: "offer-after-verify",
-      requiresVerifiedReadyOrAcceptedDegraded: true,
-    }));
+    expect(result.applyPlan.launchHandoffIntent).toBeUndefined();
   });
 
   it("cancelled review produces no apply plan", () => {
     const result = planSetupApply({
       kind: "cancelled-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
       reason: "user-cancelled-review",
     });
 
@@ -414,7 +421,7 @@ describe("setup apply plan", () => {
   it("workspace trust is not granted on cancellation", () => {
     const result = planSetupApply({
       kind: "cancelled-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
 
     expect(result.kind).toBe("cancelled");
@@ -425,7 +432,7 @@ describe("setup apply plan", () => {
   it("save failure does not continue to verify or launch", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
     let verifyCalls = 0;
@@ -448,43 +455,87 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
-  it("verified-ready can produce launch handoff intent", async () => {
+  it("does not apply deferred secrets when the reviewed save fails", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    let deferredSecretCalls = 0;
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "Config writer unavailable.",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    }, {
+      deferredSecretWrites: [{ envVarName: "OPENAI_API_KEY", value: "sk-not-written" }],
+    });
+
+    expect(endState.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
+  });
+
+  it("reports verification failure honestly after deferred secret persistence", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: true,
+        appliedOperationIds: planned.applyPlan.operations.map((operation) => operation.id),
+      }),
+      applyDeferredSecrets: () => ({
+        ok: true,
+        appliedSecretCount: 1,
+      }),
+      verify: () => verificationReport({
+        workspaceTrusted: false,
+        warnings: ["Workspace is not trusted yet"],
+        issueCodes: ["workspace-not-trusted"],
+      }),
+    }, {
+      deferredSecretWrites: [{ envVarName: "OPENAI_API_KEY", value: "sk-persisted-before-verify" }],
+    });
+
+    expect(endState.kind).toBe("blocked");
+    if (endState.kind !== "blocked") throw new Error("expected blocked");
+    expect(endState.reason).toBe("verification-blocked");
+    expect(endState.persistedSecretCount).toBe(1);
+    expect(renderSetupApplyEndState(endState, "en")).toBe(
+      "Setup was saved, including credential persistence, but verification failed because of Workspace is not trusted yet. No rollback was performed."
+    );
+  });
+
+  it("verified-ready is represented after reviewed apply and verification", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
 
     const endState = await executeSetupApplyPlan(planned.applyPlan, executorWithVerification(verificationReport()));
 
-    expect(endState.kind).toBe("launched");
-    if (endState.kind !== "launched") throw new Error("expected launch");
-    expect(endState.acceptedDegraded).toBe(false);
-    expect(endState.launchHandoffIntent.preference).toBe("offer-after-verify");
-  });
-
-  it("verified-ready can defer launch handoff for an explicit editor choice", async () => {
-    const planned = planSetupApply({
-      kind: "approved-review-result",
-      manifest: firstRunManifest(),
-    });
-    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
-
-    const endState = await executeSetupApplyPlan(
-      planned.applyPlan,
-      executorWithVerification(verificationReport()),
-      { allowAutomaticLaunch: false }
-    );
-
     expect(endState.kind).toBe("verified-ready");
     if (endState.kind !== "verified-ready") throw new Error("expected verified ready");
-    expect(endState.launchHandoffIntent?.preference).toBe("offer-after-verify");
+    expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
   it("verified-degraded requires explicit continue or limited-mode decision", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
     const degradedReport = verificationReport({
@@ -505,10 +556,10 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
-  it("accepted degraded verification may launch in explicit limited mode", async () => {
+  it("accepted degraded verification saves without launching when no manifest launch intent exists", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
     const endState = await executeSetupApplyPlan(
@@ -525,15 +576,16 @@ describe("setup apply plan", () => {
       { acceptDegraded: true }
     );
 
-    expect(endState.kind).toBe("launched");
-    if (endState.kind !== "launched") throw new Error("expected launch");
-    expect(endState.acceptedDegraded).toBe(true);
+    expect(endState.kind).toBe("saved-not-launched");
+    if (endState.kind !== "saved-not-launched") throw new Error("expected saved-not-launched");
+    expect(endState.verification).toBeDefined();
+    expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
   it("degraded verification does not launch when automatic handoff is disabled", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
     const endState = await executeSetupApplyPlan(
@@ -558,7 +610,7 @@ describe("setup apply plan", () => {
   it("blocked verification prevents automatic launch", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
 
@@ -574,18 +626,24 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
-  it("saved-not-launched state is represented", async () => {
+  it("saved-not-launched state is represented when verification cannot run", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest({ launchSelected: false }),
+      manifest: onboardingManifest(),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
 
-    const endState = await executeSetupApplyPlan(planned.applyPlan, executorWithVerification(verificationReport()));
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: true,
+        appliedOperationIds: planned.applyPlan.operations.map((operation) => operation.id),
+      }),
+    });
 
     expect(endState.kind).toBe("saved-not-launched");
     if (endState.kind !== "saved-not-launched") throw new Error("expected saved-not-launched");
-    expect(endState.launchHandoffIntent?.preference).toBe("skip-launch");
+    expect(endState.verification).toBeUndefined();
+    expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
   it("raw secrets never appear in apply planning output", () => {
@@ -604,7 +662,7 @@ describe("setup apply plan", () => {
   it("unrelated config preservation is retained", () => {
     const result = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     if (result.kind !== "apply-plan-ready") throw new Error("expected apply plan");
 
@@ -621,7 +679,7 @@ describe("setup apply plan", () => {
   it("contains no terminal rendering fields", () => {
     const result = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
     const json = JSON.stringify(result);
 
@@ -638,7 +696,7 @@ describe("setup apply plan", () => {
     const workspaceRoot = join(homeDir, "workspace");
     const planned = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest({ configPath, trustStorePath, workspaceRoot }),
+      manifest: onboardingManifest({ configPath, trustStorePath, workspaceRoot }),
     });
     if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
 
@@ -652,7 +710,7 @@ describe("setup apply plan", () => {
   it("does not reintroduce backupForMain", () => {
     const result = planSetupApply({
       kind: "approved-review-result",
-      manifest: firstRunManifest(),
+      manifest: onboardingManifest(),
     });
 
     expect(JSON.stringify(result)).not.toContain("backupForMain");

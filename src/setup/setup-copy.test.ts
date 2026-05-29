@@ -19,6 +19,13 @@ const FIRST_RUN_KEYS = [
   "onboarding.workspace.root",
   "onboarding.workspace.root.validation.selected",
   "onboarding.workspace.trust",
+  "onboarding.workspace.changeWorkspaceAction.label",
+  "onboarding.workspace.changeWorkspaceAction.description",
+  "onboarding.workspace.trust.deferredFinal",
+  "onboarding.workspace.invalid.title",
+  "onboarding.workspace.invalid.tryAgain",
+  "onboarding.workspace.invalid.useCurrent",
+  "onboarding.workspace.invalid.cancel",
   "onboarding.workspace.trust.validation.explicit",
   "onboarding.providers.primary",
   "onboarding.providers.primary.validation.selected",
@@ -32,16 +39,25 @@ const FIRST_RUN_KEYS = [
   "onboarding.workflowLearning",
   "onboarding.workflowLearning.validation.selected",
   "onboarding.optionalCapabilities",
+  "onboarding.optionalCapabilities.title",
+  "onboarding.optionalCapabilities.configureNow",
+  "onboarding.optionalCapabilities.configureNow.yes",
+  "onboarding.optionalCapabilities.configureNow.no",
+  "onboarding.optionalCapabilities.note",
+  "onboarding.optionalCapabilities.menu.title",
+  "onboarding.optionalCapabilities.more.title",
+  "onboarding.optionalCapabilities.more.yes",
   "onboarding.optionalCapabilities.skipped",
   "onboarding.optionalCapabilities.validation.skippable",
+  "onboarding.summary.confirmTitle",
+  "onboarding.summary.confirmMessage",
+  "onboarding.summary.confirmAction",
+  "onboarding.summary.cancelAction",
   "onboarding.review",
   "onboarding.review.validation.accepted",
-  "onboarding.save",
-  "onboarding.save.validation.confirmed",
-  "onboarding.verification",
-  "onboarding.verification.validation.selected",
-  "onboarding.launch",
-  "onboarding.launch.validation.explicit",
+  "onboarding.launch.startNow",
+  "onboarding.launch.startNow.yes",
+  "onboarding.launch.startNow.no",
 ] as const;
 
 const SETUP_EDITOR_KEYS = [
@@ -314,7 +330,6 @@ const REVIEW_MANIFEST_KEYS = [
   "setupDrafts.uiPreferences.summary",
   "setupDrafts.optionalCapabilities.summary",
   "setupDrafts.verification.summary",
-  "setupDrafts.launch.summary",
   "setupDrafts.exit.summary",
   "setupDrafts.brokenConfig.summary",
 ] as const;
@@ -333,6 +348,7 @@ const APPLY_HANDOFF_KEYS = [
   "setupApply.endState.verifiedReady",
   "setupApply.endState.verifiedDegraded",
   "setupApply.endState.verificationBlocked",
+  "setupApply.endState.verificationBlockedAfterPersistence",
   "setupApply.endState.savedNotLaunched",
   "setupApply.endState.launched",
   "setupApply.endState.acceptedDegraded",
@@ -400,7 +416,7 @@ describe("setup copy", () => {
   it("selects screenshot-approved Arabic copy", () => {
     const copy = setupCopy("ar");
 
-    expect(copy["onboarding.welcome"]).toContain("سنضع القواعد");
+    expect(copy["onboarding.welcome"]).toContain("اضبط مساحة العمل");
     expect(copy["onboarding.welcome"]).toContain(isolateLtr("EstaCoda"));
     expect(copy["setupEditor.summary.repairFirst"]).toContain("لا جدوى من تلميع إعداد لا يعمل");
     expect(copy["setupModules.telegram.review"]).toContain("التحكم عن بعد لا يستجيب إلا للقائمة المسموح بها");
@@ -498,8 +514,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit workflow learning");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Control how reusable workflows are learned from sessions.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit Agent Evolution");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls whether EstaCoda may learn reusable Skills from your workflow patterns.");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");
