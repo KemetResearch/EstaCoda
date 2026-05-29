@@ -15,6 +15,7 @@ import {
   type OptionalCapabilityId,
 } from "./plan.js";
 import type { OnboardingCredentialSummaryStatus, OnboardingWizardState } from "./state.js";
+import { renderOnboardingWizardSummary } from "./summary.js";
 import {
   validateOnboardingWorkspacePath,
   type OnboardingInvalidWorkspaceAction,
@@ -46,7 +47,6 @@ import {
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
-  renderSetupReviewManifest,
   setupCopyText,
   showSetupCard,
 } from "../setup-prompts.js";
@@ -317,22 +317,22 @@ export async function runFirstRunSetup(
     trustStorePath: stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const reviewText = renderSetupReviewManifest(reviewManifest, language);
-  write(options, `${setupCopyText(language, "onboarding.review")}\n${reviewText}\n`);
+  const summaryText = renderOnboardingWizardSummary(wizardState);
+  write(options, `${summaryText}\n`);
 
   const reviewAccepted = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.review"),
-    message: `${setupCopyText(language, "onboarding.review.validation.accepted")}\n`,
+    title: setupCopyText(language, "onboarding.summary.confirmTitle"),
+    message: `${summaryText}\n\n${setupCopyText(language, "onboarding.summary.confirmMessage")}\n`,
     choices: [
       {
-        id: "approve",
-        label: setupCopyText(language, "onboarding.review.approveAction"),
+        id: "confirm",
+        label: setupCopyText(language, "onboarding.summary.confirmAction"),
         description: setupCopyText(language, "setupApply.review.approved"),
         value: true,
       },
       {
         id: "cancel",
-        label: setupCopyText(language, "onboarding.review.cancelAction"),
+        label: setupCopyText(language, "onboarding.summary.cancelAction"),
         description: setupCopyText(language, "setupApply.review.cancelled"),
         value: false,
       },
@@ -347,7 +347,7 @@ export async function runFirstRunSetup(
   };
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
-    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled summary confirmation." });
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,

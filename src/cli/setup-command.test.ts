@@ -387,7 +387,7 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
-    if (title.includes("review")) {
+    if (title.includes("configuration summary") || title.includes("review")) {
       return valueOrDefault(selection, options.reviewAccepted);
     }
     if (title.includes("launch")) {

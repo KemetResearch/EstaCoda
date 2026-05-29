@@ -314,7 +314,12 @@ describe("runFirstRunSetup", () => {
       expect(result.applyPlanningResult.applyPlan.metadata.trustOperationCount).toBe(1);
     }
     const renderedOutput = output.join("");
-    expect(renderedOutput).toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(renderedOutput).toContain("Configuration summary");
+    expect(renderedOutput).toContain(`Workspace: ${result.selections.workspaceRoot}`);
+    expect(renderedOutput).toContain("Primary Provider: local");
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.sections.filesToWriteUpdate"));
+    expect(renderedOutput).not.toContain(resolveSetupCopy("en", "setupReview.sections.secretRefsToStore"));
     expect(renderedOutput).not.toMatch(/\bprofiles?\b/iu);
     expect(readActiveProfile({ homeDir: tempDir }).profileId).toBe("default");
     await expect(readFile(activeProfilePath(tempDir), "utf8")).resolves.toContain("\"profileId\": \"default\"");
@@ -780,13 +785,54 @@ describe("runFirstRunSetup", () => {
     expect(JSON.stringify(result.reviewManifest)).toContain("browser");
   });
 
-  it("renders Arabic review text from setup copy tokens", async () => {
+  it("normal onboarding confirms the user-facing summary instead of the technical manifest", async () => {
     const output: string[] = [];
+    const seenOptions: Record<string, readonly string[]> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Setup language": "العربية" }),
+      prompt: fakePrompt({}, seenOptions),
+      flowEngine: flowEngine(),
+      output: { write: (value) => output.push(value) },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(seenOptions["Configuration summary"]).toEqual(["Confirm", "Cancel"]);
+    expect(seenOptions[resolveSetupCopy("en", "onboarding.review")]).toBeUndefined();
+
+    const rendered = output.join("");
+    expect(rendered).toContain("Configuration summary");
+    expect(rendered).toContain("Credential status: Not set");
+    expect(rendered).not.toContain(resolveSetupCopy("en", "setupReview.title"));
+    expect(rendered).not.toContain(resolveSetupCopy("en", "setupReview.sections.filesToWriteUpdate"));
+  });
+
+  it("keeps redacted manifest and apply plan inspectable through the runner result", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-inspect-secret" }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.reviewManifest.metadata.lineCount).toBeGreaterThan(0);
+    expect(result.reviewManifest.sections["secret-refs-to-store"]).toHaveLength(1);
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-inspect-secret");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-inspect-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-inspect-secret");
+  });
+
+  it("renders Arabic summary confirmation without the technical review manifest", async () => {
+    const output: string[] = [];
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Setup language": "العربية" }, seenOptions),
       flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
@@ -795,8 +841,13 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
-    expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.title"));
-    expect(rendered).toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
+    expect(seenOptions[resolveSetupCopy("ar", "onboarding.summary.confirmTitle")]).toEqual([
+      resolveSetupCopy("ar", "onboarding.summary.confirmAction"),
+      resolveSetupCopy("ar", "onboarding.summary.cancelAction"),
+    ]);
+    expect(rendered).toContain("Configuration summary");
+    expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.title"));
+    expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
     expect(rendered).not.toContain("Files to write/update");
   });
 
