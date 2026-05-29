@@ -82,7 +82,7 @@ import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
-import { storeCapabilitySecret } from "../setup/capability-setup.js";
+import { storeCapabilitySecret } from "../capabilities/capability-setup.js";
 import { PackRegistry } from "../packs/pack-registry.js";
 import { validatePackManifest } from "../packs/pack-validator.js";
 import { trace } from "./trace-commands.js";

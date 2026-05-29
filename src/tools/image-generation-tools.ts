@@ -2,7 +2,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import { setupNeeded } from "../setup/capability-setup.js";
+import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";

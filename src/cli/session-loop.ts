@@ -15,7 +15,7 @@ import {
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
-import { storeCapabilitySecret, type SetupNeededMetadata } from "../setup/capability-setup.js";
+import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt } from "./readline-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
