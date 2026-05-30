@@ -73,6 +73,21 @@ const fallbackRoute: ResolvedModelRoute = {
   apiKeyEnv: "FALLBACK_KEY"
 };
 
+const secondFallbackRoute: ResolvedModelRoute = {
+  provider: "test-provider",
+  id: "test-model-second-fallback",
+  profile: {
+    id: "test-model-second-fallback",
+    provider: "test-provider",
+    contextWindowTokens: 64_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  },
+  baseUrl: "https://second-fallback.example.com/v1",
+  apiKeyEnv: "SECOND_FALLBACK_KEY"
+};
+
 const testTool: ToolDefinition = {
   name: "test.tool",
   description: "Test tool",
@@ -485,6 +500,7 @@ async function createPostToolNudgeHarness(input: {
     executions?: ToolExecutionRecord[];
     plans?: ToolCallPlan[];
   }>;
+  modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
 }) {
@@ -545,7 +561,7 @@ async function createPostToolNudgeHarness(input: {
     providerExecutor,
     model: mockModel,
     primaryModelRoute: primaryRoute,
-    modelFallbackRoutes: [fallbackRoute],
+    modelFallbackRoutes: input.modelFallbackRoutes ?? [fallbackRoute],
     providerPreferences: {
       providerOrder: ["test-provider"]
     },
@@ -1609,6 +1625,89 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     expect(result.providerExecution?.route).toEqual(fallbackRoute);
     expect(result.providerExecution?.attemptedRouteIndex).toBe(1);
     expect(result.providerExecution?.routeRole).toBe("fallback");
+  });
+
+  it("preserves later fallbacks when continuing from a successful fallback route", async () => {
+    const fallbackFirst = lengthTruncatedTextExecution({
+      content: "FallbackA par",
+      route: fallbackRoute,
+      attemptedRouteIndex: 1,
+      fallbackUsed: true,
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: false,
+          errorClass: "server",
+          content: "primary failed"
+        },
+        {
+          provider: "test-provider",
+          model: "test-model-fallback",
+          ok: true,
+          content: "FallbackA par",
+          finishReason: "length"
+        }
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        fallbackFirst,
+        providerExecution("partial from fallbackB.", [], {
+          response: {
+            ok: true,
+            content: "partial from fallbackB.",
+            finishReason: "stop",
+            model: "test-model-second-fallback",
+            provider: "test-provider"
+          },
+          route: secondFallbackRoute,
+          attemptedRouteIndex: 1,
+          routeRole: "fallback",
+          fallbackUsed: true,
+          attempts: [
+            {
+              provider: "test-provider",
+              model: "test-model-fallback",
+              ok: false,
+              errorClass: "server",
+              content: "fallback A continuation failed"
+            },
+            {
+              provider: "test-provider",
+              model: "test-model-second-fallback",
+              ok: true,
+              content: "partial from fallbackB.",
+              finishReason: "stop"
+            }
+          ]
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      modelFallbackRoutes: [fallbackRoute, secondFallbackRoute],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("FallbackA partial from fallbackB.");
+    const continuationOptions = harness.completeSpy.mock.calls[1]?.[2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
+    expect(continuationOptions.primaryRoute).toEqual(fallbackRoute);
+    expect(continuationOptions.fallbackChain).toEqual([secondFallbackRoute]);
+    expect(continuationOptions.primaryRoute).not.toEqual(primaryRoute);
+    expect(result.providerExecution?.route).toEqual(secondFallbackRoute);
+    expect(result.providerExecution?.attemptedRouteIndex).toBe(2);
+    expect(result.providerExecution?.routeRole).toBe("fallback");
+    expect(result.providerExecution?.runtimeMetadata?.continuation).toEqual({
+      reason: "provider_length",
+      attempts: 1,
+      exhausted: false,
+      initialFinishReason: "length",
+      finalFinishReason: "stop"
+    });
   });
 
   it("does not continue length-truncated visible text after provider iteration budget is exhausted", async () => {
