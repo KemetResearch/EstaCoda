@@ -279,10 +279,10 @@ export class ProviderExecutor {
         : undefined;
 
       let response: ProviderResponse | undefined;
+      let finalizedStreamToolCalls: ProviderExecutionResult["toolCalls"] = [];
       let routeAttemptCount = 0;
       const maxRouteAttempts = 2;
       const effectiveAuthMethod = route.authMethod ?? metadata.defaultAuthMethod;
-      const toolCallsBeforeRoute = toolCalls.length;
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
@@ -311,16 +311,19 @@ export class ProviderExecutor {
           };
         }
 
-        const callResponse = options.stream === true && provider.stream !== undefined
+        const callResult = options.stream === true && provider.stream !== undefined
           ? await collectProviderStream({
               provider: route.provider,
               model: route.id,
               stream: provider.stream(buildRouteProviderRequest(request, route, { stream: true }), completionOptions),
               onEvent: options.onEvent,
-              toolCalls,
               signal: options.signal
             })
-          : await provider.complete(buildRouteProviderRequest(request, route), completionOptions);
+          : {
+              response: await provider.complete(buildRouteProviderRequest(request, route), completionOptions),
+              toolCalls: []
+            };
+        const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
         const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
@@ -352,6 +355,7 @@ export class ProviderExecutor {
 
         if (callResponse.ok) {
           response = callResponse;
+          finalizedStreamToolCalls = callResult.toolCalls;
           break;
         }
 
@@ -409,11 +413,10 @@ export class ProviderExecutor {
       const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
-        const streamedToolCalls = toolCalls.slice(toolCallsBeforeRoute);
         const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
         const terminalEmptyWithoutTools =
           response.content.trim().length === 0 &&
-          streamedToolCalls.length === 0 &&
+          finalizedStreamToolCalls.length === 0 &&
           extractedToolCalls.length === 0;
 
         if (terminalEmptyWithoutTools && nextRoute !== undefined) {
@@ -449,6 +452,20 @@ export class ProviderExecutor {
           willFallback: false,
           ...attemptMetadataFromResponse(response)
         });
+
+        for (const toolCall of finalizedStreamToolCalls) {
+          toolCalls.push(toolCall);
+          await options.onEvent?.({
+            kind: "provider-tool-call",
+            provider: route.provider,
+            model: route.id,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          });
+        }
 
         for (const toolCall of extractedToolCalls) {
           toolCalls.push(toolCall);
@@ -587,14 +604,18 @@ function buildRouteProviderRequest(
   };
 }
 
+type CollectedProviderStream = {
+  response: ProviderResponse;
+  toolCalls: ProviderExecutionResult["toolCalls"];
+};
+
 async function collectProviderStream(input: {
   provider: ProviderId;
   model: string;
   stream: AsyncIterable<ProviderStreamEvent>;
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
-  toolCalls: ProviderExecutionResult["toolCalls"];
   signal?: AbortSignal;
-}): Promise<ProviderResponse> {
+}): Promise<CollectedProviderStream> {
   let content = "";
   let finalResponse: ProviderResponse | undefined;
   let errorResponse: ProviderResponse | undefined;
@@ -603,11 +624,14 @@ async function collectProviderStream(input: {
   for await (const event of input.stream) {
     if (input.signal?.aborted === true) {
       return {
-        ok: false,
-        content: "Provider stream cancelled.",
-        model: input.model,
-        provider: input.provider,
-        errorClass: "timeout"
+        response: {
+          ok: false,
+          content: "Provider stream cancelled.",
+          model: input.model,
+          provider: input.provider,
+          errorClass: "timeout"
+        },
+        toolCalls: []
       };
     }
 
@@ -640,38 +664,33 @@ async function collectProviderStream(input: {
     }
   }
 
-  for (const toolCall of toolCallFragments.values()) {
-    input.toolCalls.push(toolCall);
-    await input.onEvent?.({
-      kind: "provider-tool-call",
-      provider: input.provider,
-      model: input.model,
-      index: toolCall.index,
-      id: toolCall.id,
-      name: toolCall.name,
-      argumentsText: toolCall.argumentsText,
-      raw: toolCall.raw
-    });
-  }
-
   if (errorResponse !== undefined) {
-    return errorResponse;
+    return {
+      response: errorResponse,
+      toolCalls: []
+    };
   }
 
   if (finalResponse !== undefined) {
-    return finalResponse;
+    return {
+      response: finalResponse,
+      toolCalls: [...toolCallFragments.values()]
+    };
   }
 
   const partialContent = partialContentFromIncompleteStream(content);
   return {
-    ok: false,
-    content: content.length === 0
-      ? "Provider stream ended before a done or error event."
-      : `Provider stream ended before completion after partial output:\n${content}`,
-    ...(partialContent === undefined ? {} : { partialContent }),
-    model: input.model,
-    provider: input.provider,
-    errorClass: "incomplete-stream"
+    response: {
+      ok: false,
+      content: content.length === 0
+        ? "Provider stream ended before a done or error event."
+        : `Provider stream ended before completion after partial output:\n${content}`,
+      ...(partialContent === undefined ? {} : { partialContent }),
+      model: input.model,
+      provider: input.provider,
+      errorClass: "incomplete-stream"
+    },
+    toolCalls: []
   };
 }
 
