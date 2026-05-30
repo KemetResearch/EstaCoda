@@ -7,6 +7,7 @@ import type {
   ProviderFinishReason,
   ProviderLoopRuntimeMetadata,
   ProviderRequest,
+  ProviderResponse,
   ProviderRoutePreferences,
   ProviderUsage,
   ResolvedModelRoute
@@ -208,7 +209,8 @@ export class ProviderTurnLoop {
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
-            iteration
+            iteration,
+            loopStartedAt
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -218,6 +220,7 @@ export class ProviderTurnLoop {
           ],
           providerExecution: previousProviderExecution,
           iteration,
+          loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge
         });
       pendingEmptyResponseNudge = false;
@@ -226,7 +229,25 @@ export class ProviderTurnLoop {
         break;
       }
 
-      iterations += 1;
+      const consumedProviderIterations = providerIterationCost(execution);
+      iterations += consumedProviderIterations;
+
+      if (isTruncatedToolCallRefusalExecution(execution)) {
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: 0,
+          executedTools: 0,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        break;
+      }
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
@@ -275,7 +296,7 @@ export class ProviderTurnLoop {
         );
       }
       const exhausted = (
-        iteration + 1 >= this.#budgets.maxProviderIterations ||
+        iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations ||
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
         repeatedFailureBudgetExceeded !== undefined
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
@@ -313,12 +334,15 @@ export class ProviderTurnLoop {
       if (
         terminalPostToolEmpty &&
         !postToolEmptyRetried &&
-        iteration + 1 < this.#budgets.maxProviderIterations
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
       ) {
         postToolEmptyRetried = true;
         pendingEmptyResponseNudge = true;
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
         continue;
       }
 
@@ -330,13 +354,16 @@ export class ProviderTurnLoop {
       if (
         successfulEmptyWithoutTools &&
         emptyContentRetries < 3 &&
-        iteration + 1 < this.#budgets.maxProviderIterations
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
       ) {
         emptyContentRetries += 1;
         if (phase === "initial") {
           retryEmptyInitialResponse = true;
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
           continue;
         }
       }
@@ -357,6 +384,10 @@ export class ProviderTurnLoop {
           );
         }
         break;
+      }
+
+      if (consumedProviderIterations > 1) {
+        iteration += consumedProviderIterations - 1;
       }
     }
 
@@ -411,6 +442,7 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     toolPlans: ToolCallPlan[];
     iteration: number;
+    loopStartedAt: number;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
@@ -438,7 +470,7 @@ export class ProviderTurnLoop {
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+    const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
@@ -446,21 +478,22 @@ export class ProviderTurnLoop {
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
-    }), {
+    });
+    const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
-    }, {
+    };
+    const execution = await this.#completeProviderRequestWithTruncatedToolRetry({
+      request: providerRequest,
+      preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
-      stream: true,
+      iteration: input.iteration,
+      loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      primaryRoute: this.#primaryModelRoute,
-      fallbackChain: this.#modelFallbackRoutes,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
+      onEvent: input.onEvent
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -518,6 +551,7 @@ export class ProviderTurnLoop {
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     iteration: number;
+    loopStartedAt: number;
     emptyResponseNudge?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
@@ -559,7 +593,7 @@ export class ProviderTurnLoop {
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+    const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
@@ -567,21 +601,22 @@ export class ProviderTurnLoop {
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
-    }), {
+    });
+    const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
-    }, {
+    };
+    const execution = await this.#completeProviderRequestWithTruncatedToolRetry({
+      request: providerRequest,
+      preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
-      stream: true,
+      iteration: input.iteration,
+      loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      primaryRoute: this.#primaryModelRoute,
-      fallbackChain: this.#modelFallbackRoutes,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
+      onEvent: input.onEvent
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -628,6 +663,98 @@ export class ProviderTurnLoop {
     }
 
     return execution;
+  }
+
+  async #completeProviderRequestWithTruncatedToolRetry(input: {
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    const initialEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const execution = await this.#providerExecutor!.complete(input.request, input.preferences, {
+      sessionId: input.sessionId,
+      stream: true,
+      signal: input.signal,
+      primaryRoute: this.#primaryModelRoute,
+      fallbackChain: this.#modelFallbackRoutes,
+      onEvent: initialEvents.onEvent
+    });
+
+    if (!isLengthTruncatedToolCallExecution(execution)) {
+      await initialEvents.flushToolCalls();
+      return execution;
+    }
+    initialEvents.discardToolCalls();
+
+    const originalRouteChain = resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes);
+    const retryChain = buildRetryRouteChainFromSuccessfulAttempt(execution, originalRouteChain);
+    const retryPrimaryRoute = retryChain[0];
+    if (retryPrimaryRoute === undefined) {
+      return execution;
+    }
+
+    if (input.iteration + 1 >= this.#budgets.maxProviderIterations) {
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        provider: (execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: execution.response?.model ?? input.request.model ?? "unknown",
+        retried: false
+      });
+    }
+
+    const elapsedMs = Date.now() - input.loopStartedAt;
+    if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
+      await this.#runRecorder.recordProviderBudgetExhausted({
+        budget: "provider-wall-clock-ms",
+        limit: this.#budgets.maxProviderWallClockMs,
+        observed: elapsedMs,
+        reason: "Provider loop exceeded its wall-clock budget before retrying a truncated tool call."
+      }, input.onEvent);
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget before retrying a truncated tool call." },
+        "provider-budget-exhausted"
+      );
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        provider: (execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: execution.response?.model ?? input.request.model ?? "unknown",
+        retried: false
+      });
+    }
+
+    const baseMaxTokens = input.request.maxTokens ?? (execution.route ?? retryPrimaryRoute).maxTokens ?? 4096;
+    const retryMaxTokens = Math.min(baseMaxTokens * 2, 32768);
+    const retryEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const retryExecutionRaw = await this.#providerExecutor!.complete({
+      ...input.request,
+      maxTokens: retryMaxTokens
+    }, input.preferences, {
+      sessionId: input.sessionId,
+      stream: true,
+      signal: input.signal,
+      primaryRoute: retryPrimaryRoute,
+      fallbackChain: retryChain.slice(1),
+      onEvent: retryEvents.onEvent
+    });
+    const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
+
+    if (isLengthTruncatedToolCallExecution(retryExecution)) {
+      retryEvents.discardToolCalls();
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        retry: retryExecution,
+        provider: (retryExecution.response?.provider ?? execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: retryExecution.response?.model ?? execution.response?.model ?? input.request.model ?? "unknown",
+        retried: true
+      });
+    }
+
+    await retryEvents.flushToolCalls();
+    return mergeTruncatedToolRetryExecutions(execution, retryExecution);
   }
 
   async #providerSessionHistory(): Promise<{
@@ -804,6 +931,176 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "skill.list_proposals" ||
     name === "skill.review_proposals" ||
     name === "skill.review_proposal";
+}
+
+const TRUNCATED_TOOL_CALL_REFUSAL = "The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.";
+
+function isLengthTruncatedToolCallExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response?.finishReason === "length" &&
+    execution.toolCalls.length > 0;
+}
+
+function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.toolCalls.length === 0 &&
+    execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
+    execution.runtimeMetadata.truncation.refused === true &&
+    execution.response?.content === TRUNCATED_TOOL_CALL_REFUSAL;
+}
+
+function providerIterationCost(execution: ProviderExecutionResult): number {
+  return execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
+    execution.runtimeMetadata.truncation.retried
+    ? 2
+    : 1;
+}
+
+function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): {
+  onEvent: (event: ProviderRuntimeEvent) => Promise<void>;
+  flushToolCalls: () => Promise<void>;
+  discardToolCalls: () => void;
+} {
+  const toolCallEvents: Extract<ProviderRuntimeEvent, { kind: "provider-tool-call" }>[] = [];
+
+  return {
+    async onEvent(event) {
+      if (event.kind === "provider-tool-call") {
+        toolCallEvents.push(event);
+        return;
+      }
+      await emit(sink, mapProviderRuntimeEvent(event));
+    },
+    async flushToolCalls() {
+      for (const event of toolCallEvents) {
+        await emit(sink, mapProviderRuntimeEvent(event));
+      }
+      toolCallEvents.length = 0;
+    },
+    discardToolCalls() {
+      toolCallEvents.length = 0;
+    }
+  };
+}
+
+function resolvedRouteChain(
+  primaryRoute: ResolvedModelRoute | undefined,
+  fallbackRoutes: ResolvedModelRoute[]
+): ResolvedModelRoute[] {
+  return primaryRoute === undefined ? [...fallbackRoutes] : [primaryRoute, ...fallbackRoutes];
+}
+
+function buildRetryRouteChainFromSuccessfulAttempt(
+  execution: ProviderExecutionResult,
+  originalRouteChain: ResolvedModelRoute[]
+): ResolvedModelRoute[] {
+  const attemptedRouteIndex = execution.attemptedRouteIndex;
+  if (
+    attemptedRouteIndex !== undefined &&
+    attemptedRouteIndex >= 0 &&
+    attemptedRouteIndex < originalRouteChain.length
+  ) {
+    return originalRouteChain.slice(attemptedRouteIndex);
+  }
+
+  if (execution.route === undefined) {
+    return originalRouteChain;
+  }
+
+  const routeIndex = originalRouteChain.findIndex((route) => routesMatch(route, execution.route!));
+  return routeIndex === -1 ? [execution.route] : originalRouteChain.slice(routeIndex);
+}
+
+function routesMatch(a: ResolvedModelRoute, b: ResolvedModelRoute): boolean {
+  return a.provider === b.provider &&
+    a.id === b.id &&
+    a.baseUrl === b.baseUrl &&
+    a.apiKeyEnv === b.apiKeyEnv;
+}
+
+function rebaseRetryRouteIdentity(
+  execution: ProviderExecutionResult,
+  retryChain: ResolvedModelRoute[],
+  originalRouteChain: ResolvedModelRoute[]
+): ProviderExecutionResult {
+  const retryRoute = execution.route;
+  if (retryRoute === undefined) {
+    return execution;
+  }
+
+  const originalIndex = originalRouteChain.findIndex((route) => routesMatch(route, retryRoute));
+  if (originalIndex === -1) {
+    return execution;
+  }
+
+  return {
+    ...execution,
+    attemptedRouteIndex: originalIndex,
+    routeRole: originalIndex === 0 ? "primary" : "fallback",
+    fallbackUsed: execution.fallbackUsed || originalIndex > 0 || retryChain[0] !== originalRouteChain[0]
+  };
+}
+
+function mergeTruncatedToolRetryExecutions(
+  initial: ProviderExecutionResult,
+  retry: ProviderExecutionResult
+): ProviderExecutionResult {
+  return {
+    ...retry,
+    fallbackUsed: initial.fallbackUsed || retry.fallbackUsed,
+    attempts: [
+      ...initial.attempts,
+      ...retry.attempts
+    ],
+    toolCalls: retry.toolCalls,
+    runtimeMetadata: mergeProviderRuntimeMetadata(
+      mergeProviderRuntimeMetadata(initial.runtimeMetadata, retry.runtimeMetadata),
+      {
+        truncation: {
+          kind: "tool_call",
+          retried: true,
+          refused: false
+        }
+      }
+    )
+  };
+}
+
+function truncatedToolRetryRefusal(input: {
+  initial: ProviderExecutionResult;
+  retry?: ProviderExecutionResult;
+  provider: ProviderResponse["provider"];
+  model: string;
+  retried: boolean;
+}): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: TRUNCATED_TOOL_CALL_REFUSAL,
+      model: input.model,
+      provider: input.provider
+    },
+    fallbackUsed: input.initial.fallbackUsed || input.retry?.fallbackUsed === true,
+    attempts: [
+      ...input.initial.attempts,
+      ...(input.retry?.attempts ?? [])
+    ],
+    route: input.retry?.route ?? input.initial.route,
+    attemptedRouteIndex: input.retry?.attemptedRouteIndex ?? input.initial.attemptedRouteIndex,
+    routeRole: input.retry?.routeRole ?? input.initial.routeRole,
+    runtimeMetadata: mergeProviderRuntimeMetadata(
+      mergeProviderRuntimeMetadata(input.initial.runtimeMetadata, input.retry?.runtimeMetadata),
+      {
+        truncation: {
+          kind: "tool_call",
+          retried: input.retried,
+          refused: true
+        }
+      }
+    ),
+    toolCalls: []
+  };
 }
 
 function mergeProviderExecutions(

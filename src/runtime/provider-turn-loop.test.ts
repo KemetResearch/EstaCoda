@@ -323,12 +323,41 @@ function incompleteStreamExecution(partialContent: string | undefined): Provider
   };
 }
 
-function providerToolCall(id: string): ProviderExecutionResult["toolCalls"][number] {
+function providerToolCall(id: string, argumentsText = "{}"): ProviderExecutionResult["toolCalls"][number] {
   return {
     id,
     name: testTool.name,
-    argumentsText: "{}"
+    argumentsText
   };
+}
+
+function truncatedToolCallExecution(input: {
+  id: string;
+  argumentsText?: string;
+  route?: ResolvedModelRoute;
+  attemptedRouteIndex?: number;
+  fallbackUsed?: boolean;
+  attempts?: ProviderExecutionResult["attempts"];
+}): ProviderExecutionResult {
+  const route = input.route ?? primaryRoute;
+  const attemptedRouteIndex = input.attemptedRouteIndex ?? 0;
+  const overrides: Partial<ProviderExecutionResult> = {
+    response: {
+      ok: true,
+      content: "",
+      finishReason: "length",
+      model: route.id,
+      provider: route.provider
+    },
+    route,
+    attemptedRouteIndex,
+    routeRole: attemptedRouteIndex === 0 ? "primary" : "fallback",
+    fallbackUsed: input.fallbackUsed ?? attemptedRouteIndex > 0
+  };
+  if (input.attempts !== undefined) {
+    overrides.attempts = input.attempts;
+  }
+  return providerExecution("", [providerToolCall(input.id, input.argumentsText)], overrides);
 }
 
 function toolExecution(id: string, content = `tool result ${id}`): ToolExecutionRecord {
@@ -378,11 +407,24 @@ async function createPostToolNudgeHarness(input: {
     plans?: ToolCallPlan[];
   }>;
   maxProviderIterations?: number;
+  maxProviderWallClockMs?: number;
 }) {
   let responseIndex = 0;
-  const completeSpy = vi.fn<ProviderExecutor["complete"]>(async () => {
+  const completeSpy = vi.fn<ProviderExecutor["complete"]>(async (_request, _preferences, options) => {
     const response = input.responses[Math.min(responseIndex, input.responses.length - 1)] ?? providerExecution("");
     responseIndex += 1;
+    for (const toolCall of response.toolCalls) {
+      await options?.onEvent?.({
+        kind: "provider-tool-call",
+        provider: response.response?.provider ?? "test-provider",
+        model: response.response?.model ?? "test-model",
+        index: toolCall.index,
+        id: toolCall.id,
+        name: toolCall.name,
+        argumentsText: toolCall.argumentsText,
+        raw: toolCall.raw
+      });
+    }
     return response;
   });
   const providerExecutor = {
@@ -443,7 +485,7 @@ async function createPostToolNudgeHarness(input: {
       maxProviderIterations: input.maxProviderIterations ?? 3,
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
-      maxProviderWallClockMs: 10_000
+      maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
     }
   });
 
@@ -1058,6 +1100,245 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.iterations).toBe(2);
     expect(result.providerExecution?.response?.content).toBe("Normal continuation answer.");
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ProviderTurnLoop truncated tool-call safety", () => {
+  it("retries primary length-truncated tool calls once before executing tools", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        truncatedToolCallExecution({ id: "first-truncated", argumentsText: "{\"secret\":\"discarded-first\"}" }),
+        providerExecution("", [providerToolCall("retry-call", "{\"safe\":\"retry\"}")], {
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        { executions: [toolExecution("retry-call")] }
+      ],
+      maxProviderIterations: 2
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, (event) => {
+      events.push(event);
+    });
+
+    expect(result.iterations).toBe(2);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["retry-call"]);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(harness.executePlans.mock.calls[0]![0].providerExecution!.toolCalls).toEqual([
+      expect.objectContaining({ id: "retry-call" })
+    ]);
+    expect(harness.completeSpy.mock.calls[1]![0].maxTokens).toBe(8192);
+    expect(harness.completeSpy.mock.calls[1]![0].messages).toEqual(harness.completeSpy.mock.calls[0]![0].messages);
+    const retryOptions = harness.completeSpy.mock.calls[1]![2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
+    expect(retryOptions.primaryRoute).toEqual(primaryRoute);
+    expect(retryOptions.fallbackChain).toEqual([fallbackRoute]);
+    expect(result.providerExecution?.toolCalls).toEqual([
+      expect.objectContaining({ id: "retry-call" })
+    ]);
+    expect(result.providerExecution?.attempts).toHaveLength(2);
+    expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
+      kind: "tool_call",
+      retried: true,
+      refused: false
+    });
+    const toolCallEvents = events.filter((event) => event.kind === "provider-tool-call");
+    expect(toolCallEvents).toEqual([
+      expect.objectContaining({
+        id: "retry-call",
+        argumentsText: "{\"safe\":\"retry\"}"
+      })
+    ]);
+    expect(JSON.stringify(events)).not.toContain("first-truncated");
+    expect(JSON.stringify(events)).not.toContain("discarded-first");
+  });
+
+  it("retries fallback length-truncated tool calls from the successful fallback route", async () => {
+    const fallbackFirst = truncatedToolCallExecution({
+      id: "fallback-truncated",
+      route: fallbackRoute,
+      attemptedRouteIndex: 1,
+      fallbackUsed: true,
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: false,
+          errorClass: "server",
+          content: "primary failed"
+        },
+        {
+          provider: "test-provider",
+          model: "test-model-fallback",
+          ok: true,
+          content: "",
+          finishReason: "length"
+        }
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        fallbackFirst,
+        providerExecution("", [providerToolCall("fallback-retry-call")], {
+          route: fallbackRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        { executions: [toolExecution("fallback-retry-call")] }
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["fallback-retry-call"]);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const retryOptions = harness.completeSpy.mock.calls[1]?.[2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
+    expect(retryOptions.primaryRoute).toEqual(fallbackRoute);
+    expect(retryOptions.fallbackChain).toEqual([]);
+    expect(harness.completeSpy.mock.calls[1]?.[0].maxTokens).toBe(8192);
+    expect(result.providerExecution?.route).toEqual(fallbackRoute);
+    expect(result.providerExecution?.attemptedRouteIndex).toBe(1);
+    expect(result.providerExecution?.routeRole).toBe("fallback");
+  });
+
+  it("refuses safely when retry is still length-truncated with tool calls", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        truncatedToolCallExecution({ id: "first-truncated", argumentsText: "{\"secret\":\"discarded-first\"}" }),
+        truncatedToolCallExecution({ id: "retry-truncated", argumentsText: "{\"secret\":\"discarded-retry\"}" })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, (event) => {
+      events.push(event);
+    });
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).not.toHaveBeenCalled();
+    expect(result.toolExecutions).toEqual([]);
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(result.providerExecution?.response?.content).toBe("The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.");
+    expect(result.providerExecution?.toolCalls).toEqual([]);
+    expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
+      kind: "tool_call",
+      retried: true,
+      refused: true
+    });
+    expect(events.filter((event) => event.kind === "provider-tool-call")).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain("first-truncated");
+    expect(JSON.stringify(events)).not.toContain("retry-truncated");
+    expect(JSON.stringify(events)).not.toContain("discarded-first");
+    expect(JSON.stringify(events)).not.toContain("discarded-retry");
+  });
+
+  it("refuses without retry when provider iteration budget is exhausted", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        truncatedToolCallExecution({ id: "first-truncated" }),
+        providerExecution("", [providerToolCall("should-not-run")])
+      ],
+      toolSteps: [
+        { executions: [toolExecution("should-not-run")] }
+      ],
+      maxProviderIterations: 1
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(harness.executePlans).not.toHaveBeenCalled();
+    expect(result.toolExecutions).toEqual([]);
+    expect(result.providerExecution?.response?.content).toBe("The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.");
+    expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
+      kind: "tool_call",
+      retried: false,
+      refused: true
+    });
+  });
+
+  it("refuses without retry when wall-clock budget is exhausted before retry", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        truncatedToolCallExecution({ id: "first-truncated" }),
+        providerExecution("", [providerToolCall("should-not-run")])
+      ],
+      toolSteps: [
+        { executions: [toolExecution("should-not-run")] }
+      ],
+      maxProviderIterations: 2,
+      maxProviderWallClockMs: 10
+    });
+    let dateCalls = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      dateCalls += 1;
+      return dateCalls <= 2 ? 0 : 11;
+    });
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(result.iterations).toBe(1);
+      expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+      expect(harness.executePlans).not.toHaveBeenCalled();
+      expect(result.providerExecution?.response?.content).toBe("The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.");
+      expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
+        kind: "tool_call",
+        retried: false,
+        refused: true
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("returns retry provider failures without executing first truncated tool calls", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        truncatedToolCallExecution({ id: "first-truncated" }),
+        {
+          ok: false,
+          fallbackUsed: false,
+          attempts: [
+            {
+              provider: "test-provider",
+              model: "test-model",
+              ok: false,
+              errorClass: "server",
+              content: "retry failed"
+            }
+          ],
+          toolCalls: []
+        }
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(harness.executePlans.mock.calls[0]![0].providerExecution!.toolCalls).toEqual([]);
+    expect(result.toolExecutions).toEqual([]);
+    expect(result.providerExecution?.ok).toBe(false);
+    expect(result.providerExecution?.attempts).toHaveLength(2);
   });
 });
 
