@@ -161,6 +161,9 @@ export class ProviderTurnLoop {
     let capturedContentWithHousekeepingTools: string | undefined;
     let emptyContentRetries = 0;
     let retryEmptyInitialResponse = false;
+    let reasoningOnlyPrefillRetries = 0;
+    let pendingReasoningOnlyPrefill = false;
+    let retryReasoningOnlyInitialResponse = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -203,14 +206,18 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase = iteration === 0 || retryEmptyInitialResponse ? "initial" : "continuation";
+      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse
+        ? "initial"
+        : "continuation";
       retryEmptyInitialResponse = false;
+      retryReasoningOnlyInitialResponse = false;
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             iteration,
-            loopStartedAt
+            loopStartedAt,
+            reasoningOnlyPrefill: pendingReasoningOnlyPrefill
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -221,9 +228,11 @@ export class ProviderTurnLoop {
           providerExecution: previousProviderExecution,
           iteration,
           loopStartedAt,
-          emptyResponseNudge: pendingEmptyResponseNudge
+          emptyResponseNudge: pendingEmptyResponseNudge,
+          reasoningOnlyPrefill: pendingReasoningOnlyPrefill
         });
       pendingEmptyResponseNudge = false;
+      pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
         break;
@@ -233,6 +242,65 @@ export class ProviderTurnLoop {
       iterations += consumedProviderIterations;
 
       if (isTruncatedToolCallRefusalExecution(execution)) {
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: 0,
+          executedTools: 0,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        break;
+      }
+
+      if (isReasoningOnlyExecution(execution)) {
+        if (isReasoningOnlyLengthExhaustion(execution)) {
+          execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
+          break;
+        }
+
+        if (
+          reasoningOnlyPrefillRetries < 2 &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        ) {
+          reasoningOnlyPrefillRetries += 1;
+          pendingReasoningOnlyPrefill = true;
+          retryReasoningOnlyInitialResponse = phase === "initial";
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
+          continue;
+        }
+
+        execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_EMPTY_RESPONSE_MESSAGE);
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -444,6 +512,7 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     signal?: AbortSignal;
+    reasoningOnlyPrefill?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -466,6 +535,9 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    if (input.reasoningOnlyPrefill === true) {
+      prompt.messages.push(reasoningOnlyPrefillMessage());
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
@@ -553,6 +625,7 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    reasoningOnlyPrefill?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -588,6 +661,9 @@ export class ProviderTurnLoop {
         role: "user",
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
+    }
+    if (input.reasoningOnlyPrefill === true) {
+      prompt.messages.push(reasoningOnlyPrefillMessage());
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
@@ -934,11 +1010,59 @@ function isHousekeepingToolName(name: string | undefined): boolean {
 }
 
 const TRUNCATED_TOOL_CALL_REFUSAL = "The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.";
+const REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE = "The model exhausted its output budget while reasoning and did not produce a visible answer. Try again with a higher model.maxTokens value or a narrower request.";
+const REASONING_ONLY_EMPTY_RESPONSE_MESSAGE = "The model produced internal reasoning but did not produce a visible answer. Try again with a narrower request.";
+const REASONING_ONLY_PREFILL_CONTENT = "I’ll answer directly and only include the final visible answer.";
 
 function isLengthTruncatedToolCallExecution(execution: ProviderExecutionResult): boolean {
   return execution.ok === true &&
     execution.response?.finishReason === "length" &&
     execution.toolCalls.length > 0;
+}
+
+function isReasoningOnlyExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response !== undefined &&
+    execution.response.content.trim().length === 0 &&
+    hasReasoning(execution.response) &&
+    execution.toolCalls.length === 0;
+}
+
+function isReasoningOnlyLengthExhaustion(execution: ProviderExecutionResult): boolean {
+  return isReasoningOnlyExecution(execution) &&
+    execution.response?.finishReason === "length";
+}
+
+function hasReasoning(response: ProviderResponse): boolean {
+  return (response.reasoning !== undefined && response.reasoning.length > 0) ||
+    response.reasoningMetadata?.present === true;
+}
+
+function reasoningOnlyPrefillMessage(): ProviderRequest["messages"][number] {
+  return {
+    role: "assistant",
+    content: REASONING_ONLY_PREFILL_CONTENT
+  };
+}
+
+function reasoningOnlySafeGuidanceExecution(
+  execution: ProviderExecutionResult,
+  content: string
+): ProviderExecutionResult {
+  const response = execution.response;
+  return {
+    ...execution,
+    response: {
+      ok: true,
+      content,
+      model: response?.model ?? execution.route?.id ?? "unknown",
+      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      ...(response?.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response?.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(response?.usage === undefined ? {} : { usage: response.usage })
+    },
+    toolCalls: []
+  };
 }
 
 function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult): boolean {

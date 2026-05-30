@@ -362,6 +362,31 @@ function truncatedToolCallExecution(input: {
   return providerExecution("", [providerToolCall(input.id, input.argumentsText)], overrides);
 }
 
+function reasoningOnlyExecution(input: {
+  reasoning: string;
+  finishReason?: ProviderResponse["finishReason"];
+}): ProviderExecutionResult {
+  const reasoningMetadata = {
+    present: true,
+    chars: input.reasoning.length,
+    format: "reasoning_content" as const
+  };
+  return providerExecution("", [], {
+    response: {
+      ok: true,
+      content: "",
+      model: "test-model",
+      provider: "test-provider",
+      reasoning: input.reasoning,
+      reasoningMetadata,
+      ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason })
+    },
+    runtimeMetadata: {
+      reasoning: reasoningMetadata
+    }
+  });
+}
+
 function toolExecution(id: string, content = `tool result ${id}`): ToolExecutionRecord {
   return toolExecutionForTool(id, testTool.name, content);
 }
@@ -1188,6 +1213,135 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.iterations).toBe(2);
     expect(result.providerExecution?.response?.content).toBe("Normal continuation answer.");
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ProviderTurnLoop reasoning-only response recovery", () => {
+  it("retries non-length reasoning-only responses with a local-only visible-answer prefill", async () => {
+    const hiddenReasoning = "hidden chain";
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        reasoningOnlyExecution({ reasoning: hiddenReasoning }),
+        providerExecution("Visible answer.")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, (event) => events.push(event));
+
+    expect(result.iterations).toBe(2);
+    expect(result.providerExecution?.response?.content).toBe("Visible answer.");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const retryRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("I’ll answer directly and only include the final visible answer.");
+    expect(JSON.stringify(retryRequest.messages)).toContain("I’ll answer directly and only include the final visible answer.");
+
+    const persistedMessages = await harness.sessionDb.listMessages(harness.sessionId);
+    expect(JSON.stringify(persistedMessages)).not.toContain("I’ll answer directly and only include the final visible answer.");
+    expect(JSON.stringify(events)).not.toContain(hiddenReasoning);
+    expect(JSON.stringify(result.providerExecution?.attempts)).not.toContain(hiddenReasoning);
+  });
+
+  it("caps reasoning-only prefill retries at two attempts", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        reasoningOnlyExecution({ reasoning: "hidden one" }),
+        reasoningOnlyExecution({ reasoning: "hidden two" }),
+        reasoningOnlyExecution({ reasoning: "hidden three" }),
+        providerExecution("Should not be called.")
+      ],
+      toolSteps: [],
+      maxProviderIterations: 5
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(3);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(harness.executePlans).not.toHaveBeenCalled();
+    expect(result.providerExecution?.response?.content).toBe(
+      "The model produced internal reasoning but did not produce a visible answer. Try again with a narrower request."
+    );
+    expect(JSON.stringify(result.providerExecution)).not.toContain("hidden one");
+    expect(JSON.stringify(result.providerExecution)).not.toContain("hidden two");
+    expect(JSON.stringify(result.providerExecution)).not.toContain("hidden three");
+  });
+
+  it("does not exceed provider iteration budget for reasoning-only retries", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        reasoningOnlyExecution({ reasoning: "hidden budgeted" }),
+        providerExecution("Should not be called.")
+      ],
+      toolSteps: [],
+      maxProviderIterations: 1
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(harness.executePlans).not.toHaveBeenCalled();
+    expect(result.providerExecution?.response?.content).toBe(
+      "The model produced internal reasoning but did not produce a visible answer. Try again with a narrower request."
+    );
+  });
+
+  it("checks wall-clock budget before reasoning-only retry calls", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        reasoningOnlyExecution({ reasoning: "hidden wall clock" }),
+        providerExecution("Should not be called.")
+      ],
+      toolSteps: [],
+      maxProviderIterations: 3,
+      maxProviderWallClockMs: 1000
+    });
+    const nowSpy = vi.spyOn(Date, "now");
+    let nowCalls = 0;
+    nowSpy.mockImplementation(() => {
+      nowCalls += 1;
+      return nowCalls <= 2 ? 1000 : 2001;
+    });
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(result.iterations).toBe(1);
+      expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+      expect(result.providerExecution?.response?.content).toBe("");
+      expect(harness.executePlans).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not prefill retry length-truncated reasoning-only exhaustion", async () => {
+    const hiddenReasoning = "hidden exhausted";
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        reasoningOnlyExecution({ reasoning: hiddenReasoning, finishReason: "length" }),
+        providerExecution("Should not be called.")
+      ],
+      toolSteps: [],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(1);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(harness.executePlans).not.toHaveBeenCalled();
+    expect(result.providerExecution?.response?.content).toBe(
+      "The model exhausted its output budget while reasoning and did not produce a visible answer. Try again with a higher model.maxTokens value or a narrower request."
+    );
+    expect(JSON.stringify(result.providerExecution)).not.toContain(hiddenReasoning);
   });
 });
 

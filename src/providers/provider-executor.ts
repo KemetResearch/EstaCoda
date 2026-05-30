@@ -415,10 +415,12 @@ export class ProviderExecutor {
 
       if (response.ok) {
         const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
+        const reasoningPresent = hasReasoning(response);
         const terminalEmptyWithoutTools =
           response.content.trim().length === 0 &&
           finalizedStreamToolCalls.length === 0 &&
-          extractedToolCalls.length === 0;
+          extractedToolCalls.length === 0 &&
+          !reasoningPresent;
 
         if (terminalEmptyWithoutTools && nextRoute !== undefined) {
           attempts[attempts.length - 1] = {
@@ -561,6 +563,11 @@ function attemptMetadataFromResponse(response: ProviderResponse): Pick<
 function runtimeMetadataFromResponse(response: ProviderResponse): ProviderLoopRuntimeMetadata | undefined {
   const reasoning = safeReasoningMetadataFromResponse(response);
   return reasoning === undefined ? undefined : { reasoning };
+}
+
+function hasReasoning(response: ProviderResponse): boolean {
+  return (response.reasoning !== undefined && response.reasoning.length > 0) ||
+    response.reasoningMetadata?.present === true;
 }
 
 function safeReasoningMetadataFromResponse(response: ProviderResponse): ProviderReasoningMetadata | undefined {

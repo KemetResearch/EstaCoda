@@ -472,7 +472,7 @@ export async function* streamOpenAICompatibleRequest(input: {
       return;
     }
 
-    if (sawTransportDone && content.length > 0 && !sawToolCall) {
+    if (sawTransportDone && !sawToolCall && (content.length > 0 || reasoning !== undefined)) {
       yield {
         kind: "done",
         provider: input.provider,
@@ -642,7 +642,7 @@ export function parseOpenAICompatibleResponse(input: {
   const hasToolCalls = (message?.tool_calls?.length ?? 0) > 0;
   const finishReason = normalizeChatFinishReason(firstChoice?.finish_reason);
 
-  if (content === undefined && !hasToolCalls) {
+  if (content === undefined && !hasToolCalls && reasoning === undefined && reasoningMetadata?.present !== true) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",

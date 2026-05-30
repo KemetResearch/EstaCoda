@@ -390,6 +390,60 @@ describe("createOpenAICompatibleProvider streaming", () => {
     }));
   });
 
+  it("preserves transport-only hidden-reasoning-only streams without non-stream fallback", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: "fallback should not run"
+                }
+              }
+            ]
+          }),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: { reasoning: "transport hidden only" }, finish_reason: null }] }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events.filter((event) => event.kind === "token")).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "",
+        finishReason: "unknown",
+        reasoning: "transport hidden only",
+        reasoningMetadata: {
+          present: true,
+          chars: "transport hidden only".length,
+          format: "reasoning"
+        }
+      })
+    }));
+    expect(JSON.stringify(events)).not.toContain("fallback should not run");
+  });
+
   it("preserves transport-only streamed reasoning_content through unknown finalization", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai" as any,
@@ -720,6 +774,32 @@ describe("parseOpenAICompatibleResponse", () => {
     });
   });
 
+  it("treats reasoning-only non-stream responses as provider-successful", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              reasoning_content: "hidden chain"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.content).toBe("");
+    expect(response.reasoning).toBe("hidden chain");
+    expect(response.reasoningMetadata).toEqual({
+      present: true,
+      chars: "hidden chain".length,
+      format: "reasoning_content"
+    });
+  });
+
   it("extracts reasoning fields into turn-local response reasoning", () => {
     const response = parseOpenAICompatibleResponse({
       provider: "openai",
@@ -766,6 +846,31 @@ describe("parseOpenAICompatibleResponse", () => {
       chars: JSON.stringify({ provider_specific: "opaque hidden detail" }).length,
       format: "reasoning_details"
     });
+  });
+
+  it("treats reasoning_details-only responses as provider-successful metadata-only reasoning", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              reasoning_details: { provider_specific: "opaque hidden detail" }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.content).toBe("");
+    expect(response.reasoning).toBeUndefined();
+    expect(response.reasoningMetadata?.present).toBe(true);
+    expect(response.reasoningMetadata?.format).toBe("reasoning_details");
+    expect(response.errorClass).toBeUndefined();
+    expect(response.content).not.toContain("Provider response did not include assistant content.");
   });
 
   it("strips inline think blocks from visible content and extracts reasoning", () => {

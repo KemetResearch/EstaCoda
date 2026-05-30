@@ -193,6 +193,71 @@ describe("ProviderExecutor fallback behavior", () => {
     }));
   });
 
+  it("does not fallback when empty content includes reasoning metadata", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: true,
+        content: "",
+        model: "m1",
+        provider: "primary",
+        reasoning: "hidden provider reasoning",
+        reasoningMetadata: {
+          present: true,
+          chars: "hidden provider reasoning".length,
+          format: "reasoning_content"
+        }
+      }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")],
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("");
+    expect(result.response?.reasoning).toBe("hidden provider reasoning");
+    expect(result.runtimeMetadata).toEqual({
+      reasoning: {
+        present: true,
+        chars: "hidden provider reasoning".length,
+        format: "reasoning_content"
+      }
+    });
+    expect(fallback.calls.length).toBe(0);
+    expect(result.attempts[0]).not.toHaveProperty("reasoning");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      provider: "primary",
+      ok: true,
+      willFallback: false,
+      reasoningMetadata: {
+        present: true,
+        chars: "hidden provider reasoning".length,
+        format: "reasoning_content"
+      }
+    }));
+    expect(JSON.stringify(result.attempts)).not.toContain("hidden provider reasoning");
+    expect(JSON.stringify(events)).not.toContain("hidden provider reasoning");
+  });
+
   it("falls back when successful primary content is empty and has no tool calls", async () => {
     const primary = createMockAdapter({
       id: "primary",
