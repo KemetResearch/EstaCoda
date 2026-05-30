@@ -390,6 +390,94 @@ describe("ProviderExecutor fallback behavior", () => {
     }));
   });
 
+  it("propagates safe final-state metadata without copying raw reasoning into attempts", async () => {
+    const primaryRoute = createRoute("primary", "m1");
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: true,
+        content: "final answer",
+        model: "m1",
+        provider: "primary",
+        finishReason: "length",
+        incompleteReason: "max_output_tokens",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          reasoningTokens: 2
+        },
+        reasoning: "hidden provider reasoning",
+        reasoningMetadata: {
+          present: true,
+          chars: 25,
+          format: "reasoning_content"
+        }
+      }
+    });
+    registry.register(primary);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.route).toEqual(primaryRoute);
+    expect(result.attemptedRouteIndex).toBe(0);
+    expect(result.routeRole).toBe("primary");
+    expect(result.runtimeMetadata).toEqual({
+      reasoning: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    });
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    }));
+    expect(result.attempts[0]).not.toHaveProperty("reasoning");
+
+    const attemptEnd = events.find((event) => event.kind === "provider-attempt-end");
+    expect(attemptEnd).toEqual(expect.objectContaining({
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    }));
+    expect(JSON.stringify(result.attempts)).not.toContain("hidden provider reasoning");
+    expect(JSON.stringify(events)).not.toContain("hidden provider reasoning");
+  });
+
   it("preserves fallback route metadata during execution", async () => {
     const primary = createMockAdapter({
       id: "test-primary",
@@ -403,15 +491,19 @@ describe("ProviderExecutor fallback behavior", () => {
     registry.register(fallback);
 
     const executor = new ProviderExecutor({ registry });
-    await executor.complete(
+    const fallbackRoute = createRoute("test-fallback", "m2", { baseUrl: "https://fallback.example.com/v1" });
+    const result = await executor.complete(
       { messages: [] },
       {},
       {
         primaryRoute: createRoute("test-primary", "m1", { baseUrl: "https://primary.example.com/v1" }),
-        fallbackChain: [createRoute("test-fallback", "m2", { baseUrl: "https://fallback.example.com/v1" })]
+        fallbackChain: [fallbackRoute]
       }
     );
 
+    expect(result.route).toEqual(fallbackRoute);
+    expect(result.attemptedRouteIndex).toBe(1);
+    expect(result.routeRole).toBe("fallback");
     expect(primary.calls.length).toBe(1);
     expect(primary.calls[0].options?.endpoint?.baseUrl).toBe("https://primary.example.com/v1");
     expect(fallback.calls.length).toBe(1);

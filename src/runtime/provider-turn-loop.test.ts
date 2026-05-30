@@ -266,25 +266,41 @@ async function runBasicProviderTurn(
   });
 }
 
-function providerExecution(content: string, toolCalls: ProviderExecutionResult["toolCalls"] = []): ProviderExecutionResult {
-  return {
+function providerExecution(
+  content: string,
+  toolCalls: ProviderExecutionResult["toolCalls"] = [],
+  overrides: Partial<ProviderExecutionResult> = {}
+): ProviderExecutionResult {
+  const response = {
     ok: true,
-    response: {
+    content,
+    model: "test-model",
+    provider: "test-provider",
+    ...overrides.response
+  } satisfies ProviderResponse;
+  const attempts = overrides.attempts ?? [
+    {
+      provider: "test-provider",
+      model: "test-model",
       ok: true,
       content,
-      model: "test-model",
-      provider: "test-provider"
-    },
+      ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(response.usage === undefined ? {} : { usage: response.usage }),
+      ...(response.reasoningMetadata === undefined ? {} : { reasoningMetadata: response.reasoningMetadata })
+    }
+  ];
+
+  return {
+    ok: true,
+    response,
     fallbackUsed: false,
-    attempts: [
-      {
-        provider: "test-provider",
-        model: "test-model",
-        ok: true,
-        content
-      }
-    ],
-    toolCalls
+    attempts,
+    toolCalls,
+    runtimeMetadata: response.reasoningMetadata === undefined
+      ? undefined
+      : { reasoning: response.reasoningMetadata },
+    ...overrides
   };
 }
 
@@ -757,6 +773,92 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       iteration: 2,
       nudge: true
     }));
+  });
+
+  it("records provider completion and continuation safe final-state metadata without raw reasoning", async () => {
+    const hiddenReasoning = "hidden runtime reasoning";
+    const reasoningMetadata = {
+      present: true,
+      chars: hiddenReasoning.length,
+      format: "reasoning_content" as const
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")], {
+          response: {
+            ok: true,
+            content: "",
+            model: "test-model",
+            provider: "test-provider",
+            finishReason: "tool_calls",
+            usage: {
+              inputTokens: 12,
+              outputTokens: 4,
+              totalTokens: 16,
+              reasoningTokens: 2
+            },
+            reasoning: hiddenReasoning,
+            reasoningMetadata
+          }
+        }),
+        providerExecution("Final continuation answer.", [], {
+          response: {
+            ok: true,
+            content: "Final continuation answer.",
+            model: "test-model",
+            provider: "test-provider",
+            finishReason: "stop",
+            usage: {
+              inputTokens: 20,
+              outputTokens: 6,
+              totalTokens: 26,
+              reasoningTokens: 1
+            },
+            reasoning: hiddenReasoning,
+            reasoningMetadata
+          }
+        })
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    const completionEvent = events.find((event) => event.kind === "provider-completion");
+    const continuationEvent = events.find((event) => event.kind === "provider-continuation");
+
+    expect(completionEvent).toEqual(expect.objectContaining({
+      kind: "provider-completion",
+      finishReason: "tool_calls",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 4,
+        totalTokens: 16,
+        reasoningTokens: 2
+      },
+      runtimeMetadata: {
+        reasoning: reasoningMetadata
+      }
+    }));
+    expect(continuationEvent).toEqual(expect.objectContaining({
+      kind: "provider-continuation",
+      finishReason: "stop",
+      usage: {
+        inputTokens: 20,
+        outputTokens: 6,
+        totalTokens: 26,
+        reasoningTokens: 1
+      },
+      runtimeMetadata: {
+        reasoning: reasoningMetadata
+      }
+    }));
+    expect(JSON.stringify(events)).not.toContain(hiddenReasoning);
   });
 
   it("uses nudge text as the final response", async () => {

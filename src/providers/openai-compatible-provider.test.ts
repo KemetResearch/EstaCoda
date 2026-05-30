@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createOpenAICompatibleProvider } from "./openai-compatible-provider.js";
+import {
+  createOpenAICompatibleProvider,
+  parseOpenAICompatibleResponse
+} from "./openai-compatible-provider.js";
 import type { ProviderEndpoint } from "../contracts/provider.js";
 
 describe("createOpenAICompatibleProvider health", () => {
@@ -53,5 +56,67 @@ describe("createOpenAICompatibleProvider health", () => {
 
     const health = await provider.health(overrideEndpoint);
     expect(health.available).toBe(true);
+  });
+});
+
+describe("parseOpenAICompatibleResponse", () => {
+  it.each([
+    ["stop", "stop"],
+    ["length", "length"],
+    ["tool_calls", "tool_calls"],
+    ["function_call", "tool_calls"],
+    ["content_filter", "content_filter"],
+    ["unexpected", "unknown"],
+    [undefined, "unknown"]
+  ] as const)("maps finish_reason %s to %s", (finishReason, expected) => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: finishReason,
+            message: {
+              content: "Done"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.finishReason).toBe(expected);
+  });
+
+  it("maps token usage including reasoning tokens", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "Done"
+            }
+          }
+        ],
+        usage: {
+          prompt_tokens: 11,
+          completion_tokens: 7,
+          total_tokens: 18,
+          completion_tokens_details: {
+            reasoning_tokens: 3
+          }
+        }
+      }
+    });
+
+    expect(response.usage).toEqual({
+      inputTokens: 11,
+      outputTokens: 7,
+      totalTokens: 18,
+      reasoningTokens: 3
+    });
   });
 });

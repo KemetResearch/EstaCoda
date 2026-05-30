@@ -163,6 +163,60 @@ describe("openai-responses-provider", () => {
   });
 
   describe("parseResponsesPayload", () => {
+    it.each([
+      [
+        "incomplete max output",
+        {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          output: [{ type: "message", content: [{ type: "output_text", text: "Partial" }] }]
+        },
+        "length"
+      ],
+      [
+        "other incomplete",
+        {
+          status: "incomplete",
+          incomplete_details: { reason: "safety_filter" },
+          output: [{ type: "message", content: [{ type: "output_text", text: "Partial" }] }]
+        },
+        "incomplete"
+      ],
+      [
+        "completed function call",
+        {
+          status: "completed",
+          output: [{ type: "function_call", call_id: "call-1", name: "test_tool", arguments: "{}" }]
+        },
+        "tool_calls"
+      ],
+      [
+        "completed visible text",
+        {
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }]
+        },
+        "stop"
+      ],
+      [
+        "unknown state",
+        {
+          status: "queued",
+          output: [{ type: "message", content: [{ type: "output_text", text: "Pending" }] }]
+        },
+        "unknown"
+      ]
+    ] as const)("maps finish state for %s", (_name, payload, expected) => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.finishReason).toBe(expected);
+    });
+
     it("extracts output_text content from message items", () => {
       const response = parseResponsesPayload({
         provider: "codex",
@@ -217,6 +271,38 @@ describe("openai-responses-provider", () => {
         inputTokens: 5,
         outputTokens: 1,
         totalTokens: 6
+      });
+    });
+
+    it("extracts usage with reasoning tokens when present", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Hi" }]
+            }
+          ],
+          usage: {
+            input_tokens: 5,
+            output_tokens: 4,
+            total_tokens: 9,
+            output_tokens_details: {
+              reasoning_tokens: 3
+            }
+          }
+        }
+      });
+
+      expect(response.usage).toEqual({
+        inputTokens: 5,
+        outputTokens: 4,
+        totalTokens: 9,
+        reasoningTokens: 3
       });
     });
 
