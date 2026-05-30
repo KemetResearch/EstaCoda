@@ -1541,6 +1541,119 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     });
   });
 
+  it("does not duplicate a continuation that is entirely exact overlap", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        lengthTruncatedTextExecution({ content: "Complete repeated text" }),
+        providerExecution("repeated text", [], {
+          response: {
+            ok: true,
+            content: "repeated text",
+            finishReason: "stop",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.providerExecution?.response?.content).toBe("Complete repeated text");
+  });
+
+  it("concatenates normally when there is no exact suffix-prefix overlap", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        lengthTruncatedTextExecution({ content: "First section." }),
+        providerExecution(" Second section.", [], {
+          response: {
+            ok: true,
+            content: " Second section.",
+            finishReason: "stop",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.providerExecution?.response?.content).toBe("First section. Second section.");
+  });
+
+  it("does not fuzzy-trim similar repeated words without exact overlap", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        lengthTruncatedTextExecution({ content: "alpha beta!" }),
+        providerExecution("alpha  beta", [], {
+          response: {
+            ok: true,
+            content: "alpha  beta",
+            finishReason: "stop",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.providerExecution?.response?.content).toBe("alpha beta!alpha  beta");
+  });
+
+  it("bounds exact overlap trimming to the last and first 1000 characters", async () => {
+    const repeated = "A".repeat(1001);
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        lengthTruncatedTextExecution({ content: repeated }),
+        providerExecution(`${repeated}tail`, [], {
+          response: {
+            ok: true,
+            content: `${repeated}tail`,
+            finishReason: "stop",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.providerExecution?.response?.content).toBe(`${"A".repeat(1002)}tail`);
+  });
+
   it("returns the best visible partial when continuation attempts remain length-truncated", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [
