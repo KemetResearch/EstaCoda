@@ -6,7 +6,9 @@ import type {
   ProviderId,
   ProviderRequest,
   ProviderResponse,
-  ProviderStreamEvent
+  ProviderStreamEvent,
+  ProviderFinishReason,
+  ProviderUsage
 } from "../contracts/provider.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { normalizeProviderMessagesStrict } from "./provider-message-normalizer.js";
@@ -488,11 +490,15 @@ export function parseOpenAICompatibleResponse(input: {
         }>;
       };
       text?: string;
+      finish_reason?: unknown;
     }>;
     usage?: {
       prompt_tokens?: number;
       completion_tokens?: number;
       total_tokens?: number;
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
+      };
     };
     error?: {
       message?: string;
@@ -515,6 +521,7 @@ export function parseOpenAICompatibleResponse(input: {
   const firstChoice = payload.choices?.[0];
   const content = normalizeContent(firstChoice?.message?.content) ?? firstChoice?.text;
   const hasToolCalls = (firstChoice?.message?.tool_calls?.length ?? 0) > 0;
+  const finishReason = normalizeChatFinishReason(firstChoice?.finish_reason);
 
   if (content === undefined && !hasToolCalls) {
     return {
@@ -523,6 +530,7 @@ export function parseOpenAICompatibleResponse(input: {
       model: input.model,
       provider: input.provider,
       errorClass: "unknown",
+      finishReason,
       raw: input.payload
     };
   }
@@ -532,12 +540,47 @@ export function parseOpenAICompatibleResponse(input: {
     content: content ?? "",
     model: input.model,
     provider: input.provider,
-    usage: {
-      inputTokens: payload.usage?.prompt_tokens,
-      outputTokens: payload.usage?.completion_tokens,
-      totalTokens: payload.usage?.total_tokens
-    },
+    finishReason,
+    usage: normalizeOpenAICompatibleUsage(payload.usage),
     raw: input.payload
+  };
+}
+
+function normalizeChatFinishReason(value: unknown): ProviderFinishReason {
+  switch (value) {
+    case "stop":
+      return "stop";
+    case "length":
+      return "length";
+    case "tool_calls":
+    case "function_call":
+      return "tool_calls";
+    case "content_filter":
+      return "content_filter";
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeOpenAICompatibleUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+} | undefined): ProviderUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(usage.prompt_tokens === undefined ? {} : { inputTokens: usage.prompt_tokens }),
+    ...(usage.completion_tokens === undefined ? {} : { outputTokens: usage.completion_tokens }),
+    ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(usage.completion_tokens_details?.reasoning_tokens === undefined
+      ? {}
+      : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens })
   };
 }
 
@@ -710,6 +753,9 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
+        completion_tokens_details?: {
+          reasoning_tokens?: number;
+        };
       };
       error?: {
         message?: string;
@@ -770,11 +816,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
           content: "",
           model,
           provider,
-          usage: {
-            inputTokens: payload.usage.prompt_tokens,
-            outputTokens: payload.usage.completion_tokens,
-            totalTokens: payload.usage.total_tokens
-          },
+          usage: normalizeOpenAICompatibleUsage(payload.usage),
           raw: payload
         }
       });

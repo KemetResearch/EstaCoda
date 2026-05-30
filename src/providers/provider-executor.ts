@@ -6,7 +6,12 @@ import type {
   ProviderStreamEvent,
   ProviderId,
   ResolvedModelRoute,
-  ProviderApiMode
+  ProviderApiMode,
+  ProviderFinishReason,
+  ProviderLoopRuntimeMetadata,
+  ProviderReasoningMetadata,
+  ProviderRouteRole,
+  ProviderUsage
 } from "../contracts/provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
@@ -23,6 +28,10 @@ export type ProviderAttempt = {
   errorClass?: string;
   content: string;
   partialContent?: string;
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  usage?: ProviderUsage;
+  reasoningMetadata?: ProviderReasoningMetadata;
 };
 
 export type ProviderExecutionResult = {
@@ -31,6 +40,10 @@ export type ProviderExecutionResult = {
   partialContent?: string;
   fallbackUsed: boolean;
   attempts: ProviderAttempt[];
+  route?: ResolvedModelRoute;
+  attemptedRouteIndex?: number;
+  routeRole?: ProviderRouteRole;
+  runtimeMetadata?: ProviderLoopRuntimeMetadata;
   toolCalls: Array<{
     index?: number;
     id?: string;
@@ -73,6 +86,10 @@ export type ProviderRuntimeEvent =
       errorClass?: string;
       fallback: boolean;
       willFallback: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
+      usage?: ProviderUsage;
+      reasoningMetadata?: ProviderReasoningMetadata;
     };
 
 export type ProviderExecutionOptions = {
@@ -324,7 +341,8 @@ export class ProviderExecutor {
           ok: callResponse.ok,
           errorClass: callResponse.errorClass,
           content: callResponse.content,
-          ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent })
+          ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent }),
+          ...attemptMetadataFromResponse(callResponse)
         });
 
         if (!callResponse.ok) {
@@ -336,7 +354,8 @@ export class ProviderExecutor {
             ok: callResponse.ok,
             errorClass: callResponse.errorClass,
             fallback: index > 0,
-            willFallback: callWillFallback
+            willFallback: callWillFallback,
+            ...attemptMetadataFromResponse(callResponse)
           });
         }
 
@@ -422,7 +441,8 @@ export class ProviderExecutor {
             ok: false,
             errorClass: "empty-response",
             fallback: index > 0,
-            willFallback: true
+            willFallback: true,
+            ...attemptMetadataFromResponse(response)
           });
 
           continue;
@@ -435,7 +455,8 @@ export class ProviderExecutor {
           credentialId: credential?.id,
           ok: true,
           fallback: index > 0,
-          willFallback: false
+          willFallback: false,
+          ...attemptMetadataFromResponse(response)
         });
 
         for (const toolCall of extractedToolCalls) {
@@ -457,6 +478,10 @@ export class ProviderExecutor {
           response,
           fallbackUsed: index > 0,
           attempts,
+          route,
+          attemptedRouteIndex: index,
+          routeRole: routeRoleForIndex(index),
+          runtimeMetadata: runtimeMetadataFromResponse(response),
           toolCalls
         };
       }
@@ -509,6 +534,44 @@ export class ProviderExecutor {
     const providerLabel = providerId === "codex" ? "Codex" : providerId;
     return `${providerLabel} authentication failed after ${attempts} attempt(s). Token may be expired or revoked. Run "estacoda model setup ${providerId}" to re-authenticate.`;
   }
+}
+
+function attemptMetadataFromResponse(response: ProviderResponse): Pick<
+  ProviderAttempt,
+  "finishReason" | "incompleteReason" | "usage" | "reasoningMetadata"
+> {
+  const reasoningMetadata = safeReasoningMetadataFromResponse(response);
+  return {
+    ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+    ...(response.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+    ...(response.usage === undefined ? {} : { usage: response.usage }),
+    ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+  };
+}
+
+function runtimeMetadataFromResponse(response: ProviderResponse): ProviderLoopRuntimeMetadata | undefined {
+  const reasoning = safeReasoningMetadataFromResponse(response);
+  return reasoning === undefined ? undefined : { reasoning };
+}
+
+function safeReasoningMetadataFromResponse(response: ProviderResponse): ProviderReasoningMetadata | undefined {
+  if (response.reasoningMetadata !== undefined) {
+    return response.reasoningMetadata;
+  }
+
+  if (response.reasoning !== undefined && response.reasoning.length > 0) {
+    return {
+      present: true,
+      chars: response.reasoning.length,
+      format: "unknown"
+    };
+  }
+
+  return undefined;
+}
+
+function routeRoleForIndex(index: number): ProviderRouteRole {
+  return index === 0 ? "primary" : "fallback";
 }
 
 async function collectProviderStream(input: {

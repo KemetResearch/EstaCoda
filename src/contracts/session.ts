@@ -17,6 +17,7 @@ import type {
   ProviderFinishReason,
   ProviderId,
   ProviderLoopRuntimeMetadata,
+  ProviderReasoningMetadata,
   ProviderUsage
 } from "./provider.js";
 
@@ -262,6 +263,10 @@ export type SessionEvent =
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
+        finishReason?: ProviderFinishReason;
+        incompleteReason?: string;
+        usage?: ProviderUsage;
+        reasoningMetadata?: ProviderReasoningMetadata;
       }>;
       fallbackUsed: boolean;
       usage?: ProviderUsage;
@@ -279,6 +284,10 @@ export type SessionEvent =
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
+        finishReason?: ProviderFinishReason;
+        incompleteReason?: string;
+        usage?: ProviderUsage;
+        reasoningMetadata?: ProviderReasoningMetadata;
       }>;
       toolPlans: Array<{
         id: string;

@@ -2,7 +2,16 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
-import type { ModelProfile, ProviderId, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
+import type {
+  ModelProfile,
+  ProviderFinishReason,
+  ProviderId,
+  ProviderLoopRuntimeMetadata,
+  ProviderRequest,
+  ProviderRoutePreferences,
+  ProviderUsage,
+  ResolvedModelRoute
+} from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
@@ -21,7 +30,7 @@ import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
-import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -488,28 +497,16 @@ export class ProviderTurnLoop {
       kind: "provider-completion",
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
+      ...providerExecutionEventMetadata(execution)
     });
     this.#trajectoryRecorder.record("provider-completion", {
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
+      ...providerExecutionEventMetadata(execution)
     });
 
     if (!execution.ok) {
@@ -622,38 +619,26 @@ export class ProviderTurnLoop {
       kind: "provider-continuation" as const,
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       toolPlans: input.toolPlans.map((plan) => ({
         id: plan.id,
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage,
+      ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       toolPlans: input.toolPlans.map((plan) => ({
         id: plan.id,
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage,
+      ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true
     });
 
@@ -788,6 +773,44 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
   }, 0);
 }
 
+function providerAttemptEventPayload(attempt: ProviderAttempt): {
+  provider: string;
+  model: string;
+  credentialId?: string;
+  ok: boolean;
+  errorClass?: string;
+  finishReason?: ProviderAttempt["finishReason"];
+  incompleteReason?: string;
+  usage?: ProviderAttempt["usage"];
+  reasoningMetadata?: ProviderAttempt["reasoningMetadata"];
+} {
+  return {
+    provider: attempt.provider,
+    model: attempt.model,
+    ok: attempt.ok,
+    ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
+    ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),
+    ...(attempt.finishReason === undefined ? {} : { finishReason: attempt.finishReason }),
+    ...(attempt.incompleteReason === undefined ? {} : { incompleteReason: attempt.incompleteReason }),
+    ...(attempt.usage === undefined ? {} : { usage: attempt.usage }),
+    ...(attempt.reasoningMetadata === undefined ? {} : { reasoningMetadata: attempt.reasoningMetadata })
+  };
+}
+
+function providerExecutionEventMetadata(execution: ProviderExecutionResult): {
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  usage?: ProviderUsage;
+  runtimeMetadata?: ProviderLoopRuntimeMetadata;
+} {
+  return {
+    ...(execution.response?.finishReason === undefined ? {} : { finishReason: execution.response.finishReason }),
+    ...(execution.response?.incompleteReason === undefined ? {} : { incompleteReason: execution.response.incompleteReason }),
+    ...(execution.response?.usage === undefined ? {} : { usage: execution.response.usage }),
+    ...(execution.runtimeMetadata === undefined ? {} : { runtimeMetadata: execution.runtimeMetadata })
+  };
+}
+
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
 }
@@ -832,7 +855,29 @@ function mergeProviderExecutions(
     toolCalls: [
       ...initial.toolCalls,
       ...continuation.toolCalls
-    ]
+    ],
+    route: continuation.route,
+    attemptedRouteIndex: continuation.attemptedRouteIndex,
+    routeRole: continuation.routeRole,
+    runtimeMetadata: mergeProviderRuntimeMetadata(initial.runtimeMetadata, continuation.runtimeMetadata)
+  };
+}
+
+function mergeProviderRuntimeMetadata(
+  initial: ProviderExecutionResult["runtimeMetadata"],
+  continuation: ProviderExecutionResult["runtimeMetadata"]
+): ProviderExecutionResult["runtimeMetadata"] {
+  if (initial === undefined) {
+    return continuation;
+  }
+
+  if (continuation === undefined) {
+    return initial;
+  }
+
+  return {
+    ...initial,
+    ...continuation
   };
 }
 
@@ -880,7 +925,11 @@ function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
         ok: event.ok,
         fallback: event.fallback,
         willFallback: event.willFallback,
-        errorClass: event.errorClass
+        ...(event.errorClass === undefined ? {} : { errorClass: event.errorClass }),
+        ...(event.finishReason === undefined ? {} : { finishReason: event.finishReason }),
+        ...(event.incompleteReason === undefined ? {} : { incompleteReason: event.incompleteReason }),
+        ...(event.usage === undefined ? {} : { usage: event.usage }),
+        ...(event.reasoningMetadata === undefined ? {} : { reasoningMetadata: event.reasoningMetadata })
       };
   }
 }

@@ -6,7 +6,9 @@ import type {
   ProviderId,
   ProviderRequest,
   ProviderResponse,
-  ProviderStreamEvent
+  ProviderStreamEvent,
+  ProviderFinishReason,
+  ProviderUsage
 } from "../contracts/provider.js";
 import { classifyHttpError } from "./openai-compatible-provider.js";
 
@@ -282,6 +284,10 @@ export function parseResponsesPayload(input: {
       input_tokens?: number;
       output_tokens?: number;
       total_tokens?: number;
+      reasoning_tokens?: number;
+      output_tokens_details?: {
+        reasoning_tokens?: number;
+      };
     };
     error?: {
       message?: string;
@@ -308,6 +314,8 @@ export function parseResponsesPayload(input: {
       model: input.model,
       provider: input.provider,
       errorClass: "server",
+      finishReason: normalizeResponsesFinishReason(payload.status, payload.incomplete_details?.reason, false, false),
+      incompleteReason: payload.incomplete_details?.reason,
       raw: input.payload
     };
   }
@@ -345,6 +353,12 @@ export function parseResponsesPayload(input: {
   }
 
   const content = contentParts.join("");
+  const finishReason = normalizeResponsesFinishReason(
+    payload.status,
+    payload.incomplete_details?.reason,
+    content.length > 0,
+    functionCalls.length > 0
+  );
 
   if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress") {
     return {
@@ -353,6 +367,8 @@ export function parseResponsesPayload(input: {
       model: input.model,
       provider: input.provider,
       errorClass: payload.status === "incomplete" ? "unknown" : "unknown",
+      finishReason,
+      incompleteReason: payload.incomplete_details?.reason,
       raw: input.payload
     };
   }
@@ -362,12 +378,56 @@ export function parseResponsesPayload(input: {
     content,
     model: input.model,
     provider: input.provider,
-    usage: {
-      inputTokens: payload.usage?.input_tokens,
-      outputTokens: payload.usage?.output_tokens,
-      totalTokens: payload.usage?.total_tokens
-    },
+    finishReason,
+    incompleteReason: payload.incomplete_details?.reason,
+    usage: normalizeResponsesUsage(payload.usage),
     raw: input.payload
+  };
+}
+
+function normalizeResponsesFinishReason(
+  status: string | undefined,
+  incompleteReason: string | undefined,
+  hasText: boolean,
+  hasFunctionCalls: boolean
+): ProviderFinishReason {
+  if (status === "incomplete") {
+    return incompleteReason === "max_output_tokens" ? "length" : "incomplete";
+  }
+
+  if (status === "completed") {
+    if (hasFunctionCalls) {
+      return "tool_calls";
+    }
+    if (hasText) {
+      return "stop";
+    }
+    return "unknown";
+  }
+
+  return "unknown";
+}
+
+function normalizeResponsesUsage(usage: {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  reasoning_tokens?: number;
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+} | undefined): ProviderUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  const reasoningTokens = usage.output_tokens_details?.reasoning_tokens ?? usage.reasoning_tokens;
+
+  return {
+    ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }),
+    ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }),
+    ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens })
   };
 }
 
