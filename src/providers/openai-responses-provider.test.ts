@@ -116,6 +116,8 @@ describe("openai-responses-provider", () => {
 
       const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
       expect(prepared.body.max_output_tokens).toBe(1024);
+      expect(prepared.body).not.toHaveProperty("max_tokens");
+      expect(prepared.body).not.toHaveProperty("max_completion_tokens");
     });
 
     it("omits max_output_tokens when maxTokens is undefined", () => {
@@ -126,6 +128,21 @@ describe("openai-responses-provider", () => {
 
       const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
       expect(prepared.body).not.toHaveProperty("max_output_tokens");
+    });
+
+    it("omits max_output_tokens when maxTokens is null or zero", () => {
+      for (const maxTokens of [null, 0] as const) {
+        const request: ProviderRequest = {
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "Hello" }],
+          maxTokens: maxTokens as never
+        };
+
+        const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
+        expect(prepared.body).not.toHaveProperty("max_output_tokens");
+        expect(prepared.body).not.toHaveProperty("max_tokens");
+        expect(prepared.body).not.toHaveProperty("max_completion_tokens");
+      }
     });
 
     it("handles multiple system messages by using first as instructions and rest as developer", () => {

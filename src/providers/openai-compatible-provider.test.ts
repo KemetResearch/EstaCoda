@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildOpenAICompatibleRequest,
   createOpenAICompatibleProvider,
   parseOpenAICompatibleResponse
 } from "./openai-compatible-provider.js";
 import type { ProviderEndpoint } from "../contracts/provider.js";
+
+const DEFAULT_ENDPOINT: ProviderEndpoint = {
+  baseUrl: "https://api.openai.com/v1",
+  apiKey: { kind: "env", name: "OPENAI_API_KEY" }
+};
 
 describe("createOpenAICompatibleProvider health", () => {
   it("checks the adapter default endpoint when no override is passed", async () => {
@@ -56,6 +62,43 @@ describe("createOpenAICompatibleProvider health", () => {
 
     const health = await provider.health(overrideEndpoint);
     expect(health.available).toBe(true);
+  });
+});
+
+describe("buildOpenAICompatibleRequest", () => {
+  it("uses max_completion_tokens for direct OpenAI Chat Completions", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-5",
+      messages: [{ role: "user", content: "Hello" }],
+      maxTokens: 1024
+    }, undefined, "openai");
+
+    expect(prepared.body.max_completion_tokens).toBe(1024);
+    expect(prepared.body).not.toHaveProperty("max_tokens");
+  });
+
+  it("uses max_tokens for third-party OpenAI-compatible providers by default", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: "Hello" }],
+      maxTokens: 1024
+    }, undefined, "deepseek");
+
+    expect(prepared.body.max_tokens).toBe(1024);
+    expect(prepared.body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("omits chat token parameters when maxTokens is unset, null, or zero", () => {
+    for (const maxTokens of [undefined, null, 0] as const) {
+      const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }],
+        maxTokens: maxTokens as never
+      }, undefined, "openai");
+
+      expect(prepared.body).not.toHaveProperty("max_tokens");
+      expect(prepared.body).not.toHaveProperty("max_completion_tokens");
+    }
   });
 });
 

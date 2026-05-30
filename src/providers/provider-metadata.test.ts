@@ -9,6 +9,7 @@ import {
   listProvidersVisibleInModelPicker,
   listCatalogKnownProviders,
   isProviderMediaOnly,
+  resolveChatMaxTokenParam,
   resolveCustomProviderMetadata,
   buildResolvedModelRoute,
   type ProviderMetadata
@@ -97,6 +98,15 @@ describe("provider-metadata", () => {
 
       expect(metadata.chatMaxTokenParam).toBe("max_completion_tokens");
       expect(metadata.reasoningEchoField).toBe("reasoning_content");
+    });
+
+    it("resolves chat max token parameter names from provider metadata", () => {
+      expect(resolveChatMaxTokenParam("openai")).toBe("max_completion_tokens");
+      expect(resolveChatMaxTokenParam("deepseek")).toBe("max_tokens");
+      expect(resolveChatMaxTokenParam("custom-corp" as ProviderId)).toBe("max_tokens");
+      expect(resolveChatMaxTokenParam("custom-corp" as ProviderId, {
+        chatMaxTokenParam: "max_completion_tokens"
+      })).toBe("max_completion_tokens");
     });
   });
 

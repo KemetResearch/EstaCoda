@@ -12,6 +12,7 @@ import type {
 } from "../contracts/provider.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { normalizeProviderMessagesStrict } from "./provider-message-normalizer.js";
+import { resolveChatMaxTokenParam } from "./provider-metadata.js";
 
 export type OpenAICompatibleProviderOptions = {
   id: ProviderId;
@@ -180,6 +181,8 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
         : undefined);
 
   const normalized = normalizeOpenAICompatibleRequest(request, provider);
+  const maxTokens = normalizeProviderMaxTokens(normalized.maxTokens);
+  const maxTokenParam = resolveChatMaxTokenParam(provider);
 
   return {
     url: `${endpoint.baseUrl.replace(/\/$/, "")}/chat/completions`,
@@ -193,10 +196,10 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
       model: normalized.model,
       messages: normalized.messages,
       temperature: normalized.temperature,
-      max_tokens: normalized.maxTokens,
       stream: normalized.stream,
       tools: normalized.tools,
-      response_format: normalized.responseFormat
+      response_format: normalized.responseFormat,
+      ...(maxTokens === undefined ? {} : { [maxTokenParam]: maxTokens })
     })
   };
 }
@@ -674,6 +677,12 @@ function compactObject(value: Record<string, unknown>): Record<string, unknown> 
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined)
   );
+}
+
+function normalizeProviderMaxTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function clamp(value: number, min: number, max: number): number {

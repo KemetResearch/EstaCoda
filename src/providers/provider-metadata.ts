@@ -284,6 +284,17 @@ export function getProviderMetadata(providerId: ProviderId): ProviderMetadata {
   };
 }
 
+export function resolveChatMaxTokenParam(
+  providerId: ProviderId,
+  metadata: Pick<ProviderMetadata, "chatMaxTokenParam"> = getProviderMetadata(providerId)
+): ChatMaxTokenParam {
+  if (metadata.chatMaxTokenParam !== undefined) {
+    return metadata.chatMaxTokenParam;
+  }
+
+  return providerId === "openai" ? "max_completion_tokens" : "max_tokens";
+}
+
 /**
  * Return the real default base URL for a provider when metadata defines one.
  */

@@ -152,8 +152,9 @@ export function buildResponsesRequest(
     store: false
   };
 
-  if (request.maxTokens !== undefined) {
-    body.max_output_tokens = request.maxTokens;
+  const maxTokens = normalizeProviderMaxTokens(request.maxTokens);
+  if (maxTokens !== undefined) {
+    body.max_output_tokens = maxTokens;
   }
 
   if (hasTools) {
@@ -171,6 +172,12 @@ export function buildResponsesRequest(
     },
     body
   };
+}
+
+function normalizeProviderMaxTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function extractInstructionsAndInput(messages: ProviderRequest["messages"]): {
