@@ -652,6 +652,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.iterations).toBe(2);
     expect(result.providerExecution?.response?.content).toBe("Housekeeping-visible answer.");
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    for (const call of harness.completeSpy.mock.calls) {
+      expect(call[0] as ProviderRequest).not.toHaveProperty("maxTokens");
+    }
     const requests = harness.completeSpy.mock.calls.map((call) => JSON.stringify((call[0] as ProviderRequest).messages));
     expect(requests.some((request) => request.includes("You just executed tool calls but returned an empty response."))).toBe(false);
     const events = await harness.sessionDb.listEvents(harness.sessionId);
@@ -1235,8 +1238,10 @@ describe("ProviderTurnLoop explicit route propagation", () => {
     expect(completeSpy).toHaveBeenCalledTimes(1);
 
     const callArgs = completeSpy.mock.calls[0];
+    const request = callArgs[0] as ProviderRequest;
     const executionOptions = callArgs[2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
 
+    expect(request).not.toHaveProperty("maxTokens");
     expect(executionOptions).toBeDefined();
     expect(executionOptions.primaryRoute).toBeDefined();
     expect(executionOptions.primaryRoute!.provider).toBe("test-provider");

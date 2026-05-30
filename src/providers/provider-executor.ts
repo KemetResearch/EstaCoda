@@ -315,21 +315,12 @@ export class ProviderExecutor {
           ? await collectProviderStream({
               provider: route.provider,
               model: route.id,
-              stream: provider.stream({
-                ...request,
-                provider: route.provider,
-                model: route.id,
-                stream: true
-              }, completionOptions),
+              stream: provider.stream(buildRouteProviderRequest(request, route, { stream: true }), completionOptions),
               onEvent: options.onEvent,
               toolCalls,
               signal: options.signal
             })
-          : await provider.complete({
-              ...request,
-              provider: route.provider,
-              model: route.id
-            }, completionOptions);
+          : await provider.complete(buildRouteProviderRequest(request, route), completionOptions);
 
         const nextRoute = chain[index + 1];
         const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
@@ -572,6 +563,28 @@ function safeReasoningMetadataFromResponse(response: ProviderResponse): Provider
 
 function routeRoleForIndex(index: number): ProviderRouteRole {
   return index === 0 ? "primary" : "fallback";
+}
+
+function buildRouteProviderRequest(
+  request: Omit<ProviderRequest, "model"> & { model?: string },
+  route: ResolvedModelRoute,
+  overrides: Partial<ProviderRequest> = {}
+): ProviderRequest {
+  const {
+    provider: _provider,
+    model: _model,
+    maxTokens: requestMaxTokens,
+    ...rest
+  } = request;
+  const effectiveMaxTokens = requestMaxTokens ?? route.maxTokens;
+
+  return {
+    ...rest,
+    ...overrides,
+    provider: route.provider,
+    model: route.id,
+    ...(effectiveMaxTokens === undefined ? {} : { maxTokens: effectiveMaxTokens })
+  };
 }
 
 async function collectProviderStream(input: {

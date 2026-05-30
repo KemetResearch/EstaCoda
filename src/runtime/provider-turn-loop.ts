@@ -463,7 +463,6 @@ export class ProviderTurnLoop {
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
-      maxTokens: 1_200,
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
@@ -585,7 +584,6 @@ export class ProviderTurnLoop {
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
-      maxTokens: 1_200,
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
