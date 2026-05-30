@@ -1812,7 +1812,7 @@ describe("modelAliases normalization", () => {
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     await writeFile(profileConfigPath(workspace), JSON.stringify({
       model_aliases: {
-        myllm: { provider: "local", model: "llama3" }
+        myllm: { provider: "local", model: "llama3", maxTokens: "8192" }
       }
     }));
 
@@ -1821,7 +1821,24 @@ describe("modelAliases normalization", () => {
       homeDir: workspace
     });
 
-    expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3" });
+    expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3", maxTokens: 8192 });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("rejects invalid alias maxTokens", async () => {
+    const { loadRuntimeConfig } = await import("./runtime-config.js");
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-alias-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      modelAliases: {
+        myllm: { provider: "local", model: "llama3", maxTokens: 0 }
+      }
+    }));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow("modelAliases.myllm.maxTokens must be a positive integer when set.");
     await rm(workspace, { recursive: true, force: true });
   });
 

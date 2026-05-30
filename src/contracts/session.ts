@@ -44,6 +44,7 @@ export type SessionModelOverride = {
     apiMode?: ProviderApiMode;
     authMethod?: ProviderAuthMethod;
     contextWindowTokens?: number;
+    maxTokens?: number;
     routeId?: string;
   };
   modelProfile: ModelProfile;

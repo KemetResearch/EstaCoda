@@ -317,6 +317,7 @@ export type ModelAliasDefinition = {
   baseUrl?: string;
   apiMode?: string;
   apiKeyEnv?: string;
+  maxTokens?: number;
 };
 
 export type EstaCodaConfig = {
@@ -1010,6 +1011,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
   const compacted = (compactValue(config) ?? {}) as EstaCodaConfig;
+  if (compacted.modelAliases !== undefined) {
+    compacted.modelAliases = normalizeModelAliases(compacted.modelAliases);
+  }
   if (compacted.auxiliaryModels !== undefined) {
     const stripped = stripDefaultAuxiliarySlots(compacted.auxiliaryModels);
     if (Object.keys(stripped).length === 0) {
@@ -1320,7 +1324,7 @@ function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
   return coercePositiveInteger(value, { default: 1 });
 }
 
-function normalizeOptionalPositiveIntegerStrict(value: unknown, path: string): number | undefined {
+export function normalizeOptionalPositiveIntegerStrict(value: unknown, path: string): number | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
@@ -1338,6 +1342,26 @@ function normalizeOptionalPositiveIntegerStrict(value: unknown, path: string): n
   }
 
   return parsed;
+}
+
+function normalizeModelAliases(
+  aliases: Record<string, ModelAliasDefinition>
+): Record<string, ModelAliasDefinition> {
+  const normalized: Record<string, ModelAliasDefinition> = {};
+  for (const [name, alias] of Object.entries(aliases)) {
+    const { maxTokens: _maxTokens, ...rest } = alias as ModelAliasDefinition & {
+      maxTokens?: unknown;
+    };
+    const maxTokens = normalizeOptionalPositiveIntegerStrict(
+      _maxTokens,
+      `modelAliases.${name}.maxTokens`
+    );
+    normalized[name] = {
+      ...rest,
+      ...(maxTokens !== undefined ? { maxTokens } : {})
+    };
+  }
+  return normalized;
 }
 
 function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {

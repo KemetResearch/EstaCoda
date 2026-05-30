@@ -204,12 +204,14 @@ describe("applySetPreferredModelRoute", () => {
     const result = applySetPreferredModelRoute(existing, {
       provider: "deepseek",
       model: "deepseek-chat",
-      contextWindowTokens: 128_000
+      contextWindowTokens: 128_000,
+      maxTokens: 8192
     });
     expect(result.model).toEqual({
       provider: "deepseek",
       id: "deepseek-chat",
-      contextWindowTokens: 128_000
+      contextWindowTokens: 128_000,
+      maxTokens: 8192
     });
   });
 

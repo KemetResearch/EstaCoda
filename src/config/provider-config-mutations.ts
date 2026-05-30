@@ -46,6 +46,7 @@ export type SetPreferredModelRouteInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
 };
 
 export type AddFallbackRouteInput = {
@@ -178,6 +179,9 @@ export function applySetPreferredModelRoute(
   };
   if (input.contextWindowTokens !== undefined) {
     modelPatch.contextWindowTokens = input.contextWindowTokens;
+  }
+  if (input.maxTokens !== undefined) {
+    modelPatch.maxTokens = input.maxTokens;
   }
 
   const patch: EstaCodaConfig = {
