@@ -558,7 +558,7 @@ export class ProviderTurnLoop {
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
     };
-    const execution = await this.#completeProviderRequestWithTruncatedToolRetry({
+    const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
@@ -685,7 +685,7 @@ export class ProviderTurnLoop {
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
     };
-    const execution = await this.#completeProviderRequestWithTruncatedToolRetry({
+    const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
@@ -741,7 +741,7 @@ export class ProviderTurnLoop {
     return execution;
   }
 
-  async #completeProviderRequestWithTruncatedToolRetry(input: {
+  async #completeProviderRequestWithFinalizationRetries(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
     sessionId: string;
@@ -750,13 +750,33 @@ export class ProviderTurnLoop {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<ProviderExecutionResult> {
+    const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
+    return await this.#continueLengthTruncatedTextResponse({
+      ...input,
+      initial
+    });
+  }
+
+  async #completeProviderRequestWithTruncatedToolRetry(input: {
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    primaryRoute?: ResolvedModelRoute;
+    fallbackChain?: ResolvedModelRoute[];
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
+    const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
     const initialEvents = createProviderToolCallEventBuffer(input.onEvent);
     const execution = await this.#providerExecutor!.complete(input.request, input.preferences, {
       sessionId: input.sessionId,
       stream: true,
       signal: input.signal,
-      primaryRoute: this.#primaryModelRoute,
-      fallbackChain: this.#modelFallbackRoutes,
+      primaryRoute,
+      fallbackChain,
       onEvent: initialEvents.onEvent
     });
 
@@ -766,7 +786,7 @@ export class ProviderTurnLoop {
     }
     initialEvents.discardToolCalls();
 
-    const originalRouteChain = resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes);
+    const originalRouteChain = resolvedRouteChain(primaryRoute, fallbackChain);
     const retryChain = buildRetryRouteChainFromSuccessfulAttempt(execution, originalRouteChain);
     const retryPrimaryRoute = retryChain[0];
     if (retryPrimaryRoute === undefined) {
@@ -831,6 +851,117 @@ export class ProviderTurnLoop {
 
     await retryEvents.flushToolCalls();
     return mergeTruncatedToolRetryExecutions(execution, retryExecution);
+  }
+
+  async #continueLengthTruncatedTextResponse(input: {
+    initial: ProviderExecutionResult;
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    if (!isLengthTruncatedTextExecution(input.initial)) {
+      return input.initial;
+    }
+
+    const originalRouteChain = resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes);
+    const executions: ProviderExecutionResult[] = [input.initial];
+    let current = input.initial;
+    let accumulatedVisibleText = input.initial.response!.content;
+    let continuationAttempts = 0;
+    let consumedProviderIterations = providerIterationCost(input.initial);
+    let exhausted = false;
+    let finalFinishReason: ProviderFinishReason | undefined = input.initial.response?.finishReason;
+
+    while (continuationAttempts < MAX_TEXT_CONTINUATION_ATTEMPTS && isLengthTruncatedTextExecution(current)) {
+      const retryChain = buildRetryRouteChainFromSuccessfulAttempt(current, originalRouteChain);
+      const retryPrimaryRoute = retryChain[0];
+      if (retryPrimaryRoute === undefined) {
+        exhausted = true;
+        break;
+      }
+
+      if (input.iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations) {
+        exhausted = true;
+        break;
+      }
+
+      const elapsedMs = Date.now() - input.loopStartedAt;
+      if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "provider-wall-clock-ms",
+          limit: this.#budgets.maxProviderWallClockMs,
+          observed: elapsedMs,
+          reason: "Provider loop exceeded its wall-clock budget before continuing a length-truncated response."
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget before continuing a length-truncated response." },
+          "provider-budget-exhausted"
+        );
+        exhausted = true;
+        break;
+      }
+
+      continuationAttempts += 1;
+      const baseMaxTokens = input.request.maxTokens ?? (current.route ?? retryPrimaryRoute).maxTokens ?? 4096;
+      const continuationMaxTokens = Math.min(baseMaxTokens * (continuationAttempts + 1), 32768);
+      const continuationMessages: ProviderRequest["messages"] = [
+        ...input.request.messages,
+        {
+          role: "assistant",
+          content: accumulatedVisibleText
+        },
+        {
+          role: "user",
+          content: TEXT_CONTINUATION_PROMPT
+        }
+      ];
+      const continuationExecutionRaw = await this.#completeProviderRequestWithTruncatedToolRetry({
+        ...input,
+        request: {
+          ...input.request,
+          messages: continuationMessages,
+          maxTokens: continuationMaxTokens
+        },
+        iteration: input.iteration + consumedProviderIterations,
+        primaryRoute: retryPrimaryRoute,
+        fallbackChain: retryChain.slice(1)
+      });
+      const continuationExecution = rebaseRetryRouteIdentity(
+        continuationExecutionRaw,
+        retryChain,
+        originalRouteChain
+      );
+      executions.push(continuationExecution);
+      consumedProviderIterations += providerIterationCost(continuationExecution);
+
+      if (continuationExecution.ok !== true || continuationExecution.response === undefined) {
+        finalFinishReason = undefined;
+        break;
+      }
+
+      accumulatedVisibleText = appendWithExactOverlapTrim(
+        accumulatedVisibleText,
+        continuationExecution.response.content
+      );
+      finalFinishReason = continuationExecution.response.finishReason;
+      current = continuationExecution;
+    }
+
+    if (isLengthTruncatedTextExecution(current)) {
+      exhausted = true;
+    }
+
+    return mergeTextContinuationExecutions(executions, accumulatedVisibleText, {
+      reason: "provider_length",
+      attempts: continuationAttempts,
+      exhausted,
+      initialFinishReason: "length",
+      ...(finalFinishReason === undefined ? {} : { finalFinishReason })
+    });
   }
 
   async #providerSessionHistory(): Promise<{
@@ -1013,11 +1144,21 @@ const TRUNCATED_TOOL_CALL_REFUSAL = "The model response was truncated while gene
 const REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE = "The model exhausted its output budget while reasoning and did not produce a visible answer. Try again with a higher model.maxTokens value or a narrower request.";
 const REASONING_ONLY_EMPTY_RESPONSE_MESSAGE = "The model produced internal reasoning but did not produce a visible answer. Try again with a narrower request.";
 const REASONING_ONLY_PREFILL_CONTENT = "I’ll answer directly and only include the final visible answer.";
+const TEXT_CONTINUATION_PROMPT = "Your previous response was truncated by the output length limit. Continue exactly where you left off. Do not repeat previous text.";
+const MAX_TEXT_CONTINUATION_ATTEMPTS = 3;
+const MAX_CONTINUATION_OVERLAP_CHARS = 1000;
 
 function isLengthTruncatedToolCallExecution(execution: ProviderExecutionResult): boolean {
   return execution.ok === true &&
     execution.response?.finishReason === "length" &&
     execution.toolCalls.length > 0;
+}
+
+function isLengthTruncatedTextExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response?.finishReason === "length" &&
+    execution.response.content.trim().length > 0 &&
+    execution.toolCalls.length === 0;
 }
 
 function isReasoningOnlyExecution(execution: ProviderExecutionResult): boolean {
@@ -1074,10 +1215,15 @@ function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult)
 }
 
 function providerIterationCost(execution: ProviderExecutionResult): number {
-  return execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
+  let cost = 1;
+  if (
+    execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
     execution.runtimeMetadata.truncation.retried
-    ? 2
-    : 1;
+  ) {
+    cost += 1;
+  }
+  cost += execution.runtimeMetadata?.continuation?.attempts ?? 0;
+  return cost;
 }
 
 function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): {
@@ -1225,6 +1371,66 @@ function truncatedToolRetryRefusal(input: {
     ),
     toolCalls: []
   };
+}
+
+function mergeTextContinuationExecutions(
+  executions: ProviderExecutionResult[],
+  content: string,
+  continuation: NonNullable<ProviderLoopRuntimeMetadata["continuation"]>
+): ProviderExecutionResult {
+  const initial = executions[0]!;
+  const final = executions[executions.length - 1] ?? initial;
+  const response = final.response ?? initial.response;
+
+  return {
+    ...final,
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: response?.model ?? final.route?.id ?? initial.route?.id ?? "unknown",
+      provider: (response?.provider ?? final.route?.provider ?? initial.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      ...(response?.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response?.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(response?.usage === undefined ? {} : { usage: response.usage }),
+      ...(response?.reasoningMetadata === undefined ? {} : { reasoningMetadata: response.reasoningMetadata })
+    },
+    fallbackUsed: executions.some((execution) => execution.fallbackUsed),
+    attempts: executions.flatMap((execution) => execution.attempts),
+    toolCalls: final.toolCalls,
+    route: final.route,
+    attemptedRouteIndex: final.attemptedRouteIndex,
+    routeRole: final.routeRole,
+    runtimeMetadata: mergeRuntimeMetadataList([
+      ...executions.map((execution) => execution.runtimeMetadata),
+      { continuation }
+    ])
+  };
+}
+
+function mergeRuntimeMetadataList(
+  metadata: Array<ProviderExecutionResult["runtimeMetadata"]>
+): ProviderExecutionResult["runtimeMetadata"] {
+  return metadata.reduce<ProviderExecutionResult["runtimeMetadata"]>((merged, entry) =>
+    mergeProviderRuntimeMetadata(merged, entry), undefined);
+}
+
+function appendWithExactOverlapTrim(accumulated: string, continuation: string): string {
+  if (accumulated.length === 0 || continuation.length === 0) {
+    return accumulated + continuation;
+  }
+
+  const tail = accumulated.slice(-MAX_CONTINUATION_OVERLAP_CHARS);
+  const head = continuation.slice(0, MAX_CONTINUATION_OVERLAP_CHARS);
+  const maxOverlap = Math.min(tail.length, head.length);
+
+  for (let length = maxOverlap; length > 0; length -= 1) {
+    if (tail.slice(tail.length - length) === head.slice(0, length)) {
+      return accumulated + continuation.slice(length);
+    }
+  }
+
+  return accumulated + continuation;
 }
 
 function mergeProviderExecutions(
