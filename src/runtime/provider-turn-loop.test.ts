@@ -387,6 +387,30 @@ function reasoningOnlyExecution(input: {
   });
 }
 
+function metadataOnlyReasoningExecution(input: {
+  chars: number;
+  finishReason?: ProviderResponse["finishReason"];
+}): ProviderExecutionResult {
+  const reasoningMetadata = {
+    present: true,
+    chars: input.chars,
+    format: "reasoning_details" as const
+  };
+  return providerExecution("", [], {
+    response: {
+      ok: true,
+      content: "",
+      model: "test-model",
+      provider: "test-provider",
+      reasoningMetadata,
+      ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason })
+    },
+    runtimeMetadata: {
+      reasoning: reasoningMetadata
+    }
+  });
+}
+
 function toolExecution(id: string, content = `tool result ${id}`): ToolExecutionRecord {
   return toolExecutionForTool(id, testTool.name, content);
 }
@@ -1246,6 +1270,33 @@ describe("ProviderTurnLoop reasoning-only response recovery", () => {
     expect(JSON.stringify(persistedMessages)).not.toContain("I’ll answer directly and only include the final visible answer.");
     expect(JSON.stringify(events)).not.toContain(hiddenReasoning);
     expect(JSON.stringify(result.providerExecution?.attempts)).not.toContain(hiddenReasoning);
+  });
+
+  it("retries metadata-only reasoning responses without treating them as provider failures", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        metadataOnlyReasoningExecution({ chars: 42 }),
+        providerExecution("Visible answer from metadata-only retry.")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(result.iterations).toBe(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).toBe("Visible answer from metadata-only retry.");
+    const firstAttempt = result.providerExecution?.attempts[0];
+    expect(firstAttempt?.ok).toBe(true);
+    expect(firstAttempt?.errorClass).toBeUndefined();
+    const retryRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect(JSON.stringify(retryRequest.messages)).toContain("I’ll answer directly and only include the final visible answer.");
+    const persistedMessages = await harness.sessionDb.listMessages(harness.sessionId);
+    expect(JSON.stringify(persistedMessages)).not.toContain("I’ll answer directly and only include the final visible answer.");
+    expect(JSON.stringify(result.providerExecution)).not.toContain("opaque hidden detail");
   });
 
   it("caps reasoning-only prefill retries at two attempts", async () => {
