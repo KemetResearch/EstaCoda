@@ -164,6 +164,7 @@ export type ResolvedModelRoute = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 };

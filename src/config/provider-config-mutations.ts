@@ -54,6 +54,7 @@ export type AddFallbackRouteInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
 };
 
 export type SetAuxiliaryModelRouteInput = {
@@ -207,7 +208,8 @@ export function applyAddFallbackRoute(
     ...(input.apiKeyEnv !== undefined ? { apiKeyEnv: input.apiKeyEnv } : {}),
     ...(input.contextWindowTokens !== undefined
       ? { contextWindowTokens: input.contextWindowTokens }
-      : {})
+      : {}),
+    ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {})
   };
 
   const merged = patchConfig(existing, {

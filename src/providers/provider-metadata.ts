@@ -385,6 +385,7 @@ export function buildResolvedModelRoute(options: {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 }): ResolvedModelRoute {
@@ -396,6 +397,7 @@ export function buildResolvedModelRoute(options: {
     baseUrl: options.baseUrl,
     apiKeyEnv: options.apiKeyEnv,
     contextWindowTokens: options.contextWindowTokens,
+    maxTokens: options.maxTokens,
     apiMode: options.apiMode ?? metadata.apiMode,
     authMethod: options.authMethod ?? metadata.defaultAuthMethod
   };
