@@ -350,6 +350,55 @@ describe("openai-responses-provider", () => {
       expect(response.ok).toBe(false);
     });
 
+    it("treats reasoning-only Responses output as provider-successful", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", text: "hidden responses reasoning" }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("");
+      expect(response.reasoning).toBe("hidden responses reasoning");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden responses reasoning".length,
+        format: "responses_reasoning"
+      });
+      expect(response.errorClass).toBeUndefined();
+      expect(response.content).not.toContain("Provider response did not include assistant content.");
+    });
+
+    it("treats summary-only Responses reasoning metadata as provider-successful", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [{ text: "summary should stay metadata-only" }] }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("");
+      expect(response.reasoning).toBeUndefined();
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: 0,
+        format: "responses_reasoning"
+      });
+      expect(response.errorClass).toBeUndefined();
+      expect(JSON.stringify(response.reasoningMetadata)).not.toContain("summary should stay metadata-only");
+      expect(response.content).not.toContain("Provider response did not include assistant content.");
+    });
+
     it("handles payload-level error object", () => {
       const response = parseResponsesPayload({
         provider: "codex",

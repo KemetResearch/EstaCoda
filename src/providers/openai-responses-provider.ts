@@ -406,8 +406,9 @@ export function parseResponsesPayload(input: {
     content.length > 0,
     functionCalls.length > 0
   );
+  const hasReasoningOnlySignal = reasoning !== undefined || reasoningMetadata?.present === true;
 
-  if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress") {
+  if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress" && !hasReasoningOnlySignal) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",
