@@ -1495,6 +1495,20 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     const sessionMessages = await harness.sessionDb.listMessages(harness.sessionId);
     expect(sessionMessages.map((message) => message.content)).not.toContain("Hello wor");
     expect(sessionMessages.map((message) => message.content)).not.toContain("Your previous response was truncated by the output length limit. Continue exactly where you left off. Do not repeat previous text.");
+    const sessionEvents = await harness.sessionDb.listEvents(harness.sessionId);
+    const providerCompletion = sessionEvents.find((event) => event.kind === "provider-completion");
+    expect(providerCompletion).toEqual(expect.objectContaining({
+      kind: "provider-completion",
+      runtimeMetadata: {
+        continuation: {
+          reason: "provider_length",
+          attempts: 1,
+          exhausted: false,
+          initialFinishReason: "length",
+          finalFinishReason: "stop"
+        }
+      }
+    }));
   });
 
   it("continues repeated length-truncated text with increasing caps", async () => {
@@ -1847,6 +1861,75 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
       initialFinishReason: "length",
       finalFinishReason: "length"
     });
+  });
+
+  it("does not text-continue empty length-truncated content", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [], {
+          response: {
+            ok: true,
+            content: "",
+            finishReason: "length",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        }),
+        providerExecution("should not be requested as continuation")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).toBe("should not be requested as continuation");
+    expect(result.providerExecution?.runtimeMetadata?.continuation).toBeUndefined();
+    expect(JSON.stringify(harness.completeSpy.mock.calls[1]![0].messages)).not.toContain(
+      "Your previous response was truncated by the output length limit. Continue exactly where you left off. Do not repeat previous text."
+    );
+    expect(harness.completeSpy.mock.calls[1]![0].messages).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        content: ""
+      })
+    ]));
+  });
+
+  it("does not text-continue content-filtered visible text", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("Filtered partial", [], {
+          response: {
+            ok: true,
+            content: "Filtered partial",
+            finishReason: "content_filter",
+            model: "test-model",
+            provider: "test-provider"
+          },
+          route: primaryRoute,
+          attemptedRouteIndex: 0,
+          routeRole: "primary"
+        }),
+        providerExecution("should not be requested as continuation")
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.providerExecution?.response?.content).toBe("Filtered partial");
+    expect(result.providerExecution?.runtimeMetadata?.continuation).toBeUndefined();
   });
 
   it("checks wall-clock budget before continuation calls", async () => {
