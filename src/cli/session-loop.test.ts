@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { runSessionLoop } from "./session-loop.js";
+import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
@@ -27,6 +29,28 @@ function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): Termina
     supportsAnimation: true,
     ...overrides,
   };
+}
+
+function makeTtyInput(): NodeJS.ReadStream & {
+  readonly rawModes: boolean[];
+  press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+} {
+  const input = new PassThrough() as unknown as NodeJS.ReadStream & {
+    rawModes: boolean[];
+    press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.rawModes = [];
+  input.setRawMode = (mode: boolean) => {
+    input.isRaw = mode;
+    input.rawModes.push(mode);
+    return input;
+  };
+  input.press = (chunk, key = {}) => {
+    input.emit("keypress", chunk, key);
+  };
+  return input;
 }
 
 function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
@@ -544,10 +568,43 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
+    expect(rendered).not.toContain("Type a message.");
+    expect(rendered).toContain("/help");
+    expect(rendered).toContain("Ctrl+C exit");
+    expect(rendered).not.toContain("/exit");
+    expect(rendered).not.toContain("اكتب رسالة.");
+  });
+
+  it("preserves the direct startup hint for non-bottom-chrome fallback output", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Type a message.");
     expect(rendered).toContain("/help");
     expect(rendered).toContain("/exit");
-    expect(rendered).not.toContain("اكتب رسالة.");
   });
 
   it("renders the startup hint in Arabic with isolated slash commands", async () => {
@@ -655,9 +712,10 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("اكتب رسالة.");
+    expect(rendered).not.toContain("اكتب رسالة.");
     expect(rendered).toContain(isolateLtr("/help"));
-    expect(rendered).toContain(isolateLtr("/exit"));
+    expect(rendered).toContain(isolateLtr("Ctrl+C"));
+    expect(rendered).not.toContain(isolateLtr("/exit"));
     expect(rendered).not.toContain("𓂀");
     expect(rendered).not.toContain("╭");
     expect(rendered).toContain("*");
@@ -1155,7 +1213,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("▸ this is a delib...");
-    const chromeClearIndex = rendered.lastIndexOf("\x1b[4A\x1b[2K\x1b[1B\x1b[2K\x1b[3B", userRailIndex);
+    const chromeClearIndex = rendered.lastIndexOf("\x1b[5A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[3B", userRailIndex);
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(chromeClearIndex).toBeGreaterThan(-1);
     expect(chromeClearIndex).toBeLessThan(echoClearIndex);
@@ -1201,7 +1259,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(echoClearIndex).toBeLessThan(userRailIndex);
   });
 
-  it("renders a read-only bottom prompt chrome during the active turn", async () => {
+  it("renders active-turn bottom chrome without a read-only prompt box", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1233,7 +1291,10 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+    expect(rendered).toContain("▸ hello\n+──────────────────────────────────────────────────────────────────────────────+");
+    expect(rendered).toContain("mock-model");
+    expect(rendered).toContain("contemplating");
+    expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("brokers tool output above the redrawn bottom chrome", async () => {
@@ -1271,9 +1332,10 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     const toolIndex = rendered.indexOf("browser.status");
-    const redrawnPromptIndex = rendered.indexOf("▸ hello", toolIndex);
+    const redrawnChromeIndex = rendered.indexOf("mock-model", toolIndex);
     expect(toolIndex).toBeGreaterThan(-1);
-    expect(redrawnPromptIndex).toBeGreaterThan(toolIndex);
+    expect(redrawnChromeIndex).toBeGreaterThan(toolIndex);
+    expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
@@ -1322,10 +1384,10 @@ describe("runSessionLoop — active turn spinner", () => {
       index > lastToolChunkIndex && chunk.includes("scribbling")
     );
     const nextChromeChunkIndex = strippedChunks.findIndex((chunk, index) =>
-      index > providerSpinnerChunkIndex && chunk.includes("mock-model") && chunk.includes("▸ hello")
+      index > providerSpinnerChunkIndex && chunk.includes("mock-model")
     );
     const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
-      chunk.includes("mock-model") || chunk.includes("▸ hello")
+      chunk.includes("mock-model")
     );
     const providerSpinnerChunk = strippedChunks[providerSpinnerChunkIndex] ?? "";
     const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
@@ -1337,10 +1399,547 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(spinnerOffset).toBeGreaterThan(-1);
     if (modelOffset !== -1) {
       expect(modelOffset).toBeGreaterThan(spinnerOffset);
-      expect(promptOffset).toBeGreaterThan(modelOffset);
     }
     expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
-    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model") && chunk.includes("▸ hello"))).toBe(true);
+    expect(promptOffset).toBe(-1);
+    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model"))).toBe(true);
+  });
+
+  it("attaches the active-turn command controller only during runtime.handle", async () => {
+    const input = makeTtyInput();
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptIndex = 0;
+    const prompt = Object.assign(
+      vi.fn(async () => {
+        if (promptIndex++ === 0) {
+          return await new Promise<string>((resolve) => {
+            resolvePrompt = resolve;
+          });
+        }
+        return "/exit";
+      }),
+      { close: () => {} }
+    );
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(input.listenerCount("keypress")).toBe(0);
+    resolvePrompt("hello");
+    await handleStartedPromise;
+    expect(input.listenerCount("keypress")).toBe(1);
+    releaseTurn?.();
+    await loop;
+    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
+  it("/interrupt aborts an active turn from the command lane", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let abortReason: unknown;
+    const handleInputs: string[] = [];
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => {
+            abortReason = signal.reason;
+            resolve();
+          }, { once: true });
+        });
+        onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+        return {
+          ...mockResponse(),
+          text: "Interrupted response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/interrupt") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /interrupt");
+    const beforeSubmit = outputChunks.length;
+    input.press("\r", { name: "return" });
+    await loop;
+
+    expect(abortReason).toBe("CLI interrupt");
+    expect(handleInputs).toEqual(["hello"]);
+    expect(outputChunks.slice(beforeSubmit).map((chunk) => stripAnsi(chunk)).join("")).not.toContain("active command: /interrupt");
+    expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
+  });
+
+  it("/steer aborts the active turn and retries once with the steering note", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let abortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              abortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        return {
+          ...mockResponse(),
+          text: "Retried response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /steer use simpler approach");
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    await loop;
+
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nuse simpler approach",
+    ]);
+  });
+
+  it("empty /steer shows usage and does not abort", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let aborted = false;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/steer   ") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseTurn?.();
+    await loop;
+
+    expect(aborted).toBe(false);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <guidance>");
+  });
+
+  it("does not loop forever when the steered retry fails", async () => {
+    const input = makeTtyInput();
+    const handleInputs: string[] = [];
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        throw new Error("retry failed");
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+
+    await expect(loop).rejects.toThrow("retry failed");
+    expect(handleInputs).toHaveLength(2);
+  });
+
+  it("does not reapply steering after retry cancellation or interruption", async () => {
+    const input = makeTtyInput();
+    const handleInputs: string[] = [];
+    let firstAbortReason: unknown;
+    let secondAbortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        const callNumber = handleInputs.length;
+        if (callNumber === 1) {
+          firstHandleStarted?.();
+        } else {
+          secondHandleStarted?.();
+        }
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => {
+            if (callNumber === 1) {
+              firstAbortReason = signal.reason;
+            } else {
+              secondAbortReason = signal.reason;
+            }
+            resolve();
+          }, { once: true });
+        });
+        onEvent?.({
+          kind: "agent-cancelled",
+          reason: String(callNumber === 1 ? firstAbortReason : secondAbortReason),
+        });
+        return {
+          ...mockResponse(),
+          text: "Interrupted response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    for (const char of "/interrupt") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await loop;
+
+    expect(firstAbortReason).toBe("CLI steer");
+    expect(secondAbortReason).toBe("CLI interrupt");
+    expect(handleInputs).toHaveLength(2);
+  });
+
+  it("bounds repeated /steer attempts during the steered retry", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let firstAbortReason: unknown;
+    let secondAbortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    let releaseSecondTurn: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              firstAbortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(firstAbortReason) });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        signal?.addEventListener("abort", () => {
+          secondAbortReason = signal.reason;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseSecondTurn = resolve;
+        });
+        return {
+          ...mockResponse(),
+          text: "Retried response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    for (const char of "/steer also shorter") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseSecondTurn?.();
+    await loop;
+
+    expect(firstAbortReason).toBe("CLI steer");
+    expect(secondAbortReason).toBeUndefined();
+    expect(handleInputs).toHaveLength(2);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Steering already queued for this turn.");
+  });
+
+  it("keeps normal active-turn typing out of the transcript", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    let releaseTurn: (() => void) | undefined;
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "zzqzz") {
+      input.press(char, { name: char, sequence: char });
+    }
+    releaseTurn?.();
+    await loop;
+
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("zzqzz");
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -1485,7 +2084,282 @@ describe("runSessionLoop — active turn spinner", () => {
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[4A"))).toBe(true);
+    expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[5A"))).toBe(true);
+  });
+
+  it("renders slash completion chrome while typing idle input", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    expect(outputChunks.join("")).toContain("/help");
+    expect(outputChunks.join("")).toContain("Show command help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("clears live slash completion chrome when idle input is no longer slash-prefixed", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    const afterSlashHint = outputChunks.length;
+    promptOptions.onInputChange?.("hello");
+    const clearChunks = outputChunks.slice(afterSlashHint).join("");
+    expect(clearChunks).not.toContain("/help");
+    expect(clearChunks).toContain("mock-model");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("shows idle shortcuts only for empty bottom-chrome input and gives slash menu priority", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const initial = stripAnsi(outputChunks.join(""));
+    expect(initial).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(initial).not.toContain("Type a message.");
+
+    const afterInitial = outputChunks.length;
+    promptOptions.onInputChange?.("hello");
+    const afterTyping = stripAnsi(outputChunks.slice(afterInitial).join(""));
+    expect(afterTyping).toContain("mock-model");
+    expect(afterTyping).not.toContain("Ctrl+C exit");
+    expect(afterTyping).not.toContain("Show command help");
+
+    const afterTypingIndex = outputChunks.length;
+    promptOptions.onInputChange?.("/");
+    const afterSlash = stripAnsi(outputChunks.slice(afterTypingIndex).join(""));
+    expect(afterSlash).toContain("Show command help");
+    expect(afterSlash).not.toContain("Ctrl+C exit");
+
+    const afterSlashIndex = outputChunks.length;
+    promptOptions.onInputChange?.("");
+    const afterEmpty = stripAnsi(outputChunks.slice(afterSlashIndex).join(""));
+    expect(afterEmpty).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(afterEmpty).not.toContain("Show command help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("renders and clears paste preview chrome around idle readline submission", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
+    const previewOutput = outputChunks.join("");
+    expect(previewOutput).toContain("line one");
+    expect(previewOutput).toContain("line two");
+    const afterPreview = outputChunks.length;
+
+    resolvePrompt("/exit");
+    await loop;
+
+    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line one");
+    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
+  });
+
+  it("keeps submitted multiline text intact after paste preview", async () => {
+    const handledTexts: string[] = [];
+    const runtime = createMockRuntime({
+      handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+        handledTexts.push(input.text);
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        if (promptIndex++ === 0) {
+          promptOptions = options;
+          return await new Promise<string>((resolve) => {
+            resolvePrompt = resolve;
+          });
+        }
+        return "/exit";
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
+    resolvePrompt("line one\nline two");
+    await loop;
+
+    expect(handledTexts).toEqual(["line one\nline two"]);
+  });
+
+  it("keeps live slash callbacks out of disabled bottom chrome output", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    resolvePrompt("/exit");
+    await loop;
+
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
   });
 
   it("updates chrome status rail from provider-actual context usage events", async () => {
@@ -2215,8 +3089,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
     const renderedPlain = stripAnsi(rendered);
     const plainPermissionIndex = renderedPlain.indexOf("Permission required");
-    const promptRedrawIndex = renderedPlain.indexOf("▸ write file", plainPermissionIndex);
-    expect(promptRedrawIndex).toBeGreaterThan(plainPermissionIndex);
+    const submittedRailIndex = renderedPlain.indexOf("▸ write file");
+    expect(submittedRailIndex).toBeGreaterThan(-1);
+    expect(submittedRailIndex).toBeLessThan(plainPermissionIndex);
+    expect(renderedPlain.slice(plainPermissionIndex)).not.toContain("▸ write file");
   });
 
   it("renders image setup secret flow above redrawn bottom chrome", async () => {
@@ -2327,6 +3203,7 @@ describe("runSessionLoop — active turn spinner", () => {
     } as Runtime;
 
     let promptIndex = 0;
+    const secretPromptOptions: PromptOptions[] = [];
     try {
       await runSessionLoop({
         runtime,
@@ -2334,7 +3211,10 @@ describe("runSessionLoop — active turn spinner", () => {
         capabilities: interactiveCaps({ terminalWidth: 80 }),
         homeDir,
         prompt: Object.assign(
-          async () => {
+          async (_question: string, options?: PromptOptions) => {
+            if (options?.secret === true) {
+              secretPromptOptions.push(options);
+            }
             const values = ["make image", "secret-value", "/exit"];
             return values[promptIndex++] ?? "/exit";
           },
@@ -2348,15 +3228,18 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     const setupIndex = rendered.indexOf("Setup required");
-    const setupPromptRedrawIndex = rendered.indexOf("▸ make image", setupIndex);
     const resumedIndex = rendered.indexOf("Image setup verified");
-    const resumedPromptRedrawIndex = rendered.indexOf("▸ make image", resumedIndex);
+    const submittedRailIndex = rendered.indexOf("▸ make image");
     expect(setupIndex).toBeGreaterThan(-1);
-    expect(setupPromptRedrawIndex).toBeGreaterThan(setupIndex);
-    expect(resumedIndex).toBeGreaterThan(setupPromptRedrawIndex);
-    expect(resumedPromptRedrawIndex).toBeGreaterThan(resumedIndex);
+    expect(submittedRailIndex).toBeGreaterThan(-1);
+    expect(submittedRailIndex).toBeLessThan(setupIndex);
+    expect(resumedIndex).toBeGreaterThan(setupIndex);
+    expect(rendered.slice(setupIndex)).not.toContain("▸ make image");
     expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
     expect(rendered).toContain("generated image");
+    expect(secretPromptOptions).toHaveLength(1);
+    expect(secretPromptOptions[0]?.onInputChange).toBeUndefined();
+    expect(secretPromptOptions[0]?.onPastePreview).toBeUndefined();
   });
 
   it("keeps bottom chrome alive after active-turn SIGINT cancellation", async () => {

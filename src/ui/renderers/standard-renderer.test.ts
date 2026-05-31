@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { isolateLtr, isolateRtl } from "../bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -98,6 +98,19 @@ function renderer(theme: "light" | "dark", caps: TerminalCapabilities) {
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
+}
+
+function expectBalancedBidiIsolates(text: string): void {
+  let depth = 0;
+  for (const char of text) {
+    if (char === LRI || char === RLI) {
+      depth += 1;
+    } else if (char === PDI) {
+      depth -= 1;
+    }
+    expect(depth).toBeGreaterThanOrEqual(0);
+  }
+  expect(depth).toBe(0);
 }
 
 function hasAnsi(text: string): boolean {
@@ -485,8 +498,10 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     }));
 
-    expect(stripAnsi(out)).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
-    expect(stripAnsi(out)).toContain(`${isolateRtl("ثق بمساحة العمل")} `);
+    const plain = stripAnsi(out);
+    expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
+    expect(plain).toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
+    expect(plain).not.toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
@@ -941,6 +956,13 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("/tools");
     expect(out).toContain("Browse runtime tools");
     expect(out).toContain("/status");
+    expect(stripAnsi(out)).not.toContain("│");
+    const top = stripAnsi(out).split("\n").find((line) => line.startsWith("╭"));
+    expect(top).toContain(" v0.0.5  𓂀  sess-9f7a2c1b ");
+    expect(top).not.toContain("─v0.0.5");
+    for (const line of stripAnsi(out).split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
     expect(hasAnsi(out)).toBe(true);
   });
 
@@ -1067,7 +1089,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const top = r.renderStartupDashboard(vm).split("\n").find((line) => stripAnsi(line).startsWith("╭"));
     expect(top).toBeDefined();
     expect(top).toContain("...");
-    expect(top).toMatch(new RegExp(`\\.\\.\\.\\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
+    expect(top).toMatch(new RegExp(`\\.\\.\\. \\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
   });
 
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
@@ -1105,6 +1127,46 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain(isolateLtr("/skills"));
     expect(out).toContain(isolateLtr("/model"));
     expect(out).toContain(isolateLtr("/status"));
+    expect(stripAnsi(out)).not.toContain("│");
+    const plain = stripAnsi(out);
+    expect(plain.indexOf("النموذج")).toBeLessThan(plain.indexOf("ثقة مساحة العمل"));
+    expect(plain.indexOf("ثقة مساحة العمل")).toBeLessThan(plain.indexOf("حالة تحقق مساحة العمل"));
+    expect(plain.indexOf("حالة تحقق مساحة العمل")).toBeLessThan(plain.indexOf("الأوامر التفاعلية:"));
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
+  });
+
+  it("keeps narrow Arabic startup dashboard stacked and bounded", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: narrowCaps(), locale: "ar" });
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research"],
+      version: "v0.0.5",
+      sessionId: "session-id-that-is-long-enough-to-truncate",
+      model: { provider: "openrouter", id: "deepseek-reasoner-with-a-long-name" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace/with/a/long/path",
+      securityMode: "adaptive",
+      skillAutonomy: "proactive",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = stripAnsi(r.renderStartupDashboard(vm));
+
+    expect(out).toContain("...");
+    expect(out).toContain("النموذج");
+    expect(out).toContain("ثقة مساحة العمل");
+    expect(out).toContain("الأوامر التفاعلية:");
+    expect(out).toContain(isolateLtr("v0.0.5"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
   });
 
   it("honors provided startup dashboard commands instead of localized fallbacks", () => {
@@ -1252,10 +1314,30 @@ describe("StandardRenderer — assistant response", () => {
     });
     const out = r.renderAssistantResponse(vm);
     const titleLine = out.split("\n")[1] ?? "";
+    const plain = stripAnsi(out);
 
     expect(titleLine).toContain(ansiFgForHex(tokens.contract.palette.brand));
     expect(stripAnsi(titleLine)).toContain("𓂀  EstaCoda");
+    expect(stripAnsi(titleLine)).toContain(" 𓂀  EstaCoda ");
+    expect(plain).not.toContain("│");
+    expect(plain).toContain("  Hello, body!");
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
     expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, body!`);
+  });
+
+  it("keeps Arabic assistant response text directionally stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "𓂀 إستاكودا",
+      text: "مرحبا يا إدريس",
+    })));
+
+    expect(out).toContain(isolateRtl("𓂀  إستاكودا"));
+    expect(out).toContain(isolateRtl("مرحبا يا إدريس"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
   });
 });
 
@@ -1357,6 +1439,19 @@ describe("StandardRenderer — conversation message", () => {
     expect(out).toContain("Done.");
     expect(out).toContain("skills: search, git");
     expect(out).toContain("progress: plan -> execute");
+  });
+
+  it("keeps Arabic assistant message text directionally stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.renderConversationMessage(buildConversationMessageViewModel({
+      role: "assistant",
+      text: "مرحبا يا إدريس",
+    })));
+
+    expect(out).toContain(isolateRtl("𓂀 إستاكودا"));
+    expect(out).toContain(isolateRtl("مرحبا يا إدريس"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
   });
 
   it("passes through user message text unchanged", () => {
@@ -1487,6 +1582,54 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(status).toContain("\u062e\u0627\u0645\u0644");
     expect(shortcuts).toContain("\u2066/help\u2069");
     expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+  });
+
+  it("renders Arabic session status rail in RTL-friendly order", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "kimi-k2.6",
+      turnState: "idle",
+      contextUsage: { filled: 0, total: 262000 },
+      sessionElapsedMs: 251000,
+    })));
+
+    expect(out).toContain(`خامل | ◷ 4m 11s | ·········· 0% | ${isolateLtr("0/262k")} السياق | ${isolateLtr("kimi-k2.6")}  𓂀`);
+    expect(out.indexOf("خامل")).toBeLessThan(out.indexOf("◷ 4m 11s"));
+    expect(out.indexOf("◷ 4m 11s")).toBeLessThan(out.indexOf(isolateLtr("0/262k")));
+    expect(out.indexOf(isolateLtr("0/262k"))).toBeLessThan(out.indexOf(isolateLtr("kimi-k2.6")));
+    expect(measureVisibleWidth(out)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("wraps Arabic shortcut rail text while isolating command tokens", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
+
+    expect(out).toContain(isolateLtr("/help"));
+    expect(out).toContain(isolateLtr("Ctrl+C"));
+    expect(out).toContain("خروج");
+    expect(out).toContain("\u2067");
+    expect(out).toContain("\u2069");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("keeps truncated Arabic prompt rails bidi-balanced", () => {
+    const caps = { ...fullCaps(), terminalWidth: 48 };
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: caps, locale: "ar" });
+    const status = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "openrouter/kimi-k2.6-with-a-very-long-route-name",
+      turnState: "idle",
+      contextUsage: { filled: 98765, total: 128000 },
+      sessionElapsedMs: 251000,
+    })));
+    const shortcuts = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
+
+    for (const out of [status, shortcuts]) {
+      expect(out.split("\n")).toHaveLength(1);
+      expect(measureVisibleWidth(out)).toBeLessThanOrEqual(caps.terminalWidth);
+      expect(out).toContain("...");
+      expectBalancedBidiIsolates(out);
+    }
   });
 
   it("renders user prompt rail with Unicode bullet and horizontal rule", () => {

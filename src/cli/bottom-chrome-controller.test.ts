@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { BottomChromeController } from "./bottom-chrome-controller.js";
-import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel } from "../ui/view-models/builders.js";
+import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel, buildSlashMenuViewModel, slashMenuOption } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 
@@ -34,6 +34,7 @@ function mockOutput(): { chunks: string[]; stream: NodeJS.WritableStream } {
 function renderViewModel(vm: ViewModel): string {
   if (vm.kind === "sessionStatusRail") return `${vm.modelLabel} | ${vm.turnState}`;
   if (vm.kind === "activeTurnSpinner") return `spinner:${vm.phase ?? "none"}`;
+  if (vm.kind === "slashMenu") return vm.options.map((option) => `${option.label} ${option.description ?? ""}`.trim()).join("\n");
   return `[unsupported ${vm.kind}]`;
 }
 
@@ -49,22 +50,28 @@ function status(text = "model") {
   return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
 }
 
+function slashMenu() {
+  return buildSlashMenuViewModel({
+    query: "/h",
+    options: [slashMenuOption("help", "/help", { description: "Show command help" })],
+    selectedIndex: 0,
+  });
+}
+
 describe("BottomChromeController", () => {
-  it("renders status and fake prompt chrome", () => {
+  it("renders status chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("deepseek"), prompt: { text: "hello", readOnly: true } });
-    expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n"]);
+    ctrl.updateState({ statusRail: status("deepseek") });
+    expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n"]);
   });
 
   it("bounds rendered chrome lines to terminal width", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
-    ctrl.updateState({ statusRail: status("deepseek-reasoner"), prompt: { text: "a very long prompt", readOnly: true } });
+    ctrl.updateState({ statusRail: status("deepseek-reasoner") });
     expect(chunks.join("").split("\n").filter(Boolean)).toEqual([
       "deepseek-...",
-      "────────────",
-      "▸ a very ...",
       "────────────",
     ]);
   });
@@ -81,28 +88,28 @@ describe("BottomChromeController", () => {
   it("writes above chrome by clearing and redrawing around output", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     chunks.length = 0;
     ctrl.writeAboveChromeSync(() => {
       stream.write("tool output\n");
     });
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
+      "\x1b[2A\x1b[1G\x1b[0J",
       "tool output\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("updates transient lines above chrome without redrawing chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
     ctrl.updateTransientLines(["spinner:thinking"]);
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
-      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n",
     ]);
 
     chunks.length = 0;
@@ -111,14 +118,14 @@ describe("BottomChromeController", () => {
 
     ctrl.updateTransientLines(["spinner:tool"]);
     expect(chunks).toEqual([
-      "\x1b7\x1b[5A\x1b[2K\rspinner:tool\x1b8",
+      "\x1b7\x1b[3A\x1b[2K\rspinner:tool\x1b8",
     ]);
   });
 
   it("writes transcript output above transient lines and chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
@@ -127,16 +134,16 @@ describe("BottomChromeController", () => {
     });
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
+      "\x1b[3A\x1b[1G\x1b[0J",
       "tool output\n",
-      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("can clear transient lines while transcript output is being written", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
@@ -146,38 +153,38 @@ describe("BottomChromeController", () => {
     });
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
+      "\x1b[3A\x1b[1G\x1b[0J",
       "tool output\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("clears transient lines while preserving chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
     ctrl.clearTransientLines();
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "\x1b[3A\x1b[1G\x1b[0J",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("patches chrome state in place below transient lines", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
-    ctrl.updateStateInPlace({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateStateInPlace({ statusRail: status("next") });
 
     expect(chunks).toEqual([
-      "\x1b7\x1b[4A\x1b[2K\rnext | idle\x1b[1B\x1b[1B\x1b[1B\x1b8",
+      "\x1b7\x1b[2A\x1b[2K\rnext | idle\x1b[1B\x1b8",
     ]);
   });
 
@@ -258,6 +265,138 @@ describe("BottomChromeController", () => {
     }
   });
 
+  it("grows the managed readline region for transient lines and slash menu chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu() },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2A\x1b[2L\x1b[2K\rpaste preview\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r/help Show command help\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
+  });
+
+  it("clears slash and transient readline chrome when the managed region shrinks", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu() },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[2M\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2A`,
+    ]);
+  });
+
+  it("clears the full managed readline region when no chrome remains", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: {},
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual(["\x1b7\x1b[2A\x1b[2M\x1b8\x1b[2A"]);
+  });
+
+  it("renders paste preview-style transient lines above an active readline prompt", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["line one", "line two"],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2A\x1b[2L\x1b[2K\rline one\x1b[1B\x1b[2K\rline two\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
+  });
+
+  it("accounts for wrapped prompt rows when growing the managed readline region", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("next") },
+      transientLines: ["paste preview"],
+      promptLineCount: 3,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[1L\x1b[2K\rpaste preview\x1b[1B\x1b[2K\rnext | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1B`,
+    ]);
+  });
+
+  it("handles transient line-count changes above readline safely", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["one"],
+      promptLineCount: 1,
+    });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["one", "two"],
+      promptLineCount: 1,
+    });
+    expect(chunks).toEqual([
+      `\x1b7\x1b[3A\x1b[1L\x1b[2K\rone\x1b[1B\x1b[2K\rtwo\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1B`,
+    ]);
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["two"],
+      promptLineCount: 1,
+    });
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[1M\x1b[2K\rtwo\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1A`,
+    ]);
+  });
+
+  it("skips managed readline updates when disabled", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["paste preview"],
+      promptLineCount: 2,
+    });
+
+    expect(chunks).toEqual([]);
+  });
+
   it("skips identical readline redraw frames", () => {
     vi.useFakeTimers();
     try {
@@ -312,7 +451,7 @@ describe("BottomChromeController", () => {
   it("suspends chrome for nested prompts and redraws afterward", async () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     chunks.length = 0;
 
     const answer = await ctrl.suspendForPrompt(async () => {
@@ -322,9 +461,9 @@ describe("BottomChromeController", () => {
 
     expect(answer).toBe("once");
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
+      "\x1b[2A\x1b[1G\x1b[0J",
       "approval card\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
@@ -367,7 +506,7 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("does not redraw suspended prompt chrome after disposal", async () => {
+  it("does not redraw suspended chrome after disposal", async () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -382,8 +521,8 @@ describe("BottomChromeController", () => {
         release = resolve;
       });
 
-      ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
-      ctrl.startTicker(() => ({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } }));
+      ctrl.updateState({ statusRail: status("status") });
+      ctrl.startTicker(() => ({ statusRail: status("next") }));
       chunks.length = 0;
 
       const pending = ctrl.suspendForPrompt(async () => {
@@ -391,7 +530,7 @@ describe("BottomChromeController", () => {
         await blocker;
         return "once";
       });
-      expect(chunks).toEqual(["\x1b[4A\x1b[1G\x1b[0J", "approval card\n"]);
+      expect(chunks).toEqual(["\x1b[2A\x1b[1G\x1b[0J", "approval card\n"]);
 
       chunks.length = 0;
       ctrl.dispose();

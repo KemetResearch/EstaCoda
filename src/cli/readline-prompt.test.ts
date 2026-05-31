@@ -54,9 +54,83 @@ describe("readline prompt UI context", () => {
   });
 });
 
-function captureOutput(): Writable & { text: () => string } {
+describe("readline prompt bracketed paste", () => {
+  it("leaves plain input unchanged", async () => {
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["hello world\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ")).resolves.toBe("hello world");
+  });
+
+  it("preserves manually typed paste marker text", async () => {
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["a ↵ b\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ")).resolves.toBe("a ↵ b");
+  });
+
+  it("restores multiline pasted text in the returned answer", async () => {
+    const seen: Array<{ original: string; displayed: string }> = [];
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["\x1b[200~line 1\nline 2\x1b[201~\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ", {
+      onPastePreview: (original, displayed) => seen.push({ original, displayed }),
+    })).resolves.toBe("line 1\nline 2");
+    expect(seen).toEqual([{ original: "line 1\nline 2", displayed: "line 1 ↵ line 2" }]);
+  });
+
+  it("preserves typed prefix and suffix around a paste", async () => {
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["prefix \x1b[200~a\nb\x1b[201~ suffix\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ")).resolves.toBe("prefix a\nb suffix");
+  });
+
+  it("preserves multiple paste regions", async () => {
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["one \x1b[200~a\nb\x1b[201~ two \x1b[200~c\nd\x1b[201~ three\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ")).resolves.toBe("one a\nb two c\nd three");
+  });
+
+  it("handles split bracket markers", async () => {
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["prefix \x1b[2", "00~a\nb\x1b[20", "1~ suffix\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ")).resolves.toBe("prefix a\nb suffix");
+  });
+
+  it("does not emit paste previews for secret prompts", async () => {
+    const seen: string[] = [];
+    const prompt = createReadlinePrompt({
+      input: ttyInput(["secret-value\n"]),
+      output: captureOutput({ isTTY: true }),
+    });
+
+    await expect(prompt("> ", {
+      secret: true,
+      onPastePreview: (original) => seen.push(original),
+    })).resolves.toBe("secret-value");
+    expect(seen).toEqual([]);
+  });
+});
+
+function captureOutput(options: { isTTY?: boolean } = {}): Writable & { text: () => string } {
   let value = "";
-  return Object.assign(
+  const output = Object.assign(
     new Writable({
       write(chunk, _encoding, callback) {
         value += String(chunk);
@@ -64,5 +138,26 @@ function captureOutput(): Writable & { text: () => string } {
       },
     }),
     { text: () => value }
+  );
+  if (options.isTTY !== undefined) {
+    Object.assign(output, { isTTY: options.isTTY });
+  }
+  return output;
+}
+
+function ttyInput(chunks: string[]): Readable {
+  let isRaw = false;
+  return Object.assign(
+    Readable.from(chunks),
+    {
+      isTTY: true,
+      get isRaw() {
+        return isRaw;
+      },
+      setRawMode(mode: boolean) {
+        isRaw = mode;
+        return this;
+      },
+    }
   );
 }

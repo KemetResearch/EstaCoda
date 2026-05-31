@@ -1,6 +1,6 @@
 // Persistent bottom chrome for interactive CLI turns.
-// Keeps active-turn status/prompt chrome redrawable while transcript output
-// is written above it.
+// Keeps active-turn status chrome redrawable while transcript output is written
+// above it.
 
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type {
@@ -17,10 +17,6 @@ export interface BottomChromeState {
   readonly shortcutRail?: ShortcutHintRailViewModel;
   readonly activeSpinner?: ActiveTurnSpinnerViewModel;
   readonly slashMenu?: SlashMenuViewModel;
-  readonly prompt?: {
-    readonly text: string;
-    readonly readOnly: boolean;
-  };
 }
 
 export interface BottomChromeControllerOptions {
@@ -30,6 +26,12 @@ export interface BottomChromeControllerOptions {
   readonly enabled?: boolean;
   readonly tickMs?: number;
   readonly readlineTickMs?: number;
+}
+
+export interface UpdateManagedRegionAboveReadlineInput {
+  readonly state: BottomChromeState;
+  readonly transientLines: readonly string[];
+  readonly promptLineCount?: number;
 }
 
 export class BottomChromeController {
@@ -189,37 +191,80 @@ export class BottomChromeController {
     this.stopTicker();
     this.#ticker = setInterval(() => {
       if (this.#stateFactory === undefined) return;
-      this.updateStateAboveReadline(this.#stateFactory(), this.#readlinePromptLineCountFactory?.() ?? 1);
+      this.updateManagedRegionAboveReadline({
+        state: this.#stateFactory(),
+        transientLines: this.#transientLines,
+        promptLineCount: this.#readlinePromptLineCountFactory?.() ?? 1,
+      });
     }, this.#readlineTickMs);
   }
 
-  updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
+  updateManagedRegionAboveReadline(input: UpdateManagedRegionAboveReadlineInput): void {
     if (!this.#enabled || this.#disposed) return;
-    this.#currentState = state;
-    const lines = this.#buildChromeLines();
-    if (lines.length === 0) {
-      return;
-    }
-    if (this.#activeLineCount === 0 || this.#activeLineCount !== lines.length) {
-      this.#redraw();
-      return;
-    }
-    if (linesEqual(lines, this.#lastRenderedLines)) {
+    const nextTransientLines = this.#boundedTransientLines(input.transientLines);
+    this.#currentState = input.state;
+    this.#transientLines = nextTransientLines;
+    const nextChromeLines = this.#buildChromeLines();
+    const nextManagedLines = [...nextTransientLines, ...nextChromeLines];
+    const previousManagedLineCount = this.#managedLineCount();
+    const nextManagedLineCount = nextManagedLines.length;
+
+    if (
+      linesEqual(nextTransientLines, this.#lastRenderedTransientLines) &&
+      linesEqual(nextChromeLines, this.#lastRenderedLines)
+    ) {
       return;
     }
 
-    const promptRows = Math.max(1, Math.ceil(promptLineCount));
+    if (previousManagedLineCount === 0 && nextManagedLineCount === 0) {
+      this.#activeLineCount = 0;
+      this.#renderedTransientLineCount = 0;
+      this.#lastRenderedTransientLines = nextTransientLines;
+      this.#lastRenderedLines = nextChromeLines;
+      return;
+    }
+
+    const promptRows = Math.max(1, Math.ceil(input.promptLineCount ?? 1));
+    const lineDelta = nextManagedLineCount - previousManagedLineCount;
     let sequence = "\x1b7";
-    sequence += `\x1b[${this.#activeLineCount + promptRows - 1}A`;
-    for (let index = 0; index < lines.length; index += 1) {
-      sequence += `\x1b[2K\r${lines[index]}`;
-      if (index < lines.length - 1) {
+    const rowsAboveCursor = previousManagedLineCount > 0
+      ? previousManagedLineCount + promptRows - 1
+      : promptRows - 1;
+    if (rowsAboveCursor > 0) {
+      sequence += `\x1b[${rowsAboveCursor}A`;
+    }
+    if (lineDelta > 0) {
+      sequence += `\x1b[${lineDelta}L`;
+    } else if (lineDelta < 0) {
+      sequence += `\x1b[${Math.abs(lineDelta)}M`;
+    }
+
+    for (let index = 0; index < nextManagedLines.length; index += 1) {
+      sequence += `\x1b[2K\r${nextManagedLines[index]}`;
+      if (index < nextManagedLines.length - 1) {
         sequence += "\x1b[1B";
       }
     }
+
     sequence += "\x1b8";
+    if (lineDelta > 0) {
+      sequence += `\x1b[${lineDelta}B`;
+    } else if (lineDelta < 0) {
+      sequence += `\x1b[${Math.abs(lineDelta)}A`;
+    }
     this.#output.write(sequence);
-    this.#lastRenderedLines = lines;
+    this.#renderedTransientLineCount = nextTransientLines.length;
+    this.#activeLineCount = nextChromeLines.length;
+    this.#lastRenderedTransientLines = nextTransientLines;
+    this.#lastRenderedLines = nextChromeLines;
+  }
+
+  updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
+    this.updateManagedRegionAboveReadline({
+      state,
+      transientLines: this.#transientLines,
+      promptLineCount,
+    });
   }
 
   updateStateInPlace(state: BottomChromeState): void {
@@ -257,10 +302,7 @@ export class BottomChromeController {
 
   updateTransientLines(lines: readonly string[]): void {
     if (!this.#enabled || this.#disposed) return;
-    const width = Math.max(1, this.#capabilities.terminalWidth);
-    const nextLines = lines
-      .filter((line) => line.length > 0)
-      .map((line) => truncateVisible(line.replace(/[\r\n]+/gu, " "), width));
+    const nextLines = this.#boundedTransientLines(lines);
     this.#transientLines = nextLines;
     if (linesEqual(nextLines, this.#lastRenderedTransientLines)) {
       return;
@@ -353,6 +395,13 @@ export class BottomChromeController {
     return this.#renderedTransientLineCount + this.#activeLineCount;
   }
 
+  #boundedTransientLines(lines: readonly string[]): string[] {
+    const width = Math.max(1, this.#capabilities.terminalWidth);
+    return lines
+      .filter((line) => line.length > 0)
+      .map((line) => truncateVisible(line.replace(/[\r\n]+/gu, " "), width));
+  }
+
   #buildChromeLines(): string[] {
     const width = Math.max(1, this.#capabilities.terminalWidth);
     const lines: string[] = [];
@@ -370,11 +419,7 @@ export class BottomChromeController {
       lines.push(...this.#boundedLines(this.#renderViewModel(this.#currentState.slashMenu), width));
     }
 
-    if (this.#currentState.prompt !== undefined) {
-      lines.push(this.#horizontalRule(width));
-      lines.push(this.#promptLine(this.#currentState.prompt.text, width));
-      lines.push(this.#horizontalRule(width));
-    } else if (
+    if (
       this.#currentState.statusRail !== undefined ||
       this.#currentState.shortcutRail !== undefined ||
       this.#currentState.slashMenu !== undefined
@@ -395,11 +440,6 @@ export class BottomChromeController {
   #horizontalRule(width: number): string {
     const fill = this.#capabilities.supportsUnicode ? "─" : "-";
     return fill.repeat(width);
-  }
-
-  #promptLine(text: string, width: number): string {
-    const prompt = this.#capabilities.supportsUnicode ? "▸" : ">";
-    return truncateVisible(`${prompt} ${text}`, width);
   }
 }
 

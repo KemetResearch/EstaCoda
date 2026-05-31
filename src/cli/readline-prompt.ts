@@ -2,6 +2,7 @@ import { createInterface as createCallbackInterface } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
+import { PasteInterceptor, disableBracketedPaste, enableBracketedPaste } from "./paste-interceptor.js";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { createSessionRenderer } from "./session-renderer.js";
@@ -13,6 +14,8 @@ import {
 export type PromptOptions = {
   secret?: boolean;
   onRowsChange?: (rows: number) => void;
+  onPastePreview?: (original: string, displayed: string) => void;
+  onInputChange?: (line: string) => void;
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
@@ -103,14 +106,18 @@ export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): bool
 async function plainQuestion(input: Readable, output: Writable, question: string, options?: PromptOptions): Promise<string> {
   const isTty = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
   if (isTty && options?.onRowsChange !== undefined) {
-    return trackedQuestion(input, output, question, options.onRowsChange);
+    return trackedQuestion(input, output, question, options.onRowsChange, options);
   }
 
-  const readline = createPromptInterface({ input, output });
+  const pasteSession = createPastePromptSession(input, output, isTty, options);
+  const readline = createPromptInterface({ input: pasteSession.input, output, terminal: isTty });
+  const inputTracking = startInputChangeTracking(readline, isTty, options);
   try {
-    return await readline.question(question);
+    return pasteSession.restore(await readline.question(question));
   } finally {
+    inputTracking.stop();
     readline.close();
+    pasteSession.close();
   }
 }
 
@@ -118,10 +125,13 @@ async function trackedQuestion(
   input: Readable,
   output: Writable,
   question: string,
-  onRowsChange: (rows: number) => void
+  onRowsChange: (rows: number) => void,
+  options?: PromptOptions
 ): Promise<string> {
   return await new Promise<string>((resolve) => {
-    const readline = createCallbackInterface({ input, output, terminal: true });
+    const pasteSession = createPastePromptSession(input, output, true, options);
+    const readline = createCallbackInterface({ input: pasteSession.input, output, terminal: true });
+    const inputTracking = startInputChangeTracking(readline, true, options);
     const mutable = readline as unknown as {
       _writeToOutput?: (value: string) => void;
       getCursorPos?: () => { rows: number; cols: number };
@@ -135,15 +145,94 @@ async function trackedQuestion(
       mutable._writeToOutput = (value: string) => {
         originalWrite(value);
         reportRows();
+        inputTracking.report();
       };
     }
     readline.question(question, (answer) => {
       onRowsChange(1);
+      inputTracking.stop();
       readline.close();
-      resolve(answer);
+      const restored = pasteSession.restore(answer);
+      pasteSession.close();
+      resolve(restored);
     });
     reportRows();
   });
+}
+
+function startInputChangeTracking(
+  readline: unknown,
+  enabled: boolean,
+  options?: PromptOptions
+): { report: () => void; stop: () => void } {
+  if (!enabled || options?.onInputChange === undefined) {
+    return { report: () => undefined, stop: () => undefined };
+  }
+  let lastLine: string | undefined;
+  const readableLine = readline as { line?: string };
+  const report = () => {
+    const line = readableLine.line ?? "";
+    if (line === lastLine) return;
+    lastLine = line;
+    options.onInputChange?.(line);
+  };
+  const interval = setInterval(report, 100);
+  interval.unref?.();
+  return { report, stop: () => clearInterval(interval) };
+}
+
+type PastePromptSession = {
+  readonly input: Readable;
+  restore(answer: string): string;
+  close(): void;
+};
+
+function createPastePromptSession(
+  input: Readable,
+  output: Writable,
+  enabled: boolean,
+  options?: PromptOptions
+): PastePromptSession {
+  if (!enabled) {
+    return {
+      input,
+      restore: (answer) => answer,
+      close: () => undefined,
+    };
+  }
+
+  const interceptor = new PasteInterceptor({ onPaste: options?.onPastePreview });
+  const readlineInput = makeReadlineInput(interceptor, input);
+  input.pipe(interceptor);
+  enableBracketedPaste(output as NodeJS.WritableStream);
+
+  let closed = false;
+  return {
+    input: readlineInput,
+    restore: (answer) => interceptor.restore(answer),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      input.unpipe(interceptor);
+      disableBracketedPaste(output as NodeJS.WritableStream);
+      interceptor.destroy();
+    },
+  };
+}
+
+function makeReadlineInput(interceptor: PasteInterceptor, source: Readable): Readable {
+  const readlineInput = interceptor as Readable & {
+    isTTY?: boolean;
+    isRaw?: boolean;
+    setRawMode?: (mode: boolean) => unknown;
+  };
+  const sourceTty = source as NodeJS.ReadStream;
+  readlineInput.isTTY = sourceTty.isTTY;
+  readlineInput.isRaw = sourceTty.isRaw;
+  if (typeof sourceTty.setRawMode === "function") {
+    readlineInput.setRawMode = (mode: boolean) => sourceTty.setRawMode(mode);
+  }
+  return readlineInput;
 }
 
 async function hiddenQuestion(input: Readable, output: Writable, question: string): Promise<string> {

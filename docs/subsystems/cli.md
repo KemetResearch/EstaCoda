@@ -10,10 +10,14 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | File | Lines | Role |
 |------|-------|------|
 | `src/cli/cli.ts` | ~2,600 | CLI command surface and dispatch |
-| `src/cli/session-loop.ts` | 906 | Interactive terminal loop |
+| `src/cli/session-loop.ts` | ~2,650 | Interactive terminal loop |
 | `src/cli/cli-session-store.ts` | ~120 | Persisted active session pointer |
 | `src/cli/one-shot.ts` | ~140 | One-shot prompt execution |
-| `src/cli/slash-menu.ts` | ~180 | Slash command menu rendering |
+| `src/cli/readline-prompt.ts` | ~270 | Readline-backed idle prompt |
+| `src/cli/paste-interceptor.ts` | ~205 | Bracketed paste interception and newline restoration |
+| `src/cli/bottom-chrome-controller.ts` | ~455 | Managed terminal chrome below/above prompt regions |
+| `src/cli/active-turn-command-controller.ts` | ~150 | CLI-local active-turn command lane |
+| `src/cli/slash-menu.ts` | ~265 | Slash command menu rendering |
 | `src/cli/tool-activity-renderer.ts` | ~160 | Tool activity display |
 | `src/cli/trace-commands.ts` | ~275 | `estacoda trace` commands |
 | `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
@@ -163,6 +167,40 @@ In-session commands:
 | `/exit` | Exit session |
 
 Interactive `/compact [topic]` is semantic session compression for the current session, but it is non-rotating in this implementation. Gateway `/compact` has separate adoption logic and can preserve the parent transcript by switching the channel to a compacted child session.
+
+### Readline Prompt And Active-Turn Controls
+
+The idle CLI prompt is real readline input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
+
+Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Multiline paste is made readline-safe by displaying a visible single-line marker in the prompt row, previewing the pasted text as multiline transient chrome above the prompt, and restoring real `\n` characters in the submitted answer. The returned prompt text is the intended user text, not the visible prompt marker. Secret prompts do not emit paste previews or live slash hints; pasted secret content must not be mirrored into transient chrome.
+
+Shortcut hints are shown in managed bottom chrome while the idle input line is empty. They disappear as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Submitted slash command behavior still uses the normal command registry and handler path. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+
+Arabic setup chrome is direction-aware for localized setup selectors, rails, and onboarding summaries. Raw setup string prompts remain a follow-up RTL surface; do not describe this as full runtime Arabic localization.
+
+After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, tool activity, approval/setup output, and transient command-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+
+While `runtime.handle()` is active in a local interactive CLI session, a separate command lane watches active-turn keypresses. It starts buffering only when the first typed character is `/`; ordinary typing during an active turn is ignored and is not recorded as a user message.
+
+Active-turn commands:
+
+| Command | Behavior |
+|---------|----------|
+| `/interrupt` | Aborts the current active turn with `CLI interrupt`. It does not retry. |
+| `/steer <note>` | Aborts the current active turn with `CLI steer`, then queues one retry using the original submitted text plus an explicit steering note block. |
+
+`/steer` V1 is abort-and-retry steering. It is not true in-flight provider steering, and it does not add a runtime/provider steering primitive. The retried text is inspectable:
+
+```text
+<original user text>
+
+[Steering note while previous turn was interrupted]
+<note>
+```
+
+An empty `/steer` shows usage and does not abort. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.
+
+Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, bottom chrome line accounting, active-turn commands, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
 
 ### In-Session Model Switching
 

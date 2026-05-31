@@ -17,7 +17,7 @@ import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import { createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import { createReadlinePrompt, type Prompt, type PromptOptions } from "./readline-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -34,6 +34,7 @@ import {
   buildAssistantResponseViewModel,
   buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
+  buildShortcutHintRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
@@ -41,9 +42,9 @@ import { createSessionRenderer, type SessionRenderer } from "./session-renderer.
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { measureVisibleWidth } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -58,6 +59,7 @@ import {
   type CliVoiceRecorder,
   type CliVoiceMode
 } from "./voice-mode.js";
+import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -386,8 +388,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
   const prompt = options.prompt ?? createReadlinePrompt({
-    input: options.input as NodeJS.ReadStream | undefined ?? defaultInput,
+    input: cliInput,
     output: output as NodeJS.WriteStream,
     uiContext: promptUiContextForLocale(renderer.locale),
   });
@@ -458,7 +461,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const startupVm = await buildSessionStartupViewModel(runtime);
     const startupText = renderer.render(startupVm);
     output.write(`${startupText}\n\n`);
-    output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
+    if (!bottomChrome.enabled) {
+      output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
+    }
 
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
@@ -479,14 +484,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       let livePromptRows = 1;
-      if (bottomChrome.enabled) {
-        const idleBottomState = () => buildBottomChromeState({
-          runtime,
-          renderer,
-          slashMenu: pendingSlashCompletion,
-          contextUsage: latestContextUsage,
-          timing: railTiming()
+      let readlineTransientLines: readonly string[] = [];
+      let currentInputLine = "";
+      const idleShortcutRail = (): ShortcutHintRailViewModel | undefined =>
+        bottomChrome.enabled && currentInputLine.length === 0 && pendingSlashCompletion === undefined
+          ? buildShortcutHintRailViewModel({ hints: [] })
+          : undefined;
+      const idleBottomState = () => buildBottomChromeState({
+        runtime,
+        renderer,
+        slashMenu: pendingSlashCompletion,
+        shortcutRail: idleShortcutRail(),
+        contextUsage: latestContextUsage,
+        timing: railTiming()
+      });
+      const redrawIdleReadlineChrome = () => {
+        if (!bottomChrome.enabled) return;
+        bottomChrome.updateManagedRegionAboveReadline({
+          state: idleBottomState(),
+          transientLines: readlineTransientLines,
+          promptLineCount: livePromptRows
         });
+      };
+      if (bottomChrome.enabled) {
         bottomChrome.updateState(idleBottomState());
         bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
       } else if (chrome.enabled) {
@@ -514,10 +534,23 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         onPromptResolved: () => {
           if (bottomChrome.enabled) {
             bottomChrome.stopTicker();
+            readlineTransientLines = [];
+            redrawIdleReadlineChrome();
           }
         },
         onPromptRowsChange: (rows) => {
           livePromptRows = rows;
+        },
+        onInputChange: (line) => {
+          currentInputLine = line;
+          pendingSlashCompletion = line.startsWith("/")
+            ? buildSlashCompletionViewModel(runtime, line)
+            : undefined;
+          redrawIdleReadlineChrome();
+        },
+        onPastePreview: (original) => {
+          readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
+          redrawIdleReadlineChrome();
         }
       });
       const text = submittedInput.text;
@@ -608,6 +641,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
       let retryText: string | undefined = text;
       let wroteUserPromptRail = false;
+      let pendingSteeringNote: string | undefined;
+      let steeringRetryUsed = false;
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         const turnStartedAtMs = now();
@@ -618,15 +653,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
         let bottomChromeTranscriptSpinnerTicker: ReturnType<typeof setInterval> | undefined;
         let bottomChromeActiveChromeTicker: ReturnType<typeof setInterval> | undefined;
-        let bottomChromeTranscriptSpinnerPhase: string | undefined;
+        let bottomChromeTransientSpinnerLines: readonly string[] = [];
+        let activeTurnCommandLine: string | undefined;
+        let activeTurnCommandStatusLine: string | undefined;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
+        let activeTurnCommandController: ActiveTurnCommandController | undefined;
         const runningBottomState = () => buildBottomChromeState({
           runtime,
           renderer,
           contextUsage: latestContextUsage,
-          timing: railTiming(),
-          promptText: text
+          timing: railTiming()
         });
 
         currentAnimator = new ToolActivityAnimator({
@@ -646,17 +683,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           && !renderer.capabilities.isCI
           && !renderer.capabilities.isDumb;
 
-        const stopBottomChromeTranscriptSpinner = () => {
+        const activeTurnCommandLines = () => [
+          activeTurnCommandLine ?? activeTurnCommandStatusLine,
+        ].filter((line): line is string => line !== undefined);
+
+        const updateActiveTurnTransientLines = () => {
+          if (!bottomChrome.enabled) return;
+          bottomChrome.updateTransientLines([
+            ...activeTurnCommandLines(),
+            ...bottomChromeTransientSpinnerLines,
+          ]);
+        };
+
+        const stopBottomChromeTransientSpinner = () => {
           if (bottomChromeTranscriptSpinnerTicker !== undefined) {
             clearInterval(bottomChromeTranscriptSpinnerTicker);
             bottomChromeTranscriptSpinnerTicker = undefined;
           }
-          bottomChromeTranscriptSpinnerPhase = undefined;
-          bottomChrome.clearTransientLines();
+          bottomChromeTransientSpinnerLines = [];
+          updateActiveTurnTransientLines();
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.lastOutputWasSpinner = false;
         };
-        clearBottomChromeTranscriptSpinner = stopBottomChromeTranscriptSpinner;
+        clearBottomChromeTranscriptSpinner = stopBottomChromeTransientSpinner;
 
         const stopBottomChromeActiveChromeTicker = () => {
           if (bottomChromeActiveChromeTicker !== undefined) {
@@ -666,19 +715,19 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const renderBottomChromeTranscriptSpinnerFrame = () => {
-          if (!bottomChrome.enabled || bottomChromeTranscriptSpinnerPhase === undefined) {
+          if (!bottomChrome.enabled || currentPhase === undefined) {
             return;
           }
-          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: bottomChromeTranscriptSpinnerPhase }));
-          const spinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
-          bottomChrome.updateTransientLines(spinnerLines);
+          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: currentPhase }));
+          bottomChromeTransientSpinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
+          updateActiveTurnTransientLines();
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.hasOutput = true;
           turnOutput.lastOutputWasSpinner = true;
         };
 
         const startBottomChromeTranscriptSpinner = (phase: string) => {
-          bottomChromeTranscriptSpinnerPhase = phase;
+          currentPhase = phase;
           renderBottomChromeTranscriptSpinnerFrame();
           if (!supportsBottomChromeTranscriptSpinnerAnimation || bottomChromeTranscriptSpinnerTicker !== undefined) {
             return;
@@ -722,7 +771,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const clearSpinner = () => {
           if (bottomChrome.enabled) {
             stopBottomChromeActiveChromeTicker();
-            stopBottomChromeTranscriptSpinner();
+            stopBottomChromeTransientSpinner();
             currentPhase = undefined;
           } else if (chrome.enabled) {
             chrome.clearInlineSpinner();
@@ -750,7 +799,36 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           output.write("\n");
         }
 
-        const response = await runtime.handle({
+        activeTurnCommandController = new ActiveTurnCommandController({
+          input: cliInput,
+          enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+          onCommandLaneChange: (line) => {
+            activeTurnCommandLine = line;
+            if (line !== undefined) {
+              activeTurnCommandStatusLine = undefined;
+            }
+            updateActiveTurnTransientLines();
+          },
+          onStatusMessage: (message) => {
+            activeTurnCommandStatusLine = `active command: ${message}`;
+            updateActiveTurnTransientLines();
+          },
+          onInterrupt: () => {
+            activeTurn?.abort("CLI interrupt");
+          },
+          onSteer: (note) => {
+            if (steeringRetryUsed || pendingSteeringNote !== undefined) {
+              activeTurnCommandStatusLine = "active command: Steering already queued for this turn.";
+              updateActiveTurnTransientLines();
+              return;
+            }
+            pendingSteeringNote = note;
+            activeTurnCommandStatusLine = "active command: Steering note queued; interrupting turn.";
+            updateActiveTurnTransientLines();
+            activeTurn?.abort("CLI steer");
+          },
+        });
+        const responsePromise = runtime.handle({
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
@@ -789,12 +867,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           .finally(() => {
             activeTurn = undefined;
             activeTurnStartedAtMs = undefined;
+            activeTurnCommandController?.dispose();
+            activeTurnCommandController = undefined;
+            activeTurnCommandLine = undefined;
+            activeTurnCommandStatusLine = undefined;
             clearSpinner();
             currentAnimator?.dispose();
             currentAnimator = undefined;
             clearBottomChromeTranscriptSpinner = () => undefined;
             clearActiveTurnChrome = () => undefined;
           });
+        activeTurnCommandController.start();
+        const response = await responsePromise;
         if (pendingCompactionPostTokens !== undefined) {
           applyCompactionRailReset(pendingCompactionPostTokens);
           pendingCompactionPostTokens = undefined;
@@ -807,9 +891,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming(),
-            promptText: turnWasCancelled ? undefined : text
+            timing: railTiming()
           }));
+        }
+
+        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+          const steeringNote = pendingSteeringNote;
+          pendingSteeringNote = undefined;
+          steeringRetryUsed = true;
+          retryText = buildSteeredRetryText(text, steeringNote);
+          continue;
         }
 
         const assistantVm = buildAssistantResponseViewModel({
@@ -918,10 +1009,17 @@ async function readNextCliInput(input: {
   cliVoice?: SessionLoopOptions["cliVoice"];
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
+  onInputChange?: (line: string) => void;
+  onPastePreview?: (original: string, displayed: string) => void;
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
     const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
-    const rawText = await input.prompt(echoedPromptPrefix, { onRowsChange: input.onPromptRowsChange });
+    const promptOptions: PromptOptions = {
+      onRowsChange: input.onPromptRowsChange,
+      onInputChange: input.onInputChange,
+      onPastePreview: input.onPastePreview,
+    };
+    const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
     const text = rawText.trim();
     return {
@@ -1028,6 +1126,20 @@ function submittedPromptLineCount(
   const terminalWidth = Math.max(1, capabilities.terminalWidth);
   const visibleWidth = measureVisibleWidth(`${submittedInput.echoedPromptPrefix}${submittedInput.echoedText}`);
   return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
+}
+
+function buildPastePreviewLines(original: string, terminalWidth: number): string[] {
+  const width = Math.max(1, terminalWidth);
+  const lines = original.split(/\r\n|\r|\n/u);
+  const previewLines = lines.slice(0, 3);
+  if (lines.length > previewLines.length) {
+    previewLines.push("...");
+  }
+  return previewLines.flatMap((line) => wrapText(line, width));
+}
+
+function buildSteeredRetryText(originalText: string, note: string): string {
+  return `${originalText}\n\n[Steering note while previous turn was interrupted]\n${note}`;
 }
 
 async function playCliResponseIfEnabled(input: {
@@ -2473,9 +2585,9 @@ function buildBottomChromeState(input: {
   runtime: Runtime;
   renderer: SessionRenderer;
   slashMenu?: SlashMenuViewModel;
+  shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
-  promptText?: string;
 }): BottomChromeState {
   const chromeState = buildPromptChromeState(
     input.runtime,
@@ -2488,10 +2600,8 @@ function buildBottomChromeState(input: {
   return {
     statusRail: chromeState.statusRail,
     activeSpinner: chromeState.activeSpinner,
+    shortcutRail: input.slashMenu === undefined ? input.shortcutRail : undefined,
     slashMenu: chromeState.slashMenu,
-    prompt: input.promptText === undefined
-      ? undefined
-      : { text: input.promptText, readOnly: true }
   };
 }
 
