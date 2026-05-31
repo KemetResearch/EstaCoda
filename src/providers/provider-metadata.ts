@@ -8,10 +8,9 @@ import type {
 
 export type ChatMaxTokenParam = "max_tokens" | "max_completion_tokens";
 
-export type ReasoningEchoField =
-  | "reasoning_content"
-  | "reasoning"
-  | "reasoning_details";
+export type ReasoningEchoField = "reasoning_content";
+
+export type ReasoningEchoProviderFamily = "deepseek" | "kimi" | "mimo";
 
 export type ProviderVisibility = {
   modelPicker: boolean;
@@ -34,7 +33,12 @@ export type ProviderMetadata = {
   allowsCustomBaseUrl: boolean;
   requiresModelSelection: boolean;
   chatMaxTokenParam?: ChatMaxTokenParam;
+  supportsNativeToolHistory?: boolean;
+  requiresReasoningEcho?: boolean;
   reasoningEchoField?: ReasoningEchoField;
+  reasoningEchoRequiredForToolCalls?: boolean;
+  reasoningEchoProviderFamily?: ReasoningEchoProviderFamily;
+  allowReasoningEchoPlaceholder?: boolean;
 };
 
 const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
@@ -55,7 +59,8 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,
-    requiresModelSelection: true
+    requiresModelSelection: true,
+    supportsNativeToolHistory: true
   },
   deepseek: {
     id: "deepseek",
@@ -74,7 +79,12 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,
-    requiresModelSelection: true
+    requiresModelSelection: true,
+    supportsNativeToolHistory: true,
+    requiresReasoningEcho: true,
+    reasoningEchoField: "reasoning_content",
+    reasoningEchoRequiredForToolCalls: true,
+    reasoningEchoProviderFamily: "deepseek"
   },
   kimi: {
     id: "kimi",
@@ -93,7 +103,12 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,
-    requiresModelSelection: true
+    requiresModelSelection: true,
+    supportsNativeToolHistory: true,
+    requiresReasoningEcho: true,
+    reasoningEchoField: "reasoning_content",
+    reasoningEchoRequiredForToolCalls: true,
+    reasoningEchoProviderFamily: "kimi"
   },
   google: {
     id: "google",
@@ -410,8 +425,14 @@ export function buildResolvedModelRoute(options: {
     contextWindowTokens: options.contextWindowTokens,
     maxTokens: options.maxTokens,
     apiMode: options.apiMode ?? metadata.apiMode,
-    authMethod: options.authMethod ?? metadata.defaultAuthMethod
-  };
+    authMethod: options.authMethod ?? metadata.defaultAuthMethod,
+    supportsNativeToolHistory: metadata.supportsNativeToolHistory,
+    requiresReasoningEcho: metadata.requiresReasoningEcho,
+    reasoningEchoField: metadata.reasoningEchoField,
+    reasoningEchoRequiredForToolCalls: metadata.reasoningEchoRequiredForToolCalls,
+    reasoningEchoProviderFamily: metadata.reasoningEchoProviderFamily,
+    allowReasoningEchoPlaceholder: metadata.allowReasoningEchoPlaceholder
+  } as ResolvedModelRoute;
 }
 
 /**
