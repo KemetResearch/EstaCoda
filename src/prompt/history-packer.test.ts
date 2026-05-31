@@ -308,6 +308,39 @@ describe("packSessionHistory", () => {
     ]);
   });
 
+  it("keeps fixed protected-message packing behavior separate from native history selection", () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({
+      id: `a${index + 1}`,
+      sessionId: "s",
+      role: "agent" as const,
+      content: `Agent turn ${index + 1}`,
+      metadata: index === 0
+        ? {
+            kind: "provider-tool-call-turn",
+            nativeReplaySafe: true,
+            providerToolCalls: [
+              {
+                id: "call-old",
+                name: "files.read",
+                argumentsText: "{\"path\":\"src/index.ts\"}"
+              }
+            ]
+          }
+        : undefined
+    }));
+
+    const packed = packSessionHistory(messages, {
+      maxProtectedMessages: 2,
+      maxEstimatedTokens: 2_000
+    });
+
+    expect(packed.protectedMessageCount).toBe(2);
+    expect(packed.summarizedMessageCount).toBe(6);
+    expect(packed.messages).toHaveLength(3);
+    expect(packed.messages.at(-2)?.content).toBe("Agent turn 7");
+    expect(packed.messages.at(-1)?.content).toBe("Agent turn 8");
+  });
+
   it("strips hidden reasoning blocks from protected history messages", () => {
     const packed = packSessionHistory([
       {
