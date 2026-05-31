@@ -33,12 +33,15 @@ import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../con
 import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { stableToolCallId } from "../tools/tool-call-planner.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
+
+const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -315,6 +318,10 @@ export class ProviderTurnLoop {
           iteration += consumedProviderIterations - 1;
         }
         break;
+      }
+
+      if (execution.ok === true && execution.toolCalls.length > 0) {
+        execution = await this.#persistProviderToolCallTurn(execution);
       }
 
       const beforeExecutions = providerToolExecutions.length;
@@ -1013,6 +1020,132 @@ export class ProviderTurnLoop {
   #currentSessionId(): string {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
+
+  async #persistProviderToolCallTurn(execution: ProviderExecutionResult): Promise<ProviderExecutionResult> {
+    if (execution.response === undefined) {
+      return execution;
+    }
+
+    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({
+      ...toolCall,
+      id: toolCall.id ?? stableToolCallId(toolCall)
+    }));
+    const secretIndexes = new Set<number>();
+    normalizedToolCalls.forEach((toolCall, index) => {
+      if (containsSensitiveToolArguments(toolCall.argumentsText)) {
+        secretIndexes.add(index);
+      }
+    });
+
+    const echoEligibility = providerReplayEchoEligibility(execution);
+    const echoValue = execution.response.reasoning;
+    const echoMissing = echoEligibility.required && (typeof echoValue !== "string" || echoValue.length === 0);
+    const echoOversized = echoEligibility.required &&
+      typeof echoValue === "string" &&
+      echoValue.length > MAX_PROVIDER_REPLAY_ECHO_CHARS;
+    const nativeReplaySafe = secretIndexes.size === 0 && !echoMissing && !echoOversized;
+    const providerToolCalls = normalizedToolCalls.map((toolCall, index) => ({
+      id: toolCall.id!,
+      name: toolCall.name ?? "",
+      ...(!nativeReplaySafe
+        ? (secretIndexes.has(index) ? { argumentsRedacted: true as const } : {})
+        : toolCall.argumentsText === undefined ? {} : { argumentsText: toolCall.argumentsText })
+    }));
+    const providerReplayEcho = nativeReplaySafe &&
+      echoEligibility.required &&
+      echoEligibility.providerFamily !== undefined &&
+      typeof echoValue === "string"
+      ? {
+          field: "reasoning_content" as const,
+          value: echoValue,
+          providerFamily: echoEligibility.providerFamily,
+          apiMode: "openai_chat_completions" as const,
+          chars: echoValue.length
+        }
+      : undefined;
+
+    await this.#sessionDb.appendMessage({
+      sessionId: this.#currentSessionId(),
+      role: "agent",
+      content: execution.response.content,
+      metadata: {
+        kind: "provider-tool-call-turn",
+        nativeReplaySafe,
+        providerToolCalls,
+        provider: execution.response.provider,
+        model: execution.response.model,
+        ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole }),
+        ...(execution.attemptedRouteIndex === undefined ? {} : { attemptedRouteIndex: execution.attemptedRouteIndex }),
+        ...(execution.response.reasoningMetadata === undefined ? {} : { reasoningMetadata: execution.response.reasoningMetadata }),
+        ...(providerReplayEcho === undefined ? {} : { providerReplayEcho })
+      }
+    });
+
+    return {
+      ...execution,
+      toolCalls: normalizedToolCalls
+    };
+  }
+}
+
+function containsSensitiveToolArguments(argumentsText: string | undefined): boolean {
+  if (argumentsText === undefined || argumentsText.length === 0) {
+    return false;
+  }
+
+  return SENSITIVE_ARGUMENT_PATTERNS.some((pattern) => pattern.test(argumentsText));
+}
+
+const SENSITIVE_ARGUMENT_PATTERNS = [
+  /["']?\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|passwd|secret|authorization)\b["']?\s*[:=]/iu,
+  /\bauthorization\b\s*[:=]\s*["']?(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+/iu,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]+/iu,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/u,
+  /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|KIMI_API_KEY|OPENROUTER_API_KEY|GOOGLE_API_KEY)\b/u,
+  /\b(?:sk-proj-|sk-ant-|sk-|ghp_|github_pat_)[A-Za-z0-9_\-]+/u
+];
+
+function providerReplayEchoEligibility(execution: ProviderExecutionResult): {
+  required: boolean;
+  providerFamily?: "deepseek" | "kimi" | "mimo";
+} {
+  const route = execution.route;
+  if (route === undefined || route.apiMode !== "openai_chat_completions" || route.profile.supportsTools !== true) {
+    return { required: false };
+  }
+
+  const metadata = route as ResolvedModelRoute & {
+    supportsNativeToolHistory?: boolean;
+    requiresReasoningEcho?: boolean;
+    reasoningEchoField?: "reasoning_content" | "reasoning";
+    reasoningEchoRequiredForToolCalls?: boolean;
+    reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+  };
+
+  if (
+    metadata.supportsNativeToolHistory !== true ||
+    metadata.requiresReasoningEcho !== true ||
+    metadata.reasoningEchoField !== "reasoning_content" ||
+    metadata.reasoningEchoRequiredForToolCalls !== true
+  ) {
+    return { required: false };
+  }
+
+  const providerFamily = metadata.reasoningEchoProviderFamily ?? inferReasoningEchoProviderFamily(route.provider, route.id);
+  return providerFamily === undefined
+    ? { required: false }
+    : { required: true, providerFamily };
+}
+
+function inferReasoningEchoProviderFamily(
+  provider: string,
+  model: string
+): "deepseek" | "kimi" | "mimo" | undefined {
+  const haystack = `${provider} ${model}`.toLowerCase();
+  if (haystack.includes("deepseek")) return "deepseek";
+  if (haystack.includes("kimi") || haystack.includes("moonshot")) return "kimi";
+  if (haystack.includes("mimo") || haystack.includes("xiaomi")) return "mimo";
+  return undefined;
 }
 
 function semanticCompressionNotice(messages: ReadonlyArray<SessionMessage | ReplacementSessionMessage>): string | undefined {
