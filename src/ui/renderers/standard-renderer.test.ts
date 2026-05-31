@@ -956,6 +956,13 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("/tools");
     expect(out).toContain("Browse runtime tools");
     expect(out).toContain("/status");
+    expect(stripAnsi(out)).not.toContain("│");
+    const top = stripAnsi(out).split("\n").find((line) => line.startsWith("╭"));
+    expect(top).toContain(" v0.0.5  𓂀  sess-9f7a2c1b ");
+    expect(top).not.toContain("─v0.0.5");
+    for (const line of stripAnsi(out).split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
     expect(hasAnsi(out)).toBe(true);
   });
 
@@ -1082,7 +1089,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const top = r.renderStartupDashboard(vm).split("\n").find((line) => stripAnsi(line).startsWith("╭"));
     expect(top).toBeDefined();
     expect(top).toContain("...");
-    expect(top).toMatch(new RegExp(`\\.\\.\\.\\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
+    expect(top).toMatch(new RegExp(`\\.\\.\\. \\x1b\\[0m\\x1b\\[0m${escapeRegExp(ansiFgForHex(tokens.contract.surface.border))}─*╮`));
   });
 
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
@@ -1120,6 +1127,46 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain(isolateLtr("/skills"));
     expect(out).toContain(isolateLtr("/model"));
     expect(out).toContain(isolateLtr("/status"));
+    expect(stripAnsi(out)).not.toContain("│");
+    const plain = stripAnsi(out);
+    expect(plain.indexOf("النموذج")).toBeLessThan(plain.indexOf("ثقة مساحة العمل"));
+    expect(plain.indexOf("ثقة مساحة العمل")).toBeLessThan(plain.indexOf("حالة تحقق مساحة العمل"));
+    expect(plain.indexOf("حالة تحقق مساحة العمل")).toBeLessThan(plain.indexOf("الأوامر التفاعلية:"));
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
+  });
+
+  it("keeps narrow Arabic startup dashboard stacked and bounded", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: narrowCaps(), locale: "ar" });
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: ["Kemet Research"],
+      version: "v0.0.5",
+      sessionId: "session-id-that-is-long-enough-to-truncate",
+      model: { provider: "openrouter", id: "deepseek-reasoner-with-a-long-name" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/workspace/with/a/long/path",
+      securityMode: "adaptive",
+      skillAutonomy: "proactive",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    });
+    const out = stripAnsi(r.renderStartupDashboard(vm));
+
+    expect(out).toContain("...");
+    expect(out).toContain("النموذج");
+    expect(out).toContain("ثقة مساحة العمل");
+    expect(out).toContain("الأوامر التفاعلية:");
+    expect(out).toContain(isolateLtr("v0.0.5"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
   });
 
   it("honors provided startup dashboard commands instead of localized fallbacks", () => {
@@ -1267,10 +1314,30 @@ describe("StandardRenderer — assistant response", () => {
     });
     const out = r.renderAssistantResponse(vm);
     const titleLine = out.split("\n")[1] ?? "";
+    const plain = stripAnsi(out);
 
     expect(titleLine).toContain(ansiFgForHex(tokens.contract.palette.brand));
     expect(stripAnsi(titleLine)).toContain("𓂀  EstaCoda");
+    expect(stripAnsi(titleLine)).toContain(" 𓂀  EstaCoda ");
+    expect(plain).not.toContain("│");
+    expect(plain).toContain("  Hello, body!");
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
     expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, body!`);
+  });
+
+  it("keeps Arabic assistant response text directionally stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "𓂀 إستاكودا",
+      text: "مرحبا يا إدريس",
+    })));
+
+    expect(out).toContain(isolateRtl("𓂀  إستاكودا"));
+    expect(out).toContain(isolateRtl("مرحبا يا إدريس"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
   });
 });
 
@@ -1372,6 +1439,19 @@ describe("StandardRenderer — conversation message", () => {
     expect(out).toContain("Done.");
     expect(out).toContain("skills: search, git");
     expect(out).toContain("progress: plan -> execute");
+  });
+
+  it("keeps Arabic assistant message text directionally stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.renderConversationMessage(buildConversationMessageViewModel({
+      role: "assistant",
+      text: "مرحبا يا إدريس",
+    })));
+
+    expect(out).toContain(isolateRtl("𓂀 إستاكودا"));
+    expect(out).toContain(isolateRtl("مرحبا يا إدريس"));
+    expect(out).not.toContain("│");
+    expectBalancedBidiIsolates(out);
   });
 
   it("passes through user message text unchanged", () => {

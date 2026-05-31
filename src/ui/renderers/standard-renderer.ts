@@ -32,7 +32,7 @@ import type {
   ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
-import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
@@ -283,6 +283,54 @@ export class StandardRenderer {
   /** Open focus panel (unbordered, indented). */
   #openPanel(contentLines: readonly string[]): string {
     return contentLines.map((l) => `  ${l}`).join("\n");
+  }
+
+  #openSideFrame(
+    title: string,
+    contentLines: readonly string[],
+    options: {
+      readonly minWidth?: number;
+      readonly width?: number;
+      readonly renderTitle?: (title: string) => string;
+    } = {}
+  ): string {
+    const horiz = this.#useUnicode ? "─" : "-";
+    const topLeft = this.#useUnicode ? "╭" : "+";
+    const topRight = this.#useUnicode ? "╮" : "+";
+    const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const bottomRight = this.#useUnicode ? "╯" : "+";
+    const maxFrameWidth = Math.max(4, this.#capabilities.terminalWidth);
+    const minWidth = options.minWidth ?? 40;
+    const contentMaxWidth = Math.max(0, ...contentLines.map((line) => measureVisibleWidth(line)));
+    const titleWidth = measureVisibleWidth(` ${title} `);
+    const naturalWidth = Math.max(minWidth, contentMaxWidth + 4, titleWidth + 4);
+    const width = Math.min(maxFrameWidth, Math.max(4, options.width ?? naturalWidth));
+    const contentWidth = Math.max(0, width - 4);
+    const boundedTitle = closeOpenBidiIsolates(truncateVisible(title, Math.max(1, width - 4)));
+    const framedTitle = ` ${boundedTitle} `;
+    const renderedTitle = options.renderTitle?.(framedTitle) ?? framedTitle;
+    const titleAvail = Math.max(0, width - 2 - measureVisibleWidth(framedTitle));
+    const titleLeft = Math.floor(titleAvail / 2);
+    const titleRight = titleAvail - titleLeft;
+
+    const lines: string[] = [
+      [
+        this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
+        renderedTitle,
+        this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
+      ].join(""),
+    ];
+
+    for (const line of contentLines) {
+      if (line.length === 0) {
+        lines.push("");
+      } else {
+        lines.push(`  ${this.#truncateVisibleStable(line, contentWidth)}`);
+      }
+    }
+
+    lines.push(this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`));
+    return lines.join("\n");
   }
 
   #onboardingTitle(title: string, maxWidth: number, direction: TextDirection = "ltr"): string {
@@ -1073,17 +1121,18 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderStartupDashboard(vm: StartupDashboardViewModel): string {
+    if (this.#isRtl()) {
+      return this.#renderStartupDashboardRtl(vm);
+    }
+    return this.#renderStartupDashboardLtr(vm);
+  }
+
+  #renderStartupDashboardLtr(vm: StartupDashboardViewModel): string {
     const lines: string[] = [];
 
     // Version / session separator line
     const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
     const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
-    const horiz = this.#useUnicode ? "─" : "-";
-    const topLeft = this.#useUnicode ? "╭" : "+";
-    const topRight = this.#useUnicode ? "╮" : "+";
-    const bottomLeft = this.#useUnicode ? "╰" : "+";
-    const bottomRight = this.#useUnicode ? "╯" : "+";
-    const vert = this.#useUnicode ? "│" : "|";
     const eye = this.#useUnicode ? "𓂀" : "*";
     const cardTitle = sessionText
       ? `${versionText}  ${eye}  ${sessionText}`
@@ -1173,18 +1222,12 @@ export class StandardRenderer {
     }
 
     const blockWidth = Math.max(0, ...dashboardRows.map((row) => measureVisibleWidth(row)));
-    const titleWidth = measureTextWidth(cardTitle);
+    const titleWidth = measureVisibleWidth(` ${cardTitle} `);
     const frameWidth = Math.min(
       maxFrameWidth,
       Math.max(40, titleWidth + 4, blockWidth + 4)
     );
     const contentWidth = Math.max(8, frameWidth - 4);
-    const boundedTitleText = truncateVisible(cardTitle, Math.max(1, frameWidth - 2));
-    const boundedTitle = this.#brand(this.#bold(boundedTitleText));
-    const boundedTitleWidth = measureVisibleWidth(boundedTitle);
-    const titleAvail = Math.max(0, frameWidth - 2 - boundedTitleWidth);
-    const titleLeft = Math.floor(titleAvail / 2);
-    const titleRight = titleAvail - titleLeft;
 
     const heroLines = [
       padVisibleAlign(this.#brand(this.#bold(vm.agentName)), frameWidth, "center"),
@@ -1196,30 +1239,123 @@ export class StandardRenderer {
     lines.push(...heroLines);
     lines.push("");
 
-    lines.push([
-      this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
-      boundedTitle,
-      this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
-    ].join(""));
-
+    const frameRows: string[] = [];
     const blockOffset = blockWidth < contentWidth ? Math.floor((contentWidth - blockWidth) / 2) : 0;
     for (const row of dashboardRows) {
       const alignedRow = blockWidth < contentWidth
         ? `${" ".repeat(blockOffset)}${padVisibleEnd(row, blockWidth)}`
         : row;
-      const content = padVisibleEnd(truncateVisible(alignedRow, contentWidth), contentWidth);
-      lines.push([
-        this.#surfaceBorder(vert),
-        " ",
-        content,
-        " ",
-        this.#surfaceBorder(vert),
-      ].join(""));
+      frameRows.push(truncateVisible(alignedRow, contentWidth));
     }
 
-    lines.push(this.#surfaceBorder(`${bottomLeft}${horiz.repeat(frameWidth - 2)}${bottomRight}`));
+    lines.push(this.#openSideFrame(cardTitle, frameRows, {
+      minWidth: 40,
+      width: frameWidth,
+      renderTitle: (title) => this.#brand(this.#bold(title)),
+    }));
 
     // Warnings
+    for (const warning of vm.warnings) {
+      lines.push("");
+      lines.push(this.renderWarningError(warning));
+    }
+
+    return lines.join("\n");
+  }
+
+  #renderStartupDashboardRtl(vm: StartupDashboardViewModel): string {
+    const lines: string[] = [];
+    const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
+    const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
+    const eye = this.#useUnicode ? "𓂀" : "*";
+    const cardTitle = sessionText
+      ? `${versionText}  ${eye}  ${sessionText}`
+      : versionText;
+
+    const readiness = vm.providerReadiness;
+    let modelDot: string;
+    let modelLabel: string;
+    let readinessColor: string;
+
+    switch (readiness) {
+      case "ready":
+        modelDot = this.#severity("●", "ok");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#severity(this.#startupReadinessLabel(readiness), "ok");
+        break;
+      case "degraded":
+        modelDot = this.#caution("◐");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#caution(this.#startupReadinessLabel(readiness));
+        break;
+      case "missing-config":
+        modelDot = this.#dim("○");
+        modelLabel = this.#copy.startupModelNotConfigured;
+        readinessColor = this.#severity(this.#copy.startupMissingConfig, "error");
+        break;
+      case "unknown":
+      default:
+        modelDot = this.#dim("○");
+        modelLabel = this.#technical(vm.model.id);
+        readinessColor = this.#dim(this.#copy.startupUnknown);
+        break;
+    }
+
+    const dashboardRows: string[] = [
+      `${this.#copy.startupModel}: ${modelDot} ${this.#bold(modelLabel)}  ·  ${readinessColor}`,
+      "",
+      `${this.#copy.startupWorkspaceTrust}: ${this.#startupTrustLabel(vm.workspaceTrust)}`,
+      `${this.#copy.startupWorkspaceVerification}: ${this.#startupVerificationLabel(vm.workspaceVerification)}`,
+    ];
+
+    if (vm.workspaceDirectory !== undefined) {
+      dashboardRows.push(`${this.#copy.startupWorkspaceDirectory}: ${this.#technical(vm.workspaceDirectory)}`);
+    }
+    if (vm.securityMode !== undefined) {
+      dashboardRows.push(`${this.#copy.startupSecurityMode}: ${this.#technical(vm.securityMode)}`);
+    }
+    if (vm.skillAutonomy !== undefined) {
+      dashboardRows.push(`${this.#copy.startupSkillAutonomy}: ${this.#technical(vm.skillAutonomy)}`);
+    }
+    if (vm.versionStatus !== undefined) {
+      dashboardRows.push(`${this.#copy.startupVersionStatus}: ${this.#startupVersionStatusLabel(vm.versionStatus)}`);
+    }
+
+    dashboardRows.push("");
+    dashboardRows.push(this.#bold(this.#copy.startupInteractiveCommands));
+    for (const cmd of this.#startupCommands(vm)) {
+      dashboardRows.push(`${this.#dim(cmd.description)}  ${this.#action(this.#technical(cmd.name))}`);
+    }
+
+    const maxFrameWidth = Math.max(24, this.#capabilities.terminalWidth);
+    const rawBlockWidth = Math.max(0, ...dashboardRows.map((row) => measureVisibleWidth(row)));
+    const titleWidth = measureVisibleWidth(` ${cardTitle} `);
+    const frameWidth = Math.min(
+      maxFrameWidth,
+      Math.max(40, titleWidth + 4, rawBlockWidth + 4)
+    );
+    const contentWidth = Math.max(8, frameWidth - 4);
+    const frameRows = dashboardRows.map((row) => {
+      if (row.length === 0) return "";
+      const bounded = this.#natural(row, contentWidth);
+      return padVisibleStart(bounded, contentWidth);
+    });
+
+    const heroLines = [
+      padVisibleAlign(this.#brand(this.#bold(vm.agentName)), frameWidth, "center"),
+      "",
+      ...vm.taglines
+        .filter((tag) => tag.length > 0)
+        .map((tag) => padVisibleAlign(this.#dim(tag), frameWidth, "center")),
+    ];
+    lines.push(...heroLines);
+    lines.push("");
+    lines.push(this.#openSideFrame(cardTitle, frameRows, {
+      minWidth: 40,
+      width: frameWidth,
+      renderTitle: (title) => this.#brand(this.#bold(title)),
+    }));
+
     for (const warning of vm.warnings) {
       lines.push("");
       lines.push(this.renderWarningError(warning));
@@ -1255,12 +1391,6 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderAssistantResponse(vm: AssistantResponseViewModel): string {
-    const horiz = this.#useUnicode ? "─" : "-";
-    const topLeft = this.#useUnicode ? "╭" : "+";
-    const topRight = this.#useUnicode ? "╮" : "+";
-    const bottomLeft = this.#useUnicode ? "╰" : "+";
-    const bottomRight = this.#useUnicode ? "╯" : "+";
-    const vert = this.#useUnicode ? "│" : "|";
     const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
     const rawTitle = this.#assistantResponseTitle(vm.label, Math.max(1, requestedWidth - 4));
     const titleWidth = measureVisibleWidth(` ${rawTitle} `);
@@ -1270,38 +1400,26 @@ export class StandardRenderer {
       Math.max(40, titleWidth + 4, maxRawContent + 4)
     );
     const contentWidth = Math.max(8, width - 4);
-    const boundedTitle = truncateVisible(rawTitle, Math.max(1, width - 4));
-    const framedTitle = ` ${boundedTitle} `;
-    const boundedTitleWidth = measureVisibleWidth(framedTitle);
-    const titleAvail = Math.max(0, width - 2 - boundedTitleWidth);
-    const titleLeft = Math.floor(titleAvail / 2);
-    const titleRight = titleAvail - titleLeft;
-
-    const top = [
-      this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
-      this.#brand(this.#bold(framedTitle)),
-      this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
-    ].join("");
-    const bottom = this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
-
-    const lines: string[] = ["", top];
+    const contentLines: string[] = [];
 
     for (const rawLine of vm.text.split("\n")) {
       for (const wrappedLine of wrapVisibleLine(rawLine, contentWidth)) {
         const bodyLine = wrappedLine.length === 0
           ? wrappedLine
-          : this.#agentMessage(wrappedLine);
-        lines.push([
-          this.#surfaceBorder(vert),
-          " ",
-          padVisibleEnd(bodyLine, contentWidth),
-          " ",
-          this.#surfaceBorder(vert),
-        ].join(""));
+          : this.#agentMessage(this.#isRtl() ? this.#natural(wrappedLine) : wrappedLine);
+        contentLines.push(bodyLine);
       }
     }
 
-    lines.push(bottom);
+    const frameTitle = this.#isRtl() ? this.#natural(rawTitle, Math.max(1, width - 4)) : rawTitle;
+    const lines: string[] = [
+      "",
+      this.#openSideFrame(frameTitle, contentLines, {
+        minWidth: 40,
+        width,
+        renderTitle: (title) => this.#brand(this.#bold(title)),
+      }),
+    ];
 
     if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
       lines.push(this.#dim(`skills: ${vm.matchedSkills.join(", ")}`));
@@ -1323,15 +1441,17 @@ export class StandardRenderer {
       const title = this.#useUnicode
         ? this.#copy.assistantCardTitleUnicode
         : this.#copy.assistantCardTitleAscii;
-      const brandTitle = this.#brand(this.#bold(title));
+      const frameTitle = this.#isRtl() ? this.#natural(title) : title;
       const textLines = vm.text
         .split("\n")
-        .map((line) => line.length === 0 ? line : this.#agentMessage(line));
+        .map((line) => line.length === 0
+          ? line
+          : this.#agentMessage(this.#isRtl() ? this.#natural(line) : line));
 
-      const frame = openHorizontalFrame(textLines, {
-        useUnicode: this.#useUnicode,
-        title: brandTitle,
+      const frame = this.#openSideFrame(frameTitle, textLines, {
+        minWidth: 40,
         width: this.#capabilities.terminalWidth,
+        renderTitle: (framedTitle) => this.#brand(this.#bold(framedTitle)),
       });
 
       let result = frame;
