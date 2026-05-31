@@ -15,6 +15,7 @@ export type PromptOptions = {
   secret?: boolean;
   onRowsChange?: (rows: number) => void;
   onPastePreview?: (original: string, displayed: string) => void;
+  onInputChange?: (line: string) => void;
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
@@ -110,9 +111,11 @@ async function plainQuestion(input: Readable, output: Writable, question: string
 
   const pasteSession = createPastePromptSession(input, output, isTty, options);
   const readline = createPromptInterface({ input: pasteSession.input, output, terminal: isTty });
+  const inputTracking = startInputChangeTracking(readline, isTty, options);
   try {
     return pasteSession.restore(await readline.question(question));
   } finally {
+    inputTracking.stop();
     readline.close();
     pasteSession.close();
   }
@@ -128,6 +131,7 @@ async function trackedQuestion(
   return await new Promise<string>((resolve) => {
     const pasteSession = createPastePromptSession(input, output, true, options);
     const readline = createCallbackInterface({ input: pasteSession.input, output, terminal: true });
+    const inputTracking = startInputChangeTracking(readline, true, options);
     const mutable = readline as unknown as {
       _writeToOutput?: (value: string) => void;
       getCursorPos?: () => { rows: number; cols: number };
@@ -141,10 +145,12 @@ async function trackedQuestion(
       mutable._writeToOutput = (value: string) => {
         originalWrite(value);
         reportRows();
+        inputTracking.report();
       };
     }
     readline.question(question, (answer) => {
       onRowsChange(1);
+      inputTracking.stop();
       readline.close();
       const restored = pasteSession.restore(answer);
       pasteSession.close();
@@ -152,6 +158,27 @@ async function trackedQuestion(
     });
     reportRows();
   });
+}
+
+function startInputChangeTracking(
+  readline: unknown,
+  enabled: boolean,
+  options?: PromptOptions
+): { report: () => void; stop: () => void } {
+  if (!enabled || options?.onInputChange === undefined) {
+    return { report: () => undefined, stop: () => undefined };
+  }
+  let lastLine: string | undefined;
+  const readableLine = readline as { line?: string };
+  const report = () => {
+    const line = readableLine.line ?? "";
+    if (line === lastLine) return;
+    lastLine = line;
+    options.onInputChange?.(line);
+  };
+  const interval = setInterval(report, 100);
+  interval.unref?.();
+  return { report, stop: () => clearInterval(interval) };
 }
 
 type PastePromptSession = {

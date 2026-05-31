@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { runSessionLoop } from "./session-loop.js";
+import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
@@ -1488,6 +1489,221 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[4A"))).toBe(true);
   });
 
+  it("renders slash completion chrome while typing idle input", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    expect(outputChunks.join("")).toContain("/help");
+    expect(outputChunks.join("")).toContain("Show command help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("clears live slash completion chrome when idle input is no longer slash-prefixed", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    const afterSlashHint = outputChunks.length;
+    promptOptions.onInputChange?.("hello");
+    const clearChunks = outputChunks.slice(afterSlashHint).join("");
+    expect(clearChunks).not.toContain("/help");
+    expect(clearChunks).toContain("mock-model");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("renders and clears paste preview chrome around idle readline submission", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
+    const previewOutput = outputChunks.join("");
+    expect(previewOutput).toContain("line one");
+    expect(previewOutput).toContain("line two");
+    const afterPreview = outputChunks.length;
+
+    resolvePrompt("/exit");
+    await loop;
+
+    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line one");
+    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
+  });
+
+  it("keeps submitted multiline text intact after paste preview", async () => {
+    const handledTexts: string[] = [];
+    const runtime = createMockRuntime({
+      handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+        handledTexts.push(input.text);
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        if (promptIndex++ === 0) {
+          promptOptions = options;
+          return await new Promise<string>((resolve) => {
+            resolvePrompt = resolve;
+          });
+        }
+        return "/exit";
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
+    resolvePrompt("line one\nline two");
+    await loop;
+
+    expect(handledTexts).toEqual(["line one\nline two"]);
+  });
+
+  it("keeps live slash callbacks out of disabled bottom chrome output", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/h");
+    resolvePrompt("/exit");
+    await loop;
+
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
+  });
+
   it("updates chrome status rail from provider-actual context usage events", async () => {
     const outputChunks: string[] = [];
     const output = {
@@ -2327,6 +2543,7 @@ describe("runSessionLoop — active turn spinner", () => {
     } as Runtime;
 
     let promptIndex = 0;
+    const secretPromptOptions: PromptOptions[] = [];
     try {
       await runSessionLoop({
         runtime,
@@ -2334,7 +2551,10 @@ describe("runSessionLoop — active turn spinner", () => {
         capabilities: interactiveCaps({ terminalWidth: 80 }),
         homeDir,
         prompt: Object.assign(
-          async () => {
+          async (_question: string, options?: PromptOptions) => {
+            if (options?.secret === true) {
+              secretPromptOptions.push(options);
+            }
             const values = ["make image", "secret-value", "/exit"];
             return values[promptIndex++] ?? "/exit";
           },
@@ -2357,6 +2577,9 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(resumedPromptRedrawIndex).toBeGreaterThan(resumedIndex);
     expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
     expect(rendered).toContain("generated image");
+    expect(secretPromptOptions).toHaveLength(1);
+    expect(secretPromptOptions[0]?.onInputChange).toBeUndefined();
+    expect(secretPromptOptions[0]?.onPastePreview).toBeUndefined();
   });
 
   it("keeps bottom chrome alive after active-turn SIGINT cancellation", async () => {

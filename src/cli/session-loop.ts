@@ -17,7 +17,7 @@ import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import { createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import { createReadlinePrompt, type Prompt, type PromptOptions } from "./readline-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -43,7 +43,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
 import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { measureVisibleWidth } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -479,14 +479,23 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       let livePromptRows = 1;
-      if (bottomChrome.enabled) {
-        const idleBottomState = () => buildBottomChromeState({
-          runtime,
-          renderer,
-          slashMenu: pendingSlashCompletion,
-          contextUsage: latestContextUsage,
-          timing: railTiming()
+      let readlineTransientLines: readonly string[] = [];
+      const idleBottomState = () => buildBottomChromeState({
+        runtime,
+        renderer,
+        slashMenu: pendingSlashCompletion,
+        contextUsage: latestContextUsage,
+        timing: railTiming()
+      });
+      const redrawIdleReadlineChrome = () => {
+        if (!bottomChrome.enabled) return;
+        bottomChrome.updateManagedRegionAboveReadline({
+          state: idleBottomState(),
+          transientLines: readlineTransientLines,
+          promptLineCount: livePromptRows
         });
+      };
+      if (bottomChrome.enabled) {
         bottomChrome.updateState(idleBottomState());
         bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
       } else if (chrome.enabled) {
@@ -514,10 +523,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         onPromptResolved: () => {
           if (bottomChrome.enabled) {
             bottomChrome.stopTicker();
+            readlineTransientLines = [];
+            redrawIdleReadlineChrome();
           }
         },
         onPromptRowsChange: (rows) => {
           livePromptRows = rows;
+        },
+        onInputChange: (line) => {
+          pendingSlashCompletion = line.startsWith("/")
+            ? buildSlashCompletionViewModel(runtime, line)
+            : undefined;
+          redrawIdleReadlineChrome();
+        },
+        onPastePreview: (original) => {
+          readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
+          redrawIdleReadlineChrome();
         }
       });
       const text = submittedInput.text;
@@ -918,10 +939,17 @@ async function readNextCliInput(input: {
   cliVoice?: SessionLoopOptions["cliVoice"];
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
+  onInputChange?: (line: string) => void;
+  onPastePreview?: (original: string, displayed: string) => void;
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
     const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
-    const rawText = await input.prompt(echoedPromptPrefix, { onRowsChange: input.onPromptRowsChange });
+    const promptOptions: PromptOptions = {
+      onRowsChange: input.onPromptRowsChange,
+      onInputChange: input.onInputChange,
+      onPastePreview: input.onPastePreview,
+    };
+    const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
     const text = rawText.trim();
     return {
@@ -1028,6 +1056,16 @@ function submittedPromptLineCount(
   const terminalWidth = Math.max(1, capabilities.terminalWidth);
   const visibleWidth = measureVisibleWidth(`${submittedInput.echoedPromptPrefix}${submittedInput.echoedText}`);
   return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
+}
+
+function buildPastePreviewLines(original: string, terminalWidth: number): string[] {
+  const width = Math.max(1, terminalWidth);
+  const lines = original.split(/\r\n|\r|\n/u);
+  const previewLines = lines.slice(0, 3);
+  if (lines.length > previewLines.length) {
+    previewLines.push("...");
+  }
+  return previewLines.flatMap((line) => wrapText(line, width));
 }
 
 async function playCliResponseIfEnabled(input: {
