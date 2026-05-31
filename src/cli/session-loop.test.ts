@@ -1202,7 +1202,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(echoClearIndex).toBeLessThan(userRailIndex);
   });
 
-  it("renders a read-only bottom prompt chrome during the active turn", async () => {
+  it("renders active-turn bottom chrome without a read-only prompt box", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1234,7 +1234,10 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+    expect(rendered).toContain("▸ hello\n+──────────────────────────────────────────────────────────────────────────────+");
+    expect(rendered).toContain("mock-model");
+    expect(rendered).toContain("contemplating");
+    expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("brokers tool output above the redrawn bottom chrome", async () => {
@@ -1272,9 +1275,10 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     const toolIndex = rendered.indexOf("browser.status");
-    const redrawnPromptIndex = rendered.indexOf("▸ hello", toolIndex);
+    const redrawnChromeIndex = rendered.indexOf("mock-model", toolIndex);
     expect(toolIndex).toBeGreaterThan(-1);
-    expect(redrawnPromptIndex).toBeGreaterThan(toolIndex);
+    expect(redrawnChromeIndex).toBeGreaterThan(toolIndex);
+    expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
@@ -1323,10 +1327,10 @@ describe("runSessionLoop — active turn spinner", () => {
       index > lastToolChunkIndex && chunk.includes("scribbling")
     );
     const nextChromeChunkIndex = strippedChunks.findIndex((chunk, index) =>
-      index > providerSpinnerChunkIndex && chunk.includes("mock-model") && chunk.includes("▸ hello")
+      index > providerSpinnerChunkIndex && chunk.includes("mock-model")
     );
     const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
-      chunk.includes("mock-model") || chunk.includes("▸ hello")
+      chunk.includes("mock-model")
     );
     const providerSpinnerChunk = strippedChunks[providerSpinnerChunkIndex] ?? "";
     const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
@@ -1338,10 +1342,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(spinnerOffset).toBeGreaterThan(-1);
     if (modelOffset !== -1) {
       expect(modelOffset).toBeGreaterThan(spinnerOffset);
-      expect(promptOffset).toBeGreaterThan(modelOffset);
     }
     expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
-    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model") && chunk.includes("▸ hello"))).toBe(true);
+    expect(promptOffset).toBe(-1);
+    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model"))).toBe(true);
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -2431,8 +2435,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
     const renderedPlain = stripAnsi(rendered);
     const plainPermissionIndex = renderedPlain.indexOf("Permission required");
-    const promptRedrawIndex = renderedPlain.indexOf("▸ write file", plainPermissionIndex);
-    expect(promptRedrawIndex).toBeGreaterThan(plainPermissionIndex);
+    const submittedRailIndex = renderedPlain.indexOf("▸ write file");
+    expect(submittedRailIndex).toBeGreaterThan(-1);
+    expect(submittedRailIndex).toBeLessThan(plainPermissionIndex);
+    expect(renderedPlain.slice(plainPermissionIndex)).not.toContain("▸ write file");
   });
 
   it("renders image setup secret flow above redrawn bottom chrome", async () => {
@@ -2568,13 +2574,13 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     const setupIndex = rendered.indexOf("Setup required");
-    const setupPromptRedrawIndex = rendered.indexOf("▸ make image", setupIndex);
     const resumedIndex = rendered.indexOf("Image setup verified");
-    const resumedPromptRedrawIndex = rendered.indexOf("▸ make image", resumedIndex);
+    const submittedRailIndex = rendered.indexOf("▸ make image");
     expect(setupIndex).toBeGreaterThan(-1);
-    expect(setupPromptRedrawIndex).toBeGreaterThan(setupIndex);
-    expect(resumedIndex).toBeGreaterThan(setupPromptRedrawIndex);
-    expect(resumedPromptRedrawIndex).toBeGreaterThan(resumedIndex);
+    expect(submittedRailIndex).toBeGreaterThan(-1);
+    expect(submittedRailIndex).toBeLessThan(setupIndex);
+    expect(resumedIndex).toBeGreaterThan(setupIndex);
+    expect(rendered.slice(setupIndex)).not.toContain("▸ make image");
     expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
     expect(rendered).toContain("generated image");
     expect(secretPromptOptions).toHaveLength(1);

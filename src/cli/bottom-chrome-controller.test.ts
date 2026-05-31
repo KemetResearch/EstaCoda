@@ -59,21 +59,19 @@ function slashMenu() {
 }
 
 describe("BottomChromeController", () => {
-  it("renders status and fake prompt chrome", () => {
+  it("renders status chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("deepseek"), prompt: { text: "hello", readOnly: true } });
-    expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n"]);
+    ctrl.updateState({ statusRail: status("deepseek") });
+    expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n"]);
   });
 
   it("bounds rendered chrome lines to terminal width", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
-    ctrl.updateState({ statusRail: status("deepseek-reasoner"), prompt: { text: "a very long prompt", readOnly: true } });
+    ctrl.updateState({ statusRail: status("deepseek-reasoner") });
     expect(chunks.join("").split("\n").filter(Boolean)).toEqual([
       "deepseek-...",
-      "────────────",
-      "▸ a very ...",
       "────────────",
     ]);
   });
@@ -90,28 +88,28 @@ describe("BottomChromeController", () => {
   it("writes above chrome by clearing and redrawing around output", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     chunks.length = 0;
     ctrl.writeAboveChromeSync(() => {
       stream.write("tool output\n");
     });
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
+      "\x1b[2A\x1b[1G\x1b[0J",
       "tool output\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("updates transient lines above chrome without redrawing chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
     ctrl.updateTransientLines(["spinner:thinking"]);
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
-      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n",
     ]);
 
     chunks.length = 0;
@@ -120,14 +118,14 @@ describe("BottomChromeController", () => {
 
     ctrl.updateTransientLines(["spinner:tool"]);
     expect(chunks).toEqual([
-      "\x1b7\x1b[5A\x1b[2K\rspinner:tool\x1b8",
+      "\x1b7\x1b[3A\x1b[2K\rspinner:tool\x1b8",
     ]);
   });
 
   it("writes transcript output above transient lines and chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
@@ -136,16 +134,16 @@ describe("BottomChromeController", () => {
     });
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
+      "\x1b[3A\x1b[1G\x1b[0J",
       "tool output\n",
-      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("can clear transient lines while transcript output is being written", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
@@ -155,38 +153,38 @@ describe("BottomChromeController", () => {
     });
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
+      "\x1b[3A\x1b[1G\x1b[0J",
       "tool output\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("clears transient lines while preserving chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
     ctrl.clearTransientLines();
 
     expect(chunks).toEqual([
-      "\x1b[5A\x1b[1G\x1b[0J",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "\x1b[3A\x1b[1G\x1b[0J",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
   it("patches chrome state in place below transient lines", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
     chunks.length = 0;
-    ctrl.updateStateInPlace({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateStateInPlace({ statusRail: status("next") });
 
     expect(chunks).toEqual([
-      "\x1b7\x1b[4A\x1b[2K\rnext | idle\x1b[1B\x1b[1B\x1b[1B\x1b8",
+      "\x1b7\x1b[2A\x1b[2K\rnext | idle\x1b[1B\x1b8",
     ]);
   });
 
@@ -453,7 +451,7 @@ describe("BottomChromeController", () => {
   it("suspends chrome for nested prompts and redraws afterward", async () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
-    ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
+    ctrl.updateState({ statusRail: status("status") });
     chunks.length = 0;
 
     const answer = await ctrl.suspendForPrompt(async () => {
@@ -463,9 +461,9 @@ describe("BottomChromeController", () => {
 
     expect(answer).toBe("once");
     expect(chunks).toEqual([
-      "\x1b[4A\x1b[1G\x1b[0J",
+      "\x1b[2A\x1b[1G\x1b[0J",
       "approval card\n",
-      "status | idle\n────────────────────────────────────────\n▸ hello\n────────────────────────────────────────\n",
+      "status | idle\n────────────────────────────────────────\n",
     ]);
   });
 
@@ -508,7 +506,7 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("does not redraw suspended prompt chrome after disposal", async () => {
+  it("does not redraw suspended chrome after disposal", async () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -523,8 +521,8 @@ describe("BottomChromeController", () => {
         release = resolve;
       });
 
-      ctrl.updateState({ statusRail: status("status"), prompt: { text: "hello", readOnly: true } });
-      ctrl.startTicker(() => ({ statusRail: status("next"), prompt: { text: "hello", readOnly: true } }));
+      ctrl.updateState({ statusRail: status("status") });
+      ctrl.startTicker(() => ({ statusRail: status("next") }));
       chunks.length = 0;
 
       const pending = ctrl.suspendForPrompt(async () => {
@@ -532,7 +530,7 @@ describe("BottomChromeController", () => {
         await blocker;
         return "once";
       });
-      expect(chunks).toEqual(["\x1b[4A\x1b[1G\x1b[0J", "approval card\n"]);
+      expect(chunks).toEqual(["\x1b[2A\x1b[1G\x1b[0J", "approval card\n"]);
 
       chunks.length = 0;
       ctrl.dispose();

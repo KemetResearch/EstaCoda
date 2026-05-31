@@ -1,6 +1,6 @@
 // Persistent bottom chrome for interactive CLI turns.
-// Keeps active-turn status/prompt chrome redrawable while transcript output
-// is written above it.
+// Keeps active-turn status chrome redrawable while transcript output is written
+// above it.
 
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type {
@@ -17,10 +17,6 @@ export interface BottomChromeState {
   readonly shortcutRail?: ShortcutHintRailViewModel;
   readonly activeSpinner?: ActiveTurnSpinnerViewModel;
   readonly slashMenu?: SlashMenuViewModel;
-  readonly prompt?: {
-    readonly text: string;
-    readonly readOnly: boolean;
-  };
 }
 
 export interface BottomChromeControllerOptions {
@@ -423,11 +419,7 @@ export class BottomChromeController {
       lines.push(...this.#boundedLines(this.#renderViewModel(this.#currentState.slashMenu), width));
     }
 
-    if (this.#currentState.prompt !== undefined) {
-      lines.push(this.#horizontalRule(width));
-      lines.push(this.#promptLine(this.#currentState.prompt.text, width));
-      lines.push(this.#horizontalRule(width));
-    } else if (
+    if (
       this.#currentState.statusRail !== undefined ||
       this.#currentState.shortcutRail !== undefined ||
       this.#currentState.slashMenu !== undefined
@@ -448,11 +440,6 @@ export class BottomChromeController {
   #horizontalRule(width: number): string {
     const fill = this.#capabilities.supportsUnicode ? "─" : "-";
     return fill.repeat(width);
-  }
-
-  #promptLine(text: string, width: number): string {
-    const prompt = this.#capabilities.supportsUnicode ? "▸" : ">";
-    return truncateVisible(`${prompt} ${text}`, width);
   }
 }
 

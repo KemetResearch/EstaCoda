@@ -646,8 +646,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           runtime,
           renderer,
           contextUsage: latestContextUsage,
-          timing: railTiming(),
-          promptText: text
+          timing: railTiming()
         });
 
         currentAnimator = new ToolActivityAnimator({
@@ -828,8 +827,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming(),
-            promptText: turnWasCancelled ? undefined : text
+            timing: railTiming()
           }));
         }
 
@@ -2513,7 +2511,6 @@ function buildBottomChromeState(input: {
   slashMenu?: SlashMenuViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
-  promptText?: string;
 }): BottomChromeState {
   const chromeState = buildPromptChromeState(
     input.runtime,
@@ -2527,9 +2524,6 @@ function buildBottomChromeState(input: {
     statusRail: chromeState.statusRail,
     activeSpinner: chromeState.activeSpinner,
     slashMenu: chromeState.slashMenu,
-    prompt: input.promptText === undefined
-      ? undefined
-      : { text: input.promptText, readOnly: true }
   };
 }
 
