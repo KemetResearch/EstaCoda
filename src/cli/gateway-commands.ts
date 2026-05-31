@@ -297,10 +297,6 @@ export async function runGatewayInstallService(
     `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ${profileEnvPath}, not only shell exports.`,
   ];
 
-  if (!options.system && detectServiceManager().startsWith("systemd")) {
-    warnings.push("User services stop on logout. On a headless server, run: sudo loginctl enable-linger $USER");
-  }
-
   if (result.mode === "source") {
     warnings.push(`Installed in source mode. If this workspace is moved, run "estacoda gateway uninstall --profile ${profileId} && estacoda gateway install --profile ${profileId}" again.`);
   }
@@ -310,6 +306,7 @@ export async function runGatewayInstallService(
     output: [
       `Gateway service installed (${scope} scope, profile: ${profileId}).`,
       ...(result.logCommand === undefined ? [] : [`Logs: ${result.logCommand}`]),
+      ...(result.lingerStatus === undefined ? [] : [result.lingerStatus.text]),
       ...warnings.map((warning) => `Warning: ${warning}`),
     ].join("\n"),
   };

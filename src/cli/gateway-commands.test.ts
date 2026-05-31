@@ -609,6 +609,7 @@ describe("gateway commands", () => {
         mode: "source",
         unitName: "estacoda-gateway-default-37a8eec1.service",
         logCommand: "journalctl --user -u estacoda-gateway-default-37a8eec1.service -f",
+        lingerStatus: { kind: "message", text: "Systemd linger is enabled." },
       });
 
       const result = await withEnv({ HOME: tmpDir }, () => runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir }));
@@ -618,7 +619,8 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Logs: journalctl --user -u estacoda-gateway-default-37a8eec1.service -f");
       expect(result.output).toContain("profile-local");
       expect(result.output).toContain("not interactive shell environment");
-      expect(result.output).toContain("loginctl enable-linger");
+      expect(result.output).toContain("Systemd linger is enabled.");
+      expect(result.output).not.toContain("Could not enable systemd linger");
       expect(result.output).toContain("Installed in source mode");
       expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
         stateHomeDir: tmpDir,
@@ -665,6 +667,39 @@ describe("gateway commands", () => {
 
       expect(result.ok).toBe(true);
       expect(result.output).not.toContain("Installed in source mode");
+    });
+
+    it("renders systemd linger enabled status without a warning prefix", async () => {
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "compiled",
+        lingerStatus: { kind: "message", text: "Systemd linger enabled." },
+      });
+
+      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Systemd linger enabled.");
+      expect(result.output).not.toContain("Warning: Systemd linger enabled.");
+      expect(result.output).not.toContain("Could not enable systemd linger");
+    });
+
+    it("renders systemd linger auto-enable failure as a single warning", async () => {
+      serviceManagerMock.installService.mockResolvedValue({
+        ok: true,
+        mode: "compiled",
+        lingerStatus: {
+          kind: "warning",
+          text: "Warning: Could not enable systemd linger. The gateway may stop after logout. Run: loginctl enable-linger $USER",
+        },
+      });
+
+      const result = await runGatewayInstallService({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Warning: Could not enable systemd linger. The gateway may stop after logout. Run: loginctl enable-linger $USER");
+      expect(result.output.match(/Could not enable systemd linger/gu)).toHaveLength(1);
+      expect(result.output).not.toContain("secret-token-value");
     });
 
     it("returns install failures", async () => {
