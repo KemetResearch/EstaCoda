@@ -183,9 +183,37 @@ CI environment    → supportsAnimation=false
 
 ---
 
-## 6. Command Registry
+## 6. Readline And Bottom Chrome Ownership
 
-### 6.1 Role
+### 6.1 Idle Prompt Ownership
+
+`ReadlinePrompt` owns idle CLI input. It composes the current readline buffer, reports prompt row count as wrapping changes, and routes TTY paste input through `PasteInterceptor` when bracketed paste is available. Paste interception is scoped to interceptor-backed TTY prompts; gateway, one-shot, and non-CLI channel input do not use this path.
+
+Secret prompts are a hard boundary. They may accept pasted bytes as input, but they must not publish paste preview callbacks, live slash hints, or transient chrome containing secret text.
+
+### 6.2 Managed Region Above Readline
+
+`BottomChromeController` owns the managed region above an active readline prompt. Live prompt-adjacent UI must use:
+
+```typescript
+updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })
+```
+
+This method is the canonical path for live slash hints, paste previews, and ticker updates while readline owns the cursor. The caller must pass the current prompt line count so wrapped prompts are treated as occupied rows. The controller tracks managed-region height across growth, shrink, and disappearance; stale lines are cleared before the prompt row is restored.
+
+Do not manually combine `updateTransientLines()` and `updateStateAboveReadline()` for live readline UI. That older mixed pattern can desynchronize line counts when transient rows appear, disappear, or wrap.
+
+### 6.3 Active-Turn Chrome
+
+After submit, readline no longer owns the cursor. Active-turn chrome shows status, timing, spinner, tool activity, setup/approval output, and transient command-lane messages. It must not recreate the removed fake read-only prompt box.
+
+The active-turn command lane is CLI-local. `ActiveTurnCommandController` attaches only while `runtime.handle()` is active in an interactive TTY, buffers commands that begin with `/`, and renders through bottom chrome transient/status paths rather than direct terminal writes. `/interrupt` aborts the active turn. `/steer <note>` aborts and schedules one CLI-layer retry with an explicit steering note; it is not a runtime/provider in-flight steering primitive.
+
+---
+
+## 7. Command Registry
+
+### 7.1 Role
 
 The command registry (`src/cli/command-registry.ts`) is the **single source of truth** for:
 
@@ -195,7 +223,7 @@ The command registry (`src/cli/command-registry.ts`) is the **single source of t
 - Scope (`cli` | `slash` | `both`)
 - Parent/child relationships for subcommands
 
-### 6.2 Rules
+### 7.2 Rules
 
 - `/help`, autocomplete, startup hints, and slash menus all read from the registry.
 - No hardcoded command lists exist outside the registry.
@@ -204,9 +232,9 @@ The command registry (`src/cli/command-registry.ts`) is the **single source of t
 
 ---
 
-## 7. Provider-Token Streaming Safety
+## 8. Provider-Token Streaming Safety
 
-### 7.1 Constraint
+### 8.1 Constraint
 
 Provider tokens are streamed via `output.write(event.text)` directly. The animation and status rail must never:
 
@@ -214,7 +242,7 @@ Provider tokens are streamed via `output.write(event.text)` directly. The animat
 2. Overwrite the same terminal line as token output.
 3. Start or update spinners on the token line.
 
-### 7.2 Enforcement
+### 8.2 Enforcement
 
 - `AnimationController` only runs in interactive TTY standard mode.
 - Status rail and activity timeline write on dedicated lines above the token stream.
@@ -222,9 +250,9 @@ Provider tokens are streamed via `output.write(event.text)` directly. The animat
 
 ---
 
-## 8. Input Rail-Frame Behavior
+## 9. Input Rail-Frame Behavior
 
-### 8.1 Design
+### 9.1 Design
 
 The input rail-frame is a **thin horizontal rule** that separates turns, not a full box:
 
@@ -232,7 +260,7 @@ The input rail-frame is a **thin horizontal rule** that separates turns, not a f
 - Plain mode: ASCII dash (`-`) repeated to width.
 - Narrow width: truncated to `terminalWidth`.
 
-### 8.2 Prompt Prefix
+### 9.2 Prompt Prefix
 
 - KemetBlue skin + standard mode: `𓂀 > `
 - Plain mode: `> `
@@ -240,7 +268,7 @@ The input rail-frame is a **thin horizontal rule** that separates turns, not a f
 
 ---
 
-## 9. Status Rail Timers
+## 10. Status Rail Timers
 
 The `ProgressContextRailViewModel` includes two timer fields:
 
@@ -253,9 +281,9 @@ Rendered as:
 
 ---
 
-## 10. Assistant Response Framing
+## 11. Assistant Response Framing
 
-### 10.1 Standard Mode
+### 11.1 Standard Mode
 
 Assistant responses render with a framed header:
 
@@ -266,7 +294,7 @@ Assistant responses render with a framed header:
 ╰──────────────────────────
 ```
 
-### 10.2 Plain / Channel Mode
+### 11.2 Plain / Channel Mode
 
 ```
 EstaCoda:
@@ -277,9 +305,9 @@ The label `"𓂀 EstaCoda"` is skin-configurable. Plain mode falls back to `"Est
 
 ---
 
-## 11. Startup Hero and Picker
+## 12. Startup Hero and Picker
 
-### 11.1 Startup
+### 12.1 Startup
 
 Interactive terminal launch renders `StartupDashboardViewModel` by default. It combines the compact startup identity with readiness data:
 - Standard mode: Hero panel, version/session separator, model readiness, workspace/security fields, and interactive command hints.
@@ -289,7 +317,7 @@ Interactive terminal launch renders `StartupDashboardViewModel` by default. It c
 - Standard mode: Hero panel with brand-colored agent name, dim taglines, readiness state, and warnings.
 - Plain mode: Simple text block with agent name, taglines, model, readiness.
 
-### 11.2 Picker
+### 12.2 Picker
 
 `PickerViewModel` renders as a numbered list:
 - TTY standard mode: ANSI-colored selection indicator (`>`) with highlighted label.
@@ -299,7 +327,7 @@ The interactive picker in `src/cli/interactive-select.ts` gates ANSI cursor cont
 
 ---
 
-## 12. Compatibility Wrappers
+## 13. Compatibility Wrappers
 
 v0.95 preserves backward-compatible string-returning functions:
 
@@ -314,6 +342,6 @@ All existing tests pass without modification.
 
 ---
 
-## 13. How to Add a New CLI Surface
+## 14. How to Add a New CLI Surface
 
 See `docs/rendering-guide.md` for the contributor walkthrough.

@@ -53,6 +53,21 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 
 > **Status:** v0.4 extracted provider loop, tool execution, skill workflows, and native intents. `AgentLoop` retains orchestration, prompt assembly, security gating, memory promotion, and response formatting.
 
+### CLI Active-Turn Control Boundary
+
+`AgentLoop.handle()` still processes one submitted turn at a time. There is no runtime-level steering hook and no provider in-flight steering primitive in the current implementation.
+
+CLI `/interrupt` and `/steer` are wrappers around the active `AbortSignal` supplied to `runtime.handle()` by the interactive session loop. `/interrupt` aborts the active turn and stops there. `/steer <note>` aborts the active turn, then the CLI loop schedules one retry whose input is the original submitted text plus an explicit steering note block:
+
+```text
+<original user text>
+
+[Steering note while previous turn was interrupted]
+<note>
+```
+
+This boundary matters for inspection and failure handling. The provider sees the retried request as a normal new turn. If the retry fails, is cancelled, or is interrupted, the CLI does not reapply the same steering note indefinitely.
+
 ---
 
 ## createRuntime

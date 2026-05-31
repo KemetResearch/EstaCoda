@@ -176,6 +176,21 @@ See [Handoff Preflight Report](../security/handoff-preflight-report-v0.9.md) for
 - **No automatic context merge:** attaching a Telegram surface to a CLI session does not merge histories or messages. It only means future Telegram messages go to that session.
 - Detaching creates a new independent session for that surface.
 
+### CLI Active-Turn Control Boundary
+
+Active-turn commands are local CLI control input. They are available only while an interactive TTY CLI turn is running and are handled by the CLI command lane, not by gateway adapters, channel messages, approval queues, or the provider prompt.
+
+Current active-turn commands:
+
+- `/interrupt` aborts the current CLI active turn.
+- `/steer <note>` aborts the current CLI active turn and queues one CLI-layer retry with the original submitted text plus an explicit steering note block.
+
+These commands do not change gateway approval semantics. Gateway and non-CLI channels remain on their existing control paths: remote approvals still go through `ChannelGateway`, durable approval queues remain ask-only, and adapters do not gain an active-turn command lane.
+
+The command lane must not persist command buffers as user transcript/history content. Normal active-turn typing is ignored unless it starts a command with `/`; even then, the command text is control input, not a user message. The visible transcript should continue to show the original submitted user prompt, while retry text is inspectable through the explicit steering marker when `/steer` is used.
+
+Secret prompts are outside this chrome path. Pasted secret content must not appear in paste previews, transient bottom chrome, slash hints, status rails, logs, or active-turn command messages.
+
 ### Voice Security Boundaries
 
 Voice input is a remote-control surface when it arrives through a gateway. Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg normalization, hosted STT, downloads, or temp writes. It canonicalizes `attachment.localPath ?? attachment.path` under profile-local allowed media/audio roots, validates file type and size, checks STT readiness, and denies gateway-triggered faster-whisper first-run downloads unless explicitly allowed.

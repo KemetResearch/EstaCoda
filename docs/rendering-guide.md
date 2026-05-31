@@ -238,9 +238,29 @@ pnpm run test -- --update
 
 ---
 
-## 3. Common Patterns
+## 3. Readline-Owned Cursor Surfaces
 
-### 3.1 Command Result with Nested Blocks
+When readline owns the cursor, do not write ad hoc terminal output around it. The prompt row is not a free output line; readline may repaint it after every keypress, paste, resize, or submit.
+
+Use `BottomChromeController.updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })` for live prompt-adjacent UI. This is the path for live slash hints, paste preview lines, and readline ticker updates. The call must include the current `promptLineCount`; wrapped prompts occupy more than one terminal row.
+
+Operational rules:
+
+- Do not mix `updateTransientLines()` and `updateStateAboveReadline()` manually for live readline UI.
+- Account for managed-region line-count growth and shrink.
+- Clear stale managed lines when slash hints, paste previews, or transient messages disappear.
+- Treat terminal width as mutable; prompt wrapping can change while the user is editing.
+- Never mirror secret prompt content into paste previews, transient lines, status rails, logs, or debug chrome.
+- Keep active-turn command-lane rendering in bottom chrome transient/status paths. Do not write command buffers directly to the terminal.
+- Do not reintroduce a fake prompt box after submit. The submitted user text belongs in transcript/history rendering; active-turn chrome is status and control chrome.
+
+Cursor-control changes need real terminal smoke in addition to unit tests. Tests can prove line accounting for known streams; a real terminal catches emulator behavior around cursor save/restore, wrapping, scrollback, and bracketed paste mode.
+
+---
+
+## 4. Common Patterns
+
+### 4.1 Command Result with Nested Blocks
 
 Use `CommandResultViewModel` to wrap multiple ViewModels:
 
@@ -255,7 +275,7 @@ const vm = buildCommandResultViewModel({
 });
 ```
 
-### 3.2 Table with Empty State
+### 4.2 Table with Empty State
 
 ```typescript
 buildTableViewModel({
@@ -266,7 +286,7 @@ buildTableViewModel({
 });
 ```
 
-### 3.3 Warning Banner
+### 4.3 Warning Banner
 
 ```typescript
 buildWarningErrorViewModel({
@@ -277,7 +297,7 @@ buildWarningErrorViewModel({
 });
 ```
 
-### 3.4 Approval Prompt
+### 4.4 Approval Prompt
 
 ```typescript
 buildApprovalSecurityViewModel({
@@ -296,7 +316,7 @@ buildApprovalSecurityViewModel({
 
 ---
 
-## 4. What NOT to Do
+## 5. What NOT to Do
 
 | Anti-pattern | Correct Approach |
 |--------------|----------------|
@@ -306,10 +326,12 @@ buildApprovalSecurityViewModel({
 | `output.write(`┌${`─`.repeat(w)}┐`)` | Use `#framedPanel()` in `StandardRenderer` or plain text blocks in `PlainRenderer`. |
 | `const lines = ["header", `  ${key}: ${value}`]` | Build a `KeyValueBlockViewModel` and render it. |
 | Hardcoding command names in `/help` | Register commands in `CommandRegistry`, read from registry. |
+| Writing terminal output while readline owns the prompt row | Use `updateManagedRegionAboveReadline(...)` and pass the current prompt line count. |
+| Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
 
 ---
 
-## 5. Renderer Fallback Reference
+## 6. Renderer Fallback Reference
 
 When `StandardRenderer` encounters restricted capabilities, it falls back automatically:
 
@@ -322,7 +344,7 @@ When `StandardRenderer` encounters restricted capabilities, it falls back automa
 
 ---
 
-## 6. Channel-Safe Output
+## 7. Channel-Safe Output
 
 If your surface needs to work through channels (Telegram, Discord, Email), ensure it produces safe output when rendered through `PlainLogSurfaceAdapter`:
 
