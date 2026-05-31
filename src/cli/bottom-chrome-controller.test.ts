@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { BottomChromeController } from "./bottom-chrome-controller.js";
-import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel } from "../ui/view-models/builders.js";
+import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel, buildSlashMenuViewModel, slashMenuOption } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
 
@@ -34,6 +34,7 @@ function mockOutput(): { chunks: string[]; stream: NodeJS.WritableStream } {
 function renderViewModel(vm: ViewModel): string {
   if (vm.kind === "sessionStatusRail") return `${vm.modelLabel} | ${vm.turnState}`;
   if (vm.kind === "activeTurnSpinner") return `spinner:${vm.phase ?? "none"}`;
+  if (vm.kind === "slashMenu") return vm.options.map((option) => `${option.label} ${option.description ?? ""}`.trim()).join("\n");
   return `[unsupported ${vm.kind}]`;
 }
 
@@ -47,6 +48,14 @@ function makeController(
 
 function status(text = "model") {
   return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
+}
+
+function slashMenu() {
+  return buildSlashMenuViewModel({
+    query: "/h",
+    options: [slashMenuOption("help", "/help", { description: "Show command help" })],
+    selectedIndex: 0,
+  });
 }
 
 describe("BottomChromeController", () => {
@@ -256,6 +265,138 @@ describe("BottomChromeController", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("grows the managed readline region for transient lines and slash menu chrome", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu() },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2A\x1b[2L\x1b[2K\rpaste preview\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r/help Show command help\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
+  });
+
+  it("clears slash and transient readline chrome when the managed region shrinks", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu() },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[2M\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2A`,
+    ]);
+  });
+
+  it("clears the full managed readline region when no chrome remains", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: {},
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual(["\x1b7\x1b[2A\x1b[2M\x1b8\x1b[2A"]);
+  });
+
+  it("renders paste preview-style transient lines above an active readline prompt", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["line one", "line two"],
+      promptLineCount: 1,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2A\x1b[2L\x1b[2K\rline one\x1b[1B\x1b[2K\rline two\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
+  });
+
+  it("accounts for wrapped prompt rows when growing the managed readline region", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("next") },
+      transientLines: ["paste preview"],
+      promptLineCount: 3,
+    });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[1L\x1b[2K\rpaste preview\x1b[1B\x1b[2K\rnext | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1B`,
+    ]);
+  });
+
+  it("handles transient line-count changes above readline safely", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["one"],
+      promptLineCount: 1,
+    });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["one", "two"],
+      promptLineCount: 1,
+    });
+    expect(chunks).toEqual([
+      `\x1b7\x1b[3A\x1b[1L\x1b[2K\rone\x1b[1B\x1b[2K\rtwo\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1B`,
+    ]);
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["two"],
+      promptLineCount: 1,
+    });
+    expect(chunks).toEqual([
+      `\x1b7\x1b[4A\x1b[1M\x1b[2K\rtwo\x1b[1B\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[1A`,
+    ]);
+  });
+
+  it("skips managed readline updates when disabled", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: ["paste preview"],
+      promptLineCount: 2,
+    });
+
+    expect(chunks).toEqual([]);
   });
 
   it("skips identical readline redraw frames", () => {
