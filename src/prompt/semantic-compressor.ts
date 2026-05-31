@@ -116,6 +116,11 @@ type CompressionPlan = {
   warnings: string[];
 };
 
+type ProviderToolGroup = {
+  indexes: number[];
+  complete: boolean;
+};
+
 export class SemanticCompressor {
   readonly #config: SessionCompressionConfig;
   readonly #route: ResolvedAuxiliaryRoute | undefined;
@@ -161,7 +166,8 @@ export class SemanticCompressor {
       });
     }
 
-    const pruned = pruneOldToolResults(plan.source);
+    const compressionSource = sanitizeMessagesForCompression(plan.source);
+    const pruned = pruneOldToolResults(compressionSource);
     const serialized = serializeMessagesForSummary(pruned.messages);
     const previousSummary = previousSummaryText(input.messages, input.previousState);
     const summaryBudget = computeSummaryBudget({
@@ -511,7 +517,8 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
 } {
   const warnings: string[] = [];
   let prunedToolResults = 0;
-  const text = messages.map((message) => {
+  const text = messages.map((rawMessage) => {
+    const message = sanitizeMessageForCompression(rawMessage);
     const visibleContent = sanitizeVisibleContent(message.content);
     const content = truncateMessageContent(visibleContent);
     const contextSummary = message.role === "tool"
@@ -912,6 +919,21 @@ function protectedMessageIndexes(messages: readonly SessionMessage[], config: Se
   }
 
   const toolGroups = toolCallGroups(messages);
+  const providerGroups = providerToolGroups(messages);
+  for (const group of providerGroups) {
+    const groupTouchesProtectedSpan = group.indexes.some((index) => protectedIndexes.has(index));
+    const groupIsMarkedActive = group.indexes.some((index) => {
+      const groupedMessage = messages[index];
+      return groupedMessage !== undefined && isActiveToolMessage(groupedMessage);
+    });
+    if (!groupTouchesProtectedSpan && group.complete && !groupIsMarkedActive) {
+      continue;
+    }
+    for (const index of group.indexes) {
+      protectedIndexes.add(index);
+    }
+  }
+
   for (const indexes of toolGroups.values()) {
     const groupTouchesProtectedSpan = indexes.some((index) => protectedIndexes.has(index));
     const groupHasNoResult = !indexes.some((index) => messages[index]?.role === "tool");
@@ -925,6 +947,57 @@ function protectedMessageIndexes(messages: readonly SessionMessage[], config: Se
   }
 
   return protectedIndexes;
+}
+
+function providerToolGroups(messages: readonly SessionMessage[]): ProviderToolGroup[] {
+  const groups: ProviderToolGroup[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const callIds = providerToolCallIds(messages[index]!);
+    if (callIds === undefined) {
+      continue;
+    }
+
+    const indexes = [index];
+    const matchedIds = new Set<string>();
+    for (let scanIndex = index + 1; scanIndex < messages.length; scanIndex += 1) {
+      const candidate = messages[scanIndex]!;
+      if (candidate.role !== "tool") {
+        break;
+      }
+      const toolCallId = toolCallIdFrom(candidate);
+      if (toolCallId === undefined || !callIds.has(toolCallId)) {
+        break;
+      }
+      indexes.push(scanIndex);
+      matchedIds.add(toolCallId);
+    }
+
+    groups.push({
+      indexes,
+      complete: callIds.size > 0 && [...callIds].every((id) => matchedIds.has(id))
+    });
+  }
+  return groups;
+}
+
+function providerToolCallIds(message: SessionMessage): Set<string> | undefined {
+  if (message.role !== "agent" || message.metadata?.kind !== "provider-tool-call-turn") {
+    return undefined;
+  }
+
+  const calls = message.metadata.providerToolCalls;
+  const ids = new Set<string>();
+  if (Array.isArray(calls)) {
+    for (const call of calls) {
+      if (call !== null && typeof call === "object") {
+        const id = (call as Record<string, unknown>).id;
+        if (typeof id === "string" && id.length > 0) {
+          ids.add(id);
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 function toolCallGroups(messages: readonly SessionMessage[]): Map<string, number[]> {
@@ -1049,6 +1122,51 @@ function previousSummaryText(messages: readonly SessionMessage[], state: Session
   );
   return summary === undefined ? undefined : sanitizeVisibleContent(summary.content);
 }
+
+function sanitizeMessagesForCompression(messages: readonly SessionMessage[]): SessionMessage[] {
+  return messages.map(sanitizeMessageForCompression);
+}
+
+function sanitizeMessageForCompression(message: SessionMessage): SessionMessage {
+  return {
+    ...message,
+    content: sanitizeVisibleContent(message.content),
+    metadata: sanitizeCompressionMetadata(message.metadata)
+  };
+}
+
+function sanitizeCompressionMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (metadata === undefined) {
+    return undefined;
+  }
+
+  const sanitized = { ...metadata };
+  for (const key of UNSAFE_COMPRESSION_METADATA_KEYS) {
+    delete sanitized[key];
+  }
+  return Object.keys(sanitized).length === 0 ? undefined : sanitized;
+}
+
+const UNSAFE_COMPRESSION_METADATA_KEYS = [
+  "providerReplayEcho",
+  "providerToolCalls",
+  "reasoning",
+  "reasoning_content",
+  "reasoningContent",
+  "reasoning_details",
+  "reasoningDetails",
+  "reasoningMetadata",
+  "rawReasoning",
+  "raw_reasoning",
+  "raw",
+  "providerRaw",
+  "provider_raw",
+  "rawProviderPayload",
+  "runtimeMetadata",
+  "usage",
+  "finishReason",
+  "finish_reason"
+] as const;
 
 function sanitizeVisibleContent(value: string): string {
   return stripInlineReasoning(value);

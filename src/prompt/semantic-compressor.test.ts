@@ -121,6 +121,41 @@ describe("SemanticCompressor", () => {
     expect(serialized.text).not.toContain("private chain");
   });
 
+  it("strips provider replay echo and raw reasoning metadata from summary transcripts", () => {
+    const echo = "private provider reasoning";
+    const serialized = serializeMessagesForSummary([
+      providerToolTurn("provider-turn", ["call-1"], {
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: echo,
+          providerFamily: "deepseek",
+          apiMode: "openai_chat_completions",
+          chars: echo.length
+        },
+        reasoning_content: "raw metadata reasoning",
+        reasoningMetadata: { present: true, chars: 22 },
+        raw: { payload: "raw provider payload" }
+      }, "<think>raw content reasoning</think>Visible tool call."),
+      message("tool-result", "tool", "tool output", {
+        tool_call_id: "call-1",
+        tool_call_name: "files.read",
+        reasoning: "tool metadata reasoning",
+        raw: { payload: "tool raw payload" }
+      })
+    ]);
+
+    expect(serialized.text).toContain("Visible tool call.");
+    expect(serialized.text).toContain("tool output");
+    expect(serialized.text).not.toContain(echo);
+    expect(serialized.text).not.toContain("providerReplayEcho");
+    expect(serialized.text).not.toContain("providerToolCalls");
+    expect(serialized.text).not.toContain("raw metadata reasoning");
+    expect(serialized.text).not.toContain("raw content reasoning");
+    expect(serialized.text).not.toContain("raw provider payload");
+    expect(serialized.text).not.toContain("tool metadata reasoning");
+    expect(serialized.text).not.toContain("tool raw payload");
+  });
+
   it("strips hidden reasoning from auxiliary summary output before persistence", async () => {
     const compressor = new SemanticCompressor({
       config: normalizeSessionCompressionConfig({
@@ -322,6 +357,182 @@ describe("SemanticCompressor", () => {
     expect(observedTranscript).toContain("[tool result pruned]");
     expect(observedTranscript).not.toContain("x".repeat(CONTENT_HEAD));
     expect(observedTranscript.length).toBeLessThan(largeToolOutput.length);
+  });
+
+  it("compresses old provider tool groups as whole text history", async () => {
+    let observedTranscript = "";
+    const harness = auxiliaryHarness("old provider tool group summarized");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedTranscript = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("old provider tool group summarized");
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1
+      }),
+      ...harness
+    });
+    const messages = [
+      providerToolTurn("provider-turn", ["call-1"]),
+      message("provider-tool-result", "tool", "provider tool result", {
+        tool_call_id: "call-1",
+        tool_call_name: "files.read"
+      }),
+      message("latest-user", "user", "latest user request")
+    ];
+
+    const result = await compressor.compress({ messages, profileId: "profile", sessionId: "session", force: true });
+
+    expect(result.didCompress).toBe(true);
+    expect(observedTranscript).toContain("--- message provider-turn");
+    expect(observedTranscript).toContain("--- message provider-tool-result");
+    expect(result.messages.map((entry) => entry.id)).not.toContain("provider-turn");
+    expect(result.messages.map((entry) => entry.id)).not.toContain("provider-tool-result");
+    expect(result.messages.map((entry) => entry.id)).toContain("latest-user");
+    expect(result.messages.some((entry) => entry.role === "tool")).toBe(false);
+  });
+
+  it("keeps a provider tool group whole when any part is protected", async () => {
+    let observedTranscript = "";
+    const harness = auxiliaryHarness("older context summarized");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedTranscript = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult("older context summarized");
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1
+      }),
+      ...harness
+    });
+    const messages = [
+      message("old-agent", "agent", "old context"),
+      providerToolTurn("provider-turn", ["call-1"]),
+      message("provider-tool-result", "tool", "provider tool result", {
+        tool_call_id: "call-1",
+        tool_call_name: "files.read"
+      })
+    ];
+
+    const result = await compressor.compress({ messages, profileId: "profile", sessionId: "session", force: true });
+
+    expect(observedTranscript).toContain("--- message old-agent");
+    expect(observedTranscript).not.toContain("provider-turn");
+    expect(observedTranscript).not.toContain("provider tool result");
+    expect(result.messages.map((entry) => entry.id)).toEqual([
+      expect.stringMatching(/^summary-/u),
+      "provider-turn",
+      "provider-tool-result"
+    ]);
+    expect(result.diagnostics.protectedSpans).toContainEqual(expect.objectContaining({
+      startMessageId: "provider-turn",
+      endMessageId: "provider-tool-result",
+      messageCount: 2
+    }));
+  });
+
+  it("keeps multi-call provider tool groups atomic", async () => {
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1
+      }),
+      ...auxiliaryHarness("older context summarized")
+    });
+    const messages = [
+      message("old-agent", "agent", "old context"),
+      providerToolTurn("multi-provider-turn", ["call-a", "call-b"]),
+      message("tool-a", "tool", "a", { tool_call_id: "call-a", tool_call_name: "files.read" }),
+      message("tool-b", "tool", "b", { tool_call_id: "call-b", tool_call_name: "files.stat" })
+    ];
+
+    const result = await compressor.compress({ messages, profileId: "profile", sessionId: "session", force: true });
+
+    expect(result.messages.map((entry) => entry.id)).toEqual([
+      expect.stringMatching(/^summary-/u),
+      "multi-provider-turn",
+      "tool-a",
+      "tool-b"
+    ]);
+  });
+
+  it("protects incomplete provider tool groups without inventing tool results", async () => {
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 0
+      }),
+      ...auxiliaryHarness("older context summarized")
+    });
+    const messages = [
+      providerToolTurn("incomplete-provider-turn", ["call-missing"]),
+      message("old-agent", "agent", "old context"),
+      message("latest-user", "user", "latest user request")
+    ];
+
+    const result = await compressor.compress({ messages, profileId: "profile", sessionId: "session", force: true });
+
+    expect(result.messages.map((entry) => entry.id)).toEqual([
+      "incomplete-provider-turn",
+      expect.stringMatching(/^summary-/u),
+      "latest-user"
+    ]);
+    expect(result.messages.filter((entry) => entry.role === "tool")).toEqual([]);
+  });
+
+  it("keeps provider replay echo out of compressor input and generated summaries", async () => {
+    let observedTranscript = "";
+    const echo = "private provider reasoning";
+    const harness = auxiliaryHarness("summary without replay echo");
+    harness.providerExecutor.complete = vi.fn(async (request?: unknown): Promise<any> => {
+      observedTranscript = String((request as { messages?: Array<{ content?: unknown }> }).messages?.[1]?.content ?? "");
+      return providerResult(`summary based on ${observedTranscript}`);
+    });
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1
+      }),
+      ...harness
+    });
+    const messages = [
+      providerToolTurn("provider-turn", ["call-1"], {
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: echo,
+          providerFamily: "deepseek",
+          apiMode: "openai_chat_completions",
+          chars: echo.length
+        },
+        reasoning_content: "raw provider reasoning",
+        raw: { payload: "raw provider payload" }
+      }, "<think>raw content reasoning</think>Visible tool call."),
+      message("provider-tool-result", "tool", "provider tool result", {
+        tool_call_id: "call-1",
+        tool_call_name: "files.read"
+      }),
+      message("latest-user", "user", "latest user request")
+    ];
+
+    const result = await compressor.compress({ messages, profileId: "profile", sessionId: "session", force: true });
+    const summary = result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content ?? "";
+
+    expect(observedTranscript).toContain("Visible tool call.");
+    expect(observedTranscript).not.toContain(echo);
+    expect(observedTranscript).not.toContain("raw provider reasoning");
+    expect(observedTranscript).not.toContain("raw content reasoning");
+    expect(observedTranscript).not.toContain("raw provider payload");
+    expect(summary).not.toContain(echo);
+    expect(summary).not.toContain("raw provider reasoning");
+    expect(summary).not.toContain("raw content reasoning");
+    expect(summary).not.toContain("raw provider payload");
   });
 
   it("redacts summarizer input and generated summary output", async () => {
@@ -750,6 +961,26 @@ describe("SemanticCompressor", () => {
 function fixtureMessages(count: number, extra = ""): SessionMessage[] {
   return Array.from({ length: count }, (_value, index) =>
     message(`m${index}`, index % 2 === 0 ? "user" : "agent", `message ${index} ${"x".repeat(120)} ${extra}`));
+}
+
+function providerToolTurn(
+  id: string,
+  callIds: string[],
+  metadata: Record<string, unknown> = {},
+  content = "provider tool call"
+): SessionMessage {
+  return message(id, "agent", content, {
+    kind: "provider-tool-call-turn",
+    nativeReplaySafe: true,
+    providerToolCalls: callIds.map((callId) => ({
+      id: callId,
+      name: callId.endsWith("b") ? "files.stat" : "files.read",
+      argumentsText: "{\"path\":\"src/index.ts\"}"
+    })),
+    provider: "deepseek",
+    model: "deepseek-chat",
+    ...metadata
+  });
 }
 
 function message(
