@@ -19,11 +19,13 @@ const UNSAFE_PROVIDER_BOUND_MESSAGE_FIELDS = new Set([
   "reasoning_content",
   "reasoning_details",
   "reasoningMetadata",
+  "metadata",
   "runtimeMetadata",
   "providerLoopRuntimeMetadata",
   "attemptedRouteIndex",
   "routeRole",
-  "usage"
+  "usage",
+  "raw"
 ]);
 
 export function normalizeProviderMessagesStrict(
@@ -34,10 +36,13 @@ export function normalizeProviderMessagesStrict(
   const repairs: string[] = [];
   const normalized: Array<Omit<ProviderMessage, "content"> & { content: unknown }> = [];
   let systemContent: unknown;
+  let activeToolCallIds: Set<string> | undefined;
 
   for (const originalMessage of messages) {
     const message = sanitizeProviderBoundMessage(originalMessage);
-    const content = normalizeContent(message.content);
+    const content = normalizeContent(message.content, {
+      allowEmptyString: hasAssistantToolCalls(message)
+    });
 
     if (message.role === "system") {
       systemContent = mergeNormalizedContent(systemContent, content);
@@ -49,7 +54,7 @@ export function normalizeProviderMessagesStrict(
 
     const previous = normalized[normalized.length - 1];
 
-    if (message.role === "tool" && (previous === undefined || (previous.role !== "assistant" && previous.role !== "tool"))) {
+    if (message.role === "tool" && !isValidNativeToolResult(message, previous, activeToolCallIds)) {
       normalized.push({
         role: "user",
         content: `Tool result received without a preceding assistant tool call:\n${stringifyNormalizedContent(content)}`,
@@ -57,6 +62,7 @@ export function normalizeProviderMessagesStrict(
       });
       warnings.push(previous === undefined ? "orphan-tool-message" : "tool-message-without-assistant-before-it");
       repairs.push("converted-invalid-tool-to-user-message");
+      activeToolCallIds = undefined;
       continue;
     }
 
@@ -64,6 +70,8 @@ export function normalizeProviderMessagesStrict(
       previous !== undefined &&
       previous.role === message.role &&
       message.role !== "tool" &&
+      !hasStructuredMessageFields(previous) &&
+      !hasStructuredMessageFields(message) &&
       typeof previous.content === "string" &&
       typeof content === "string"
     ) {
@@ -72,22 +80,11 @@ export function normalizeProviderMessagesStrict(
       continue;
     }
 
-    if (
-      previous !== undefined &&
-      previous.role === "tool" &&
-      message.role === "tool" &&
-      typeof previous.content === "string" &&
-      typeof content === "string"
-    ) {
-      previous.content = `${previous.content}\n\n${content}`;
-      repairs.push("merged-adjacent-tool-messages");
-      continue;
-    }
-
     normalized.push({
       ...message,
       content
     });
+    activeToolCallIds = activeToolCallIdsAfterMessage(message, activeToolCallIds);
   }
 
   if (systemContent !== undefined) {
@@ -138,6 +135,29 @@ export function sanitizeProviderBoundMessage(message: ProviderMessage): Provider
     sanitized[key] = key === "content" ? sanitizeProviderBoundContent(value) : value;
   }
 
+  const toolCalls = sanitizeStructuredToolCalls(sanitized.toolCalls);
+  if (sanitized.role === "assistant" && toolCalls !== undefined) {
+    sanitized.toolCalls = toolCalls;
+  } else {
+    delete sanitized.toolCalls;
+  }
+
+  const toolCallId = typeof sanitized.toolCallId === "string" && sanitized.toolCallId.length > 0
+    ? sanitized.toolCallId
+    : undefined;
+  if (sanitized.role === "tool" && toolCallId !== undefined) {
+    sanitized.toolCallId = toolCallId;
+  } else {
+    delete sanitized.toolCallId;
+  }
+
+  const providerReplayEcho = sanitizeProviderReplayEcho(sanitized.providerReplayEcho);
+  if (sanitized.role === "assistant" && toolCalls !== undefined && providerReplayEcho !== undefined) {
+    sanitized.providerReplayEcho = providerReplayEcho;
+  } else {
+    delete sanitized.providerReplayEcho;
+  }
+
   if (!("content" in sanitized)) {
     sanitized.content = "[empty]";
   }
@@ -145,9 +165,12 @@ export function sanitizeProviderBoundMessage(message: ProviderMessage): Provider
   return sanitized as ProviderMessage;
 }
 
-function normalizeContent(content: unknown): unknown {
+function normalizeContent(content: unknown, options: { allowEmptyString?: boolean } = {}): unknown {
   if (typeof content === "string") {
     const trimmed = content.trim();
+    if (trimmed.length === 0 && options.allowEmptyString === true) {
+      return "";
+    }
     return trimmed.length === 0 ? "[empty]" : trimmed;
   }
 
@@ -171,6 +194,108 @@ function sanitizeProviderBoundContent(content: unknown): unknown {
   }
 
   return content;
+}
+
+function hasStructuredMessageFields(message: Pick<ProviderMessage, "role" | "toolCalls" | "toolCallId" | "providerReplayEcho">): boolean {
+  return hasAssistantToolCalls(message) || message.toolCallId !== undefined || message.providerReplayEcho !== undefined;
+}
+
+function hasAssistantToolCalls(message: Pick<ProviderMessage, "role" | "toolCalls">): boolean {
+  return message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
+}
+
+function isValidNativeToolResult(
+  message: Pick<ProviderMessage, "role" | "toolCallId">,
+  previous: Pick<ProviderMessage, "role" | "toolCalls" | "toolCallId"> | undefined,
+  activeToolCallIds: Set<string> | undefined
+): boolean {
+  if (message.role !== "tool" || message.toolCallId === undefined) {
+    return false;
+  }
+
+  if (previous?.role === "assistant" && hasAssistantToolCalls(previous)) {
+    return previous.toolCalls!.some((toolCall) => toolCall.id === message.toolCallId);
+  }
+
+  return previous?.role === "tool" && activeToolCallIds?.has(message.toolCallId) === true;
+}
+
+function activeToolCallIdsAfterMessage(
+  message: Pick<ProviderMessage, "role" | "toolCalls" | "toolCallId">,
+  current: Set<string> | undefined
+): Set<string> | undefined {
+  if (hasAssistantToolCalls(message)) {
+    return new Set(message.toolCalls!.map((toolCall) => toolCall.id));
+  }
+
+  if (message.role === "tool" && current?.has(message.toolCallId ?? "") === true) {
+    return current;
+  }
+
+  return undefined;
+}
+
+function sanitizeStructuredToolCalls(value: unknown): ProviderMessage["toolCalls"] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+
+  const toolCalls: NonNullable<ProviderMessage["toolCalls"]> = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (item === null || typeof item !== "object") {
+      return undefined;
+    }
+    const record = item as Record<string, unknown>;
+    if (
+      typeof record.id !== "string" ||
+      record.id.length === 0 ||
+      typeof record.name !== "string" ||
+      record.name.length === 0 ||
+      typeof record.argumentsText !== "string"
+    ) {
+      return undefined;
+    }
+    if (ids.has(record.id)) {
+      return undefined;
+    }
+    ids.add(record.id);
+    toolCalls.push({
+      id: record.id,
+      name: record.name,
+      argumentsText: record.argumentsText
+    });
+  }
+
+  return toolCalls;
+}
+
+function sanitizeProviderReplayEcho(value: unknown): ProviderMessage["providerReplayEcho"] | undefined {
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.field !== "reasoning_content" ||
+    typeof record.value !== "string" ||
+    !isProviderReplayEchoFamily(record.providerFamily) ||
+    record.apiMode !== "openai_chat_completions" ||
+    typeof record.chars !== "number" ||
+    record.chars !== record.value.length
+  ) {
+    return undefined;
+  }
+  return {
+    field: "reasoning_content",
+    value: record.value,
+    providerFamily: record.providerFamily,
+    apiMode: "openai_chat_completions",
+    chars: record.chars
+  };
+}
+
+function isProviderReplayEchoFamily(value: unknown): value is NonNullable<ProviderMessage["providerReplayEcho"]>["providerFamily"] {
+  return value === "deepseek" || value === "kimi" || value === "mimo";
 }
 
 function sanitizeProviderBoundContentPart(part: unknown): unknown | undefined {
