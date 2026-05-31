@@ -225,7 +225,8 @@ describe("service manager", () => {
     expect(content).not.toContain(`Environment="HOME=${stateHomeDir}"`);
     expect(content).toContain("Environment=\"PATH=/opt/homebrew/bin:");
     expect(content).toContain(`WorkingDirectory="${join(tmpDir, "workspace with spaces")}"`);
-    expect(content).toContain('"gateway" "start" "--profile" "default"');
+    expect(content).toContain('"gateway" "run" "--profile" "default"');
+    expect(content).not.toContain('"gateway" "start" "--profile" "default"');
     expect(content).not.toContain("--replace");
     expect((await stat(unitPath)).mode & 0o777).toBe(0o600);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
@@ -835,7 +836,8 @@ describe("service manager", () => {
     await expect(readFile(statePlistPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(content).toContain(`<string>com.estacoda.gateway.work-prod-`);
     expect(content).toContain("<string>gateway</string>");
-    expect(content).toContain("<string>start</string>");
+    expect(content).toContain("<string>run</string>");
+    expect(content).not.toContain("<string>start</string>");
     expect(content).toContain("<string>--profile</string>");
     expect(content).toContain("<string>work.prod</string>");
     expect(content).toContain("<key>RunAtLoad</key><true/>");

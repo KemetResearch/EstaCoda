@@ -469,7 +469,7 @@ function renderSystemdUnit(options: {
     options.resolved.command,
     ...options.resolved.args,
     "gateway",
-    "start",
+    "run",
     "--profile",
     options.profileId,
   ];
@@ -518,7 +518,7 @@ function renderLaunchdPlist(options: {
     options.resolved.command,
     ...options.resolved.args,
     "gateway",
-    "start",
+    "run",
     "--profile",
     options.profileId,
   ];
