@@ -11,6 +11,7 @@ describe("sanitizeProviderBoundMessage", () => {
       reasoning_content: "raw reasoning content",
       reasoning_details: [{ text: "raw reasoning details" }],
       reasoningMetadata: { present: true, chars: 12, format: "reasoning_content" },
+      metadata: { session: "internal" },
       finishReason: "stop",
       finish_reason: "stop",
       runtimeMetadata: { reasoning: { present: true, chars: 12, format: "reasoning" } },
@@ -26,9 +27,100 @@ describe("sanitizeProviderBoundMessage", () => {
     expect(sanitized).not.toHaveProperty("reasoning_content");
     expect(sanitized).not.toHaveProperty("reasoning_details");
     expect(sanitized).not.toHaveProperty("reasoningMetadata");
+    expect(sanitized).not.toHaveProperty("metadata");
     expect(sanitized).not.toHaveProperty("finishReason");
     expect(sanitized).not.toHaveProperty("finish_reason");
     expect(sanitized).not.toHaveProperty("runtimeMetadata");
+  });
+
+  it("preserves structured tool fields and strips unsafe runtime metadata", () => {
+    const sanitized = sanitizeProviderBoundMessage({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: "call-1",
+          name: "files.read",
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        }
+      ],
+      providerReplayEcho: {
+        field: "reasoning_content",
+        value: "private provider reasoning",
+        providerFamily: "deepseek",
+        apiMode: "openai_chat_completions",
+        chars: "private provider reasoning".length
+      },
+      reasoning: "raw reasoning",
+      reasoning_content: "raw reasoning content",
+      reasoningMetadata: { present: true, chars: 12, format: "reasoning_content" },
+      usage: { inputTokens: 1 },
+      finishReason: "tool_calls",
+      runtimeMetadata: { unsafe: true },
+      raw: { provider: "payload" }
+    } as ProviderMessage & Record<string, unknown>) as ProviderMessage & Record<string, unknown>;
+
+    expect(sanitized).toMatchObject({
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call-1",
+          name: "files.read",
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        }
+      ],
+      providerReplayEcho: {
+        field: "reasoning_content",
+        value: "private provider reasoning",
+        providerFamily: "deepseek",
+        apiMode: "openai_chat_completions",
+        chars: "private provider reasoning".length
+      }
+    });
+    expect(sanitized).not.toHaveProperty("reasoning");
+    expect(sanitized).not.toHaveProperty("reasoning_content");
+    expect(sanitized).not.toHaveProperty("reasoningMetadata");
+    expect(sanitized).not.toHaveProperty("usage");
+    expect(sanitized).not.toHaveProperty("finishReason");
+    expect(sanitized).not.toHaveProperty("runtimeMetadata");
+    expect(sanitized).not.toHaveProperty("raw");
+  });
+
+  it("strips provider replay echo outside assistant messages with tool calls", () => {
+    const providerReplayEcho = {
+      field: "reasoning_content",
+      value: "private provider reasoning",
+      providerFamily: "deepseek",
+      apiMode: "openai_chat_completions",
+      chars: "private provider reasoning".length
+    };
+    const messages = [
+      { role: "system", content: "system", providerReplayEcho },
+      { role: "user", content: "user", providerReplayEcho },
+      { role: "assistant", content: "assistant", providerReplayEcho },
+      { role: "tool", content: "tool", toolCallId: "call-1", providerReplayEcho }
+    ] as Array<ProviderMessage & Record<string, unknown>>;
+
+    for (const message of messages) {
+      expect(sanitizeProviderBoundMessage(message)).not.toHaveProperty("providerReplayEcho");
+    }
+  });
+
+  it("preserves toolCallId only on tool messages", () => {
+    expect(sanitizeProviderBoundMessage({
+      role: "tool",
+      content: "tool result",
+      toolCallId: "call-1"
+    })).toMatchObject({
+      role: "tool",
+      content: "tool result",
+      toolCallId: "call-1"
+    });
+    expect(sanitizeProviderBoundMessage({
+      role: "assistant",
+      content: "not a tool",
+      toolCallId: "call-1"
+    } as ProviderMessage)).not.toHaveProperty("toolCallId");
   });
 
   it("strips unsafe fields from structured content without dropping unknown safe fields", () => {
@@ -98,5 +190,151 @@ describe("sanitizeProviderBoundMessage", () => {
         content: "Use <think> as the example tag"
       }
     ]);
+  });
+
+  it("allows empty assistant content when tool calls exist", () => {
+    const normalized = normalizeProviderMessagesStrict([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      }
+    ]);
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      }
+    ]);
+  });
+
+  it("does not merge assistant messages with tool calls", () => {
+    const normalized = normalizeProviderMessagesStrict([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      },
+      {
+        role: "assistant",
+        content: "Visible follow-up"
+      }
+    ]);
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      },
+      {
+        role: "assistant",
+        content: "Visible follow-up"
+      }
+    ]);
+    expect(normalized.repairs).not.toContain("merged-adjacent-assistant-messages");
+  });
+
+  it("preserves native tool messages without merging them", () => {
+    const normalized = normalizeProviderMessagesStrict([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      },
+      {
+        role: "tool",
+        content: "first result",
+        toolCallId: "call-1"
+      },
+      {
+        role: "tool",
+        content: "second result",
+        toolCallId: "call-1"
+      }
+    ]);
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      },
+      {
+        role: "tool",
+        content: "first result",
+        toolCallId: "call-1"
+      },
+      {
+        role: "tool",
+        content: "second result",
+        toolCallId: "call-1"
+      }
+    ]);
+    expect(normalized.repairs).not.toContain("merged-adjacent-tool-messages");
+  });
+
+  it("converts orphan tool messages safely instead of making them native results", () => {
+    const normalized = normalizeProviderMessagesStrict([
+      {
+        role: "assistant",
+        content: "Plain assistant"
+      },
+      {
+        role: "tool",
+        content: "orphan result",
+        toolCallId: "call-orphan"
+      }
+    ]);
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: "Plain assistant"
+      },
+      {
+        role: "user",
+        content: "Tool result received without a preceding assistant tool call:\norphan result"
+      }
+    ]);
+    expect(normalized.repairs).toContain("converted-invalid-tool-to-user-message");
   });
 });

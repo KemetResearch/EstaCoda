@@ -896,6 +896,64 @@ describe("SessionCompressionService", () => {
     expect(result.userFacingMessage).toContain("Session history compacted");
     expect(result.messages.find((message) => message.metadata?.semanticCompression === true)?.content).toContain(SUMMARY_PREFIX);
   });
+
+  it("persists protected provider tool groups without splitting them", async () => {
+    const db = new InMemorySessionDB({ now: () => new Date("2030-01-01T00:00:00.000Z") });
+    const session = await db.createSession({ id: "provider-tool-group-session", profileId: "profile" });
+    await db.appendMessage({
+      id: "latest-user",
+      sessionId: session.id,
+      role: "user",
+      content: "latest user request"
+    });
+    await db.appendMessage({
+      id: "compressible-agent",
+      sessionId: session.id,
+      role: "agent",
+      content: "old compressible context ".repeat(20)
+    });
+    await db.appendMessage(providerToolTurn(session.id, "provider-turn", ["call-1"]));
+    await db.appendMessage({
+      id: "provider-tool-result",
+      sessionId: session.id,
+      role: "tool",
+      content: "provider tool result",
+      metadata: {
+        tool_call_id: "call-1",
+        tool_call_name: "files.read"
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1
+      }),
+      ...auxiliaryHarness("compressed older context")
+    });
+
+    const result = await service.compactNow({ profileId: "profile", sessionId: session.id });
+    const persisted = await db.listMessages(session.id);
+
+    expect(result.didCompress).toBe(true);
+    expect(persisted.map((message) => message.id)).toEqual([
+      "latest-user",
+      expect.stringMatching(/^summary-/u),
+      "provider-turn",
+      "provider-tool-result"
+    ]);
+    expect(persisted.find((message) => message.id === "provider-turn")?.metadata).toEqual(expect.objectContaining({
+      kind: "provider-tool-call-turn",
+      providerToolCalls: expect.any(Array)
+    }));
+    expect(persisted.find((message) => message.id === "provider-tool-result")?.metadata?.tool_call_id).toBe("call-1");
+    expect(result.diagnostics.protectedSpans).toContainEqual(expect.objectContaining({
+      startMessageId: "provider-turn",
+      endMessageId: "provider-tool-result",
+      messageCount: 2
+    }));
+  });
 });
 
 async function sessionDbWithMessages(count: number, sessionId = "session-a") {
@@ -917,6 +975,26 @@ async function appendMessages(db: InMemorySessionDB, sessionId: string, count: n
       content: `message ${index} ${"x".repeat(120)}`
     });
   }
+}
+
+function providerToolTurn(sessionId: string, id: string, callIds: string[]) {
+  return {
+    id,
+    sessionId,
+    role: "agent" as const,
+    content: "provider tool call",
+    metadata: {
+      kind: "provider-tool-call-turn",
+      nativeReplaySafe: true,
+      providerToolCalls: callIds.map((callId) => ({
+        id: callId,
+        name: "files.read",
+        argumentsText: "{\"path\":\"src/index.ts\"}"
+      })),
+      provider: "deepseek",
+      model: "deepseek-chat"
+    }
+  };
 }
 
 function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB>): SessionDB {

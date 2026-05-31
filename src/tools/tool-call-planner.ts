@@ -75,7 +75,7 @@ export class ToolCallPlanner {
   }
 }
 
-function stableToolCallId(delta: ProviderToolCallDelta): string {
+export function stableToolCallId(delta: ProviderToolCallDelta): string {
   const hash = createHash("sha256")
     .update(String(delta.index ?? ""))
     .update("\0")

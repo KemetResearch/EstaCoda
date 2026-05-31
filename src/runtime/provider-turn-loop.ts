@@ -6,6 +6,7 @@ import type {
   ModelProfile,
   ProviderFinishReason,
   ProviderLoopRuntimeMetadata,
+  ProviderMessage,
   ProviderRequest,
   ProviderResponse,
   ProviderRoutePreferences,
@@ -14,7 +15,7 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
+import type { ReplacementSessionMessage, SessionDB, SessionMessage, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
 import type { LoadedSkill, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -23,7 +24,8 @@ import { PromptCache } from "../prompt/prompt-cache.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
 import {
   assembleProviderContinuationPrompt,
-  assembleProviderPrompt
+  assembleProviderPrompt,
+  type ProviderPromptAssembly
 } from "../prompt/prompt-assembly.js";
 import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
@@ -33,12 +35,15 @@ import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../con
 import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { stableToolCallId } from "../tools/tool-call-planner.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
+
+const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -317,6 +322,10 @@ export class ProviderTurnLoop {
         break;
       }
 
+      if (execution.ok === true && execution.toolCalls.length > 0) {
+        execution = await this.#persistProviderToolCallTurn(execution);
+      }
+
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
       const loopToolExecutionResult = await this.#toolPlanRunner.executePlans({
@@ -524,6 +533,9 @@ export class ProviderTurnLoop {
       model: this.#model,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
+      rawSessionHistory: sessionHistory.rawMessages,
+      nativeHistoryRoute: this.#primaryModelRoute,
+      nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: input.preflightCompression ?? sessionHistory.compression,
       soul: this.#soul,
@@ -540,6 +552,7 @@ export class ProviderTurnLoop {
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const providerRequest = normalizeProviderRequest({
@@ -645,6 +658,9 @@ export class ProviderTurnLoop {
       model: this.#model,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
+      rawSessionHistory: sessionHistory.rawMessages,
+      nativeHistoryRoute: this.#primaryModelRoute,
+      nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: sessionHistory.compression,
       soul: this.#soul,
@@ -667,6 +683,7 @@ export class ProviderTurnLoop {
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const providerRequest = normalizeProviderRequest({
@@ -966,6 +983,7 @@ export class ProviderTurnLoop {
 
   async #providerSessionHistory(): Promise<{
     messages: Array<Pick<import("../contracts/provider.js").ProviderMessage, "role" | "content">>;
+    rawMessages: SessionMessage[];
     compactionNotice?: string;
     compression?: PromptSemanticCompressionReport;
   }> {
@@ -997,6 +1015,7 @@ export class ProviderTurnLoop {
 
     return {
       messages: packed.messages,
+      rawMessages: messages,
       compactionNotice: semanticCompressionNotice(messages),
       compression: undefined
     };
@@ -1013,6 +1032,265 @@ export class ProviderTurnLoop {
   #currentSessionId(): string {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
+
+  async #recordNativeHistoryDiagnostics(prompt: ProviderPromptAssembly, routeRole: string): Promise<void> {
+    for (const diagnostic of prompt.nativeHistoryDiagnostics ?? []) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic({
+        ...diagnostic,
+        routeRole: diagnostic.routeRole ?? routeRole
+      });
+    }
+
+    const serialized = nativeHistorySerializedDiagnostic(prompt.messages, this.#primaryModelRoute, this.#model, routeRole);
+    if (serialized !== undefined) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic(serialized);
+    }
+  }
+
+  async #persistProviderToolCallTurn(execution: ProviderExecutionResult): Promise<ProviderExecutionResult> {
+    if (execution.response === undefined) {
+      return execution;
+    }
+
+    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({
+      ...toolCall,
+      id: toolCall.id ?? stableToolCallId(toolCall)
+    }));
+    const secretIndexes = new Set<number>();
+    normalizedToolCalls.forEach((toolCall, index) => {
+      if (containsSensitiveToolArguments(toolCall.argumentsText)) {
+        secretIndexes.add(index);
+      }
+    });
+
+    const echoEligibility = providerReplayEchoEligibility(execution);
+    const echoValue = execution.response.reasoning;
+    const echoMissing = echoEligibility.required && (typeof echoValue !== "string" || echoValue.length === 0);
+    const echoOversized = echoEligibility.required &&
+      typeof echoValue === "string" &&
+      echoValue.length > MAX_PROVIDER_REPLAY_ECHO_CHARS;
+    const nativeReplaySafe = secretIndexes.size === 0 && !echoMissing && !echoOversized;
+    const providerToolCalls = normalizedToolCalls.map((toolCall, index) => ({
+      id: toolCall.id!,
+      name: toolCall.name ?? "",
+      ...(!nativeReplaySafe
+        ? (secretIndexes.has(index) ? { argumentsRedacted: true as const } : {})
+        : toolCall.argumentsText === undefined ? {} : { argumentsText: toolCall.argumentsText })
+    }));
+    const providerReplayEcho = nativeReplaySafe &&
+      echoEligibility.required &&
+      echoEligibility.providerFamily !== undefined &&
+      typeof echoValue === "string"
+      ? {
+          field: "reasoning_content" as const,
+          value: echoValue,
+          providerFamily: echoEligibility.providerFamily,
+          apiMode: "openai_chat_completions" as const,
+          chars: echoValue.length
+        }
+      : undefined;
+
+    await this.#sessionDb.appendMessage({
+      sessionId: this.#currentSessionId(),
+      role: "agent",
+      content: execution.response.content,
+      metadata: {
+        kind: "provider-tool-call-turn",
+        nativeReplaySafe,
+        providerToolCalls,
+        provider: execution.response.provider,
+        model: execution.response.model,
+        ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole }),
+        ...(execution.attemptedRouteIndex === undefined ? {} : { attemptedRouteIndex: execution.attemptedRouteIndex }),
+        ...(execution.response.reasoningMetadata === undefined ? {} : { reasoningMetadata: execution.response.reasoningMetadata }),
+        ...(providerReplayEcho === undefined ? {} : { providerReplayEcho })
+      }
+    });
+    const unsafeDiagnostic = unsafeProviderToolCallTurnDiagnostic(execution, {
+      nativeReplaySafe,
+      callCount: normalizedToolCalls.length,
+      secretBearingCalls: secretIndexes.size,
+      echoMissing,
+      echoOversized
+    });
+    if (unsafeDiagnostic !== undefined) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic(unsafeDiagnostic);
+    }
+
+    return {
+      ...execution,
+      toolCalls: normalizedToolCalls
+    };
+  }
+}
+
+function containsSensitiveToolArguments(argumentsText: string | undefined): boolean {
+  if (argumentsText === undefined || argumentsText.length === 0) {
+    return false;
+  }
+
+  return SENSITIVE_ARGUMENT_PATTERNS.some((pattern) => pattern.test(argumentsText));
+}
+
+const SENSITIVE_ARGUMENT_PATTERNS = [
+  /["']?\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|passwd|secret|authorization)\b["']?\s*[:=]/iu,
+  /\bauthorization\b\s*[:=]\s*["']?(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+/iu,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]+/iu,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/u,
+  /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|KIMI_API_KEY|OPENROUTER_API_KEY|GOOGLE_API_KEY)\b/u,
+  /\b(?:sk-proj-|sk-ant-|sk-|ghp_|github_pat_)[A-Za-z0-9_\-]+/u
+];
+
+function providerReplayEchoEligibility(execution: ProviderExecutionResult): {
+  required: boolean;
+  providerFamily?: "deepseek" | "kimi" | "mimo";
+} {
+  const route = execution.route;
+  if (route === undefined || route.apiMode !== "openai_chat_completions" || route.profile.supportsTools !== true) {
+    return { required: false };
+  }
+
+  const metadata = route as ResolvedModelRoute & {
+    supportsNativeToolHistory?: boolean;
+    requiresReasoningEcho?: boolean;
+    reasoningEchoField?: "reasoning_content" | "reasoning";
+    reasoningEchoRequiredForToolCalls?: boolean;
+    reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+  };
+
+  if (
+    metadata.supportsNativeToolHistory !== true ||
+    metadata.requiresReasoningEcho !== true ||
+    metadata.reasoningEchoField !== "reasoning_content" ||
+    metadata.reasoningEchoRequiredForToolCalls !== true
+  ) {
+    return { required: false };
+  }
+
+  const providerFamily = metadata.reasoningEchoProviderFamily ?? inferReasoningEchoProviderFamily(route.provider, route.id);
+  return providerFamily === undefined
+    ? { required: false }
+    : { required: true, providerFamily };
+}
+
+function nativeHistorySerializedDiagnostic(
+  messages: ProviderMessage[],
+  route: ResolvedModelRoute | undefined,
+  model: ModelProfile | undefined,
+  routeRole: string
+): StructuredToolHistoryDiagnosticEvent | undefined {
+  const assistantToolMessages = messages.filter((message) =>
+    message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0
+  );
+  if (assistantToolMessages.length === 0) {
+    return undefined;
+  }
+
+  const base = nativeHistoryRouteDiagnosticBase(route, model, routeRole);
+  const metadata = nativeHistoryRouteMetadata(route);
+  const requiresEcho = metadata.requiresReasoningEcho === true &&
+    metadata.reasoningEchoField === "reasoning_content" &&
+    metadata.reasoningEchoRequiredForToolCalls === true;
+  const echoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho !== undefined &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
+  const echoMissing = requiresEcho ? assistantToolMessages.length - echoMessages : 0;
+
+  if (echoMissing > 0) {
+    return {
+      kind: "structured-tool-history-skipped",
+      ...base,
+      nativePairs: assistantToolMessages.length,
+      echoMissing,
+      reason: "missing_echo"
+    };
+  }
+
+  return {
+    kind: "structured-tool-history-serialized",
+    ...base,
+    nativePairs: assistantToolMessages.length,
+    echoMessages
+  };
+}
+
+function unsafeProviderToolCallTurnDiagnostic(
+  execution: ProviderExecutionResult,
+  input: {
+    nativeReplaySafe: boolean;
+    callCount: number;
+    secretBearingCalls: number;
+    echoMissing: boolean;
+    echoOversized: boolean;
+  }
+): StructuredToolHistoryDiagnosticEvent | undefined {
+  if (input.nativeReplaySafe) {
+    return undefined;
+  }
+
+  const reason = input.secretBearingCalls > 0
+    ? "unsafe_arguments"
+    : input.echoOversized
+      ? "echo_oversized"
+      : input.echoMissing
+        ? "missing_echo"
+        : "malformed_history";
+
+  return {
+    kind: "structured-tool-history-skipped",
+    provider: execution.response?.provider,
+    model: execution.response?.model,
+    ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole }),
+    nativePairs: input.callCount > 0 ? 1 : 0,
+    skippedUnsafeTurns: 1,
+    nativeReplayUnsafeTurns: 1,
+    ...(input.echoMissing ? { echoMissing: 1 } : {}),
+    ...(input.echoOversized ? { echoOversized: 1 } : {}),
+    reason
+  };
+}
+
+function nativeHistoryRouteDiagnosticBase(
+  route: ResolvedModelRoute | undefined,
+  model: ModelProfile | undefined,
+  routeRole: string
+): Pick<StructuredToolHistoryDiagnosticEvent, "provider" | "model" | "routeRole"> {
+  const provider = route?.provider ?? model?.provider;
+  const modelId = route?.id ?? model?.id;
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(modelId === undefined ? {} : { model: modelId }),
+    routeRole
+  };
+}
+
+function nativeHistoryRouteMetadata(route: ResolvedModelRoute | undefined): {
+  requiresReasoningEcho?: boolean;
+  reasoningEchoField?: "reasoning_content";
+  reasoningEchoRequiredForToolCalls?: boolean;
+  reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+} {
+  return (route ?? {}) as {
+    requiresReasoningEcho?: boolean;
+    reasoningEchoField?: "reasoning_content";
+    reasoningEchoRequiredForToolCalls?: boolean;
+    reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+  };
+}
+
+function inferReasoningEchoProviderFamily(
+  provider: string,
+  model: string
+): "deepseek" | "kimi" | "mimo" | undefined {
+  const haystack = `${provider} ${model}`.toLowerCase();
+  if (haystack.includes("deepseek")) return "deepseek";
+  if (haystack.includes("kimi") || haystack.includes("moonshot")) return "kimi";
+  if (haystack.includes("mimo") || haystack.includes("xiaomi")) return "mimo";
+  return undefined;
 }
 
 function semanticCompressionNotice(messages: ReadonlyArray<SessionMessage | ReplacementSessionMessage>): string | undefined {

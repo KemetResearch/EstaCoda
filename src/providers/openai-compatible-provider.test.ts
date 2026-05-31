@@ -100,7 +100,538 @@ describe("buildOpenAICompatibleRequest", () => {
       expect(prepared.body).not.toHaveProperty("max_completion_tokens");
     }
   });
+
+  it("serializes assistant native tool calls for tested Chat Completions providers", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "read_file",
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        }]
+      }, {
+        role: "tool",
+        content: "file contents",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "openai");
+
+    expect(bodyMessages(prepared)[0]).toEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "read_file",
+          arguments: "{\"path\":\"src/index.ts\"}"
+        }
+      }]
+    });
+  });
+
+  it("serializes matching native tool results", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "call_1",
+            name: "read_file",
+            argumentsText: "{\"path\":\"src/index.ts\"}"
+          }]
+        },
+        {
+          role: "tool",
+          content: "file contents",
+          toolCallId: "call_1"
+        }
+      ]
+    }, undefined, "openai");
+
+    expect(bodyMessages(prepared)[1]).toEqual({
+      role: "tool",
+      content: "file contents",
+      tool_call_id: "call_1"
+    });
+  });
+
+  it("serializes assistant content plus native tool calls", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "I'll inspect that.",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }]
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "openai");
+
+    expect(bodyMessages(prepared)[0]).toMatchObject({
+      role: "assistant",
+      content: "I'll inspect that.",
+      tool_calls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "search",
+          arguments: "{\"query\":\"native history\"}"
+        }
+      }]
+    });
+  });
+
+  it("serializes provider replay echo for matching echo-required providers", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "deepseek-reasoner",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: "private replay echo",
+          providerFamily: "deepseek",
+          apiMode: "openai_chat_completions",
+          chars: "private replay echo".length
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "deepseek");
+
+    expect(bodyMessages(prepared)[0]).toMatchObject({
+      role: "assistant",
+      content: null,
+      reasoning_content: "private replay echo",
+      tool_calls: [expect.objectContaining({ id: "call_1" })]
+    });
+  });
+
+  it("serializes Kimi provider replay echo for matching echo-required routes", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "kimi-k2-thinking",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: "kimi private replay echo",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: "kimi private replay echo".length
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "kimi");
+
+    expect(bodyMessages(prepared)[0]).toMatchObject({
+      role: "assistant",
+      content: null,
+      reasoning_content: "kimi private replay echo",
+      tool_calls: [expect.objectContaining({ id: "call_1" })]
+    });
+  });
+
+  it("fails closed for echo-required providers when replay echo is missing", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "deepseek-reasoner",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "call_1",
+            name: "search",
+            argumentsText: "{\"query\":\"native history\"}"
+          }]
+        },
+        {
+          role: "tool",
+          content: "search result",
+          toolCallId: "call_1"
+        }
+      ]
+    }, undefined, "deepseek");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(serialized).not.toContain("reasoning_content");
+    expect(serialized).not.toContain("\"reasoning_content\":\" \"");
+    expect(bodyMessages(prepared)[0]).toEqual({
+      role: "assistant",
+      content: "[Native tool-call history unavailable]"
+    });
+    expect(bodyMessages(prepared)[1]).toEqual({
+      role: "user",
+      content: "Tool result received without serialized assistant tool call:\nsearch result"
+    });
+  });
+
+  it("fails closed for cross-provider echo on echo-required providers", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "deepseek-reasoner",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: "kimi private replay echo",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: "kimi private replay echo".length
+        }
+      }]
+    }, undefined, "deepseek");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("reasoning_content");
+    expect(serialized).not.toContain("kimi private replay echo");
+  });
+
+  it("strips cross-provider echo for providers that do not require echo", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: "private replay echo",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: "private replay echo".length
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(bodyMessages(prepared)[0]).toHaveProperty("tool_calls");
+    expect(serialized).not.toContain("reasoning_content");
+    expect(serialized).not.toContain("private replay echo");
+  });
+
+  it("serializes complete multi-call native tool groups atomically", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call_a",
+              name: "search",
+              argumentsText: "{\"query\":\"a\"}"
+            },
+            {
+              id: "call_b",
+              name: "read_file",
+              argumentsText: "{\"path\":\"b.ts\"}"
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: "result a",
+          toolCallId: "call_a"
+        },
+        {
+          role: "tool",
+          content: "result b",
+          toolCallId: "call_b"
+        }
+      ]
+    }, undefined, "openai");
+
+    expect(bodyMessages(prepared)).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          expect.objectContaining({ id: "call_a" }),
+          expect.objectContaining({ id: "call_b" })
+        ]
+      }),
+      {
+        role: "tool",
+        content: "result a",
+        tool_call_id: "call_a"
+      },
+      {
+        role: "tool",
+        content: "result b",
+        tool_call_id: "call_b"
+      }
+    ]);
+  });
+
+  it("fails closed for multi-call native tool groups with a missing result", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call_a",
+              name: "search",
+              argumentsText: "{\"query\":\"a\"}"
+            },
+            {
+              id: "call_b",
+              name: "read_file",
+              argumentsText: "{\"path\":\"b.ts\"}"
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: "result a",
+          toolCallId: "call_a"
+        },
+        {
+          role: "user",
+          content: "next turn"
+        }
+      ]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(bodyMessages(prepared)).toEqual([
+      {
+        role: "assistant",
+        content: "[Native tool-call history unavailable]"
+      },
+      {
+        role: "user",
+        content: "Tool result received without serialized assistant tool call:\nresult a"
+      },
+      {
+        role: "user",
+        content: "next turn"
+      }
+    ]);
+  });
+
+  it("fails closed for single-call native tool groups with a missing result", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }]
+      }]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(bodyMessages(prepared)[0]).toEqual({
+      role: "assistant",
+      content: "[Native tool-call history unavailable]"
+    });
+  });
+
+  it("fails closed for malformed matching tool results", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "call_1",
+            name: "search",
+            argumentsText: "{\"query\":\"native history\"}"
+          }]
+        },
+        {
+          role: "tool",
+          content: "search result",
+          toolCallId: ""
+        } as any
+      ]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+  });
+
+  it("fails closed without leaking echo when echo-required multi-call groups are incomplete", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "deepseek-reasoner",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call_a",
+              name: "search",
+              argumentsText: "{\"query\":\"a\"}"
+            },
+            {
+              id: "call_b",
+              name: "read_file",
+              argumentsText: "{\"path\":\"b.ts\"}"
+            }
+          ],
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: "private replay echo",
+            providerFamily: "deepseek",
+            apiMode: "openai_chat_completions",
+            chars: "private replay echo".length
+          }
+        },
+        {
+          role: "tool",
+          content: "result a",
+          toolCallId: "call_a"
+        }
+      ]
+    }, undefined, "deepseek");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(serialized).not.toContain("reasoning_content");
+    expect(serialized).not.toContain("private replay echo");
+  });
+
+  it("fails closed for malformed native tool call messages", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "I will call a tool.",
+        toolCalls: [{
+          id: "call_1",
+          name: "search"
+        }]
+      } as any]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(bodyMessages(prepared)[0]).toEqual({
+      role: "assistant",
+      content: "I will call a tool."
+    });
+  });
+
+  it("does not leak raw reasoning fields into Chat Completions request messages", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "Visible answer",
+        reasoning: "raw hidden reasoning",
+        reasoning_content: "raw reasoning content",
+        reasoningMetadata: {
+          present: true,
+          chars: 20,
+          format: "reasoning_content"
+        },
+        raw: {
+          providerPayload: "raw provider payload"
+        },
+        usage: {
+          inputTokens: 1
+        }
+      } as any]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).toContain("Visible answer");
+    expect(serialized).not.toContain("raw hidden reasoning");
+    expect(serialized).not.toContain("raw reasoning content");
+    expect(serialized).not.toContain("raw provider payload");
+    expect(serialized).not.toContain("reasoningMetadata");
+    expect(serialized).not.toContain("usage");
+  });
+
+  it("keeps Responses-mode providers on non-native fallback", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "codex-test",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "call_1",
+            name: "search",
+            argumentsText: "{\"query\":\"native history\"}"
+          }]
+        },
+        {
+          role: "tool",
+          content: "search result",
+          toolCallId: "call_1"
+        }
+      ]
+    }, undefined, "codex" as any);
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(bodyMessages(prepared).map((message) => message.role)).toEqual(["assistant", "user"]);
+  });
 });
+
+function bodyMessages(prepared: ReturnType<typeof buildOpenAICompatibleRequest>): any[] {
+  return prepared.body.messages as any[];
+}
 
 describe("createOpenAICompatibleProvider streaming", () => {
   it("finalizes on finish_reason without usage", async () => {

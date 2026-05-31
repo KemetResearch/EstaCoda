@@ -768,34 +768,40 @@ export class AgentLoop {
       artifacts
     });
 
-    await this.#sessionDb.appendMessage({
-      sessionId: this.#currentSessionId(),
-      role: "agent",
-      content: response.text,
-      channel: input.channel,
-      metadata: {
-        matchedSkills: response.matchedSkills,
-        intentLabels: intent.labels,
-        securityDecision,
-        contextReferences: context?.references.map((reference) => reference.raw) ?? [],
-        toolExecutions: toolExecutions.map((execution) => execution.tool.name),
-        provider: effectiveProviderExecution?.response === undefined
-          ? undefined
-          : `${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
-        toolPlans: toolPlans.map((plan) => ({
-          id: plan.id,
-          tool: plan.tool,
-          status: plan.status,
-          error: plan.error
-        })),
-        artifacts: artifacts.map((artifact) => ({
-          id: artifact.id,
-          path: artifact.path,
-          kind: artifact.kind,
-          bytes: artifact.bytes
-        }))
-      }
-    });
+    const skipFinalAgentAppend = await this.#shouldSkipDuplicateProviderToolCallFinalAppend(
+      response,
+      effectiveProviderExecution
+    );
+    if (!skipFinalAgentAppend) {
+      await this.#sessionDb.appendMessage({
+        sessionId: this.#currentSessionId(),
+        role: "agent",
+        content: response.text,
+        channel: input.channel,
+        metadata: {
+          matchedSkills: response.matchedSkills,
+          intentLabels: intent.labels,
+          securityDecision,
+          contextReferences: context?.references.map((reference) => reference.raw) ?? [],
+          toolExecutions: toolExecutions.map((execution) => execution.tool.name),
+          provider: effectiveProviderExecution?.response === undefined
+            ? undefined
+            : `${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
+          toolPlans: toolPlans.map((plan) => ({
+            id: plan.id,
+            tool: plan.tool,
+            status: plan.status,
+            error: plan.error
+          })),
+          artifacts: artifacts.map((artifact) => ({
+            id: artifact.id,
+            path: artifact.path,
+            kind: artifact.kind,
+            bytes: artifact.bytes
+          }))
+        }
+      });
+    }
 
     await emit(input.onEvent, {
       kind: "agent-final",
@@ -837,6 +843,24 @@ export class AgentLoop {
       total,
       source: "live-estimate"
     });
+  }
+
+  async #shouldSkipDuplicateProviderToolCallFinalAppend(
+    response: AgentLoopResponse,
+    providerExecution: ProviderExecutionResult | undefined
+  ): Promise<boolean> {
+    if (
+      providerExecution?.ok !== true ||
+      providerExecution.toolCalls.length === 0 ||
+      (providerExecution.response?.content ?? "").trim().length > 0
+    ) {
+      return false;
+    }
+
+    const messages = await this.#sessionDb.listMessages(this.#currentSessionId()).catch(() => []);
+    const lastAgent = [...messages].reverse().find((message) => message.role === "agent");
+    return lastAgent?.metadata?.kind === "provider-tool-call-turn" &&
+      response.text === "I completed the requested actions but did not produce any visible output.";
   }
 
   async #estimateLiveContextTokens(input: {

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile } from "../contracts/provider.js";
@@ -102,6 +103,24 @@ const execution: ToolExecutionRecord = {
   }
 };
 
+const artifact: ArtifactRecord = {
+  id: "artifact-1",
+  path: "artifacts/report.md",
+  kind: "document",
+  bytes: 123,
+  createdAt: "2026-05-31T00:00:00.000Z",
+  summary: "Generated report"
+};
+
+const artifactExecution: ToolExecutionRecord = {
+  ...execution,
+  result: {
+    ok: true,
+    content: "artifact created",
+    metadata: artifact
+  }
+};
+
 function successfulProviderExecution(content: string): ProviderExecutionResult {
   return {
     ok: true,
@@ -121,6 +140,19 @@ function successfulProviderExecution(content: string): ProviderExecutionResult {
       }
     ],
     toolCalls: []
+  };
+}
+
+function successfulProviderToolCallExecution(content: string): ProviderExecutionResult {
+  return {
+    ...successfulProviderExecution(content),
+    toolCalls: [
+      {
+        id: "call-agent-loop",
+        name: "files.read",
+        argumentsText: "{}"
+      }
+    ]
   };
 }
 
@@ -324,6 +356,105 @@ describe("AgentLoop provider availability gating", () => {
       success: false,
       summary: "Provider turn succeeded but returned empty visible content."
     });
+  });
+
+  it("does not append a duplicate final agent message for an empty provider tool-call turn", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderToolCallExecution("")
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "agent",
+      content: "",
+      metadata: {
+        kind: "provider-tool-call-turn",
+        nativeReplaySafe: true,
+        providerToolCalls: [
+          {
+            id: "call-agent-loop",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      }
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages[0]?.metadata?.kind).toBe("provider-tool-call-turn");
+  });
+
+  it("persists final artifact summary text after an empty provider tool-call turn", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderToolCallExecution("")
+    });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderToolCallExecution(""),
+      toolExecutions: [artifactExecution],
+      iterations: 1
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "agent",
+      content: "",
+      metadata: {
+        kind: "provider-tool-call-turn",
+        nativeReplaySafe: true,
+        providerToolCalls: [
+          {
+            id: "call-agent-loop",
+            name: "files.read",
+            argumentsText: "{}"
+          }
+        ]
+      }
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    expect(response.text).toContain("Artifacts:");
+    expect(response.text).toContain("artifacts/report.md:artifact-1");
+    expect(agentMessages).toHaveLength(2);
+    expect(agentMessages[1]?.content).toContain("artifacts/report.md:artifact-1");
+    expect(agentMessages[1]?.metadata?.artifacts).toEqual([
+      expect.objectContaining({
+        id: "artifact-1",
+        path: "artifacts/report.md"
+      })
+    ]);
+  });
+
+  it("keeps existing empty no-tool provider response persistence", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("")
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages[0]?.content).toBe("I completed the requested actions but did not produce any visible output.");
   });
 
   it("renders a dedicated message when a successful provider response is whitespace-only", async () => {

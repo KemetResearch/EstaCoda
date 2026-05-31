@@ -4,6 +4,7 @@ import type {
   ProviderCompletionOptions,
   ProviderEndpoint,
   ProviderId,
+  ProviderMessage,
   ProviderRequest,
   ProviderResponse,
   ProviderStreamEvent,
@@ -14,7 +15,11 @@ import type {
 } from "../contracts/provider.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { normalizeProviderMessagesStrict } from "./provider-message-normalizer.js";
-import { resolveChatMaxTokenParam } from "./provider-metadata.js";
+import {
+  getProviderMetadata,
+  resolveChatMaxTokenParam,
+  type ProviderMetadata
+} from "./provider-metadata.js";
 import {
   extractInlineReasoning,
   extractReasoningFromContentList,
@@ -193,6 +198,7 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
   const normalized = normalizeOpenAICompatibleRequest(request, provider);
   const maxTokens = normalizeProviderMaxTokens(normalized.maxTokens);
   const maxTokenParam = resolveChatMaxTokenParam(provider);
+  const messages = serializeOpenAICompatibleChatMessages(normalized.messages, provider);
 
   return {
     url: `${endpoint.baseUrl.replace(/\/$/, "")}/chat/completions`,
@@ -204,7 +210,7 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
     },
     body: compactObject({
       model: normalized.model,
-      messages: normalized.messages,
+      messages,
       temperature: normalized.temperature,
       stream: normalized.stream,
       tools: normalized.tools,
@@ -227,6 +233,259 @@ export function normalizeOpenAICompatibleRequest(request: ProviderRequest, provi
   };
 
   return normalized;
+}
+
+type OpenAICompatibleChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: ProviderMessage["content"] | null;
+  name?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  tool_call_id?: string;
+  reasoning_content?: string;
+};
+
+function serializeOpenAICompatibleChatMessages(
+  messages: ProviderMessage[],
+  provider: ProviderId
+): OpenAICompatibleChatMessage[] {
+  const metadata = getProviderMetadata(provider);
+  const supportsNativeToolHistory = metadata.apiMode === "openai_chat_completions" &&
+    metadata.supportsNativeToolHistory === true;
+  const serialized: OpenAICompatibleChatMessage[] = [];
+
+  for (let index = 0; index < messages.length;) {
+    const message = messages[index]!;
+    if (hasNativeAssistantToolCalls(message)) {
+      const group = serializeNativeToolCallGroup(messages, index, supportsNativeToolHistory, metadata);
+      serialized.push(...group.messages);
+      index += group.consumedMessages;
+      continue;
+    }
+
+    if (message.role === "tool") {
+      serialized.push(toolMessageFallbackMessage(message));
+      index += 1;
+      continue;
+    }
+
+    serialized.push(ordinaryChatMessage(message));
+    index += 1;
+  }
+
+  return serialized;
+}
+
+function serializeNativeToolCallGroup(
+  messages: ProviderMessage[],
+  assistantIndex: number,
+  supportsNativeToolHistory: boolean,
+  metadata: ProviderMetadata
+): { messages: OpenAICompatibleChatMessage[]; consumedMessages: number } {
+  const assistant = messages[assistantIndex]!;
+  const toolMessages: ProviderMessage[] = [];
+  let cursor = assistantIndex + 1;
+
+  while (cursor < messages.length && messages[cursor]?.role === "tool") {
+    toolMessages.push(messages[cursor]!);
+    cursor += 1;
+  }
+
+  if (
+    supportsNativeToolHistory &&
+    hasNativeAssistantToolCalls(assistant) &&
+    isCompleteNativeToolCallGroup(assistant, toolMessages)
+  ) {
+    const assistantMessage = serializeNativeAssistantToolCallMessage(assistant, metadata);
+    if (assistantMessage !== undefined) {
+      return {
+        consumedMessages: 1 + toolMessages.length,
+        messages: [
+          assistantMessage,
+          ...toolMessages.map(serializeNativeToolResultMessage)
+        ]
+      };
+    }
+  }
+
+  return {
+    consumedMessages: 1 + toolMessages.length,
+    messages: [
+      nativeToolCallFallbackMessage(assistant as ProviderMessage & { role: "assistant" }),
+      ...toolMessages.map(toolMessageFallbackMessage)
+    ]
+  };
+}
+
+function isCompleteNativeToolCallGroup(
+  assistant: ProviderMessage & { role: "assistant"; toolCalls: NonNullable<ProviderMessage["toolCalls"]> },
+  toolMessages: ProviderMessage[]
+): boolean {
+  if (!assistant.toolCalls.every(isSerializableToolCall)) {
+    return false;
+  }
+
+  const requiredIds = new Set(assistant.toolCalls.map((toolCall) => toolCall.id));
+  const matchedIds = new Set<string>();
+
+  for (const toolMessage of toolMessages) {
+    if (
+      toolMessage.role !== "tool" ||
+      typeof toolMessage.toolCallId !== "string" ||
+      !requiredIds.has(toolMessage.toolCallId) ||
+      matchedIds.has(toolMessage.toolCallId) ||
+      serializeToolMessageContent(toolMessage.content) === undefined
+    ) {
+      return false;
+    }
+    matchedIds.add(toolMessage.toolCallId);
+  }
+
+  return matchedIds.size === requiredIds.size;
+}
+
+function serializeNativeToolResultMessage(message: ProviderMessage): OpenAICompatibleChatMessage {
+  return compactObject({
+    role: "tool",
+    content: serializeToolMessageContent(message.content),
+    tool_call_id: message.toolCallId
+  }) as OpenAICompatibleChatMessage;
+}
+
+function serializeNativeAssistantToolCallMessage(
+  message: ProviderMessage & { role: "assistant"; toolCalls: NonNullable<ProviderMessage["toolCalls"]> },
+  metadata: ProviderMetadata
+): OpenAICompatibleChatMessage | undefined {
+  if (!message.toolCalls.every(isSerializableToolCall)) {
+    return undefined;
+  }
+
+  const echo = providerReasoningEchoForMessage(message, metadata);
+  if (echo.ok === false) {
+    return undefined;
+  }
+
+  return compactObject({
+    role: "assistant",
+    content: assistantToolCallContent(message.content),
+    tool_calls: message.toolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      type: "function" as const,
+      function: {
+        name: toolCall.name,
+        arguments: toolCall.argumentsText
+      }
+    })),
+    ...(echo.value === undefined ? {} : { reasoning_content: echo.value })
+  }) as OpenAICompatibleChatMessage;
+}
+
+function providerReasoningEchoForMessage(
+  message: Pick<ProviderMessage, "providerReplayEcho" | "toolCalls" | "role">,
+  metadata: ProviderMetadata
+): { ok: true; value?: string } | { ok: false } {
+  const requiresEcho = metadata.requiresReasoningEcho === true ||
+    metadata.reasoningEchoRequiredForToolCalls === true;
+  if (!requiresEcho) {
+    return { ok: true };
+  }
+
+  if (
+    metadata.reasoningEchoField !== "reasoning_content" ||
+    metadata.reasoningEchoProviderFamily === undefined
+  ) {
+    return { ok: false };
+  }
+
+  const echo = message.providerReplayEcho;
+  if (
+    message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0 &&
+    echo?.field === "reasoning_content" &&
+    echo.providerFamily === metadata.reasoningEchoProviderFamily &&
+    echo.apiMode === "openai_chat_completions"
+  ) {
+    return { ok: true, value: echo.value };
+  }
+
+  if (metadata.allowReasoningEchoPlaceholder === true) {
+    return { ok: true, value: " " };
+  }
+
+  return { ok: false };
+}
+
+function hasNativeAssistantToolCalls(
+  message: ProviderMessage
+): message is ProviderMessage & { role: "assistant"; toolCalls: NonNullable<ProviderMessage["toolCalls"]> } {
+  return message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0;
+}
+
+function isSerializableToolCall(toolCall: NonNullable<ProviderMessage["toolCalls"]>[number]): boolean {
+  return typeof toolCall.id === "string" &&
+    toolCall.id.length > 0 &&
+    typeof toolCall.name === "string" &&
+    toolCall.name.length > 0 &&
+    typeof toolCall.argumentsText === "string";
+}
+
+function assistantToolCallContent(content: ProviderMessage["content"]): ProviderMessage["content"] | null {
+  if (typeof content === "string" && content.trim().length === 0) {
+    return null;
+  }
+  return content;
+}
+
+function ordinaryChatMessage(message: ProviderMessage): OpenAICompatibleChatMessage {
+  return compactObject({
+    role: message.role,
+    content: message.content,
+    name: message.name
+  }) as OpenAICompatibleChatMessage;
+}
+
+function nativeToolCallFallbackMessage(
+  message: ProviderMessage & { role: "assistant" }
+): OpenAICompatibleChatMessage {
+  return compactObject({
+    role: "assistant",
+    content: hasVisibleMessageContent(message.content)
+      ? message.content
+      : "[Native tool-call history unavailable]"
+  }) as OpenAICompatibleChatMessage;
+}
+
+function toolMessageFallbackMessage(message: ProviderMessage): OpenAICompatibleChatMessage {
+  return {
+    role: "user",
+    content: `Tool result received without serialized assistant tool call:\n${serializeToolMessageContent(message.content)}`
+  };
+}
+
+function serializeToolMessageContent(content: ProviderMessage["content"]): string | undefined {
+  if (typeof content === "string") {
+    return content;
+  }
+  return JSON.stringify(content);
+}
+
+function hasVisibleMessageContent(content: ProviderMessage["content"]): boolean {
+  if (typeof content === "string") {
+    return content.trim().length > 0;
+  }
+  if (Array.isArray(content)) {
+    return content.length > 0;
+  }
+  return content !== undefined && content !== null;
 }
 
 export async function executeOpenAICompatibleRequest(input: {

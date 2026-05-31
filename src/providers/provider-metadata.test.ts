@@ -78,15 +78,18 @@ describe("provider-metadata", () => {
 
     it("exposes optional provider finalization metadata knobs without enabling reasoning echo by default", () => {
       const openai = getProviderMetadata("openai");
-      const deepseek = getProviderMetadata("deepseek");
+      const codex = getProviderMetadata("codex");
       const custom = getProviderMetadata("custom-corp" as ProviderId);
 
       expect(openai).toHaveProperty("apiMode");
       expect(openai.chatMaxTokenParam).toBeUndefined();
       expect(openai.reasoningEchoField).toBeUndefined();
-      expect(deepseek.reasoningEchoField).toBeUndefined();
+      expect(openai.requiresReasoningEcho).toBeUndefined();
+      expect(codex.reasoningEchoField).toBeUndefined();
+      expect(codex.requiresReasoningEcho).toBeUndefined();
       expect(custom.chatMaxTokenParam).toBeUndefined();
       expect(custom.reasoningEchoField).toBeUndefined();
+      expect(custom.requiresReasoningEcho).toBeUndefined();
     });
 
     it("types provider metadata token parameter and reasoning echo fields", () => {
@@ -98,6 +101,41 @@ describe("provider-metadata", () => {
 
       expect(metadata.chatMaxTokenParam).toBe("max_completion_tokens");
       expect(metadata.reasoningEchoField).toBe("reasoning_content");
+    });
+
+    it("defaults native tool history support off for custom and deferred providers", () => {
+      for (const id of ["custom-corp", "codex", "anthropic", "minimax", "nous", "local", "google", "openrouter"] as const) {
+        const metadata = getProviderMetadata(id as ProviderId);
+        expect(metadata.supportsNativeToolHistory).not.toBe(true);
+        expect(metadata.allowReasoningEchoPlaceholder).not.toBe(true);
+      }
+    });
+
+    it("enables tested Chat Completions native history routes only", () => {
+      expect(getProviderMetadata("openai")).toMatchObject({
+        apiMode: "openai_chat_completions",
+        supportsNativeToolHistory: true
+      });
+      expect(getProviderMetadata("deepseek")).toMatchObject({
+        apiMode: "openai_chat_completions",
+        supportsNativeToolHistory: true,
+        requiresReasoningEcho: true,
+        reasoningEchoField: "reasoning_content",
+        reasoningEchoRequiredForToolCalls: true,
+        reasoningEchoProviderFamily: "deepseek"
+      });
+      expect(getProviderMetadata("kimi")).toMatchObject({
+        apiMode: "openai_chat_completions",
+        supportsNativeToolHistory: true,
+        requiresReasoningEcho: true,
+        reasoningEchoField: "reasoning_content",
+        reasoningEchoRequiredForToolCalls: true,
+        reasoningEchoProviderFamily: "kimi"
+      });
+      expect(getProviderMetadata("codex").apiMode).toBe("openai_responses");
+      expect(getProviderMetadata("codex").supportsNativeToolHistory).not.toBe(true);
+      expect(getProviderMetadata("anthropic").apiMode).toBe("anthropic_messages");
+      expect(getProviderMetadata("anthropic").supportsNativeToolHistory).not.toBe(true);
     });
 
     it("resolves chat max token parameter names from provider metadata", () => {
@@ -261,6 +299,7 @@ describe("provider-metadata", () => {
       expect(route.apiMode).toBe("openai_chat_completions");
       expect(route.baseUrl).toBeUndefined();
       expect(route.apiKeyEnv).toBeUndefined();
+      expect((route as ResolvedRouteNativeMetadata).supportsNativeToolHistory).toBe(true);
     });
 
     it("preserves explicit apiMode when provided", () => {
@@ -300,6 +339,9 @@ describe("provider-metadata", () => {
       expect(route.baseUrl).toBe("https://custom.deepseek.com/v1");
       expect(route.apiKeyEnv).toBe("DEEPSEEK_KEY");
       expect(route.apiMode).toBe("openai_chat_completions");
+      expect((route as ResolvedRouteNativeMetadata).supportsNativeToolHistory).toBe(true);
+      expect((route as ResolvedRouteNativeMetadata).requiresReasoningEcho).toBe(true);
+      expect((route as ResolvedRouteNativeMetadata).reasoningEchoProviderFamily).toBe("deepseek");
     });
 
     it("defaults unknown providers to custom_openai_compatible apiMode", () => {
@@ -338,3 +380,9 @@ describe("provider-metadata", () => {
     });
   });
 });
+
+type ResolvedRouteNativeMetadata = {
+  supportsNativeToolHistory?: boolean;
+  requiresReasoningEcho?: boolean;
+  reasoningEchoProviderFamily?: string;
+};
