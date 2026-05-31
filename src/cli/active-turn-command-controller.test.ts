@@ -28,15 +28,17 @@ function createController(input = makeInput()) {
   const laneUpdates: Array<string | undefined> = [];
   const statuses: string[] = [];
   const abort = vi.fn();
+  const steer = vi.fn();
   const emitSigint = vi.fn();
   const controller = new ActiveTurnCommandController({
     input,
     onCommandLaneChange: (line) => laneUpdates.push(line),
     onInterrupt: abort,
+    onSteer: steer,
     onStatusMessage: (message) => statuses.push(message),
     emitSigint,
   });
-  return { input, controller, laneUpdates, statuses, abort, emitSigint };
+  return { input, controller, laneUpdates, statuses, abort, steer, emitSigint };
 }
 
 describe("ActiveTurnCommandController", () => {
@@ -157,8 +159,8 @@ describe("ActiveTurnCommandController", () => {
     expect(statuses).toEqual([]);
   });
 
-  it("does not implement /steer", () => {
-    const { input, controller, statuses, abort } = createController();
+  it("dispatches /steer distinctly from unknown commands", () => {
+    const { input, controller, statuses, abort, steer } = createController();
     controller.start();
 
     for (const char of "/steer go left") {
@@ -167,7 +169,34 @@ describe("ActiveTurnCommandController", () => {
     input.press("\r", { name: "return" });
 
     expect(abort).not.toHaveBeenCalled();
-    expect(statuses).toEqual(["/steer is reserved for a later active-turn flow."]);
+    expect(steer).toHaveBeenCalledWith("go left");
+    expect(statuses).toEqual([]);
+  });
+
+  it("empty /steer emits usage and does not abort", () => {
+    const { input, controller, statuses, abort, steer } = createController();
+    controller.start();
+
+    for (const char of "/steer   ") {
+      input.press(char, { name: char });
+    }
+    input.press("\r", { name: "return" });
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+    expect(statuses).toEqual(["Usage: /steer <guidance>"]);
+  });
+
+  it("/steer clears the command lane after submit", () => {
+    const { input, controller, laneUpdates } = createController();
+    controller.start();
+
+    for (const char of "/steer go left") {
+      input.press(char, { name: char });
+    }
+    input.press("\r", { name: "return" });
+
+    expect(laneUpdates.at(-1)).toBeUndefined();
   });
 
   it("Escape clears the command lane", () => {

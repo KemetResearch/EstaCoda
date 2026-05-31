@@ -631,6 +631,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
       let retryText: string | undefined = text;
       let wroteUserPromptRail = false;
+      let pendingSteeringNote: string | undefined;
+      let steeringRetryUsed = false;
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         const turnStartedAtMs = now();
@@ -804,6 +806,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           onInterrupt: () => {
             activeTurn?.abort("CLI interrupt");
           },
+          onSteer: (note) => {
+            if (steeringRetryUsed || pendingSteeringNote !== undefined) {
+              activeTurnCommandStatusLine = "active command: Steering already queued for this turn.";
+              updateActiveTurnTransientLines();
+              return;
+            }
+            pendingSteeringNote = note;
+            activeTurnCommandStatusLine = "active command: Steering note queued; interrupting turn.";
+            updateActiveTurnTransientLines();
+            activeTurn?.abort("CLI steer");
+          },
         });
         const responsePromise = runtime.handle({
             text: retryText,
@@ -870,6 +883,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             contextUsage: latestContextUsage,
             timing: railTiming()
           }));
+        }
+
+        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+          const steeringNote = pendingSteeringNote;
+          pendingSteeringNote = undefined;
+          steeringRetryUsed = true;
+          retryText = buildSteeredRetryText(text, steeringNote);
+          continue;
         }
 
         const assistantVm = buildAssistantResponseViewModel({
@@ -1105,6 +1126,10 @@ function buildPastePreviewLines(original: string, terminalWidth: number): string
     previewLines.push("...");
   }
   return previewLines.flatMap((line) => wrapText(line, width));
+}
+
+function buildSteeredRetryText(originalText: string, note: string): string {
+  return `${originalText}\n\n[Steering note while previous turn was interrupted]\n${note}`;
 }
 
 async function playCliResponseIfEnabled(input: {

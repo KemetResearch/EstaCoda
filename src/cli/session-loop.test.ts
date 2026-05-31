@@ -1433,12 +1433,14 @@ describe("runSessionLoop — active turn spinner", () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
     let abortReason: unknown;
+    const handleInputs: string[] = [];
     let handleStarted: (() => void) | undefined;
     const handleStartedPromise = new Promise<void>((resolve) => {
       handleStarted = resolve;
     });
     const runtime = createMockRuntime({
-      handle: async ({ signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
         onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
         handleStarted?.();
         await new Promise<void>((resolve) => {
@@ -1487,8 +1489,373 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(abortReason).toBe("CLI interrupt");
+    expect(handleInputs).toEqual(["hello"]);
     expect(outputChunks.slice(beforeSubmit).map((chunk) => stripAnsi(chunk)).join("")).not.toContain("active command: /interrupt");
     expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
+  });
+
+  it("/steer aborts the active turn and retries once with the steering note", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let abortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              abortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        return {
+          ...mockResponse(),
+          text: "Retried response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /steer use simpler approach");
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    await loop;
+
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nuse simpler approach",
+    ]);
+  });
+
+  it("empty /steer shows usage and does not abort", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let aborted = false;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/steer   ") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseTurn?.();
+    await loop;
+
+    expect(aborted).toBe(false);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <guidance>");
+  });
+
+  it("does not loop forever when the steered retry fails", async () => {
+    const input = makeTtyInput();
+    const handleInputs: string[] = [];
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        throw new Error("retry failed");
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+
+    await expect(loop).rejects.toThrow("retry failed");
+    expect(handleInputs).toHaveLength(2);
+  });
+
+  it("does not reapply steering after retry cancellation or interruption", async () => {
+    const input = makeTtyInput();
+    const handleInputs: string[] = [];
+    let firstAbortReason: unknown;
+    let secondAbortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        const callNumber = handleInputs.length;
+        if (callNumber === 1) {
+          firstHandleStarted?.();
+        } else {
+          secondHandleStarted?.();
+        }
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => {
+            if (callNumber === 1) {
+              firstAbortReason = signal.reason;
+            } else {
+              secondAbortReason = signal.reason;
+            }
+            resolve();
+          }, { once: true });
+        });
+        onEvent?.({
+          kind: "agent-cancelled",
+          reason: String(callNumber === 1 ? firstAbortReason : secondAbortReason),
+        });
+        return {
+          ...mockResponse(),
+          text: "Interrupted response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    for (const char of "/interrupt") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await loop;
+
+    expect(firstAbortReason).toBe("CLI steer");
+    expect(secondAbortReason).toBe("CLI interrupt");
+    expect(handleInputs).toHaveLength(2);
+  });
+
+  it("bounds repeated /steer attempts during the steered retry", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let firstAbortReason: unknown;
+    let secondAbortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    let releaseSecondTurn: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              firstAbortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(firstAbortReason) });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        signal?.addEventListener("abort", () => {
+          secondAbortReason = signal.reason;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseSecondTurn = resolve;
+        });
+        return {
+          ...mockResponse(),
+          text: "Retried response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use simpler approach") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    for (const char of "/steer also shorter") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseSecondTurn?.();
+    await loop;
+
+    expect(firstAbortReason).toBe("CLI steer");
+    expect(secondAbortReason).toBeUndefined();
+    expect(handleInputs).toHaveLength(2);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Steering already queued for this turn.");
   });
 
   it("keeps normal active-turn typing out of the transcript", async () => {

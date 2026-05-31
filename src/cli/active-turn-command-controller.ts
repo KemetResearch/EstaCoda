@@ -5,6 +5,7 @@ export type ActiveTurnCommandControllerOptions = {
   readonly enabled?: boolean;
   readonly onCommandLaneChange: (line: string | undefined) => void;
   readonly onInterrupt: () => void;
+  readonly onSteer?: (note: string) => void;
   readonly onStatusMessage?: (message: string) => void;
   readonly emitSigint?: () => void;
 };
@@ -20,6 +21,7 @@ export class ActiveTurnCommandController {
   readonly #enabled: boolean;
   readonly #onCommandLaneChange: (line: string | undefined) => void;
   readonly #onInterrupt: () => void;
+  readonly #onSteer?: (note: string) => void;
   readonly #onStatusMessage?: (message: string) => void;
   readonly #emitSigint: () => void;
   readonly #onKeypress = (chunk: string, key: Keypress = {}) => this.#handleKeypress(chunk, key);
@@ -33,6 +35,7 @@ export class ActiveTurnCommandController {
     this.#enabled = options.enabled ?? true;
     this.#onCommandLaneChange = options.onCommandLaneChange;
     this.#onInterrupt = options.onInterrupt;
+    this.#onSteer = options.onSteer;
     this.#onStatusMessage = options.onStatusMessage;
     this.#emitSigint = options.emitSigint ?? (() => process.emit("SIGINT"));
   }
@@ -106,16 +109,27 @@ export class ActiveTurnCommandController {
   }
 
   #submit(command: string): void {
-    const normalized = command.trim().replace(/\s+/gu, " ");
-    if (normalized.length === 0 || normalized === "/") {
+    const trimmed = command.trim();
+    const normalized = trimmed.replace(/\s+/gu, " ");
+    if (trimmed.length === 0 || trimmed === "/") {
       return;
     }
     if (normalized === "/interrupt") {
       this.#onInterrupt();
       return;
     }
-    if (normalized.startsWith("/steer")) {
-      this.#onStatusMessage?.("/steer is reserved for a later active-turn flow.");
+    const steerMatch = /^\/steer(?:\s+([\s\S]*))?$/u.exec(trimmed);
+    if (steerMatch !== null) {
+      const note = steerMatch[1]?.trim() ?? "";
+      if (note.length === 0) {
+        this.#onStatusMessage?.("Usage: /steer <guidance>");
+        return;
+      }
+      if (this.#onSteer === undefined) {
+        this.#onStatusMessage?.("Unknown active command: /steer");
+        return;
+      }
+      this.#onSteer(note);
       return;
     }
     this.#onStatusMessage?.(`Unknown active command: ${normalized}`);
