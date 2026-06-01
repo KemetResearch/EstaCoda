@@ -139,19 +139,16 @@ export function setupProviderCredentialQuestion(
   ].join(" ");
 }
 
-export function setupTelegramBotTokenEnvQuestion(
-  locale: SetupCopyLocale,
-  defaultEnvVarName = "ESTACODA_TELEGRAM_BOT_TOKEN"
-): string {
-  return [
-    setupCopyText(locale, "setupEditor.prompt.telegram.summary"),
-    setupCopyText(locale, "setupEditor.prompt.telegram.remoteControlRisk"),
-    `${setupCopyText(locale, "setupEditor.prompt.telegram.botTokenEnv")} [${renderDisplayToken(locale, defaultEnvVarName)}]: `,
-  ].join("\n");
+export function setupTelegramBotTokenQuestion(locale: SetupCopyLocale): string {
+  return `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")} `;
 }
 
-export function setupTelegramBotTokenQuestion(locale: SetupCopyLocale): string {
-  return `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")}: `;
+export function setupTelegramAllowedUserIdsQuestion(locale: SetupCopyLocale): string {
+  return `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedUserIds")} `;
+}
+
+export function setupTelegramAllowedChatIdsQuestion(locale: SetupCopyLocale): string {
+  return `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedChatIds")} `;
 }
 
 export async function showSetupCard(

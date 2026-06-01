@@ -7,7 +7,12 @@ import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import { resolveSetupCopy } from "../setup-copy.js";
-import { setupProviderCredentialQuestion, setupTelegramBotTokenEnvQuestion } from "../setup-prompts.js";
+import {
+  setupProviderCredentialQuestion,
+  setupTelegramAllowedChatIdsQuestion,
+  setupTelegramAllowedUserIdsQuestion,
+  setupTelegramBotTokenQuestion,
+} from "../setup-prompts.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
@@ -754,19 +759,23 @@ describe("runFirstRunSetup", () => {
         [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
         [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
         [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
-        __prompt: ["", "", "12345", ""],
+        __prompt: ["", "12345", ""],
         __secret: "123456:telegram-token",
       }, {}, {}, seenQuestions),
       flowEngine: flowEngine({ credentialAction: "none" }),
     });
 
     expect(seenQuestions).toContainEqual({
-      question: setupTelegramBotTokenEnvQuestion("en"),
+      question: setupTelegramBotTokenQuestion("en"),
+      secret: true,
+    });
+    expect(seenQuestions).toContainEqual({
+      question: setupTelegramAllowedUserIdsQuestion("en"),
       secret: false,
     });
     expect(seenQuestions).toContainEqual({
-      question: `${resolveSetupCopy("en", "setupEditor.prompt.telegram.botToken")}: `,
-      secret: true,
+      question: setupTelegramAllowedChatIdsQuestion("en"),
+      secret: false,
     });
   });
 
@@ -780,17 +789,17 @@ describe("runFirstRunSetup", () => {
         [resolveSetupCopy("ar", "onboarding.optionalCapabilities.title")]: true,
         [resolveSetupCopy("ar", "onboarding.optionalCapabilities.menu.title")]: "channels",
         [resolveSetupCopy("ar", "onboarding.optionalCapabilities.more.title")]: false,
-        __prompt: ["", "", "12345", ""],
+        __prompt: ["", "12345", ""],
         __secret: "123456:telegram-token",
       }, {}, {}, seenQuestions),
       flowEngine: flowEngine({ credentialAction: "none" }),
     });
-    const expectedQuestion = setupTelegramBotTokenEnvQuestion("ar");
+    const expectedQuestion = setupTelegramBotTokenQuestion("ar");
 
-    expect(seenQuestions).toContainEqual({ question: expectedQuestion, secret: false });
+    expect(seenQuestions).toContainEqual({ question: expectedQuestion, secret: true });
     expect(expectedQuestion).toContain(isolateLtr("Telegram"));
-    expect(expectedQuestion).toContain(isolateLtr("EstaCoda"));
-    expect(expectedQuestion).toContain(isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN"));
+    expect(setupTelegramAllowedUserIdsQuestion("ar")).toContain(isolateLtr("Telegram"));
+    expect(setupTelegramAllowedChatIdsQuestion("ar")).toContain(isolateLtr("Telegram"));
     expect(result.wizardState.optionalCapabilities?.channels?.telegram).toBe("configured");
     expect(JSON.stringify(result.wizardState)).toContain("ESTACODA_TELEGRAM_BOT_TOKEN");
     expect(JSON.stringify(result.wizardState)).not.toContain("\u2066");
@@ -1304,7 +1313,7 @@ describe("runFirstRunSetup", () => {
       "Configure optional capability": "Configure channels",
       [gatewayServiceActivationPromptTitle]: "Yes",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
-      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+      __prompt: ["", "42", ""],
       __secret: "123456:telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1350,7 +1359,7 @@ describe("runFirstRunSetup", () => {
         "Configure optional capability": "Configure channels",
         [gatewayServiceActivationPromptTitle]: "Not now",
         [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
-        __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+        __prompt: ["", "42", ""],
         __secret: "123456:telegram-token",
       }),
       flowEngine: flowEngine(),
@@ -1447,7 +1456,7 @@ describe("runFirstRunSetup", () => {
       "Optional capabilities": "Yes",
       "Configure optional capability": "Configure channels",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
-      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "", ""],
+      __prompt: ["", "", ""],
       __secret: "123456:telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1477,7 +1486,7 @@ describe("runFirstRunSetup", () => {
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
       "Configure optional capability": "Configure channels",
-      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+      __prompt: ["", "42", ""],
       __secret: "123456:telegram-token",
     });
     const baseSelect = prompt.select!;

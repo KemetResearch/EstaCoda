@@ -1360,7 +1360,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
+        values: ["telegram", "enable", "", "", "skip", true],
       }),
       defaultActionId: "configure-channels",
     });
@@ -1384,11 +1384,9 @@ describe("runConfigEditor", () => {
         values: [
           "telegram",
           "enable",
-          "TELEGRAM_BOT_TOKEN",
           "",
           "",
           "retry",
-          "TELEGRAM_BOT_TOKEN",
           "42",
           "",
           true,
@@ -1407,14 +1405,26 @@ describe("runConfigEditor", () => {
   it("applies reviewed Telegram optional capability with env ref and allowlisted identities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
+    const seenQuestions: string[] = [];
+    const seenCards: Array<{ title: string; bodyLines: readonly string[] }> = [];
+    const basePrompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
+      secret: "123456:stored-telegram-token",
+    });
+    const prompt = (async (question: string, options?: { secret?: boolean }) => {
+      seenQuestions.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = basePrompt.select;
+    prompt.onboardingCard = (input) => {
+      seenCards.push({ title: input.title, bodyLines: input.bodyLines });
+    };
+    prompt.close = basePrompt.close;
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
-        secret: "123456:stored-telegram-token",
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -1429,6 +1439,17 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-channels");
+    expect(seenQuestions.some((question) => question.includes("Env var name to store Telegram bot token under"))).toBe(false);
+    expect(seenQuestions).toContain("Telegram bot API token: ");
+    expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
+    expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
+    expect(seenCards.map((card) => card.title)).toEqual(["Configure Telegram", "Configure Telegram", "Configure Telegram"]);
+    expect(seenCards[0]?.bodyLines).toContain("Connect Telegram bot");
+    expect(seenCards[0]?.bodyLines.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
+    expect(seenCards[1]?.bodyLines).toContain("Authorize Telegram users");
+    expect(seenCards[1]?.bodyLines.join("\n")).toContain("Open Telegram and search for @userinfobot.");
+    expect(seenCards[2]?.bodyLines).toContain("Authorize Telegram group chats");
+    expect(seenCards[2]?.bodyLines.join("\n")).toContain("Add @getidsbot or @chatIDrobot to the same group chat.");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"]).toHaveLength(1);
     expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
@@ -1437,12 +1458,12 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-user-or-chat-id");
     expect(config.channels?.telegram).toEqual(expect.objectContaining({
       enabled: true,
-      botTokenEnv: "TELEGRAM_BOT_TOKEN",
+      botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
       allowedUserIds: ["42"],
       allowedChatIds: ["-100"],
     }));
     expect(rawConfig).not.toContain("123456:");
-    expect(envFile).toContain('TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
+    expect(envFile).toContain('ESTACODA_TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
@@ -1451,14 +1472,13 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: [
-        "telegram",
-        "enable",
-        "TELEGRAM_BOT_TOKEN",
-        "42",
-        "-100",
-        true,
+      const prompt = fakePrompt({
+        values: [
+          "telegram",
+          "enable",
+          "42",
+          "-100",
+          true,
         "Yes",
         "exit",
       ],
@@ -1508,7 +1528,6 @@ describe("runConfigEditor", () => {
         values: [
           "telegram",
           "enable",
-          "TELEGRAM_BOT_TOKEN",
           "42",
           "-100",
           true,
@@ -1820,8 +1839,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", false],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", false],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1854,8 +1873,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1887,8 +1906,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true, "exit"],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true, "exit"],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;

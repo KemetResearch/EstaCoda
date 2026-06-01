@@ -7,7 +7,8 @@ import {
   setupCopyText,
   setupProviderCredentialQuestion,
   setupPromptContext,
-  setupTelegramBotTokenEnvQuestion,
+  setupTelegramAllowedChatIdsQuestion,
+  setupTelegramAllowedUserIdsQuestion,
   setupTelegramBotTokenQuestion,
 } from "./setup-prompts.js";
 
@@ -53,21 +54,22 @@ describe("shared setup string prompt copy", () => {
     expect(english).toContain("DeepSeek [DEEPSEEK_API_KEY]: ");
     expect(arabic).toContain(`${isolateLtr("DeepSeek")} [${isolateLtr("DEEPSEEK_API_KEY")}]: `);
     expect(arabic).not.toContain("DeepSeek [DEEPSEEK_API_KEY]");
+    expect(setupProviderCredentialQuestion("ar", {
+      providerName: "Telegram",
+      envVarName: "ESTACODA_TELEGRAM_BOT_TOKEN",
+    })).toContain(isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN"));
   });
 
-  it("renders Telegram env and secret prompts from shared setup editor copy", () => {
-    const english = setupTelegramBotTokenEnvQuestion("en");
-    const arabic = setupTelegramBotTokenEnvQuestion("ar");
+  it("renders Telegram input prompts from shared setup editor copy without an env-var question", () => {
+    expect(setupTelegramBotTokenQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.botToken")} `);
+    expect(setupTelegramAllowedUserIdsQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.allowedUserIds")} `);
+    expect(setupTelegramAllowedChatIdsQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.allowedChatIds")} `);
 
-    expect(english).toContain(setupCopyText("en", "setupEditor.prompt.telegram.summary"));
-    expect(english).toContain(setupCopyText("en", "setupEditor.prompt.telegram.botTokenEnv"));
-    expect(english).toContain("[ESTACODA_TELEGRAM_BOT_TOKEN]: ");
-    expect(arabic).toContain(setupCopyText("ar", "setupEditor.prompt.telegram.summary"));
-    expect(arabic).toContain(setupCopyText("ar", "setupEditor.prompt.telegram.botTokenEnv"));
-    expect(arabic).toContain(`[${isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN")}]: `);
-    expect(arabic).toContain(isolateLtr("Telegram"));
-    expect(arabic).toContain(isolateLtr("EstaCoda"));
-    expect(setupTelegramBotTokenQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.botToken")}: `);
-    expect(setupTelegramBotTokenQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.botToken")}: `);
+    expect(setupTelegramBotTokenQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.botToken")} `);
+    expect(setupTelegramAllowedUserIdsQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.allowedUserIds")} `);
+    expect(setupTelegramAllowedChatIdsQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.allowedChatIds")} `);
+    expect(setupTelegramBotTokenQuestion("ar")).toContain(isolateLtr("Telegram"));
+    expect(setupTelegramAllowedUserIdsQuestion("ar")).toContain(isolateLtr("Telegram"));
+    expect(setupTelegramAllowedChatIdsQuestion("ar")).toContain(isolateLtr("Telegram"));
   });
 });

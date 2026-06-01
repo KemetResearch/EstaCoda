@@ -11,11 +11,14 @@ import {
   promptSetupChoice,
   type SetupChoice,
   promptSetupStringWithDefault,
-  setupTelegramBotTokenEnvQuestion,
+  setupPromptContext,
+  showSetupCard,
+  setupTelegramAllowedChatIdsQuestion,
+  setupTelegramAllowedUserIdsQuestion,
   setupTelegramBotTokenQuestion,
   setupCopyText,
 } from "../setup-prompts.js";
-import type { SetupCopyLocale } from "../setup-copy.js";
+import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import type { ConfigEditorRenderedAction } from "./render.js";
 
 export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
@@ -507,25 +510,24 @@ export async function promptTelegramCapability(
   readonly allowedUserIds: readonly string[];
   readonly allowedChatIds: readonly string[];
 }> {
-  const botTokenEnv = await promptSetupStringWithDefault(
-    prompt,
-    setupTelegramBotTokenEnvQuestion(locale),
-    current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
-  );
+  const botTokenEnv = current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
+  await showTelegramSetupInputCard(prompt, locale, "botToken");
   const botTokenInput = await promptForApiKeyInput({
     prompt,
     providerId: "telegram",
     envVarName: botTokenEnv,
     question: setupTelegramBotTokenQuestion(locale),
   });
+  await showTelegramSetupInputCard(prompt, locale, "allowedUserIds");
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedUserIds")}, comma-separated: `,
+    setupTelegramAllowedUserIdsQuestion(locale),
     (current.allowedUserIds ?? []).join(",")
   ));
+  await showTelegramSetupInputCard(prompt, locale, "allowedChatIds");
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedChatIds")}, comma-separated: `,
+    setupTelegramAllowedChatIdsQuestion(locale),
     (current.allowedChatIds ?? []).join(",")
   ));
 
@@ -535,6 +537,40 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+type TelegramSetupInputCardKind = "botToken" | "allowedUserIds" | "allowedChatIds";
+
+const TELEGRAM_SETUP_INPUT_CARD_KEYS: Record<TelegramSetupInputCardKind, {
+  readonly heading: SetupCopyKey;
+  readonly body: SetupCopyKey;
+}> = {
+  botToken: {
+    heading: "setupEditor.prompt.telegram.botToken.heading",
+    body: "setupEditor.prompt.telegram.botToken.body",
+  },
+  allowedUserIds: {
+    heading: "setupEditor.prompt.telegram.allowedUserIds.heading",
+    body: "setupEditor.prompt.telegram.allowedUserIds.body",
+  },
+  allowedChatIds: {
+    heading: "setupEditor.prompt.telegram.allowedChatIds.heading",
+    body: "setupEditor.prompt.telegram.allowedChatIds.body",
+  },
+};
+
+async function showTelegramSetupInputCard(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  kind: TelegramSetupInputCardKind
+): Promise<void> {
+  const keys = TELEGRAM_SETUP_INPUT_CARD_KEYS[kind];
+  const body = setupCopyText(locale, keys.body).split("\n");
+  await showSetupCard(setupPromptContext(prompt, locale), {
+    title: setupCopyText(locale, "setupEditor.prompt.telegram.card.title"),
+    bodyLines: [setupCopyText(locale, keys.heading), "", ...body],
+    options: [],
+  });
 }
 
 export async function promptDiscordCapability(
