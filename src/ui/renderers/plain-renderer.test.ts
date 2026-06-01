@@ -163,6 +163,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
+    expect(out).toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
   });
 });
 

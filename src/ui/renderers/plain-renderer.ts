@@ -527,10 +527,12 @@ export function renderOnboardingPromptCard(
     const marker = i === vm.selectedOptionIndex ? ">" : " ";
     const label = option.technical === true && effectiveLocale === "ar"
       ? isolateLtr(option.label)
+      : effectiveLocale === "ar"
+        ? isolateRtl(option.label)
       : option.label;
     lines.push(`${marker} ${label}`);
     if (option.description !== undefined) {
-      lines.push(`  ${option.description}`);
+      lines.push(`  ${effectiveLocale === "ar" ? isolateRtl(option.description) : option.description}`);
     }
   }
 

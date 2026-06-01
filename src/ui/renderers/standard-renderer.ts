@@ -657,13 +657,14 @@ export class StandardRenderer {
         ? this.#localizedTechnical(option.label, locale, Math.max(1, contentWidth - 2))
         : this.#localizedNatural(option.label, direction, Math.max(1, contentWidth - 2));
       const styledOption = this.#primary(optionText);
+      const optionRow = `${marker} ${styledOption}`;
       lines.push(direction === "rtl"
-        ? `  ${marker} ${styledOption}`
-        : `  ${marker} ${styledOption}`);
+        ? `  ${padVisibleStart(optionRow, contentWidth)}`
+        : `  ${optionRow}`);
       if (option.description !== undefined) {
         const description = this.#muted(this.#localizedNatural(option.description, direction, Math.max(1, contentWidth - 4)));
         lines.push(direction === "rtl"
-          ? `  ${padVisibleStart(description, Math.max(1, contentWidth - 2))}`
+          ? `  ${padVisibleStart(description, contentWidth)}`
           : `    ${description}`);
       }
     }

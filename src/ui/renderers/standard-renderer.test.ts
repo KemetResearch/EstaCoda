@@ -490,8 +490,8 @@ describe("StandardRenderer — dark theme", () => {
       bodyLines: ["هل تثق بمساحة العمل هذه؟", "يمكن لـ EstaCoda قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة."],
       technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
       options: [
-        { id: "trust", label: "ثق بمساحة العمل" },
-        { id: "skip", label: "ليس الآن" },
+        { id: "trust", label: "ثق بمساحة العمل", description: "اسمح بالعمل المحلي هنا." },
+        { id: "skip", label: "ليس الآن", description: "ارجع لاحقًا." },
       ],
       selectedOptionIndex: 0,
       locale: "ar",
@@ -502,6 +502,10 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
     expect(plain).toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
     expect(plain).not.toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
+    const optionLine = plain.split("\n").find((line) => line.includes(isolateRtl("ثق بمساحة العمل")));
+    const descriptionLine = plain.split("\n").find((line) => line.includes(isolateRtl("اسمح بالعمل المحلي هنا.")));
+    expect(optionLine).toMatch(/^\s{4,}▸/u);
+    expect(descriptionLine).toMatch(/^\s{4,}/u);
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
