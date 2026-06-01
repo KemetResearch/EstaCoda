@@ -2,6 +2,7 @@ import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { loadRuntimeConfig } from "../../config/runtime-config.js";
+import type { ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { withPromptUiContext } from "../../cli/readline-prompt.js";
@@ -12,6 +13,7 @@ import {
   type FlowEngine,
   type ProviderModelSelectionResult,
 } from "../../providers/provider-model-selection-flow.js";
+import { getProviderMetadata } from "../../providers/provider-metadata.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
@@ -45,6 +47,7 @@ import {
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
   renderSetupReviewManifest,
+  setupProviderCredentialQuestion,
   setupCopyText,
 } from "../setup-prompts.js";
 import {
@@ -1181,6 +1184,10 @@ async function resolveCredentialForReview(
             prompt: options.prompt,
             providerId: resolution.provider,
             envVarName,
+            question: setupProviderCredentialQuestion(options.locale, {
+              providerName: credentialProviderDisplayName(resolution.provider),
+              envVarName,
+            }),
           });
           if (promptResult.kind === "skipped") {
             return {
@@ -1209,6 +1216,10 @@ async function resolveCredentialForReview(
         prompt: options.prompt,
         providerId: resolution.provider,
         envVarName,
+        question: setupProviderCredentialQuestion(options.locale, {
+          providerName: credentialProviderDisplayName(resolution.provider),
+          envVarName,
+        }),
       });
       return {
         kind: "ready",
@@ -1220,6 +1231,10 @@ async function resolveCredentialForReview(
       };
     }
   }
+}
+
+function credentialProviderDisplayName(providerId: ProviderId): string {
+  return getProviderMetadata(providerId).displayName;
 }
 
 function credentialReferenceAction(

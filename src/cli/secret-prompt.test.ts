@@ -127,6 +127,20 @@ describe("promptForApiKeyInput", () => {
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 
+  it("preserves non-empty user-entered secret values exactly", async () => {
+    const result = await promptForApiKeyInput({
+      prompt: fakePrompt("  sk-preserve-spaces  "),
+      providerId: "openai",
+      envVarName: "OPENAI_API_KEY",
+    });
+
+    expect(result).toEqual({
+      kind: "entered",
+      envVarName: "OPENAI_API_KEY",
+      value: "  sk-preserve-spaces  ",
+    });
+  });
+
   it("returns skipped for empty input without writing .env", async () => {
     const result = await promptForApiKeyInput({
       prompt: fakePrompt("   "),

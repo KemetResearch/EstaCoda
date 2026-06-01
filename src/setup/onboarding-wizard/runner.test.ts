@@ -7,6 +7,7 @@ import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import { setupProviderCredentialQuestion, setupTelegramBotTokenEnvQuestion } from "../setup-prompts.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
@@ -224,7 +225,8 @@ type FakePromptOverrideValue = string | boolean | readonly (string | boolean)[];
 function fakePrompt(
   overrides: Record<string, FakePromptOverrideValue> = {},
   seenOptions: Record<string, readonly string[]> = {},
-  seenDescriptions: Record<string, readonly (string | undefined)[]> = {}
+  seenDescriptions: Record<string, readonly (string | undefined)[]> = {},
+  seenQuestions: { question: string; secret: boolean }[] = []
 ): Prompt {
   const overrideQueues = new Map<string, (string | boolean)[]>();
   function nextOverride(key: string): string | boolean | undefined {
@@ -239,7 +241,8 @@ function fakePrompt(
   }
 
   const prompt = Object.assign(
-    async (_question: string, options?: { secret?: boolean }) => {
+    async (question: string, options?: { secret?: boolean }) => {
+      seenQuestions.push({ question, secret: options?.secret === true });
       if (options?.secret === true) {
         const secret = nextOverride("__secret");
         return typeof secret === "string" ? secret : "";
@@ -697,6 +700,101 @@ describe("runFirstRunSetup", () => {
     expect(JSON.stringify(result.reviewManifest)).toContain("SHARED_FLOW_OPENAI_KEY");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("OPENAI_API_KEY");
     expect(outputLines.join("")).toContain("Config will expect SHARED_FLOW_OPENAI_KEY to be available externally");
+  });
+
+  it("uses shared setup editor copy for the English provider credential prompt", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "" }, {}, {}, seenQuestions),
+      flowEngine: flowEngine(),
+    });
+
+    expect(seenQuestions).toContainEqual({
+      question: setupProviderCredentialQuestion("en", {
+        providerName: "OpenAI",
+        envVarName: "OPENAI_API_KEY",
+      }),
+      secret: true,
+    });
+  });
+
+  it("uses shared setup editor copy for the Arabic provider credential prompt", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Setup language": "العربية",
+        [resolveSetupCopy("ar", "onboarding.providers.primary.title")]: "OpenAI",
+        __secret: "sk-arabic-secret",
+      }, {}, {}, seenQuestions),
+      flowEngine: flowEngine(),
+    });
+    const expectedQuestion = setupProviderCredentialQuestion("ar", {
+      providerName: "OpenAI",
+      envVarName: "OPENAI_API_KEY",
+    });
+
+    expect(seenQuestions).toContainEqual({ question: expectedQuestion, secret: true });
+    expect(expectedQuestion).toContain(isolateLtr("OpenAI"));
+    expect(expectedQuestion).toContain(isolateLtr("OPENAI_API_KEY"));
+    expect(JSON.stringify(result)).not.toContain("sk-arabic-secret");
+    expect(JSON.stringify(result)).not.toContain("\u2066");
+    expect(JSON.stringify(result)).not.toContain("\u2069");
+  });
+
+  it("uses shared setup editor copy for Telegram onboarding prompts", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "", "12345", ""],
+        __secret: "123456:telegram-token",
+      }, {}, {}, seenQuestions),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+    });
+
+    expect(seenQuestions).toContainEqual({
+      question: setupTelegramBotTokenEnvQuestion("en"),
+      secret: false,
+    });
+    expect(seenQuestions).toContainEqual({
+      question: `${resolveSetupCopy("en", "setupEditor.prompt.telegram.botToken")}: `,
+      secret: true,
+    });
+  });
+
+  it("uses isolated shared setup editor copy for Arabic Telegram onboarding prompts", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Setup language": "العربية",
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "", "12345", ""],
+        __secret: "123456:telegram-token",
+      }, {}, {}, seenQuestions),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+    });
+    const expectedQuestion = setupTelegramBotTokenEnvQuestion("ar");
+
+    expect(seenQuestions).toContainEqual({ question: expectedQuestion, secret: false });
+    expect(expectedQuestion).toContain(isolateLtr("Telegram"));
+    expect(expectedQuestion).toContain(isolateLtr("EstaCoda"));
+    expect(expectedQuestion).toContain(isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN"));
+    expect(result.wizardState.optionalCapabilities?.channels?.telegram).toBe("configured");
+    expect(JSON.stringify(result.wizardState)).toContain("ESTACODA_TELEGRAM_BOT_TOKEN");
+    expect(JSON.stringify(result.wizardState)).not.toContain("\u2066");
+    expect(JSON.stringify(result.wizardState)).not.toContain("\u2069");
   });
 
   it("does not re-add Codex, catalog-only, or media providers filtered out by the shared flow", async () => {

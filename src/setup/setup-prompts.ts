@@ -1,5 +1,6 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
+import { isolateLtr } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
   type PromptUiContext,
@@ -123,6 +124,34 @@ export async function promptSetupStringWithDefault(
   const { prompt } = resolveSetupPromptTarget(target);
   const answer = (await prompt(question)).trim();
   return answer.length > 0 ? answer : defaultValue;
+}
+
+export function setupProviderCredentialQuestion(
+  locale: SetupCopyLocale,
+  input: {
+    readonly providerName: string;
+    readonly envVarName: string;
+  }
+): string {
+  return [
+    setupCopyText(locale, "setupEditor.actions.storeProviderCredentialReference.description"),
+    `${renderDisplayToken(locale, input.providerName)} [${renderDisplayToken(locale, input.envVarName)}]: `,
+  ].join(" ");
+}
+
+export function setupTelegramBotTokenEnvQuestion(
+  locale: SetupCopyLocale,
+  defaultEnvVarName = "ESTACODA_TELEGRAM_BOT_TOKEN"
+): string {
+  return [
+    setupCopyText(locale, "setupEditor.prompt.telegram.summary"),
+    setupCopyText(locale, "setupEditor.prompt.telegram.remoteControlRisk"),
+    `${setupCopyText(locale, "setupEditor.prompt.telegram.botTokenEnv")} [${renderDisplayToken(locale, defaultEnvVarName)}]: `,
+  ].join("\n");
+}
+
+export function setupTelegramBotTokenQuestion(locale: SetupCopyLocale): string {
+  return `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")}: `;
 }
 
 export async function showSetupCard(
@@ -270,6 +299,10 @@ function reviewPlaceholderValues(
     workflowMode: values.workflowMode ?? values.workflowLearning,
     capabilities: values.capabilities,
   };
+}
+
+function renderDisplayToken(locale: SetupCopyLocale, value: string): string {
+  return locale === "ar" ? isolateLtr(value) : value;
 }
 
 function remoteControlIdentityRefs(values: Record<string, SetupPromptValue>): string | undefined {
