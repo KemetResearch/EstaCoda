@@ -1130,7 +1130,10 @@ export async function handleSlashCommand(input: {
   modelSwitchContext?: () => Promise<ModelSwitchContext>;
   prompt?: Prompt;
   output: NodeJS.WritableStream;
-  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+  renderer: {
+    render(viewModel: import("../contracts/view-model.js").ViewModel): string;
+    capabilities?: TerminalCapabilities;
+  };
   workspaceRoot?: string;
   homeDir?: string;
   onSessionCompacted?: (result: { readonly postTokens: number }) => void;
@@ -1496,13 +1499,7 @@ async function handleSessionModelSet(
 
   return {
     runtime: refreshed,
-    notice: (runtime) => [
-      `Session model override set: ${resolution.displayName}`,
-      "Scope: session",
-      "Fallback routes unchanged.",
-      "",
-      runtime.describe()
-    ].join("\n")
+    notice: () => renderSessionModelOverrideNotice(input, resolution.displayName)
   };
 }
 
@@ -1590,8 +1587,8 @@ async function handleSessionModelPicker(
 
   const cancel = "__cancel__";
   const provider = await input.prompt.select<string>({
-    title: "Session model provider",
-    body: "Choose the provider to use for this session only.",
+    title: "Select provider",
+    body: "Select the provider to use for this session only.",
     options: [
       ...providers.map((candidate) => ({
         value: candidate.id,
@@ -1616,8 +1613,8 @@ async function handleSessionModelPicker(
   }
 
   const model = await input.prompt.select<string>({
-    title: "Session model",
-    body: "Choose the model to use for this session only.",
+    title: "Select model",
+    body: "Select the model to use for this session only.",
     options: [
       ...models.map((candidate) => ({
         value: candidate.id,
@@ -1647,6 +1644,27 @@ async function refreshCurrentRuntime(input: HandleSlashCommandInput): Promise<Ru
     return input.switchRuntime(input.runtime.sessionId);
   }
   return input.refreshRuntime?.({ preserveSession: true });
+}
+
+function renderSessionModelOverrideNotice(input: HandleSlashCommandInput, displayName: string): string {
+  const formatLabel = createNoticeLabelFormatter(input.renderer.capabilities);
+  return [
+    `${formatLabel("Session model override set:")} ${displayName}`,
+    `${formatLabel("Scope:")} session`,
+    formatLabel("Fallback routes unchanged.")
+  ].join("\n");
+}
+
+function createNoticeLabelFormatter(
+  capabilities: TerminalCapabilities | undefined
+): (value: string) => string {
+  const supportsStyledNotice = capabilities !== undefined &&
+    capabilities.isTTY &&
+    capabilities.supportsColor &&
+    !capabilities.isCI &&
+    !capabilities.isDumb;
+  if (!supportsStyledNotice) return (value) => value;
+  return (value) => `\u001b[1m${value}\u001b[22m`;
 }
 
 async function handleTaskFlowCommand(input: {
