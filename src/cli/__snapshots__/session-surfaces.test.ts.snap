@@ -28,6 +28,8 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
+• /interrupt: Interrupt the active response
+• /steer: Interrupt and retry the active response with a steering note
 • /version: Show the installed version"
 `;
 
@@ -59,6 +61,8 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
+- /interrupt: Interrupt the active response
+- /steer: Interrupt and retry the active response with a steering note
 - /version: Show the installed version"
 `;
 
@@ -90,6 +94,8 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
+• /interrupt: Interrupt the active response
+• /steer: Interrupt and retry the active response with a steering note
 • /version: Show the installed version"
 `;
 
@@ -121,6 +127,8 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
+- /interrupt: Interrupt the active response
+- /steer: Interrupt and retry the active response with a steering note
 - /version: Show the installed version"
 `;
 
@@ -152,6 +160,8 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
+• /interrupt: Interrupt the active response
+• /steer: Interrupt and retry the active response with a steering note
 • /version: Show the installed version"
 `;
 
@@ -183,6 +193,8 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
+• /interrupt: Interrupt the active response
+• /steer: Interrupt and retry the active response with a steering note
 • /version: Show the installed version"
 `;
 

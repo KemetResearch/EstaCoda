@@ -331,6 +331,25 @@ function registerAll(): void {
     visibility: "public",
     scope: "slash",
   });
+  commandRegistry.register({
+    name: "interrupt",
+    aliases: [],
+    category: "Active Turn",
+    description: "Interrupt the active response",
+    visibility: "public",
+    scope: "slash",
+    availability: "active-turn",
+  });
+  commandRegistry.register({
+    name: "steer",
+    aliases: [],
+    category: "Active Turn",
+    description: "Interrupt and retry the active response with a steering note",
+    visibility: "public",
+    scope: "slash",
+    availability: "active-turn",
+    usage: "/steer <note>",
+  });
 
   // ── CLI-only commands ──
   commandRegistry.register({

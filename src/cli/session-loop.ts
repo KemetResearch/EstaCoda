@@ -386,6 +386,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
       fn();
     };
+    let queuedSubmittedInput: SubmittedCliInput | undefined;
 
     while (true) {
       let livePromptRows = 1;
@@ -410,65 +411,80 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           promptLineCount: livePromptRows
         });
       };
-      if (bottomChrome.enabled) {
-        bottomChrome.updateState(idleBottomState());
-        bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
-      } else if (chrome.enabled) {
-        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
-      } else {
-        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-        output.write(`${topRule}\n`);
-      }
+      let submittedInput = queuedSubmittedInput;
+      queuedSubmittedInput = undefined;
+      let turnVoiceMode: CliVoiceMode = "off";
 
-      const voiceMode = await currentCliVoiceMode({
-        runtime,
-        homeDir: options.homeDir
-      });
-      const submittedInput = await readNextCliInput({
-        voiceMode,
-        prompt,
-        promptPrefix,
-        renderer,
-        useColor,
-        runtime,
-        output,
-        homeDir: options.homeDir,
-        workspaceRoot: options.workspaceRoot,
-        cliVoice: options.cliVoice,
-        inputPlaceholder,
-        onPromptResolved: () => {
-          if (bottomChrome.enabled) {
-            bottomChrome.stopTicker();
-            readlineTransientLines = [];
+      if (submittedInput === undefined) {
+        if (bottomChrome.enabled) {
+          bottomChrome.updateState(idleBottomState());
+          bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
+        } else if (chrome.enabled) {
+          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
+        } else {
+          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+          output.write(`${topRule}\n`);
+        }
+
+        turnVoiceMode = await currentCliVoiceMode({
+          runtime,
+          homeDir: options.homeDir
+        });
+        submittedInput = await readNextCliInput({
+          voiceMode: turnVoiceMode,
+          prompt,
+          promptPrefix,
+          renderer,
+          useColor,
+          runtime,
+          output,
+          homeDir: options.homeDir,
+          workspaceRoot: options.workspaceRoot,
+          cliVoice: options.cliVoice,
+          inputPlaceholder,
+          onPromptResolved: () => {
+            if (bottomChrome.enabled) {
+              bottomChrome.stopTicker();
+              readlineTransientLines = [];
+              redrawIdleReadlineChrome();
+            }
+          },
+          onPromptRowsChange: (rows) => {
+            livePromptRows = rows;
+          },
+          onInputChange: (line) => {
+            currentInputLine = line;
+            pendingSlashCompletion = line.startsWith("/")
+              ? buildPromptRegionSlashCompletionViewModel(runtime, line)
+              : undefined;
+            redrawIdleReadlineChrome();
+          },
+          onPastePreview: (original) => {
+            readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
             redrawIdleReadlineChrome();
           }
-        },
-        onPromptRowsChange: (rows) => {
-          livePromptRows = rows;
-        },
-        onInputChange: (line) => {
-          currentInputLine = line;
-          pendingSlashCompletion = line.startsWith("/")
-            ? buildPromptRegionSlashCompletionViewModel(runtime, line)
-            : undefined;
-          redrawIdleReadlineChrome();
-        },
-        onPastePreview: (original) => {
-          readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
-          redrawIdleReadlineChrome();
-        }
-      });
+        });
+      } else {
+        pendingSlashCompletion = undefined;
+      }
+
       const text = submittedInput.text;
 
       const submittedPromptRows = submittedPromptLineCount(renderer.capabilities, submittedInput);
-      if (bottomChrome.enabled) {
-        bottomChrome.stopTicker();
-        bottomChrome.clearForReadline(submittedPromptRows);
-      } else if (chrome.enabled) {
-        chrome.clearChrome(submittedPromptRows);
+      if (submittedInput.clearSubmittedPrompt === true) {
+        if (bottomChrome.enabled) {
+          bottomChrome.stopTicker();
+          bottomChrome.clearForReadline(submittedPromptRows);
+        } else if (chrome.enabled) {
+          chrome.clearChrome(submittedPromptRows);
+        } else {
+          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+          output.write(`${topRule}\n`);
+        }
       } else {
-        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-        output.write(`${topRule}\n`);
+        if (bottomChrome.enabled) {
+          bottomChrome.stopTicker();
+        }
       }
 
       if (text.length === 0) {
@@ -561,12 +577,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let bottomChromeTransientSpinnerLines: readonly string[] = [];
         let activeTurnCommandLine: string | undefined;
         let activeTurnCommandStatusLine: string | undefined;
+        let activeTurnSlashCompletion: SlashMenuViewModel | undefined;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
         let activeTurnCommandController: ActiveTurnCommandController | undefined;
         const runningBottomState = () => buildBottomChromeState({
           runtime,
           renderer,
+          slashMenu: activeTurnSlashCompletion,
+          slashMenuMinRows: activeTurnSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
           contextUsage: latestContextUsage,
           timing: railTiming()
         });
@@ -712,6 +731,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnCommandStatusLine = `active command: ${message}`;
             updateActiveTurnTransientLines();
           },
+          onInputLineChange: (line) => {
+            activeTurnSlashCompletion = line?.startsWith("/") === true
+              ? buildActiveTurnSlashCompletionViewModel(runtime, line)
+              : undefined;
+            if (bottomChrome.enabled) {
+              bottomChrome.updateStateInPlace(runningBottomState());
+            }
+          },
+          onQueueText: (queuedText) => {
+            if (queuedSubmittedInput !== undefined) {
+              activeTurnCommandStatusLine = "active input: A message is already queued for the next turn.";
+              updateActiveTurnTransientLines();
+              return;
+            }
+            queuedSubmittedInput = {
+              text: queuedText,
+              echoedPromptPrefix: "",
+              echoedText: queuedText,
+              clearSubmittedPrompt: false
+            };
+            activeTurnCommandStatusLine = "active input: Queued for the next turn.";
+            updateActiveTurnTransientLines();
+          },
           onInterrupt: () => {
             activeTurn?.abort("CLI interrupt");
           },
@@ -770,6 +812,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnCommandController = undefined;
             activeTurnCommandLine = undefined;
             activeTurnCommandStatusLine = undefined;
+            activeTurnSlashCompletion = undefined;
             clearSpinner();
             currentAnimator?.dispose();
             currentAnimator = undefined;
@@ -811,7 +854,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));
         });
-        if (voiceMode === "tts") {
+        if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
             text: response.text,
@@ -2510,6 +2553,13 @@ function buildBottomChromeState(input: {
 
 function buildPromptRegionSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
   return buildSlashCompletionViewModel(runtime, line, { limit: PROMPT_REGION_SLASH_PANEL_ROWS });
+}
+
+function buildActiveTurnSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
+  return buildSlashCompletionViewModel(runtime, line, {
+    includeActiveTurnCommands: true,
+    limit: PROMPT_REGION_SLASH_PANEL_ROWS,
+  });
 }
 
 function promptInputPlaceholder(

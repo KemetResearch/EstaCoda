@@ -1590,6 +1590,57 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
   });
 
+  it("shows active-turn slash completions for /interrupt and /steer", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("/", { name: "/", sequence: "/" });
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("/interrupt");
+    expect(rendered).toContain("/steer");
+    expect(rendered).toContain("/steer <note>");
+
+    releaseTurn?.();
+    await loop;
+  });
+
   it("/steer aborts the active turn and retries once with the steering note", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
@@ -1721,7 +1772,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(aborted).toBe(false);
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <guidance>");
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <note>");
   });
 
   it("does not loop forever when the steered retry fails", async () => {
@@ -1954,20 +2005,34 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).toContain("active command: Steering already queued for this turn.");
   });
 
-  it("keeps normal active-turn typing out of the transcript", async () => {
+  it("queues normal active-turn typing as the next turn without aborting the current turn", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let aborted = false;
     let handleStarted: (() => void) | undefined;
     const handleStartedPromise = new Promise<void>((resolve) => {
       handleStarted = resolve;
     });
     let releaseTurn: (() => void) | undefined;
+    let queuedTurnStarted: (() => void) | undefined;
+    const queuedTurnStartedPromise = new Promise<void>((resolve) => {
+      queuedTurnStarted = resolve;
+    });
     const runtime = createMockRuntime({
-      handle: async () => {
-        handleStarted?.();
-        await new Promise<void>((resolve) => {
-          releaseTurn = resolve;
-        });
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        }, { once: true });
+        if (handleInputs.length === 1) {
+          handleStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        } else {
+          queuedTurnStarted?.();
+        }
         return mockResponse();
       },
     });
@@ -1995,13 +2060,20 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     await handleStartedPromise;
-    for (const char of "zzqzz") {
+    for (const char of "queued follow up") {
       input.press(char, { name: char, sequence: char });
     }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active input: queued follow up");
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handleInputs).toEqual(["hello"]);
+    expect(aborted).toBe(false);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active input: Queued for the next turn.");
     releaseTurn?.();
+    await queuedTurnStartedPromise;
     await loop;
 
-    expect(stripAnsi(outputChunks.join(""))).not.toContain("zzqzz");
+    expect(handleInputs).toEqual(["hello", "queued follow up"]);
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {

@@ -9,6 +9,8 @@ export interface CommandRegistration {
   readonly visibility: CommandVisibility;
   readonly scope: CommandScope;
   readonly parent?: string;
+  readonly availability?: "always" | "active-turn";
+  readonly usage?: string;
 }
 
 export interface CommandRegistry {

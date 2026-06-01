@@ -47,6 +47,8 @@ const implementedSlashCommands = new Set([
   "handoff",
   "clear",
   "exit",
+  "interrupt",
+  "steer",
 ]);
 
 export function isImplementedSlashCommand(commandName: string): boolean {
@@ -60,12 +62,25 @@ const completionPriority = new Map([
   ["tools", 3],
   ["skills", 4],
   ["exit", 5],
+  ["interrupt", 6],
+  ["steer", 7],
+]);
+
+const activeTurnCompletionPriority = new Map([
+  ["interrupt", 0],
+  ["steer", 1],
+  ["help", 2],
+  ["status", 3],
+  ["model", 4],
+  ["tools", 5],
+  ["skills", 6],
+  ["exit", 7],
 ]);
 
 export function buildSlashCompletionViewModel(
   runtime: Runtime,
   query = "/",
-  options: { readonly limit?: number } = {}
+  options: { readonly limit?: number; readonly includeActiveTurnCommands?: boolean } = {}
 ): SlashMenuViewModel {
   const normalizedFilter = normalizeFilter(query);
   const limit = Math.max(1, options.limit ?? DEFAULT_COMPLETION_LIMIT);
@@ -76,9 +91,13 @@ export function buildSlashCompletionViewModel(
       filter: normalizedFilter || undefined,
     })
     .filter((command) => implementedSlashCommands.has(command.name))
+    .filter((command) => options.includeActiveTurnCommands === true || command.availability !== "active-turn")
     .sort((a, b) => {
-      const aPriority = completionPriority.get(a.name) ?? 100;
-      const bPriority = completionPriority.get(b.name) ?? 100;
+      const priorityMap = options.includeActiveTurnCommands === true
+        ? activeTurnCompletionPriority
+        : completionPriority;
+      const aPriority = priorityMap.get(a.name) ?? 100;
+      const bPriority = priorityMap.get(b.name) ?? 100;
       if (aPriority !== bPriority) return aPriority - bPriority;
       return a.name.localeCompare(b.name);
     })
@@ -90,7 +109,7 @@ export function buildSlashCompletionViewModel(
     query: query.startsWith("/") ? query : `/${query}`,
     options: commands.map((command) =>
       slashMenuOption(command.name, `/${command.name}`, {
-        description: completionDescription(command.name, "en") ?? command.description,
+        description: completionDescription(command.name, "en") ?? command.usage ?? command.description,
       })
     ),
     selectedIndex: 0,
@@ -102,7 +121,7 @@ export function buildSlashMenuViewModel(runtime: Runtime, filter = ""): ViewMode
   const commands = commandRegistry.list({
     scope: "slash",
     filter: normalizedFilter || undefined,
-  });
+  }).filter((command) => command.availability !== "active-turn");
 
   const commandRows = commands.map((command) => ({
     name: `/${command.name}`,
