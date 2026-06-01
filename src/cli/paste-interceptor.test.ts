@@ -1,6 +1,9 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { PasteInterceptor, restorePastedNewlines } from "./paste-interceptor.js";
+import { PasteInterceptor, createFilePasteReferenceStore, restorePastedNewlines } from "./paste-interceptor.js";
 
 describe("PasteInterceptor", () => {
   it("passes through plain input unchanged", async () => {
@@ -99,6 +102,92 @@ describe("PasteInterceptor", () => {
 
   it("does not rewrite manually typed marker text without a tracked paste region", () => {
     expect(restorePastedNewlines("a ↵ b")).toBe("a ↵ b");
+  });
+
+  it("uses compact file-backed references for multiline pasted text when a store is configured", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-paste-reference-"));
+    try {
+      const interceptor = new PasteInterceptor({
+        referenceStore: createFilePasteReferenceStore({
+          directory: tempDir,
+          now: () => new Date("2026-06-01T14:00:06Z"),
+        }),
+      });
+
+      const displayed = await collect(interceptor, ["\x1b[200~line 1\nline 2\x1b[201~"]);
+
+      expect(displayed).toMatch(/^\[Pasted text #\d+: 2 lines → .+paste_\d+_\d{6}_[a-f0-9]{8}\.txt\]$/u);
+      const path = displayed.match(/→ (.*)\]$/u)?.[1];
+      expect(path).toBeDefined();
+      expect(path).toContain(tempDir);
+      await expect(readFile(path!, "utf8")).resolves.toBe("line 1\nline 2");
+      expect(interceptor.restore(displayed)).toBe("line 1\nline 2");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses compact file-backed references for large single-line pasted text", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-paste-reference-"));
+    try {
+      const original = "x".repeat(20);
+      const interceptor = new PasteInterceptor({
+        referenceStore: createFilePasteReferenceStore({ directory: tempDir }),
+        referenceThresholdChars: 10,
+      });
+
+      const displayed = await collect(interceptor, [`\x1b[200~${original}\x1b[201~`]);
+
+      expect(displayed).toMatch(/^\[Pasted text #\d+: 1 line → /u);
+      const path = displayed.match(/→ (.*)\]$/u)?.[1];
+      expect(path).toBeDefined();
+      await expect(readFile(path!, "utf8")).resolves.toBe(original);
+      expect(interceptor.restore(displayed)).toBe(original);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps small single-line pastes inline even when a store is configured", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-paste-reference-"));
+    try {
+      const interceptor = new PasteInterceptor({
+        referenceStore: createFilePasteReferenceStore({ directory: tempDir }),
+        referenceThresholdChars: 10,
+      });
+
+      const displayed = await collect(interceptor, ["\x1b[200~small\x1b[201~"]);
+
+      expect(displayed).toBe("small");
+      expect(interceptor.restore(displayed)).toBe("small");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("generates unique paste references for multiple large paste regions", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-paste-reference-"));
+    try {
+      const interceptor = new PasteInterceptor({
+        referenceStore: createFilePasteReferenceStore({
+          directory: tempDir,
+          now: () => new Date("2026-06-01T14:00:06Z"),
+        }),
+      });
+
+      const displayed = await collect(interceptor, [
+        "\x1b[200~a\nb\x1b[201~ and \x1b[200~c\nd\x1b[201~",
+      ]);
+      const paths = [...displayed.matchAll(/→ (.*?)\]/gu)].map((match) => match[1]);
+
+      expect(paths).toHaveLength(2);
+      expect(new Set(paths).size).toBe(2);
+      await expect(readFile(paths[0]!, "utf8")).resolves.toBe("a\nb");
+      await expect(readFile(paths[1]!, "utf8")).resolves.toBe("c\nd");
+      expect(interceptor.restore(displayed)).toBe("a\nb and c\nd");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

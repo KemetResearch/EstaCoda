@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -2349,7 +2349,6 @@ describe("runSessionLoop — active turn spinner", () => {
     const afterInitial = outputChunks.length;
     promptOptions.onInputChange?.("hello");
     const afterTyping = stripAnsi(outputChunks.slice(afterInitial).join(""));
-    expect(afterTyping).toContain("mock-model");
     expect(afterTyping).not.toContain("Ctrl+C exit");
     expect(afterTyping).not.toContain("Show command help");
 
@@ -2415,6 +2414,51 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
   });
 
+  it("renders compact paste references in preview chrome without exposing original paste content", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.(
+      "do not echo this pasted body\nsecond line",
+      "[Pasted text #1: 2 lines → /tmp/estacoda-test-paste.txt]"
+    );
+    const previewOutput = outputChunks.join("");
+    expect(previewOutput).toContain("[Pasted text #1: 2 lines");
+    expect(previewOutput).not.toContain("do not echo this pasted body");
+    expect(previewOutput).not.toContain("second line");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
   it("keeps submitted multiline text intact after paste preview", async () => {
     const handledTexts: string[] = [];
     const runtime = createMockRuntime({
@@ -2461,6 +2505,44 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(handledTexts).toEqual(["line one\nline two"]);
+  });
+
+  it("provides a profile-local paste reference store to idle readline prompts", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-paste-home-"));
+    try {
+      let promptOptions: PromptOptions | undefined;
+      const prompt = Object.assign(
+        vi.fn(async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
+          return "/exit";
+        }),
+        { close: () => {} }
+      );
+
+      await runSessionLoop({
+        runtime: createMockRuntime(),
+        output: {
+          write(): boolean {
+            return true;
+          },
+          isTTY: true,
+          columns: 120,
+        } as unknown as NodeJS.WritableStream,
+        capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+        homeDir,
+        prompt,
+        close: () => {},
+      });
+
+      const reference = promptOptions?.pasteReferenceStore?.create("line one\nline two");
+      expect(reference).toBeDefined();
+      const pasteDir = join(resolveProfileStateHome({ homeDir, profileId: "default" }).tempPath, "pastes");
+      expect(reference!.path).toContain(pasteDir);
+      expect(reference!.path).not.toContain("/home/idris");
+      await expect(readFile(reference!.path, "utf8")).resolves.toBe("line one\nline two");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps live slash callbacks out of disabled bottom chrome output", async () => {

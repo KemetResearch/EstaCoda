@@ -1,4 +1,5 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import { join } from "node:path";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -59,6 +60,7 @@ import {
   type CliVoiceMode
 } from "./voice-mode.js";
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
+import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -459,8 +461,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               : undefined;
             redrawIdleReadlineChrome();
           },
-          onPastePreview: (original) => {
-            readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
+          onPastePreview: (_original, displayed) => {
+            readlineTransientLines = buildPastePreviewLines(displayed, renderer.capabilities.terminalWidth);
             redrawIdleReadlineChrome();
           }
         });
@@ -957,11 +959,16 @@ async function readNextCliInput(input: {
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
     const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
+    const profileId = await runtimeProfileId(input.runtime);
+    const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
     const promptOptions: PromptOptions = {
       onRowsChange: input.onPromptRowsChange,
       onInputChange: input.onInputChange,
       onPastePreview: input.onPastePreview,
       placeholder: input.inputPlaceholder,
+      pasteReferenceStore: createFilePasteReferenceStore({
+        directory: join(profilePaths.tempPath, "pastes"),
+      }),
     };
     const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
@@ -1072,9 +1079,9 @@ function submittedPromptLineCount(
   return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
 }
 
-function buildPastePreviewLines(original: string, terminalWidth: number): string[] {
+function buildPastePreviewLines(displayed: string, terminalWidth: number): string[] {
   const width = Math.max(1, terminalWidth);
-  const lines = original.split(/\r\n|\r|\n/u);
+  const lines = displayed.split(/\r\n|\r|\n/u);
   const previewLines = lines.slice(0, 3);
   if (lines.length > previewLines.length) {
     previewLines.push("...");

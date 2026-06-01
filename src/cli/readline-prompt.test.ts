@@ -1,7 +1,11 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { createReadlinePrompt, withPromptUiContext, type Prompt } from "./readline-prompt.js";
 
 describe("readline prompt UI context", () => {
@@ -103,6 +107,31 @@ describe("readline prompt bracketed paste", () => {
     expect(seen).toEqual([{ original: "line 1\nline 2", displayed: "line 1 ↵ line 2" }]);
   });
 
+  it("displays multiline paste as a compact reference while returning the original content", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-readline-paste-"));
+    try {
+      const seen: Array<{ original: string; displayed: string }> = [];
+      const prompt = createReadlinePrompt({
+        input: ttyInput(["\x1b[200~line 1\nline 2\x1b[201~\n"]),
+        output: captureOutput({ isTTY: true }),
+      });
+
+      await expect(prompt("> ", {
+        onPastePreview: (original, displayed) => seen.push({ original, displayed }),
+        pasteReferenceStore: createFilePasteReferenceStore({ directory: tempDir }),
+      })).resolves.toBe("line 1\nline 2");
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.original).toBe("line 1\nline 2");
+      expect(seen[0]?.displayed).toMatch(/^\[Pasted text #\d+: 2 lines → /u);
+      const path = seen[0]?.displayed.match(/→ (.*)\]$/u)?.[1];
+      expect(path).toBeDefined();
+      await expect(readFile(path!, "utf8")).resolves.toBe("line 1\nline 2");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("preserves typed prefix and suffix around a paste", async () => {
     const prompt = createReadlinePrompt({
       input: ttyInput(["prefix \x1b[200~a\nb\x1b[201~ suffix\n"]),
@@ -142,6 +171,24 @@ describe("readline prompt bracketed paste", () => {
       onPastePreview: (original) => seen.push(original),
     })).resolves.toBe("secret-value");
     expect(seen).toEqual([]);
+  });
+
+  it("does not persist paste references for secret prompts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-readline-secret-paste-"));
+    try {
+      const prompt = createReadlinePrompt({
+        input: ttyInput(["secret-value\n"]),
+        output: captureOutput({ isTTY: true }),
+      });
+
+      await expect(prompt("> ", {
+        secret: true,
+        pasteReferenceStore: createFilePasteReferenceStore({ directory: tempDir }),
+      })).resolves.toBe("secret-value");
+      await expect(readdir(tempDir)).resolves.toEqual([]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

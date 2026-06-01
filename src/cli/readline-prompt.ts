@@ -2,7 +2,7 @@ import { createInterface as createCallbackInterface } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
-import { PasteInterceptor, disableBracketedPaste, enableBracketedPaste } from "./paste-interceptor.js";
+import { PasteInterceptor, disableBracketedPaste, enableBracketedPaste, type PasteReferenceStore } from "./paste-interceptor.js";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { createSessionRenderer } from "./session-renderer.js";
@@ -18,6 +18,8 @@ export type PromptOptions = {
   onPastePreview?: (original: string, displayed: string) => void;
   onInputChange?: (line: string) => void;
   placeholder?: string;
+  pasteReferenceStore?: PasteReferenceStore;
+  pasteReferenceThresholdChars?: number;
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
@@ -226,7 +228,11 @@ function createPastePromptSession(
     };
   }
 
-  const interceptor = new PasteInterceptor({ onPaste: options?.onPastePreview });
+  const interceptor = new PasteInterceptor({
+    onPaste: options?.onPastePreview,
+    referenceStore: options?.pasteReferenceStore,
+    referenceThresholdChars: options?.pasteReferenceThresholdChars,
+  });
   const readlineInput = makeReadlineInput(interceptor, input);
   input.pipe(interceptor);
   enableBracketedPaste(output as NodeJS.WritableStream);
