@@ -1302,33 +1302,51 @@ export class StandardRenderer {
         break;
     }
 
-    const dashboardRows: string[] = [
-      `${this.#copy.startupModel}: ${modelDot} ${this.#bold(modelLabel)}  ·  ${readinessColor}`,
-      "",
+    const modelLine = `${this.#copy.startupModel}: ${modelDot} ${this.#bold(modelLabel)}  ·  ${readinessColor}`;
+
+    const infoRows: string[] = [
       `${this.#copy.startupWorkspaceTrust}: ${this.#startupTrustLabel(vm.workspaceTrust)}`,
       `${this.#copy.startupWorkspaceVerification}: ${this.#startupVerificationLabel(vm.workspaceVerification)}`,
     ];
-
     if (vm.workspaceDirectory !== undefined) {
-      dashboardRows.push(`${this.#copy.startupWorkspaceDirectory}: ${this.#technical(vm.workspaceDirectory)}`);
+      infoRows.push(`${this.#copy.startupWorkspaceDirectory}: ${this.#technical(vm.workspaceDirectory)}`);
     }
     if (vm.securityMode !== undefined) {
-      dashboardRows.push(`${this.#copy.startupSecurityMode}: ${this.#technical(vm.securityMode)}`);
+      infoRows.push(`${this.#copy.startupSecurityMode}: ${this.#technical(vm.securityMode)}`);
     }
     if (vm.skillAutonomy !== undefined) {
-      dashboardRows.push(`${this.#copy.startupSkillAutonomy}: ${this.#technical(vm.skillAutonomy)}`);
+      infoRows.push(`${this.#copy.startupSkillAutonomy}: ${this.#technical(vm.skillAutonomy)}`);
     }
     if (vm.versionStatus !== undefined) {
-      dashboardRows.push(`${this.#copy.startupVersionStatus}: ${this.#startupVersionStatusLabel(vm.versionStatus)}`);
+      infoRows.push(`${this.#copy.startupVersionStatus}: ${this.#startupVersionStatusLabel(vm.versionStatus)}`);
     }
 
-    dashboardRows.push("");
-    dashboardRows.push(this.#bold(this.#copy.startupInteractiveCommands));
+    const cmdRows: string[] = [this.#bold(this.#copy.startupInteractiveCommands)];
     for (const cmd of this.#startupCommands(vm)) {
-      dashboardRows.push(`${this.#dim(cmd.description)}  ${this.#action(this.#technical(cmd.name))}`);
+      cmdRows.push(`${this.#dim(cmd.description)}  ${this.#action(this.#technical(cmd.name))}`);
     }
 
     const maxFrameWidth = Math.max(24, this.#capabilities.terminalWidth);
+    const maxContentWidth = Math.max(8, maxFrameWidth - 4);
+    const maxInfoWidth = infoRows.length > 0 ? Math.max(...infoRows.map((row) => measureVisibleWidth(row))) : 0;
+    const maxCmdWidth = cmdRows.length > 0 ? Math.max(...cmdRows.map((row) => measureVisibleWidth(row))) : 0;
+    const gap = 6;
+    const twoColumnWidth = maxCmdWidth + gap + maxInfoWidth;
+    const dashboardRows: string[] = [modelLine, ""];
+
+    if (twoColumnWidth <= maxContentWidth && maxInfoWidth > 0 && maxCmdWidth > 0) {
+      const maxRows = Math.max(infoRows.length, cmdRows.length);
+      for (let i = 0; i < maxRows; i++) {
+        const left = padVisibleEnd(cmdRows[i] ?? "", maxCmdWidth);
+        const right = padVisibleStart(infoRows[i] ?? "", maxInfoWidth);
+        dashboardRows.push(`${left}${" ".repeat(gap)}${right}`);
+      }
+    } else {
+      for (const row of infoRows) dashboardRows.push(row);
+      if (infoRows.length > 0 && cmdRows.length > 0) dashboardRows.push("");
+      for (const row of cmdRows) dashboardRows.push(row);
+    }
+
     const rawBlockWidth = Math.max(0, ...dashboardRows.map((row) => measureVisibleWidth(row)));
     const titleWidth = measureVisibleWidth(` ${cardTitle} `);
     const frameWidth = Math.min(
