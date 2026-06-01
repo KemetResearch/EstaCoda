@@ -330,10 +330,35 @@ buildApprovalSecurityViewModel({
 | Hardcoding command names in `/help` | Register commands in `CommandRegistry`, read from registry. |
 | Writing terminal output while readline owns the prompt row | Use `updateManagedRegionAboveReadline(...)` and pass the current prompt line count. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
+| Rendering tool activity inside bottom chrome redraws | Render tool-start/tool-result rows as durable transcript output above the bottom prompt region. |
+| Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
 
 ---
 
-## 6. Renderer Fallback Reference
+## 6. Prompt Region Stability
+
+The CLI renderer treats terminal regions as exclusive ownership zones:
+
+```text
+Transcript area:
+  durable user rails
+  durable assistant cards
+  durable tool activity rows
+
+Bottom prompt region:
+  status rail
+  input row / placeholder
+  fixed-height slash completion panel
+  compact paste notice/reference when applicable
+```
+
+The transcript area is append-oriented. Tool-start and tool-result rows belong there. The bottom prompt region is cursor-managed and should contain only the active status/spinner, the current input row, prompt placeholder text, slash completions, and paste reference notices.
+
+Idle placeholder copy is not a separate shortcut rail and must not include a prompt marker. Slash completion panels reserve stable height; fewer matches should not shrink the managed prompt region. Arabic prompt-region surfaces must measure visible width, keep technical tokens LTR-isolated, and preserve balanced bidi isolates after truncation or padding.
+
+---
+
+## 7. Renderer Fallback Reference
 
 When `StandardRenderer` encounters restricted capabilities, it falls back automatically:
 

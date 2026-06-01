@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { Transform, type TransformCallback } from "node:stream";
 
@@ -5,20 +8,36 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const PASTE_NEWLINE_MARKER = " ↵ ";
 const NEWLINE_PATTERN = /\r\n|\r|\n/gu;
+const NEWLINE_DETECT_PATTERN = /\r\n|\r|\n/u;
+const DEFAULT_REFERENCE_THRESHOLD_CHARS = 4_096;
+let nextGlobalPasteReferenceId = 1;
 
 export interface PasteRegion {
   readonly original: string;
   readonly displayed: string;
 }
 
+export interface PasteReference {
+  readonly id: number;
+  readonly path: string;
+}
+
+export interface PasteReferenceStore {
+  create(original: string): PasteReference;
+}
+
 export interface PasteInterceptorOptions {
   readonly onPaste?: (original: string, displayed: string) => void;
+  readonly referenceStore?: PasteReferenceStore;
+  readonly referenceThresholdChars?: number;
   readonly unterminatedPasteTimeoutMs?: number;
 }
 
 export class PasteInterceptor extends Transform {
   readonly #decoder = new StringDecoder("utf8");
   readonly #onPaste?: (original: string, displayed: string) => void;
+  readonly #referenceStore?: PasteReferenceStore;
+  readonly #referenceThresholdChars: number;
   readonly #unterminatedPasteTimeoutMs: number;
   readonly #regions: PasteRegion[] = [];
   #inPaste = false;
@@ -30,6 +49,8 @@ export class PasteInterceptor extends Transform {
   constructor(options: PasteInterceptorOptions = {}) {
     super();
     this.#onPaste = options.onPaste;
+    this.#referenceStore = options.referenceStore;
+    this.#referenceThresholdChars = options.referenceThresholdChars ?? DEFAULT_REFERENCE_THRESHOLD_CHARS;
     this.#unterminatedPasteTimeoutMs = options.unterminatedPasteTimeoutMs ?? 5_000;
   }
 
@@ -142,7 +163,10 @@ export class PasteInterceptor extends Transform {
     this.#inPaste = false;
     const original = this.#pasteBuffer;
     this.#pasteBuffer = "";
-    const displayed = displayPastedText(original);
+    const displayed = displayPastedText(original, {
+      referenceStore: this.#referenceStore,
+      referenceThresholdChars: this.#referenceThresholdChars,
+    });
     this.#regions.push({ original, displayed });
     this.#onPaste?.(original, displayed);
     this.push(displayed);
@@ -174,7 +198,19 @@ export class PasteInterceptor extends Transform {
   }
 }
 
-export function displayPastedText(original: string): string {
+export function displayPastedText(
+  original: string,
+  options: {
+    readonly referenceStore?: PasteReferenceStore;
+    readonly referenceThresholdChars?: number;
+  } = {}
+): string {
+  if (shouldUsePasteReference(original, options.referenceThresholdChars ?? DEFAULT_REFERENCE_THRESHOLD_CHARS)) {
+    const reference = options.referenceStore?.create(original);
+    if (reference !== undefined) {
+      return formatPasteReference(original, reference);
+    }
+  }
   return original.replace(NEWLINE_PATTERN, PASTE_NEWLINE_MARKER);
 }
 
@@ -203,4 +239,43 @@ export function enableBracketedPaste(output: NodeJS.WritableStream): void {
 
 export function disableBracketedPaste(output: NodeJS.WritableStream): void {
   output.write("\x1b[?2004l");
+}
+
+export function createFilePasteReferenceStore(options: {
+  readonly directory: string;
+  readonly now?: () => Date;
+}): PasteReferenceStore {
+  return {
+    create(original: string): PasteReference {
+      const id = nextGlobalPasteReferenceId;
+      nextGlobalPasteReferenceId += 1;
+      const timestamp = timestampForPastePath(options.now?.() ?? new Date());
+      const uniqueSuffix = randomUUID().slice(0, 8);
+      const path = join(options.directory, `paste_${id}_${timestamp}_${uniqueSuffix}.txt`);
+      mkdirSync(options.directory, { recursive: true });
+      writeFileSync(path, original, "utf8");
+      return { id, path };
+    },
+  };
+}
+
+function shouldUsePasteReference(original: string, thresholdChars: number): boolean {
+  return NEWLINE_DETECT_PATTERN.test(original) || original.length > thresholdChars;
+}
+
+function formatPasteReference(original: string, reference: PasteReference): string {
+  const lines = lineCount(original);
+  return `[Pasted text #${reference.id}: ${lines} ${lines === 1 ? "line" : "lines"} → ${reference.path}]`;
+}
+
+function lineCount(value: string): number {
+  return value.split(NEWLINE_PATTERN).length;
+}
+
+function timestampForPastePath(value: Date): string {
+  return [
+    String(value.getHours()).padStart(2, "0"),
+    String(value.getMinutes()).padStart(2, "0"),
+    String(value.getSeconds()).padStart(2, "0"),
+  ].join("");
 }

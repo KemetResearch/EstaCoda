@@ -1,4 +1,5 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import { join } from "node:path";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -34,7 +35,6 @@ import {
   buildAssistantResponseViewModel,
   buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
-  buildShortcutHintRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
@@ -44,7 +44,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
 import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { measureVisibleWidth, wrapText } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -60,6 +60,7 @@ import {
   type CliVoiceMode
 } from "./voice-mode.js";
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
+import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -82,6 +83,8 @@ export type SessionLoopOptions = {
     playbackCommandExists?: (command: string) => Promise<boolean>;
   };
 };
+
+const PROMPT_REGION_SLASH_PANEL_ROWS = 10;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -246,102 +249,6 @@ export class ToolActivityAnimator implements ToolActivityRailAnimator {
   }
 }
 
-export class BottomChromeToolActivityAnimator implements ToolActivityRailAnimator {
-  readonly #output: NodeJS.WritableStream;
-  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  readonly #streamState: { lastWriteEndedWithNewline: boolean };
-  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
-  #renderedRowCount = 0;
-
-  constructor(options: {
-    output: NodeJS.WritableStream;
-    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-    streamState: { lastWriteEndedWithNewline: boolean };
-  }) {
-    this.#output = options.output;
-    this.#renderer = options.renderer;
-    this.#streamState = options.streamState;
-  }
-
-  start(event: ToolActivityRailEvent): void {
-    this.#upsertRow(event, true);
-    this.#redrawRows();
-  }
-
-  complete(event: ToolActivityRailEvent): void {
-    if (this.#rows.length === 0) {
-      this.#writeDurableRow(event);
-      return;
-    }
-
-    this.#upsertRow(event, false);
-    this.#redrawRows();
-
-    if (this.#rows.every((row) => !row.active)) {
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-    }
-  }
-
-  cancel(): void {
-    if (this.#renderedRowCount > 0) {
-      this.#clearRows();
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-      this.#streamState.lastWriteEndedWithNewline = true;
-    }
-  }
-
-  dispose(): void {
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  #redrawRows(): void {
-    this.#clearRows();
-    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#renderedRowCount = this.#rows.length;
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
-    const index = this.#findRowIndex(event);
-    const row = { event, active };
-    if (index === -1) {
-      this.#rows.push(row);
-    } else {
-      this.#rows[index] = row;
-    }
-  }
-
-  #findRowIndex(event: ToolActivityRailEvent): number {
-    const key = toolActivityRowKey(event);
-    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
-    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
-      return exactIndex;
-    }
-    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
-  }
-
-  #clearRows(): void {
-    if (this.#renderedRowCount === 0) {
-      return;
-    }
-    if (this.#renderedRowCount === 1) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      return;
-    }
-    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
-  }
-
-  #writeDurableRow(event: ToolActivityRailEvent): void {
-    const vm = buildToolActivityRailViewModel({ events: [event] });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-}
-
 function toolActivityRowKey(event: ToolActivityRailEvent): string {
   return event.activityId ?? `${event.tool}\0${event.target ?? ""}`;
 }
@@ -481,20 +388,20 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
       fn();
     };
+    let queuedSubmittedInput: SubmittedCliInput | undefined;
 
     while (true) {
       let livePromptRows = 1;
       let readlineTransientLines: readonly string[] = [];
       let currentInputLine = "";
-      const idleShortcutRail = (): ShortcutHintRailViewModel | undefined =>
-        bottomChrome.enabled && currentInputLine.length === 0 && pendingSlashCompletion === undefined
-          ? buildShortcutHintRailViewModel({ hints: [] })
-          : undefined;
+      const inputPlaceholder = bottomChrome.enabled
+        ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
+        : undefined;
       const idleBottomState = () => buildBottomChromeState({
         runtime,
         renderer,
         slashMenu: pendingSlashCompletion,
-        shortcutRail: idleShortcutRail(),
+        slashMenuMinRows: pendingSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
         contextUsage: latestContextUsage,
         timing: railTiming()
       });
@@ -506,64 +413,80 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           promptLineCount: livePromptRows
         });
       };
-      if (bottomChrome.enabled) {
-        bottomChrome.updateState(idleBottomState());
-        bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
-      } else if (chrome.enabled) {
-        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
-      } else {
-        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-        output.write(`${topRule}\n`);
-      }
+      let submittedInput = queuedSubmittedInput;
+      queuedSubmittedInput = undefined;
+      let turnVoiceMode: CliVoiceMode = "off";
 
-      const voiceMode = await currentCliVoiceMode({
-        runtime,
-        homeDir: options.homeDir
-      });
-      const submittedInput = await readNextCliInput({
-        voiceMode,
-        prompt,
-        promptPrefix,
-        renderer,
-        useColor,
-        runtime,
-        output,
-        homeDir: options.homeDir,
-        workspaceRoot: options.workspaceRoot,
-        cliVoice: options.cliVoice,
-        onPromptResolved: () => {
-          if (bottomChrome.enabled) {
-            bottomChrome.stopTicker();
-            readlineTransientLines = [];
+      if (submittedInput === undefined) {
+        if (bottomChrome.enabled) {
+          bottomChrome.updateState(idleBottomState());
+          bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
+        } else if (chrome.enabled) {
+          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
+        } else {
+          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+          output.write(`${topRule}\n`);
+        }
+
+        turnVoiceMode = await currentCliVoiceMode({
+          runtime,
+          homeDir: options.homeDir
+        });
+        submittedInput = await readNextCliInput({
+          voiceMode: turnVoiceMode,
+          prompt,
+          promptPrefix,
+          renderer,
+          useColor,
+          runtime,
+          output,
+          homeDir: options.homeDir,
+          workspaceRoot: options.workspaceRoot,
+          cliVoice: options.cliVoice,
+          inputPlaceholder,
+          onPromptResolved: () => {
+            if (bottomChrome.enabled) {
+              bottomChrome.stopTicker();
+              readlineTransientLines = [];
+              redrawIdleReadlineChrome();
+            }
+          },
+          onPromptRowsChange: (rows) => {
+            livePromptRows = rows;
+          },
+          onInputChange: (line) => {
+            currentInputLine = line;
+            pendingSlashCompletion = line.startsWith("/")
+              ? buildPromptRegionSlashCompletionViewModel(runtime, line)
+              : undefined;
+            redrawIdleReadlineChrome();
+          },
+          onPastePreview: (_original, displayed) => {
+            readlineTransientLines = buildPastePreviewLines(displayed, renderer.capabilities.terminalWidth);
             redrawIdleReadlineChrome();
           }
-        },
-        onPromptRowsChange: (rows) => {
-          livePromptRows = rows;
-        },
-        onInputChange: (line) => {
-          currentInputLine = line;
-          pendingSlashCompletion = line.startsWith("/")
-            ? buildSlashCompletionViewModel(runtime, line)
-            : undefined;
-          redrawIdleReadlineChrome();
-        },
-        onPastePreview: (original) => {
-          readlineTransientLines = buildPastePreviewLines(original, renderer.capabilities.terminalWidth);
-          redrawIdleReadlineChrome();
-        }
-      });
+        });
+      } else {
+        pendingSlashCompletion = undefined;
+      }
+
       const text = submittedInput.text;
 
       const submittedPromptRows = submittedPromptLineCount(renderer.capabilities, submittedInput);
-      if (bottomChrome.enabled) {
-        bottomChrome.stopTicker();
-        bottomChrome.clearForReadline(submittedPromptRows);
-      } else if (chrome.enabled) {
-        chrome.clearChrome(submittedPromptRows);
+      if (submittedInput.clearSubmittedPrompt === true) {
+        if (bottomChrome.enabled) {
+          bottomChrome.stopTicker();
+          bottomChrome.clearForReadline(submittedPromptRows);
+        } else if (chrome.enabled) {
+          chrome.clearChrome(submittedPromptRows);
+        } else {
+          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+          output.write(`${topRule}\n`);
+        }
       } else {
-        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-        output.write(`${topRule}\n`);
+        if (bottomChrome.enabled) {
+          bottomChrome.stopTicker();
+        }
       }
 
       if (text.length === 0) {
@@ -585,7 +508,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           resolvedSubmittedCommand === undefined ||
           !isImplementedSlashCommand(resolvedSubmittedCommand.name)
         ) {
-          pendingSlashCompletion = buildSlashCompletionViewModel(runtime, text);
+          pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(runtime, text);
           continue;
         }
 
@@ -656,12 +579,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let bottomChromeTransientSpinnerLines: readonly string[] = [];
         let activeTurnCommandLine: string | undefined;
         let activeTurnCommandStatusLine: string | undefined;
+        let activeTurnSlashCompletion: SlashMenuViewModel | undefined;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
         let activeTurnCommandController: ActiveTurnCommandController | undefined;
         const runningBottomState = () => buildBottomChromeState({
           runtime,
           renderer,
+          slashMenu: activeTurnSlashCompletion,
+          slashMenuMinRows: activeTurnSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
           contextUsage: latestContextUsage,
           timing: railTiming()
         });
@@ -672,12 +598,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           streamState,
           enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
         });
-        const bottomChromeToolActivityAnimator = new BottomChromeToolActivityAnimator({
-          output,
-          renderer,
-          streamState,
-        });
-
         const supportsBottomChromeTranscriptSpinnerAnimation =
           renderer.capabilities.supportsAnimation
           && !renderer.capabilities.isCI
@@ -813,6 +733,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnCommandStatusLine = `active command: ${message}`;
             updateActiveTurnTransientLines();
           },
+          onInputLineChange: (line) => {
+            activeTurnSlashCompletion = line?.startsWith("/") === true
+              ? buildActiveTurnSlashCompletionViewModel(runtime, line)
+              : undefined;
+            if (bottomChrome.enabled) {
+              bottomChrome.updateStateInPlace(runningBottomState());
+            }
+          },
+          onQueueText: (queuedText) => {
+            if (queuedSubmittedInput !== undefined) {
+              activeTurnCommandStatusLine = "active input: A message is already queued for the next turn.";
+              updateActiveTurnTransientLines();
+              return;
+            }
+            queuedSubmittedInput = {
+              text: queuedText,
+              echoedPromptPrefix: "",
+              echoedText: queuedText,
+              clearSubmittedPrompt: false
+            };
+            activeTurnCommandStatusLine = "active input: Queued for the next turn.";
+            updateActiveTurnTransientLines();
+          },
           onInterrupt: () => {
             activeTurn?.abort("CLI interrupt");
           },
@@ -854,7 +797,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               let newPhase: string | undefined;
               if (bottomChrome.enabled) {
                 bottomChrome.writeAboveChromeSync(() => {
-                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, bottomChromeToolActivityAnimator);
+                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput);
                 });
               } else {
                 newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
@@ -871,6 +814,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnCommandController = undefined;
             activeTurnCommandLine = undefined;
             activeTurnCommandStatusLine = undefined;
+            activeTurnSlashCompletion = undefined;
             clearSpinner();
             currentAnimator?.dispose();
             currentAnimator = undefined;
@@ -912,7 +856,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));
         });
-        if (voiceMode === "tts") {
+        if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
             text: response.text,
@@ -1007,6 +951,7 @@ async function readNextCliInput(input: {
   homeDir?: string;
   workspaceRoot?: string;
   cliVoice?: SessionLoopOptions["cliVoice"];
+  inputPlaceholder?: string;
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
   onInputChange?: (line: string) => void;
@@ -1014,10 +959,16 @@ async function readNextCliInput(input: {
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
     const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
+    const profileId = await runtimeProfileId(input.runtime);
+    const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
     const promptOptions: PromptOptions = {
       onRowsChange: input.onPromptRowsChange,
       onInputChange: input.onInputChange,
       onPastePreview: input.onPastePreview,
+      placeholder: input.inputPlaceholder,
+      pasteReferenceStore: createFilePasteReferenceStore({
+        directory: join(profilePaths.tempPath, "pastes"),
+      }),
     };
     const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
@@ -1128,9 +1079,9 @@ function submittedPromptLineCount(
   return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
 }
 
-function buildPastePreviewLines(original: string, terminalWidth: number): string[] {
+function buildPastePreviewLines(displayed: string, terminalWidth: number): string[] {
   const width = Math.max(1, terminalWidth);
-  const lines = original.split(/\r\n|\r|\n/u);
+  const lines = displayed.split(/\r\n|\r|\n/u);
   const previewLines = lines.slice(0, 3);
   if (lines.length > previewLines.length) {
     previewLines.push("...");
@@ -2585,6 +2536,7 @@ function buildBottomChromeState(input: {
   runtime: Runtime;
   renderer: SessionRenderer;
   slashMenu?: SlashMenuViewModel;
+  slashMenuMinRows?: number;
   shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
@@ -2602,7 +2554,33 @@ function buildBottomChromeState(input: {
     activeSpinner: chromeState.activeSpinner,
     shortcutRail: input.slashMenu === undefined ? input.shortcutRail : undefined,
     slashMenu: chromeState.slashMenu,
+    slashMenuMinRows: input.slashMenuMinRows,
   };
+}
+
+function buildPromptRegionSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
+  return buildSlashCompletionViewModel(runtime, line, { limit: PROMPT_REGION_SLASH_PANEL_ROWS });
+}
+
+function buildActiveTurnSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
+  return buildSlashCompletionViewModel(runtime, line, {
+    includeActiveTurnCommands: true,
+    limit: PROMPT_REGION_SLASH_PANEL_ROWS,
+  });
+}
+
+function promptInputPlaceholder(
+  renderer: SessionRenderer,
+  promptPrefix: string,
+  useColor: boolean,
+  terminalWidth: number
+): string {
+  const availableWidth = Math.max(0, terminalWidth - measureVisibleWidth(promptPrefix));
+  if (availableWidth <= 0) {
+    return "";
+  }
+  const text = truncateVisible(chromeCopy(renderer.locale).inputPlaceholder, availableWidth);
+  return colorPromptPlaceholder(text, renderer.tokens, useColor);
 }
 
 function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {
@@ -2643,6 +2621,11 @@ export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, 
 export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useColor: boolean): string {
   if (!useColor) return prefix;
   return ansiColor(prefix, tokens.contract.palette.action);
+}
+
+export function colorPromptPlaceholder(value: string, tokens: ResolvedTokens, useColor: boolean): string {
+  if (!useColor) return value;
+  return ansiColor(value, tokens.contract.text.muted);
 }
 
 function ansiColor(text: string, hex: string): string {

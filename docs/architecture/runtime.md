@@ -66,6 +66,8 @@ CLI `/interrupt` and `/steer` are wrappers around the active `AbortSignal` suppl
 <note>
 ```
 
+`<note>` is documentation notation only. Users type free-form text after the command, for example `/steer try the safer approach instead`. Normal text typed and submitted during an active turn does not interrupt the turn; the CLI queues it as the next user turn and sends it after the current response completes.
+
 This boundary matters for inspection and failure handling. The provider sees the retried request as a normal new turn. If the retry fails, is cancelled, or is interrupted, the CLI does not reapply the same steering note indefinitely.
 
 ---

@@ -27,18 +27,22 @@ function makeInput(): NodeJS.ReadStream & {
 function createController(input = makeInput()) {
   const laneUpdates: Array<string | undefined> = [];
   const statuses: string[] = [];
+  const inputLines: Array<string | undefined> = [];
+  const queuedTexts: string[] = [];
   const abort = vi.fn();
   const steer = vi.fn();
   const emitSigint = vi.fn();
   const controller = new ActiveTurnCommandController({
     input,
     onCommandLaneChange: (line) => laneUpdates.push(line),
+    onInputLineChange: (line) => inputLines.push(line),
+    onQueueText: (text) => queuedTexts.push(text),
     onInterrupt: abort,
     onSteer: steer,
     onStatusMessage: (message) => statuses.push(message),
     emitSigint,
   });
-  return { input, controller, laneUpdates, statuses, abort, steer, emitSigint };
+  return { input, controller, laneUpdates, inputLines, queuedTexts, statuses, abort, steer, emitSigint };
 }
 
 describe("ActiveTurnCommandController", () => {
@@ -54,14 +58,29 @@ describe("ActiveTurnCommandController", () => {
     expect(input.rawModes).toEqual([true, false]);
   });
 
-  it("ignores normal typed characters before a slash command starts", () => {
-    const { input, controller, laneUpdates } = createController();
+  it("renders normal active-turn typing in the input lane", () => {
+    const { input, controller, laneUpdates, inputLines } = createController();
     controller.start();
 
     input.press("h", { name: "h" });
     input.press("i", { name: "i" });
 
-    expect(laneUpdates).toEqual([]);
+    expect(laneUpdates).toEqual(["active input: h", "active input: hi"]);
+    expect(inputLines).toEqual(["h", "hi"]);
+  });
+
+  it("Enter queues normal active-turn text", () => {
+    const { input, controller, queuedTexts, laneUpdates, abort } = createController();
+    controller.start();
+
+    for (const char of "hello while busy") {
+      input.press(char, { name: char });
+    }
+    input.press("\r", { name: "return" });
+
+    expect(queuedTexts).toEqual(["hello while busy"]);
+    expect(abort).not.toHaveBeenCalled();
+    expect(laneUpdates.at(-1)).toBeUndefined();
   });
 
   it("/ starts command buffering", () => {
@@ -184,7 +203,19 @@ describe("ActiveTurnCommandController", () => {
 
     expect(abort).not.toHaveBeenCalled();
     expect(steer).not.toHaveBeenCalled();
-    expect(statuses).toEqual(["Usage: /steer <guidance>"]);
+    expect(statuses).toEqual(["Usage: /steer <note>"]);
+  });
+
+  it("/steer treats literal angle brackets as part of the note", () => {
+    const { input, controller, steer } = createController();
+    controller.start();
+
+    for (const char of "/steer <note>") {
+      input.press(char, { name: char });
+    }
+    input.press("\r", { name: "return" });
+
+    expect(steer).toHaveBeenCalledWith("<note>");
   });
 
   it("/steer clears the command lane after submit", () => {

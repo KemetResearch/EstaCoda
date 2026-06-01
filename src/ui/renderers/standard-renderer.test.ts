@@ -490,8 +490,8 @@ describe("StandardRenderer — dark theme", () => {
       bodyLines: ["هل تثق بمساحة العمل هذه؟", "يمكن لـ EstaCoda قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة."],
       technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
       options: [
-        { id: "trust", label: "ثق بمساحة العمل" },
-        { id: "skip", label: "ليس الآن" },
+        { id: "trust", label: "ثق بمساحة العمل", description: "اسمح بالعمل المحلي هنا." },
+        { id: "skip", label: "ليس الآن", description: "ارجع لاحقًا." },
       ],
       selectedOptionIndex: 0,
       locale: "ar",
@@ -502,6 +502,10 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
     expect(plain).toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
     expect(plain).not.toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
+    const optionLine = plain.split("\n").find((line) => line.includes(isolateRtl("ثق بمساحة العمل")));
+    const descriptionLine = plain.split("\n").find((line) => line.includes(isolateRtl("اسمح بالعمل المحلي هنا.")));
+    expect(optionLine).toMatch(/^\s{4,}▸/u);
+    expect(descriptionLine).toMatch(/^\s{4,}/u);
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
@@ -1103,10 +1107,10 @@ describe("StandardRenderer — startup dashboard", () => {
       workspaceTrust: "trusted",
       workspaceVerification: "verified",
       workspaceDirectory: "/workspace",
-      securityMode: "high",
+      securityMode: "open",
       skillAutonomy: "autonomous",
       providerReadiness: "ready",
-      versionStatus: "unknown",
+      versionStatus: "update-available",
       availableCommands: [],
       warnings: [],
     });
@@ -1121,17 +1125,26 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain(isolateLtr("sess-9f7a2c1b"));
     expect(out).toContain(isolateLtr("deepseek-reasoner"));
     expect(out).toContain(isolateLtr("/workspace"));
-    expect(out).toContain(isolateLtr("high"));
+    expect(out).toContain(isolateLtr("open"));
     expect(out).toContain(isolateLtr("autonomous"));
+    expect(out).toContain(isolateLtr("update-available"));
     expect(out).toContain(isolateLtr("/tools"));
     expect(out).toContain(isolateLtr("/skills"));
     expect(out).toContain(isolateLtr("/model"));
     expect(out).toContain(isolateLtr("/status"));
     expect(stripAnsi(out)).not.toContain("│");
     const plain = stripAnsi(out);
-    expect(plain.indexOf("النموذج")).toBeLessThan(plain.indexOf("ثقة مساحة العمل"));
-    expect(plain.indexOf("ثقة مساحة العمل")).toBeLessThan(plain.indexOf("حالة تحقق مساحة العمل"));
-    expect(plain.indexOf("حالة تحقق مساحة العمل")).toBeLessThan(plain.indexOf("الأوامر التفاعلية:"));
+    const columnHeaderLine = plain.split("\n").find((line) => line.includes("الأوامر التفاعلية:") && line.includes("ثقة مساحة العمل"));
+    expect(columnHeaderLine).toBeDefined();
+    expect(columnHeaderLine?.indexOf("الأوامر التفاعلية:")).toBeLessThan(columnHeaderLine?.indexOf("ثقة مساحة العمل") ?? 0);
+    const commandFactLine = plain.split("\n").find((line) => line.includes("استعرض أدوات التشغيل") && line.includes("حالة تحقق مساحة العمل"));
+    expect(commandFactLine).toBeDefined();
+    expect(commandFactLine?.indexOf("استعرض أدوات التشغيل")).toBeLessThan(commandFactLine?.indexOf("حالة تحقق مساحة العمل") ?? 0);
+    const top = plain.split("\n").find((line) => line.startsWith("╭"));
+    const bottom = plain.split("\n").find((line) => line.startsWith("╰"));
+    expect(top).toContain(` ${isolateLtr("v0.0.5")}  𓂀  ${isolateLtr("sess-9f7a2c1b")} `);
+    expect(bottom).toBeDefined();
+    expectBalancedBidiIsolates(plain);
     for (const line of plain.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
     }
@@ -1163,6 +1176,7 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("الأوامر التفاعلية:");
     expect(out).toContain(isolateLtr("v0.0.5"));
     expect(out).not.toContain("│");
+    expect(out.split("\n").some((line) => line.includes("الأوامر التفاعلية:") && line.includes("ثقة مساحة العمل"))).toBe(false);
     expectBalancedBidiIsolates(out);
     for (const line of out.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);

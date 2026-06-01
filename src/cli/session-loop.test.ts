@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -545,6 +545,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
+    let promptOptions: PromptOptions | undefined;
 
     await runSessionLoop({
       runtime,
@@ -558,7 +559,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       } as unknown as NodeJS.WritableStream,
       capabilities: interactiveCaps(),
       prompt: Object.assign(
-        async () => {
+        async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
           const values = ["/exit"];
           return values[promptIndex++] ?? "/exit";
         },
@@ -569,8 +571,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).not.toContain("Type a message.");
-    expect(rendered).toContain("/help");
-    expect(rendered).toContain("Ctrl+C exit");
+    expect(promptOptions?.placeholder).toContain("/help");
+    expect(promptOptions?.placeholder).toContain("Ctrl+C exit");
     expect(rendered).not.toContain("/exit");
     expect(rendered).not.toContain("اكتب رسالة.");
   });
@@ -683,6 +685,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
+    let promptOptions: PromptOptions | undefined;
 
     await runSessionLoop({
       runtime,
@@ -702,7 +705,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         terminalWidth: 80,
       }),
       prompt: Object.assign(
-        async () => {
+        async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
           const values = ["/exit"];
           return values[promptIndex++] ?? "/exit";
         },
@@ -713,8 +717,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).not.toContain("اكتب رسالة.");
-    expect(rendered).toContain(isolateLtr("/help"));
-    expect(rendered).toContain(isolateLtr("Ctrl+C"));
+    expect(promptOptions?.placeholder).toContain(isolateLtr("/help"));
+    expect(promptOptions?.placeholder).toContain(isolateLtr("Ctrl+C"));
     expect(rendered).not.toContain(isolateLtr("/exit"));
     expect(rendered).not.toContain("𓂀");
     expect(rendered).not.toContain("╭");
@@ -1213,11 +1217,12 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("▸ this is a delib...");
-    const chromeClearIndex = rendered.lastIndexOf("\x1b[5A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[3B", userRailIndex);
+    const beforeUserRail = rendered.slice(0, userRailIndex);
+    const chromeClearIndex = beforeUserRail.search(/\x1b\[\d+A\x1b\[2K/u);
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(chromeClearIndex).toBeGreaterThan(-1);
-    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
     expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
     expect(echoClearIndex).toBeLessThan(userRailIndex);
   });
 
@@ -1336,6 +1341,63 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(toolIndex).toBeGreaterThan(-1);
     expect(redrawnChromeIndex).toBeGreaterThan(toolIndex);
     expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+  });
+
+  it("renders bottom-chrome tool activity as durable transcript rows", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 100,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const startChunk = outputChunks.find((chunk) => {
+      const stripped = stripAnsi(chunk);
+      return stripped.includes("preparing") && stripped.includes("browser.status");
+    });
+    const startChunkIndex = outputChunks.findIndex((chunk) => chunk === startChunk);
+    const resultChunk = outputChunks.find((chunk, index) => {
+      const stripped = stripAnsi(chunk);
+      return index > startChunkIndex
+        && stripped.includes("│")
+        && stripped.includes("ms")
+        && !stripped.includes("preparing")
+        && !stripped.includes("mock-model");
+    });
+    expect(startChunk).toBeDefined();
+    expect(resultChunk).toBeDefined();
+    const toolChunks = [startChunk, resultChunk] as string[];
+    for (const chunk of toolChunks) {
+      expect(chunk).not.toContain("\x1b[1A\x1b[2K\r");
+      expect(chunk).not.toContain("\x1b[0J");
+      expect(stripAnsi(chunk)).not.toContain("mock-model");
+    }
+    expect(outputChunks.some((chunk) => stripAnsi(chunk).includes("mock-model"))).toBe(true);
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
@@ -1528,6 +1590,57 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
   });
 
+  it("shows active-turn slash completions for /interrupt and /steer", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("/", { name: "/", sequence: "/" });
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("/interrupt");
+    expect(rendered).toContain("/steer");
+    expect(rendered).toContain("/steer <note>");
+
+    releaseTurn?.();
+    await loop;
+  });
+
   it("/steer aborts the active turn and retries once with the steering note", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
@@ -1659,7 +1772,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(aborted).toBe(false);
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <guidance>");
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <note>");
   });
 
   it("does not loop forever when the steered retry fails", async () => {
@@ -1892,20 +2005,34 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).toContain("active command: Steering already queued for this turn.");
   });
 
-  it("keeps normal active-turn typing out of the transcript", async () => {
+  it("queues normal active-turn typing as the next turn without aborting the current turn", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    let aborted = false;
     let handleStarted: (() => void) | undefined;
     const handleStartedPromise = new Promise<void>((resolve) => {
       handleStarted = resolve;
     });
     let releaseTurn: (() => void) | undefined;
+    let queuedTurnStarted: (() => void) | undefined;
+    const queuedTurnStartedPromise = new Promise<void>((resolve) => {
+      queuedTurnStarted = resolve;
+    });
     const runtime = createMockRuntime({
-      handle: async () => {
-        handleStarted?.();
-        await new Promise<void>((resolve) => {
-          releaseTurn = resolve;
-        });
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        }, { once: true });
+        if (handleInputs.length === 1) {
+          handleStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        } else {
+          queuedTurnStarted?.();
+        }
         return mockResponse();
       },
     });
@@ -1933,13 +2060,20 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     await handleStartedPromise;
-    for (const char of "zzqzz") {
+    for (const char of "queued follow up") {
       input.press(char, { name: char, sequence: char });
     }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active input: queued follow up");
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handleInputs).toEqual(["hello"]);
+    expect(aborted).toBe(false);
+    expect(stripAnsi(outputChunks.join(""))).toContain("active input: Queued for the next turn.");
     releaseTurn?.();
+    await queuedTurnStartedPromise;
     await loop;
 
-    expect(stripAnsi(outputChunks.join(""))).not.toContain("zzqzz");
+    expect(handleInputs).toEqual(["hello", "queued follow up"]);
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -2084,7 +2218,7 @@ describe("runSessionLoop — active turn spinner", () => {
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[5A"))).toBe(true);
+    expect(outputChunks.some((chunk) => /\x1b7\x1b\[\d+A/u.test(chunk))).toBe(true);
   });
 
   it("renders slash completion chrome while typing idle input", async () => {
@@ -2174,8 +2308,10 @@ describe("runSessionLoop — active turn spinner", () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
+    let promptQuestion = "";
     const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
+      vi.fn(async (question: string, options?: PromptOptions) => {
+        promptQuestion = stripAnsi(question);
         promptOptions = options;
         return await new Promise<string>((resolve) => {
           resolvePrompt = resolve;
@@ -2204,13 +2340,15 @@ describe("runSessionLoop — active turn spinner", () => {
     }
 
     const initial = stripAnsi(outputChunks.join(""));
-    expect(initial).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptQuestion).toBe("> ");
+    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptOptions.placeholder).not.toContain("›");
+    expect(initial).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(initial).not.toContain("Type a message.");
 
     const afterInitial = outputChunks.length;
     promptOptions.onInputChange?.("hello");
     const afterTyping = stripAnsi(outputChunks.slice(afterInitial).join(""));
-    expect(afterTyping).toContain("mock-model");
     expect(afterTyping).not.toContain("Ctrl+C exit");
     expect(afterTyping).not.toContain("Show command help");
 
@@ -2223,7 +2361,8 @@ describe("runSessionLoop — active turn spinner", () => {
     const afterSlashIndex = outputChunks.length;
     promptOptions.onInputChange?.("");
     const afterEmpty = stripAnsi(outputChunks.slice(afterSlashIndex).join(""));
-    expect(afterEmpty).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(afterEmpty).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(afterEmpty).not.toContain("Show command help");
 
     resolvePrompt("/exit");
@@ -2275,6 +2414,51 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
   });
 
+  it("renders compact paste references in preview chrome without exposing original paste content", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onPastePreview?.(
+      "do not echo this pasted body\nsecond line",
+      "[Pasted text #1: 2 lines → /tmp/estacoda-test-paste.txt]"
+    );
+    const previewOutput = outputChunks.join("");
+    expect(previewOutput).toContain("[Pasted text #1: 2 lines");
+    expect(previewOutput).not.toContain("do not echo this pasted body");
+    expect(previewOutput).not.toContain("second line");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
   it("keeps submitted multiline text intact after paste preview", async () => {
     const handledTexts: string[] = [];
     const runtime = createMockRuntime({
@@ -2321,6 +2505,44 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(handledTexts).toEqual(["line one\nline two"]);
+  });
+
+  it("provides a profile-local paste reference store to idle readline prompts", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-paste-home-"));
+    try {
+      let promptOptions: PromptOptions | undefined;
+      const prompt = Object.assign(
+        vi.fn(async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
+          return "/exit";
+        }),
+        { close: () => {} }
+      );
+
+      await runSessionLoop({
+        runtime: createMockRuntime(),
+        output: {
+          write(): boolean {
+            return true;
+          },
+          isTTY: true,
+          columns: 120,
+        } as unknown as NodeJS.WritableStream,
+        capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+        homeDir,
+        prompt,
+        close: () => {},
+      });
+
+      const reference = promptOptions?.pasteReferenceStore?.create("line one\nline two");
+      expect(reference).toBeDefined();
+      const pasteDir = join(resolveProfileStateHome({ homeDir, profileId: "default" }).tempPath, "pastes");
+      expect(reference!.path).toContain(pasteDir);
+      expect(reference!.path).not.toContain("/home/idris");
+      await expect(readFile(reference!.path, "utf8")).resolves.toBe("line one\nline two");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps live slash callbacks out of disabled bottom chrome output", async () => {

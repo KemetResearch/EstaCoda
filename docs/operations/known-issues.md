@@ -36,9 +36,9 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## CLI / UX
 
-- Full runtime CLI localization is incomplete. Arabic support is limited to setup labels and select surfaces. `live-proven`
-- Mixed Arabic + English technical tokens can show terminal bidi artifacts. `live-proven`
-- Interactive multiline paste ergonomics are rough. `live-proven`
+- Full runtime CLI localization is incomplete. Arabic support covers setup labels, select surfaces, localized prompt cards, and the Arabic startup dashboard. `live-proven`
+- Mixed Arabic + English technical tokens outside localized setup/dashboard surfaces can still show terminal bidi artifacts. `live-proven`
+- Prompt-region and paste-reference behavior has automated coverage, but terminal-emulator cursor differences still require manual TTY smoke before release. `live-proven`
 - Some answers remain too "assistant-ish" depending on surface. `live-proven`
 
 ## Testing

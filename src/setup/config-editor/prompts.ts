@@ -11,6 +11,8 @@ import {
   promptSetupChoice,
   type SetupChoice,
   promptSetupStringWithDefault,
+  setupTelegramBotTokenEnvQuestion,
+  setupTelegramBotTokenQuestion,
   setupCopyText,
 } from "../setup-prompts.js";
 import type { SetupCopyLocale } from "../setup-copy.js";
@@ -507,18 +509,14 @@ export async function promptTelegramCapability(
 }> {
   const botTokenEnv = await promptSetupStringWithDefault(
     prompt,
-    [
-      setupCopyText(locale, "setupEditor.prompt.telegram.summary"),
-      setupCopyText(locale, "setupEditor.prompt.telegram.remoteControlRisk"),
-      `${setupCopyText(locale, "setupEditor.prompt.telegram.botTokenEnv")} [ESTACODA_TELEGRAM_BOT_TOKEN]: `,
-    ].join("\n"),
+    setupTelegramBotTokenEnvQuestion(locale),
     current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
   );
   const botTokenInput = await promptForApiKeyInput({
     prompt,
     providerId: "telegram",
     envVarName: botTokenEnv,
-    question: `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")}: `,
+    question: setupTelegramBotTokenQuestion(locale),
   });
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,

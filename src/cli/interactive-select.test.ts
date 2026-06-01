@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 type TtyInput = PassThrough & {
   isTTY: true;
@@ -110,6 +111,56 @@ describe("interactive-select prompt card surface", () => {
       "  Not now",
     ].join("\n"));
   });
+
+  it("localizes and bolds Arabic selected output", async () => {
+    clearCiEnv();
+    process.env.FORCE_COLOR = "1";
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, arabicPromptCardSelection());
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("yes");
+    const rendered = output.getText();
+    const plain = stripAnsi(rendered);
+    expect(plain).toContain(`تم تحديد: ${isolateRtl("نعم")}`);
+    expect(plain).not.toContain("Selected:");
+    expect(rendered).toContain("\x1b[1mتم تحديد\x1b[22m");
+  });
+
+  it("isolates Arabic selected technical values", async () => {
+    clearCiEnv();
+    process.env.FORCE_COLOR = "1";
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...arabicPromptCardSelection(),
+      options: [{ value: "model", label: "deepseek-v4-pro", technical: true }],
+    });
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("model");
+    expect(stripAnsi(output.getText())).toContain(`تم تحديد: ${isolateLtr("deepseek-v4-pro")}`);
+  });
+
+  it("keeps selected output readable without ANSI color", async () => {
+    clearCiEnv();
+    process.env.FORCE_COLOR = "0";
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, promptCardSelection());
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("trust");
+    const rendered = output.getText();
+    expect(rendered).toContain("Selected: Trust workspace");
+    expect(rendered).not.toContain("\x1b[1mSelected\x1b[22m");
+  });
 });
 
 function promptCardSelection(): SelectPromptInput<string> {
@@ -128,6 +179,23 @@ function promptCardSelection(): SelectPromptInput<string> {
       { value: "skip", label: "Not now" },
     ],
     fallbackPrompt: "Enter choice number [default: 1 Trust workspace]: ",
+  };
+}
+
+function arabicPromptCardSelection(): SelectPromptInput<string> {
+  return {
+    surface: "promptCard",
+    locale: "ar",
+    direction: "rtl",
+    title: "تشغيل EstaCoda",
+    body: "هل تريد تشغيل EstaCoda الآن؟",
+    instruction: "استخدم الأسهم.",
+    defaultIndex: 0,
+    options: [
+      { value: "yes", label: "نعم", description: "ابدأ الجلسة." },
+      { value: "no", label: "لا", description: "ابق في الإعداد." },
+    ],
+    fallbackPrompt: "اختر رقمًا: ",
   };
 }
 

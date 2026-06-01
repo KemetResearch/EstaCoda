@@ -51,6 +51,7 @@ import {
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
+  setupProviderCredentialQuestion,
   setupPromptContext,
   setupCopyText,
   showSetupCard,
@@ -210,7 +211,10 @@ export async function runFirstRunSetup(
         prompt: localizedOptions.prompt,
         providerId: primaryProvider,
         envVarName,
-        question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${envVarName}]: `,
+        question: setupProviderCredentialQuestion(language, {
+          providerName: primaryProviderCandidate.displayName,
+          envVarName,
+        }),
       });
 
       if (promptResult.kind === "skipped") {

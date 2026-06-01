@@ -4,6 +4,8 @@ export type ActiveTurnCommandControllerOptions = {
   readonly input: NodeJS.ReadStream;
   readonly enabled?: boolean;
   readonly onCommandLaneChange: (line: string | undefined) => void;
+  readonly onInputLineChange?: (line: string | undefined) => void;
+  readonly onQueueText?: (text: string) => void;
   readonly onInterrupt: () => void;
   readonly onSteer?: (note: string) => void;
   readonly onStatusMessage?: (message: string) => void;
@@ -20,6 +22,8 @@ export class ActiveTurnCommandController {
   readonly #input: NodeJS.ReadStream;
   readonly #enabled: boolean;
   readonly #onCommandLaneChange: (line: string | undefined) => void;
+  readonly #onInputLineChange?: (line: string | undefined) => void;
+  readonly #onQueueText?: (text: string) => void;
   readonly #onInterrupt: () => void;
   readonly #onSteer?: (note: string) => void;
   readonly #onStatusMessage?: (message: string) => void;
@@ -34,6 +38,8 @@ export class ActiveTurnCommandController {
     this.#input = options.input;
     this.#enabled = options.enabled ?? true;
     this.#onCommandLaneChange = options.onCommandLaneChange;
+    this.#onInputLineChange = options.onInputLineChange;
+    this.#onQueueText = options.onQueueText;
     this.#onInterrupt = options.onInterrupt;
     this.#onSteer = options.onSteer;
     this.#onStatusMessage = options.onStatusMessage;
@@ -71,14 +77,6 @@ export class ActiveTurnCommandController {
       return;
     }
 
-    if (this.#buffer === undefined) {
-      if (chunk === "/" || key.sequence === "/") {
-        this.#buffer = "/";
-        this.#renderBuffer();
-      }
-      return;
-    }
-
     if (key.name === "escape") {
       this.#clearBuffer();
       return;
@@ -88,6 +86,9 @@ export class ActiveTurnCommandController {
       return;
     }
     if (key.name === "backspace") {
+      if (this.#buffer === undefined) {
+        return;
+      }
       this.#buffer = this.#buffer.slice(0, -1);
       if (this.#buffer.length === 0) {
         this.#clearBuffer();
@@ -97,13 +98,13 @@ export class ActiveTurnCommandController {
       return;
     }
     if (key.name === "return" || key.name === "enter") {
-      const command = this.#buffer;
+      const command = this.#buffer ?? "";
       this.#clearBuffer();
       this.#submit(command);
       return;
     }
     if (isPrintableInput(chunk)) {
-      this.#buffer += chunk;
+      this.#buffer = `${this.#buffer ?? ""}${chunk}`;
       this.#renderBuffer();
     }
   }
@@ -114,6 +115,13 @@ export class ActiveTurnCommandController {
     if (trimmed.length === 0 || trimmed === "/") {
       return;
     }
+    if (!trimmed.startsWith("/")) {
+      if (this.#onQueueText === undefined) {
+        return;
+      }
+      this.#onQueueText(trimmed);
+      return;
+    }
     if (normalized === "/interrupt") {
       this.#onInterrupt();
       return;
@@ -122,7 +130,7 @@ export class ActiveTurnCommandController {
     if (steerMatch !== null) {
       const note = steerMatch[1]?.trim() ?? "";
       if (note.length === 0) {
-        this.#onStatusMessage?.("Usage: /steer <guidance>");
+        this.#onStatusMessage?.("Usage: /steer <note>");
         return;
       }
       if (this.#onSteer === undefined) {
@@ -137,13 +145,16 @@ export class ActiveTurnCommandController {
 
   #renderBuffer(): void {
     if (this.#buffer === undefined) return;
-    this.#onCommandLaneChange(`active command: ${this.#buffer}`);
+    const prefix = this.#buffer.startsWith("/") ? "active command" : "active input";
+    this.#onCommandLaneChange(`${prefix}: ${this.#buffer}`);
+    this.#onInputLineChange?.(this.#buffer);
   }
 
   #clearBuffer(): void {
     if (this.#buffer === undefined) return;
     this.#buffer = undefined;
     this.#onCommandLaneChange(undefined);
+    this.#onInputLineChange?.(undefined);
   }
 }
 

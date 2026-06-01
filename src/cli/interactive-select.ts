@@ -5,6 +5,7 @@ import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/
 import type { OnboardingPromptOption, PickerOption, ViewModel } from "../contracts/view-model.js";
 import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -15,6 +16,7 @@ export type SelectPromptInput<T> = {
     value: T;
     label: string;
     description?: string;
+    technical?: boolean;
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
@@ -81,7 +83,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       }
       settled = true;
       restoreTerminal();
-      output.write(`\n${selection.selectedLabel ?? "Selected"}: ${selection.options[selectedIndex]?.label ?? "option"}\n\n`);
+      output.write(`\n${selectedOutputLine(selection, selectedIndex, renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor)}\n\n`);
       resolve(value);
     };
 
@@ -128,7 +130,7 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       id: String(i),
       label: opt.label,
       description: opt.description,
-      technical: false,
+      technical: opt.technical ?? false,
     }));
     return buildOnboardingPromptCardViewModel({
       title: selection.title,
@@ -149,6 +151,35 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
     selected: i === selectedIndex,
   }));
   return buildPickerViewModel({ title: selection.title, options });
+}
+
+function selectedOutputLine<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number,
+  useAnsi: boolean
+): string {
+  const locale = selection.locale ?? "en";
+  const label = selection.selectedLabel ?? (locale === "ar" ? "تم تحديد" : "Selected");
+  const selectedOption = selection.options[selectedIndex];
+  const selectedValue = selectedOption === undefined
+    ? locale === "ar" ? "خيار" : "option"
+    : selectedOptionLabel(selectedOption.label, locale, selectedOption.technical === true);
+  return `${useAnsi ? bold(label) : label}: ${selectedValue}`;
+}
+
+function selectedOptionLabel(value: string, locale: Locale, explicitTechnical: boolean): string {
+  if (locale !== "ar") {
+    return value;
+  }
+  return explicitTechnical || looksTechnical(value) ? isolateLtr(value) : isolateRtl(value);
+}
+
+function looksTechnical(value: string): boolean {
+  return /^[/~.]|^[A-Z0-9_]+$/u.test(value) || /[A-Za-z0-9][._/-][A-Za-z0-9]/u.test(value);
+}
+
+function bold(value: string): string {
+  return `\x1b[1m${value}\x1b[22m`;
 }
 
 function splitBodyLines(body: string | undefined): string[] {

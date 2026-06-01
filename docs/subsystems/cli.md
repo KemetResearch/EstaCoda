@@ -172,15 +172,34 @@ Interactive `/compact [topic]` is semantic session compression for the current s
 
 The idle CLI prompt is real readline input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
 
-Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Multiline paste is made readline-safe by displaying a visible single-line marker in the prompt row, previewing the pasted text as multiline transient chrome above the prompt, and restoring real `\n` characters in the submitted answer. The returned prompt text is the intended user text, not the visible prompt marker. Secret prompts do not emit paste previews or live slash hints; pasted secret content must not be mirrored into transient chrome.
+The terminal regions are intentionally separate:
 
-Shortcut hints are shown in managed bottom chrome while the idle input line is empty. They disappear as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Submitted slash command behavior still uses the normal command registry and handler path. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+```text
+Transcript area:
+  durable user rails
+  durable assistant cards
+  durable tool activity rows
 
-Arabic setup chrome is direction-aware for localized setup selectors, rails, and onboarding summaries. Raw setup string prompts remain a follow-up RTL surface; do not describe this as full runtime Arabic localization.
+Bottom prompt region:
+  status rail
+  input row / placeholder
+  fixed-height slash completion panel
+  compact paste notice/reference when applicable
+```
 
-After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, tool activity, approval/setup output, and transient command-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+Tool-start and tool-result rows are durable transcript output above bottom chrome. The active spinner and status rail stay in the bottom prompt region.
 
-While `runtime.handle()` is active in a local interactive CLI session, a separate command lane watches active-turn keypresses. It starts buffering only when the first typed character is `/`; ordinary typing during an active turn is ignored and is not recorded as a user message.
+Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
+
+Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+
+Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, and the startup dashboard. Arabic picker rows are RTL/right-aligned as full option rows; selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal terminal widths and falls back to a bounded stacked layout on narrow terminals. Technical tokens such as paths, env vars, provider/model IDs, slash commands, and version numbers remain untranslated and isolated. Do not describe this as full runtime Arabic localization.
+
+Onboarding provider credential prompts and Telegram token prompts share the setup editor prompt copy. Arabic display strings isolate product names, provider names, `Telegram`, env vars, and other technical tokens. Stored config, env, auth, and state values remain raw; secret prompts remain masked.
+
+After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and transient active-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+
+While `runtime.handle()` is active in a local interactive CLI session, the active prompt lane accepts visible input. Normal text submitted mid-turn is queued for the next turn, does not interrupt the current turn, and is sent only after the current response completes. Slash commands in this lane remain control input and are not persisted as user transcript/history content.
 
 Active-turn commands:
 
@@ -196,6 +215,12 @@ Active-turn commands:
 
 [Steering note while previous turn was interrupted]
 <note>
+```
+
+`<note>` is documentation notation only. The actual input is free-form text after the command:
+
+```text
+/steer try the safer approach instead
 ```
 
 An empty `/steer` shows usage and does not abort. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.

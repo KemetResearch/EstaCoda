@@ -2,10 +2,11 @@ import { createInterface as createCallbackInterface } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
-import { PasteInterceptor, disableBracketedPaste, enableBracketedPaste } from "./paste-interceptor.js";
+import { PasteInterceptor, disableBracketedPaste, enableBracketedPaste, type PasteReferenceStore } from "./paste-interceptor.js";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { createSessionRenderer } from "./session-renderer.js";
+import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import {
   promptUiContextForLocale,
   type PromptUiContext,
@@ -16,6 +17,9 @@ export type PromptOptions = {
   onRowsChange?: (rows: number) => void;
   onPastePreview?: (original: string, displayed: string) => void;
   onInputChange?: (line: string) => void;
+  placeholder?: string;
+  pasteReferenceStore?: PasteReferenceStore;
+  pasteReferenceThresholdChars?: number;
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
@@ -135,6 +139,27 @@ async function trackedQuestion(
     const mutable = readline as unknown as {
       _writeToOutput?: (value: string) => void;
       getCursorPos?: () => { rows: number; cols: number };
+      line?: string;
+    };
+    let placeholderVisible = false;
+    const renderPlaceholder = () => {
+      const placeholder = options?.placeholder;
+      if (placeholder === undefined || placeholder.length === 0 || (mutable.line ?? "").length > 0) {
+        if (placeholderVisible) {
+          output.write("\x1b[0K");
+          placeholderVisible = false;
+        }
+        return;
+      }
+      if (placeholderVisible) {
+        return;
+      }
+      const width = measureVisibleWidth(placeholder);
+      if (width === 0) {
+        return;
+      }
+      output.write(`${placeholder}\x1b[${width}D`);
+      placeholderVisible = true;
     };
     const reportRows = () => {
       const cursor = mutable.getCursorPos?.();
@@ -144,6 +169,7 @@ async function trackedQuestion(
     if (originalWrite !== undefined) {
       mutable._writeToOutput = (value: string) => {
         originalWrite(value);
+        renderPlaceholder();
         reportRows();
         inputTracking.report();
       };
@@ -156,6 +182,7 @@ async function trackedQuestion(
       pasteSession.close();
       resolve(restored);
     });
+    renderPlaceholder();
     reportRows();
   });
 }
@@ -201,7 +228,11 @@ function createPastePromptSession(
     };
   }
 
-  const interceptor = new PasteInterceptor({ onPaste: options?.onPastePreview });
+  const interceptor = new PasteInterceptor({
+    onPaste: options?.onPastePreview,
+    referenceStore: options?.pasteReferenceStore,
+    referenceThresholdChars: options?.pasteReferenceThresholdChars,
+  });
   const readlineInput = makeReadlineInput(interceptor, input);
   input.pipe(interceptor);
   enableBracketedPaste(output as NodeJS.WritableStream);

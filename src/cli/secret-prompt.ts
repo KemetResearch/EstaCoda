@@ -18,9 +18,9 @@ export async function promptForApiKeyInput(options: {
   question?: string;
 }): Promise<PromptForApiKeyInputResult> {
   const question = options.question ?? `Enter API key for ${options.providerId}: `;
-  const raw = (await options.prompt(question, { secret: true })).trim();
+  const raw = await options.prompt(question, { secret: true });
 
-  if (raw.length === 0) {
+  if (raw.trim().length === 0) {
     return { kind: "skipped", envVarName: options.envVarName };
   }
 
