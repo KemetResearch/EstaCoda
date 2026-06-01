@@ -187,9 +187,9 @@ Current active-turn commands:
 
 These commands do not change gateway approval semantics. Gateway and non-CLI channels remain on their existing control paths: remote approvals still go through `ChannelGateway`, durable approval queues remain ask-only, and adapters do not gain an active-turn command lane.
 
-The command lane must not persist command buffers as user transcript/history content. Normal active-turn typing is ignored unless it starts a command with `/`; even then, the command text is control input, not a user message. The visible transcript should continue to show the original submitted user prompt, while retry text is inspectable through the explicit steering marker when `/steer` is used.
+The active prompt lane must keep control input and user messages distinct. Normal active-turn text is visible and can be submitted, but it is queued as the next user turn and is not sent to `runtime.handle()` until the current response completes. It does not interrupt the active turn. Slash commands such as `/interrupt` and `/steer <note>` are control input, not user transcript/history content. The visible transcript should continue to show the original submitted user prompt, while retry text is inspectable through the explicit steering marker when `/steer` is used. `<note>` is documentation notation; actual use is free-form text after the command, such as `/steer try the safer approach instead`.
 
-Secret prompts are outside this chrome path. Pasted secret content must not appear in paste previews, transient bottom chrome, slash hints, status rails, logs, or active-turn command messages.
+Secret prompts are outside this chrome path. Pasted secret content must not appear in paste previews, paste reference files, transient bottom chrome, slash hints, status rails, logs, or active-turn command messages.
 
 ### Voice Security Boundaries
 

@@ -189,25 +189,25 @@ CI environment    → supportsAnimation=false
 
 `ReadlinePrompt` owns idle CLI input. It composes the current readline buffer, reports prompt row count as wrapping changes, and routes TTY paste input through `PasteInterceptor` when bracketed paste is available. Paste interception is scoped to interceptor-backed TTY prompts; gateway, one-shot, and non-CLI channel input do not use this path.
 
-Secret prompts are a hard boundary. They may accept pasted bytes as input, but they must not publish paste preview callbacks, live slash hints, or transient chrome containing secret text.
+Secret prompts are a hard boundary. They may accept pasted bytes as input, but they must not publish paste preview callbacks, paste reference files, live slash hints, or temporary chrome containing secret text.
 
 ### 6.2 Managed Region Above Readline
 
-`BottomChromeController` owns the managed region above an active readline prompt. Live prompt-adjacent UI must use:
+`BottomChromeController` owns the managed prompt region around an active readline prompt. The transcript area owns durable user rails, assistant cards, and tool activity rows. The bottom prompt region owns the status rail, input row/placeholder, fixed-height slash completion panel, and compact paste notice/reference when applicable. Live prompt-adjacent UI must use:
 
 ```typescript
 updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })
 ```
 
-This method is the canonical path for live slash hints, paste previews, and ticker updates while readline owns the cursor. The caller must pass the current prompt line count so wrapped prompts are treated as occupied rows. The controller tracks managed-region height across growth, shrink, and disappearance; stale lines are cleared before the prompt row is restored.
+This method is the canonical path for live slash hints, paste notices/references, and ticker updates while readline owns the cursor. The caller must pass the current prompt line count so wrapped prompts are treated as occupied rows. The controller tracks managed-region height across growth, shrink, and disappearance; stale lines are cleared before the prompt row is restored. Slash completions reserve a fixed panel height so changing match counts do not resize the prompt region.
 
 Do not manually combine `updateTransientLines()` and `updateStateAboveReadline()` for live readline UI. That older mixed pattern can desynchronize line counts when transient rows appear, disappear, or wrap.
 
 ### 6.3 Active-Turn Chrome
 
-After submit, readline no longer owns the cursor. Active-turn chrome shows status, timing, spinner, tool activity, setup/approval output, and transient command-lane messages. It must not recreate the removed fake read-only prompt box.
+After submit, readline no longer owns the cursor. Active-turn chrome shows status, timing, spinner, setup/approval output, and transient active-lane messages. Tool activity rows are durable transcript output above bottom chrome. Active-turn chrome must not recreate the removed fake read-only prompt box.
 
-The active-turn command lane is CLI-local. `ActiveTurnCommandController` attaches only while `runtime.handle()` is active in an interactive TTY, buffers commands that begin with `/`, and renders through bottom chrome transient/status paths rather than direct terminal writes. `/interrupt` aborts the active turn. `/steer <note>` aborts and schedules one CLI-layer retry with an explicit steering note; it is not a runtime/provider in-flight steering primitive.
+The active-turn input lane is CLI-local. `ActiveTurnCommandController` attaches only while `runtime.handle()` is active in an interactive TTY. Normal submitted text is visible and queued as the next user turn after the current response completes. `/interrupt` aborts the active turn. `/steer <note>` aborts and schedules one CLI-layer retry with an explicit steering note; it is not a runtime/provider in-flight steering primitive. `<note>` is documentation notation only; users type free-form note text after `/steer`.
 
 ---
 

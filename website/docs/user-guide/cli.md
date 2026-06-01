@@ -135,13 +135,25 @@ Inside an active session, slash commands provide operational controls. This is a
 
 The idle CLI prompt is real `readline` input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
 
-Managed bottom chrome shows shortcut hints while the input line is empty. The hints disappear as soon as the user starts typing. Slash hints take priority when the line starts with `/`, and they clear when the line no longer starts with `/` or the prompt resolves. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+The transcript area owns durable user rails, assistant cards, and tool activity rows. The bottom prompt region owns the status rail, input row/placeholder, fixed-height slash completion panel, and compact paste notice/reference when applicable. Tool-start and tool-result rows render above bottom chrome; the active spinner/status stays in the prompt region.
 
-Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Multiline paste is made readline-safe by displaying a visible single-line marker in the prompt row, previewing the pasted text as multiline transient chrome above the prompt, and restoring real `\n` characters in the submitted answer. Secret prompts do not emit paste previews, shortcut hints, or live slash hints.
+Managed bottom chrome shows shortcut hints as input-lane placeholder copy while the input line is empty. The prompt row owns the prompt marker, so placeholder copy does not include its own marker. The hint disappears as soon as the user starts typing. Slash hints take priority when the line starts with `/`, reserve a fixed-height panel, and clear when the line no longer starts with `/` or the prompt resolves. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
 
-Arabic setup chrome is direction-aware for localized setup selectors, rails, and onboarding summaries. Raw setup string prompts remain a follow-up RTL surface; this is not full runtime Arabic localization.
+Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when paste storage is available. Paste files live under active profile temp state, not the workspace, and are temporary operational artifacts. Submitted runtime input restores the original pasted content. Secret prompts bypass paste preview/storage and do not emit shortcut hints or live slash hints.
 
-After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, tool activity, approval/setup output, and transient command-lane messages. It does not show a fake read-only prompt box containing the submitted user text.
+Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
+
+Onboarding provider credential prompts and Telegram token prompts share setup editor prompt copy. Arabic display strings isolate technical tokens, while stored config, env, auth, and state values remain raw. Secret prompts remain masked.
+
+After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, approval/setup output, durable tool activity above chrome, and transient active-lane messages. It does not show a fake read-only prompt box containing the submitted user text.
+
+While EstaCoda is responding, the active prompt lane accepts visible input. Normal text submitted mid-turn is queued for the next turn, does not interrupt the current turn, and is sent only after the current response completes. `/interrupt` cancels the active turn. `/steer <note>` aborts and retries once with a steering note; `<note>` is documentation notation only. Actual use is free-form:
+
+```text
+/steer try the safer approach instead
+```
+
+An empty `/steer` shows usage and does not abort.
 
 ---
 
