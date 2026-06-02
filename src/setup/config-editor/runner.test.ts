@@ -405,8 +405,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("edit-language");
     expect(prompts[0]?.title).toBe("Setup language");
     expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
-    expect(prompts[1]?.title).toBe("أسلوب الواجهة");
-    expect(prompts[1]?.labels).toContain("عربي خفيف");
+    expect(prompts.map((prompt) => prompt.title)).not.toContain("أسلوب الواجهة");
     expect(uiLine?.review.values).toEqual(expect.objectContaining({
       language: "ar",
       flavor: "arabic-light",
