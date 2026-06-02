@@ -574,12 +574,20 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
+        const TOOL_SLOT_COUNT = 5;
+        const EMPTY_TOOL_SLOT = "\u00A0";
         let bottomChromeTranscriptSpinnerTicker: ReturnType<typeof setInterval> | undefined;
         let bottomChromeActiveChromeTicker: ReturnType<typeof setInterval> | undefined;
         let bottomChromeTransientSpinnerLines: readonly string[] = [];
+        let bottomChromeToolActivityActive = false;
+        let bottomChromeToolActivityLines: string[] = [];
+        const completedBottomChromeToolRows: string[] = [];
+        let completedToolRowsFlushed = false;
+        let skippedPreResponseBottomChromeStateUpdate = false;
         let activeTurnCommandLine: string | undefined;
         let activeTurnCommandStatusLine: string | undefined;
         let activeTurnSlashCompletion: SlashMenuViewModel | undefined;
+        let suppressActiveTurnChromeUpdates = false;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
         let activeTurnCommandController: ActiveTurnCommandController | undefined;
@@ -607,25 +615,96 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           activeTurnCommandLine ?? activeTurnCommandStatusLine,
         ].filter((line): line is string => line !== undefined);
 
+        function fixedToolActivitySlots(): string[] {
+          if (!bottomChromeToolActivityActive) return [];
+          const recent = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
+          return [
+            ...recent,
+            ...Array.from({ length: TOOL_SLOT_COUNT - recent.length }, () => EMPTY_TOOL_SLOT),
+          ];
+        }
+
         const updateActiveTurnTransientLines = () => {
           if (!bottomChrome.enabled) return;
           bottomChrome.updateTransientLines([
             ...activeTurnCommandLines(),
+            ...fixedToolActivitySlots(),
             ...bottomChromeTransientSpinnerLines,
           ]);
         };
 
-        const stopBottomChromeTransientSpinner = () => {
+        function renderToolActivityLines(event: ToolActivityRailEvent): string[] {
+          return renderer.render(buildToolActivityRailViewModel({ events: [event] }))
+            .split("\n")
+            .filter((line) => line.length > 0);
+        }
+
+        function appendRenderedRows(rows: string[], rendered: string): void {
+          rows.push(...rendered.split("\n").filter((line) => line.length > 0));
+        }
+
+        function writeTurnBoundaryRows(rows: readonly string[]): void {
+          if (rows.length === 0) return;
+          if (!streamState.lastWriteEndedWithNewline) {
+            output.write("\n");
+          }
+          output.write(`${rows.join("\n")}\n`);
+          streamState.lastWriteEndedWithNewline = true;
+        }
+
+        function isToolActivityRuntimeEvent(
+          event: RuntimeEvent
+        ): event is Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }> {
+          return event.kind === "tool-start" || event.kind === "tool-result";
+        }
+
+        function flushCompletedToolRowsNoRestore(): void {
+          if (
+            !bottomChrome.enabled ||
+            completedToolRowsFlushed ||
+            completedBottomChromeToolRows.length === 0
+          ) {
+            return;
+          }
+
+          completedToolRowsFlushed = true;
+          bottomChromeToolActivityActive = false;
+          bottomChromeToolActivityLines = [];
+
+          bottomChrome.writeAboveChromeNoRestore(() => {
+            writeTurnBoundaryRows(completedBottomChromeToolRows);
+          });
+        }
+
+        const resetBottomChromeTransientSpinnerState = () => {
           if (bottomChromeTranscriptSpinnerTicker !== undefined) {
             clearInterval(bottomChromeTranscriptSpinnerTicker);
             bottomChromeTranscriptSpinnerTicker = undefined;
           }
           bottomChromeTransientSpinnerLines = [];
-          updateActiveTurnTransientLines();
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.lastOutputWasSpinner = false;
         };
+
+        const stopBottomChromeTransientSpinner = () => {
+          resetBottomChromeTransientSpinnerState();
+          updateActiveTurnTransientLines();
+        };
         clearBottomChromeTranscriptSpinner = stopBottomChromeTransientSpinner;
+
+        const updateActiveTurnTransientLinesUnlessSuppressed = () => {
+          if (suppressActiveTurnChromeUpdates) {
+            return;
+          }
+          updateActiveTurnTransientLines();
+        };
+
+        const updateBottomChromeStateInPlaceUnlessSuppressed = () => {
+          if (!bottomChrome.enabled || suppressActiveTurnChromeUpdates) {
+            return;
+          }
+          bottomChrome.updateStateInPlace(runningBottomState());
+        };
 
         const stopBottomChromeActiveChromeTicker = () => {
           if (bottomChromeActiveChromeTicker !== undefined) {
@@ -727,24 +806,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             if (line !== undefined) {
               activeTurnCommandStatusLine = undefined;
             }
-            updateActiveTurnTransientLines();
+            updateActiveTurnTransientLinesUnlessSuppressed();
           },
           onStatusMessage: (message) => {
             activeTurnCommandStatusLine = `active command: ${message}`;
-            updateActiveTurnTransientLines();
+            updateActiveTurnTransientLinesUnlessSuppressed();
           },
           onInputLineChange: (line) => {
             activeTurnSlashCompletion = line?.startsWith("/") === true
               ? buildActiveTurnSlashCompletionViewModel(runtime, line)
               : undefined;
-            if (bottomChrome.enabled) {
-              bottomChrome.updateStateInPlace(runningBottomState());
-            }
+            updateBottomChromeStateInPlaceUnlessSuppressed();
           },
           onQueueText: (queuedText) => {
             if (queuedSubmittedInput !== undefined) {
               activeTurnCommandStatusLine = "active input: A message is already queued for the next turn.";
-              updateActiveTurnTransientLines();
+              updateActiveTurnTransientLinesUnlessSuppressed();
               return;
             }
             queuedSubmittedInput = {
@@ -795,7 +872,26 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                 turnWasCancelled = true;
               }
               let newPhase: string | undefined;
-              if (bottomChrome.enabled) {
+              if (bottomChrome.enabled && isToolActivityRuntimeEvent(event)) {
+                runtimeEventBottomChrome.clearInlineSpinner();
+
+                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
+                const lines = renderToolActivityLines(railEvent);
+
+                bottomChromeToolActivityActive = true;
+                bottomChromeToolActivityLines.push(...lines);
+                bottomChromeToolActivityLines = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
+
+                if (event.kind === "tool-result") {
+                  completedBottomChromeToolRows.push(...lines);
+                  if (event.fileChangePreview !== undefined) {
+                    appendRenderedRows(completedBottomChromeToolRows, renderer.render(event.fileChangePreview));
+                  }
+                }
+
+                updateActiveTurnTransientLines();
+                newPhase = "tool";
+              } else if (bottomChrome.enabled) {
                 bottomChrome.writeAboveChromeSync(() => {
                   newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput);
                 });
@@ -810,12 +906,27 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           .finally(() => {
             activeTurn = undefined;
             activeTurnStartedAtMs = undefined;
-            activeTurnCommandController?.dispose();
+            suppressActiveTurnChromeUpdates = bottomChrome.enabled;
+            try {
+              activeTurnCommandController?.dispose();
+            } finally {
+              suppressActiveTurnChromeUpdates = false;
+            }
             activeTurnCommandController = undefined;
             activeTurnCommandLine = undefined;
             activeTurnCommandStatusLine = undefined;
             activeTurnSlashCompletion = undefined;
-            clearSpinner();
+            bottomChromeToolActivityActive = false;
+            bottomChromeToolActivityLines = [];
+            if (bottomChrome.enabled) {
+              stopBottomChromeActiveChromeTicker();
+              resetBottomChromeTransientSpinnerState();
+              currentPhase = undefined;
+              turnOutput.spinnerPhase = undefined;
+              turnOutput.lastOutputWasSpinner = false;
+            } else {
+              clearSpinner();
+            }
             currentAnimator?.dispose();
             currentAnimator = undefined;
             clearBottomChromeTranscriptSpinner = () => undefined;
@@ -830,19 +941,25 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
           timerMode = "last-turn";
         }
-        if (bottomChrome.enabled) {
+        if (bottomChrome.enabled && completedBottomChromeToolRows.length === 0) {
+          updateActiveTurnTransientLines();
           bottomChrome.updateState(buildBottomChromeState({
             runtime,
             renderer,
             contextUsage: latestContextUsage,
             timing: railTiming()
           }));
+        } else if (bottomChrome.enabled) {
+          skippedPreResponseBottomChromeStateUpdate = true;
         }
 
         if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
           const steeringNote = pendingSteeringNote;
           pendingSteeringNote = undefined;
           steeringRetryUsed = true;
+          if (bottomChrome.enabled) {
+            updateActiveTurnTransientLines();
+          }
           retryText = buildSteeredRetryText(text, steeringNote);
           continue;
         }
@@ -853,9 +970,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           matchedSkills: response.matchedSkills,
           progress: options.showResponseProgress === true ? response.progress : undefined,
         });
+        flushCompletedToolRowsNoRestore();
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));
         });
+        if (skippedPreResponseBottomChromeStateUpdate && bottomChrome.enabled) {
+          bottomChrome.updateState(buildBottomChromeState({
+            runtime,
+            renderer,
+            contextUsage: latestContextUsage,
+            timing: railTiming()
+          }));
+        }
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
