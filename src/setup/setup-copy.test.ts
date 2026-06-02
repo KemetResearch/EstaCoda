@@ -515,6 +515,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds.heading")).toBe("Authorize Telegram group chats");
     expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds")).toBe("Allowed Telegram group chat ID(s):");
 
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.card.title")).toBe("ضبط Telegram");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.card.title")).toContain(isolateLtr("Telegram"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.botToken.heading")).toBe("ربط بوت Telegram");
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.heading")).toBe("اعتماد مستخدمي Telegram");
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds")).toBe(

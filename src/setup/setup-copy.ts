@@ -412,7 +412,7 @@ export const SETUP_COPY_ENTRIES = [
     [],
     "optional-capability"
   ),
-  copy("setupEditor.prompt.telegram.card.title", "Configure Telegram", "Configure Telegram", [], "optional-capability"),
+  copy("setupEditor.prompt.telegram.card.title", "Configure Telegram", "ضبط Telegram", [], "optional-capability"),
   copy("setupEditor.prompt.telegram.botToken.heading", "Connect Telegram bot", "ربط بوت Telegram", [], "optional-capability"),
   copy(
     "setupEditor.prompt.telegram.botToken.body",
