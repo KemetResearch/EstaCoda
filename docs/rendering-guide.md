@@ -111,6 +111,8 @@ Rules for standard rendering:
 - Respect `this.#capabilities.terminalWidth` for wrapping.
 - Use `measureTextWidth()` from `layout.ts` for width-aware operations.
 
+Small CLI-only notices may use a localized helper instead of a full ViewModel when the surface is intentionally narrow. The helper must still be capability-gated: interactive TTY-capable standard output may bold stable notice labels, while plain, CI, non-TTY, and no-capability paths must emit unstyled text with no ANSI escapes. `/model` session override notices follow this rule; the notice is compact and must not replay startup dashboard/runtime status text.
+
 ### Step 4: Add Snapshot Tests
 
 Create or extend a test file (e.g., `src/cli/my-surface.test.ts`):
@@ -257,6 +259,8 @@ Operational rules:
 - Arabic setup chrome is direction-aware for setup selectors, rails, and onboarding summaries. Raw setup string prompts are still a follow-up RTL surface; do not claim full runtime Arabic localization.
 
 Cursor-control changes need real terminal smoke in addition to unit tests. Tests can prove line accounting for known streams; a real terminal catches emulator behavior around cursor save/restore, wrapping, scrollback, and bracketed paste mode.
+
+Setup prompt cards are direction-aware. Arabic prompt cards and selectors should keep technical tokens such as env vars, slash commands, provider IDs, model IDs, bot handles, and file paths isolated in LTR spans or code-style runs. When truncating or padding mixed Arabic/English text, preserve balanced bidi isolates and measure visible width, not raw string length.
 
 ---
 

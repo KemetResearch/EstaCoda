@@ -61,6 +61,10 @@ Workspace trust is required before EstaCoda can run in a workspace. If trust is 
 
 `Start EstaCoda now?` is a post-success prompt after apply and verification. A yes answer reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher.
 
+Existing users who run the Setup Editor get a different post-apply path. The final review prompt is titled `Finalize configuration`, shows `Confirm selected configuration`, and includes a dynamic selected area such as `Channels · Telegram` or `Security`. `Confirm` updates the selected profile configuration. `Cancel` keeps the existing configuration unchanged and writes no config or secret changes. The technical review manifest remains internal and is not printed as user-facing setup output.
+
+After an existing-user Setup Editor apply, EstaCoda reports the apply and verification result and exits the setup flow. It does not show `Setup next action`, does not output `Selected: Launch EstaCoda`, and does not hand off to `Launch EstaCoda`. First-run onboarding still owns the launch prompt after verified setup.
+
 ---
 
 ## Trace and Eval
@@ -128,6 +132,19 @@ Inside an active session, slash commands provide operational controls. This is a
 | `/exit` | Exit session |
 
 `/model` is session-scoped by default. `/model --global <provider>/<model>` persists the route as the profile primary model after trust checks. `/model --global clear` is rejected; use `estacoda model setup` for primary route management.
+
+The interactive `/model` picker labels the two choice screens `Select provider` and `Select model`. Both screens use session-only wording: `Select the provider to use for this session only.` and `Select the model to use for this session only.`
+
+After a session override, the CLI prints a compact notice and does not replay the startup dashboard:
+
+```text
+Model: deepseek-v4-flash
+Session model override set: deepseek/deepseek-v4-flash
+Scope: session
+Fallback routes unchanged.
+```
+
+Plain, CI, and non-TTY output remains unstyled. Interactive terminals that support standard styling may bold notice labels.
 
 ---
 

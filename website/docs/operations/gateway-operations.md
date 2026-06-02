@@ -46,6 +46,19 @@ estacoda gateway start --system   # Start installed system-scope service.
 
 `gateway install` is required before `gateway start`. `gateway start --background` is deprecated and no longer creates a detached unmanaged process; use service install/start for persistent operation.
 
+## Setup activation prompt
+
+The setup prompt that offers to install and start the gateway is titled `EstaCoda Gateway`.
+
+The prompt appears:
+
+- During first-run onboarding when a ready channel is configured.
+- During the existing-user Setup Editor when the first ready channel is newly configured.
+
+The prompt does not appear for non-channel setup changes, for channel edits when a ready channel already existed before that Setup Editor run, or when a managed gateway service is already installed or active.
+
+First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply reports apply/verification state and exits the setup flow without a launch handoff.
+
 ## Stop
 
 ```bash

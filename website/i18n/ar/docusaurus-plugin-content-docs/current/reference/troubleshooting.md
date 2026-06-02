@@ -151,18 +151,18 @@ estacoda channels enable telegram
 
 **العرض:** محول Telegram يفشل في البدء مع خطأ رمز مفقود.
 
-**السبب المحتمل:** `ESTACODA_TELEGRAM_TOKEN` (أو البيئة المسماة في `botTokenEnv`) غير موجود.
+**السبب المحتمل:** `ESTACODA_TELEGRAM_BOT_TOKEN` (أو البيئة المسماة في `botTokenEnv`) غير موجود.
 
 **الفحص:**
 
 ```bash
-grep ESTACODA_TELEGRAM_TOKEN ~/.estacoda/profiles/<id>/.env
-echo $ESTACODA_TELEGRAM_TOKEN
+grep ESTACODA_TELEGRAM_BOT_TOKEN ~/.estacoda/profiles/<id>/.env
+echo $ESTACODA_TELEGRAM_BOT_TOKEN
 ```
 
 **الإصلاح:**
 
-أضف الرمز إلى `.env` الخاص بالملف الشخصي المحدد وأعد تشغيل البوابة.
+أضف الرمز إلى `.env` الخاص بالملف الشخصي المحدد وأعد تشغيل البوابة. الإعداد الموجّه لـ Telegram يكتب الرمز تحت `ESTACODA_TELEGRAM_BOT_TOKEN` ويخزن `botTokenEnv` فقط في الإعدادات. يجب ألا يظهر رمز البوت الخام في مراجعة الإعدادات أو مخرجات الإعداد.
 
 ## الثقة في مساحة العمل أو الموافقة مطلوبة
 

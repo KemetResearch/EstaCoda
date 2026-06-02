@@ -231,6 +231,19 @@ Cursor-control-heavy changes in this area need unit coverage and real terminal s
 
 `/model` inside an active CLI session is session-scoped by default. `/model <provider>/<model>` writes a model override for the active session only, and `/model set <provider>/<model>` is compatibility syntax for the same session-scoped behavior. It does not resurrect the old persistent `estacoda model set` command. `/model clear` removes the session override and returns the session to the configured primary route.
 
+The interactive `/model` picker labels the two selection steps as `Select provider` and `Select model`. Both prompts use session-only wording: `Select the provider to use for this session only.` and `Select the model to use for this session only.` These picker choices do not mutate profile config.
+
+After a successful session override, the CLI prints a compact session notice only:
+
+```text
+Model: deepseek-v4-flash
+Session model override set: deepseek/deepseek-v4-flash
+Scope: session
+Fallback routes unchanged.
+```
+
+The notice must not replay the startup dashboard or runtime status fields such as `EstaCoda is ready`, `profile:`, or `tools:`. Plain, CI, and non-TTY output remains unstyled. Standard interactive terminals with styling capability may bold notice labels.
+
 The picker only presents ready, runnable model choices. Providers missing credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
 
 `/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are explicit global forms. They persist the selected route as the profile-level primary model only after the existing local workspace/profile trust path authorizes the write. They do not collect credentials. `/model --global clear` is rejected because clearing the profile primary route has no product-defined meaning. Use `estacoda model setup` for credentials and primary setup, and `estacoda model fallback` for fallback route management.
@@ -322,10 +335,16 @@ Configured, degraded, untrusted, and repair states use the Setup Editor. The int
 - Credential repair stores route/auth references and env var names, not raw key values.
 - Verification after apply is read-only.
 - Workspace trust is required before EstaCoda can run in that workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
-- `Start EstaCoda now?` is a post-success prompt after apply and verification, not a pre-apply setup preference.
+- `Start EstaCoda now?` is a first-run onboarding post-success prompt after apply and verification, not a pre-apply setup preference.
 - Onboarding launch reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher. No pre-setup runtime state is reused.
-- Launch requires verified-ready setup, or explicit limited-mode acceptance after degraded warnings are shown in Setup Editor paths.
+- Onboarding launch requires verified-ready setup.
 - Broken config, missing credential, untrusted workspace, state-not-writable, failed verification, and blocked verification do not expose a launch path.
+
+Existing-user Setup Editor apply uses a separate handoff. The final review prompt is titled `Finalize configuration`, shows `Confirm selected configuration`, and includes a dynamic selected area such as `Channels · Telegram` or `Security`. The visible choices are `Confirm` (`Update your EstaCoda configuration`) and `Cancel` (`Keep your existing configuration unchanged.`). Cancel preserves existing config and writes no config or secret changes. Confirm still creates and applies the reviewed plan.
+
+Setup Editor keeps review manifest details internal after the final review. User-facing output must not print the technical section headers `Review manifest.`, `Configuration write.`, `Enabled optional capabilities.`, or `Remote-control surfaces and allowed identities.` The runner result may still carry the redacted `reviewManifest` for inspection and tests.
+
+After existing-user Setup Editor apply and verification, the flow returns with applied or verified output. It does not show `Setup next action`, does not output `Selected: Launch EstaCoda`, and does not hand off to `Launch EstaCoda`. First-run onboarding keeps its launch prompt.
 
 ### Provider And Optional Capability Boundaries
 

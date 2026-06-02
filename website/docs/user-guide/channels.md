@@ -76,11 +76,21 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 **Setup:**
 
 ```bash
-estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
+estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_BOT_TOKEN --allow-user 123456789
 estacoda channels enable telegram
 estacoda gateway install
 estacoda gateway start
 ```
+
+Normal guided setup asks for:
+
+- Telegram bot API token.
+- Allowed Telegram user IDs.
+- Allowed Telegram group chat IDs.
+
+Normal guided setup does not ask for the bot-token env-var name. It stores the token under `ESTACODA_TELEGRAM_BOT_TOKEN`, and config points at it with `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. The bot token must not appear in config review or setup output.
+
+Use `@BotFather` and `/newbot` to create a bot and copy the API token. Use `@userinfobot` and `/start` to get Telegram user IDs. For group chats, add the EstaCoda bot and either `@getidsbot` or `@chatIDrobot` to the group. The ID bot replies with the group chat ID; for groups, this is usually a long negative number.
 
 **Readiness requirements:**
 

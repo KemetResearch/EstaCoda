@@ -376,13 +376,15 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
   "channels": {
     "telegram": {
       "enabled": true,
-      "botTokenEnv": "ESTACODA_TELEGRAM_TOKEN",
+      "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
       "busyPolicy": "reject",
       "queueDepth": 3
     }
   }
 }
 ```
+
+Guided Telegram setup stores the bot token in the selected profile `.env` under `ESTACODA_TELEGRAM_BOT_TOKEN` and writes `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` to config. The raw Telegram bot token must not appear in config review or setup output.
 
 ## Secret handling
 

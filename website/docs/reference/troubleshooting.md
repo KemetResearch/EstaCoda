@@ -151,18 +151,18 @@ estacoda channels enable telegram
 
 **Symptom:** Telegram adapter fails to start with missing token error.
 
-**Likely cause:** `ESTACODA_TELEGRAM_TOKEN` (or the env named in `botTokenEnv`) is absent.
+**Likely cause:** `ESTACODA_TELEGRAM_BOT_TOKEN` (or the env named in `botTokenEnv`) is absent.
 
 **Inspect:**
 
 ```bash
-grep ESTACODA_TELEGRAM_TOKEN ~/.estacoda/profiles/<id>/.env
-echo $ESTACODA_TELEGRAM_TOKEN
+grep ESTACODA_TELEGRAM_BOT_TOKEN ~/.estacoda/profiles/<id>/.env
+echo $ESTACODA_TELEGRAM_BOT_TOKEN
 ```
 
 **Repair:**
 
-Add the token to the selected profile `.env` and restart the gateway.
+Add the token to the selected profile `.env` and restart the gateway. Guided Telegram setup writes the token under `ESTACODA_TELEGRAM_BOT_TOKEN` and stores only `botTokenEnv` in config. The raw bot token must not appear in config review or setup output.
 
 ## Workspace trust or approval required
 

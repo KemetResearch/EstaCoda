@@ -50,6 +50,16 @@ estacoda gateway start
 estacoda gateway uninstall --profile work
 ```
 
+## Setup-driven activation
+
+When setup can install and start the gateway for a newly ready remote channel, the prompt title is `EstaCoda Gateway`.
+
+The prompt appears during first-run onboarding when a ready channel is configured. It also appears in the existing-user Setup Editor when that run newly configures the first ready channel.
+
+The prompt does not appear for non-channel setup changes, for editing a channel after a ready channel already existed, or when a managed gateway service is already installed or active.
+
+First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
+
 ## Channel maturity
 
 | Channel | v0.1.0 status |

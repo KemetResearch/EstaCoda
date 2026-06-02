@@ -194,6 +194,17 @@ Operational warnings:
 - `estacoda gateway start`, `estacoda gateway stop`, and `estacoda gateway restart` prefer a user-scope managed service when one exists. If both user and system services exist, the user service is controlled unless `--system` is passed. If only a system service exists, rerun with `--system`; EstaCoda will not silently control the system unit.
 - Foreground/debug operation is `estacoda gateway run`. Persistent operation is `estacoda gateway install` followed by `estacoda gateway start`. Detached unmanaged background spawning is no longer the start path.
 
+### Setup-Driven Gateway Activation
+
+The setup prompt for installing and starting the gateway is titled `EstaCoda Gateway`.
+
+It appears in two setup paths:
+
+- During first-run onboarding when a ready channel is configured.
+- During the existing-user Setup Editor only when the first ready channel is newly configured.
+
+It does not appear for non-channel setup changes, for channel edits when any ready channel already existed before that Setup Editor run, or when a managed gateway service is already installed or active. First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
+
 ### Channel Commands
 
 ```bash
