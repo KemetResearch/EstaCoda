@@ -7,7 +7,9 @@ import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../co
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
+import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import {
+  formatSetupCopy,
   promptSetupChoice,
   type SetupChoice,
   promptSetupStringWithDefault,
@@ -245,27 +247,85 @@ function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["st
 
 export async function promptConfigEditorReviewApproval(
   prompt: Prompt,
+  input: {
+    readonly selectedActionId: string;
+    readonly reviewManifest: SetupReviewManifest;
+  },
   locale: SetupCopyLocale = "en"
 ): Promise<boolean> {
+  const selectedArea = setupEditorReviewSelectedAreaLabel(input.selectedActionId, input.reviewManifest);
   return promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "onboarding.review"),
-    message: `${setupCopyText(locale, "onboarding.review.validation.accepted")}\n`,
+    title: setupCopyText(locale, "setupEditor.review.title"),
+    message: [
+      setupCopyText(locale, "setupEditor.review.body"),
+      formatSetupCopy(locale, "setupEditor.review.selectedArea", { selectedArea }),
+      "",
+    ].join("\n"),
     choices: [
       {
         id: "approve",
-        label: setupCopyText(locale, "onboarding.review.approveAction"),
-        description: setupCopyText(locale, "setupApply.review.approved"),
+        label: setupCopyText(locale, "setupEditor.review.confirm"),
+        description: setupCopyText(locale, "setupEditor.review.confirm.description"),
         value: true,
       },
       {
         id: "cancel",
-        label: setupCopyText(locale, "onboarding.review.cancelAction"),
-        description: setupCopyText(locale, "setupApply.review.cancelled"),
+        label: setupCopyText(locale, "setupEditor.review.cancel"),
+        description: setupCopyText(locale, "setupEditor.review.cancel.description"),
         value: false,
       },
     ],
     defaultValue: true,
   });
+}
+
+export function setupEditorReviewSelectedAreaLabel(
+  selectedActionId: string,
+  reviewManifest: SetupReviewManifest
+): string {
+  if (manifestHasChannel(reviewManifest, "telegram")) return "Channels · Telegram";
+  if (manifestHasChannel(reviewManifest, "discord")) return "Channels · Discord";
+  if (manifestHasChannel(reviewManifest, "whatsapp")) return "Channels · WhatsApp";
+
+  switch (selectedActionId) {
+    case "edit-primary-model-route":
+    case "repair-primary-provider":
+    case "edit-primary-credential-reference":
+    case "repair-missing-credential":
+    case "store-provider-credential-reference":
+      return "Model · Primary";
+    case "edit-fallback-model-route":
+      return "Model · Fallback";
+    case "edit-auxiliary-model-route":
+      return "Model · Auxiliary";
+    case "edit-security-mode":
+      return "Security";
+    case "configure-voice":
+      return "Voice";
+    case "configure-image-generation":
+      return "Image Generation";
+    case "configure-browser":
+      return "Browser";
+    case "edit-language":
+      return "Language";
+    case "edit-workflow-learning":
+      return "Agent Evolution";
+    default:
+      return "Model · Primary";
+  }
+}
+
+function manifestHasChannel(
+  reviewManifest: SetupReviewManifest,
+  channelId: "telegram" | "discord" | "whatsapp"
+): boolean {
+  const sourceId = `setup-module.${channelId}.capability`;
+  return reviewManifest.lines.some((line) =>
+    line.sourceDraftIds.some((sourceDraftId) => sourceDraftId === sourceId) ||
+    line.copyKey === `setupModules.${channelId}.review` ||
+    line.summaryKey === `setupModules.${channelId}.review` ||
+    reviewManifest.sourceBundleIds.some((bundleId) => bundleId.endsWith(`.${channelId}`))
+  );
 }
 
 export async function promptChannelCapability(

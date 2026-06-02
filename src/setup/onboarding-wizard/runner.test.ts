@@ -1438,13 +1438,12 @@ describe("runFirstRunSetup", () => {
       serviceActions: actions,
     });
 
-    expect(result).toEqual(expect.objectContaining({
-      kind: "started",
-      installed: false,
-      output: "Gateway service started for configured Telegram and Discord channels.",
-    }));
+    expect(result).toEqual({
+      kind: "not-offered",
+      reason: "gateway-service-already-installed",
+    });
     expect(actions.install).not.toHaveBeenCalled();
-    expect(actions.start).toHaveBeenCalledTimes(1);
+    expect(actions.start).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain("telegram-secret-value");
     expect(JSON.stringify(result)).not.toContain("discord-secret-value");
   });

@@ -75,6 +75,13 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.status.newCredentialPending",
   "onboarding.review",
   "onboarding.review.validation.accepted",
+  "setupEditor.review.title",
+  "setupEditor.review.body",
+  "setupEditor.review.selectedArea",
+  "setupEditor.review.confirm",
+  "setupEditor.review.confirm.description",
+  "setupEditor.review.cancel",
+  "setupEditor.review.cancel.description",
   "onboarding.launch.startNow",
   "onboarding.launch.startNow.yes",
   "onboarding.launch.startNow.no",
@@ -517,6 +524,16 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds")).toBe(
       "معرّف/معرّفات محادثات مجموعات Telegram"
     );
+  });
+
+  it("contains the setup editor finalize-configuration review copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.review.title")).toBe("Finalize configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.body")).toBe("Confirm selected configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.selectedArea")).toBe("Selected area: {selectedArea}");
+    expect(rawSetupCopy("en", "setupEditor.review.confirm")).toBe("Confirm");
+    expect(rawSetupCopy("en", "setupEditor.review.confirm.description")).toBe("Update your EstaCoda configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.cancel")).toBe("Cancel");
+    expect(rawSetupCopy("en", "setupEditor.review.cancel.description")).toBe("Keep your existing configuration unchanged.");
   });
 
   it("describes managed local STT as the normal onboarding path", () => {
