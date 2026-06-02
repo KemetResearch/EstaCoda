@@ -2674,6 +2674,193 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
   });
 
+  it("moves idle slash completion selection with special arrow keys", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/");
+    const beforeMove = outputChunks.length;
+    const result = promptOptions.specialKeyController?.onSpecialKey("down", {
+      getInputLine: () => "/",
+      setInputLine: () => undefined,
+    });
+
+    expect(result).toBe("handled");
+    expect(stripAnsi(outputChunks.slice(beforeMove).join(""))).toContain("> /status");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("applies idle slash completion on Tab", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    let inputLine = "/h";
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.(inputLine);
+    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
+      getInputLine: () => inputLine,
+      setInputLine: (nextLine) => {
+        inputLine = nextLine;
+        promptOptions?.onInputChange?.(nextLine);
+      },
+    });
+
+    expect(result).toBe("handled");
+    expect(inputLine).toBe("/help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("lets Tab fall through for no-match idle slash completion", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    let inputLine = "/zzzz";
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.(inputLine);
+    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
+      getInputLine: () => inputLine,
+      setInputLine: (nextLine) => {
+        inputLine = nextLine;
+      },
+    });
+
+    expect(result).toBeUndefined();
+    expect(inputLine).toBe("/zzzz");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("closes no-match idle slash completion on Escape", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/zzzz");
+    const result = promptOptions.specialKeyController?.onSpecialKey("escape", {
+      getInputLine: () => "/zzzz",
+      setInputLine: () => undefined,
+    });
+
+    expect(result).toBe("handled");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
   it("clears live slash completion chrome when idle input is no longer slash-prefixed", async () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
@@ -3875,6 +4062,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(secretPromptOptions).toHaveLength(1);
     expect(secretPromptOptions[0]?.onInputChange).toBeUndefined();
     expect(secretPromptOptions[0]?.onPastePreview).toBeUndefined();
+    expect(secretPromptOptions[0]?.specialKeyController).toBeUndefined();
   });
 
   it("keeps bottom chrome alive after active-turn SIGINT cancellation", async () => {

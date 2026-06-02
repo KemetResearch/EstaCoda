@@ -18,7 +18,7 @@ import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import { createReadlinePrompt, type Prompt, type PromptOptions } from "./readline-prompt.js";
+import { createReadlinePrompt, type Prompt, type PromptOptions, type PromptSpecialKeyControl } from "./readline-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -339,6 +339,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
   try {
     let pendingSlashCompletion: SlashMenuViewModel | undefined;
+    let slashCompletionLine = "";
+    let slashCompletionSelectedIndex = 0;
     let latestContextUsage: ContextUsageSnapshot | undefined;
     let timerMode: StatusRailTimerMode = "idle";
     let activeTurnStartedAtMs: number | undefined;
@@ -415,6 +417,52 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           promptLineCount: livePromptRows
         });
       };
+      const updateIdleSlashCompletionForLine = (line: string) => {
+        currentInputLine = line;
+        slashCompletionLine = line;
+        if (!line.startsWith("/")) {
+          pendingSlashCompletion = undefined;
+          slashCompletionSelectedIndex = 0;
+          return;
+        }
+        pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(runtime, line, slashCompletionSelectedIndex);
+        slashCompletionSelectedIndex = pendingSlashCompletion.absoluteSelectedIndex ?? 0;
+      };
+      const hasSlashCompletionState = () =>
+        pendingSlashCompletion !== undefined && currentInputLine.startsWith("/");
+      const hasSelectableSlashCompletion = () =>
+        hasSlashCompletionState() && (pendingSlashCompletion?.options.length ?? 0) > 0;
+      const moveIdleSlashSelection = (delta: -1 | 1): "handled" | undefined => {
+        if (!hasSelectableSlashCompletion()) return undefined;
+        const totalOptions = pendingSlashCompletion?.totalOptions ?? pendingSlashCompletion?.options.length ?? 0;
+        if (totalOptions <= 0) return undefined;
+        const currentIndex = pendingSlashCompletion?.absoluteSelectedIndex ?? pendingSlashCompletion?.selectedIndex ?? 0;
+        slashCompletionSelectedIndex = Math.min(Math.max(0, currentIndex + delta), totalOptions - 1);
+        pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(
+          runtime,
+          slashCompletionLine,
+          slashCompletionSelectedIndex
+        );
+        slashCompletionSelectedIndex = pendingSlashCompletion.absoluteSelectedIndex ?? slashCompletionSelectedIndex;
+        redrawIdleReadlineChrome();
+        return "handled";
+      };
+      const closeIdleSlashMenu = (): "handled" | undefined => {
+        if (!hasSlashCompletionState()) return undefined;
+        pendingSlashCompletion = undefined;
+        slashCompletionSelectedIndex = 0;
+        redrawIdleReadlineChrome();
+        return "handled";
+      };
+      const applyIdleSlashCompletion = (control: PromptSpecialKeyControl): "handled" | undefined => {
+        if (!hasSelectableSlashCompletion()) return undefined;
+        const selectedOption = pendingSlashCompletion?.options[pendingSlashCompletion.selectedIndex];
+        if (selectedOption === undefined) return undefined;
+        slashCompletionSelectedIndex = pendingSlashCompletion?.absoluteSelectedIndex ?? pendingSlashCompletion?.selectedIndex ?? 0;
+        control.setInputLine(selectedOption.label);
+        redrawIdleReadlineChrome();
+        return "handled";
+      };
       let submittedInput = queuedSubmittedInput;
       queuedSubmittedInput = undefined;
       let turnVoiceMode: CliVoiceMode = "off";
@@ -457,11 +505,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             livePromptRows = rows;
           },
           onInputChange: (line) => {
-            currentInputLine = line;
-            pendingSlashCompletion = line.startsWith("/")
-              ? buildPromptRegionSlashCompletionViewModel(runtime, line)
-              : undefined;
+            updateIdleSlashCompletionForLine(line);
             redrawIdleReadlineChrome();
+          },
+          specialKeyController: {
+            shouldHandleSpecialKey: () => hasSlashCompletionState(),
+            onSpecialKey: (key, control) => {
+              if (key === "down") return moveIdleSlashSelection(1);
+              if (key === "up") return moveIdleSlashSelection(-1);
+              if (key === "escape") return closeIdleSlashMenu();
+              if (key === "tab") return applyIdleSlashCompletion(control);
+              return undefined;
+            },
           },
           onPastePreview: (_original, displayed) => {
             readlineTransientLines = buildPastePreviewLines(displayed, renderer.capabilities.terminalWidth);
@@ -1177,6 +1232,7 @@ async function readNextCliInput(input: {
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
   onInputChange?: (line: string) => void;
+  specialKeyController?: PromptOptions["specialKeyController"];
   onPastePreview?: (original: string, displayed: string) => void;
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
@@ -1186,6 +1242,7 @@ async function readNextCliInput(input: {
     const promptOptions: PromptOptions = {
       onRowsChange: input.onPromptRowsChange,
       onInputChange: input.onInputChange,
+      specialKeyController: input.specialKeyController,
       onPastePreview: input.onPastePreview,
       placeholder: input.inputPlaceholder,
       pasteReferenceStore: createFilePasteReferenceStore({
@@ -2798,14 +2855,21 @@ function buildBottomChromeState(input: {
   };
 }
 
-function buildPromptRegionSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
-  return buildSlashCompletionViewModel(runtime, line, { limit: PROMPT_REGION_SLASH_PANEL_ROWS });
+function buildPromptRegionSlashCompletionViewModel(
+  runtime: Runtime,
+  line: string,
+  selectedIndex = 0
+): SlashMenuViewModel {
+  return buildSlashCompletionViewModel(runtime, line, {
+    selectedIndex,
+    visibleRows: PROMPT_REGION_SLASH_PANEL_ROWS,
+  });
 }
 
 function buildActiveTurnSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
   return buildSlashCompletionViewModel(runtime, line, {
     includeActiveTurnCommands: true,
-    limit: PROMPT_REGION_SLASH_PANEL_ROWS,
+    visibleRows: PROMPT_REGION_SLASH_PANEL_ROWS,
   });
 }
 
