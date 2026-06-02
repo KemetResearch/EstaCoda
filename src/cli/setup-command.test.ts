@@ -339,11 +339,14 @@ describe("cli setup command", () => {
       homeDir: tempDir,
       prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "repair-workspace-trust" }),
     });
+    const trusted = await new WorkspaceTrustStore({
+      path: join(tempDir, ".estacoda", "trust.json"),
+    }).isTrusted(workspaceRoot);
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("Workspace trust write.");
-    expect(result.output).toContain(`Grant trust for ${workspaceRoot}`);
+    expect(trusted).toBe(true);
     expect(result.output).toContain("Verification passed. Setup is ready.");
+    expect(result.output).not.toContain("Review cancelled");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("Workspace is not trusted.\n- Warning: Workspace is not trusted.");
@@ -442,7 +445,7 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
-    if (title.includes("configuration summary") || title.includes("review")) {
+    if (title.includes("configuration summary") || title.includes("review") || title.includes("finalize configuration")) {
       return valueOrDefault(selection, options.reviewAccepted);
     }
     if (title.includes("start estacoda")) {

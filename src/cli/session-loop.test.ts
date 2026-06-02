@@ -496,7 +496,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(getStartupReadiness).toHaveBeenCalledTimes(1);
-    expect(rendered).toContain("test-session");
+    expect(rendered).toContain("session test-ses");
     expect(rendered).toContain("Workspace Trust");
     expect(rendered).toContain("Workspace Verification");
     expect(rendered).toContain("Security Mode");

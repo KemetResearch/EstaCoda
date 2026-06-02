@@ -746,7 +746,7 @@ exports[`Session surfaces — startup dashboard > renders in narrow width > star
              [2mKemet Research[0m
       [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m╭──────[0m[38;2;16;52;166m[1m v0.0.5  𓂀  sess-9f7a2c1b [0m[0m[38;2;237;237;237m──────╮[0m
+[38;2;237;237;237m╭────[0m[38;2;16;52;166m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m─────╮[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted
@@ -771,7 +771,7 @@ exports[`Session surfaces — startup dashboard > renders in no Unicode > startu
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m+-----------------------[0m[38;2;16;52;166m[1m v0.0.5  *  sess-9f7a2c1b [0m[0m[38;2;237;237;237m------------------------+[0m
+[38;2;237;237;237m+----------------------[0m[38;2;16;52;166m[1m v0.0.5  *  session 4c6d7f55 [0m[0m[38;2;237;237;237m----------------------+[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m
@@ -789,7 +789,7 @@ exports[`Session surfaces — startup dashboard > renders in no color > startup-
                               Kemet Research
                         السيادة التكنولوجية العربية
 
-╭─────────────────────── v0.0.5  𓂀  sess-9f7a2c1b ────────────────────────╮
+╭────────────────────── v0.0.5  𓂀  session 4c6d7f55 ──────────────────────╮
   ● deepseek-reasoner  ·  ready
 
   Workspace Trust        :  trusted         Interactive Commands:
@@ -807,7 +807,7 @@ Kemet Research
 السيادة التكنولوجية العربية
 
 version: v0.0.5
-session: sess-9f7a2c1b
+session: 4c6d7f55-7e8b-4f4f-8f39-111111111111
 model: deepseek-reasoner - ready
 workspace trust: trusted
 workspace verification: verified
@@ -829,7 +829,7 @@ exports[`Session surfaces — startup dashboard > renders in standard dark > sta
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m╭───────────────────────[0m[38;2;16;52;166m[1m v0.0.5  𓂀  sess-9f7a2c1b [0m[0m[38;2;237;237;237m────────────────────────╮[0m
+[38;2;237;237;237m╭──────────────────────[0m[38;2;16;52;166m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m──────────────────────╮[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m
@@ -847,7 +847,7 @@ exports[`Session surfaces — startup dashboard > renders in standard light > st
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;224;224;224m╭───────────────────────[0m[38;2;0;87;217m[1m v0.0.5  𓂀  sess-9f7a2c1b [0m[0m[38;2;224;224;224m────────────────────────╮[0m
+[38;2;224;224;224m╭──────────────────────[0m[38;2;0;87;217m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;224;224;224m──────────────────────╮[0m
   [38;2;46;125;50m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;46;125;50mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m

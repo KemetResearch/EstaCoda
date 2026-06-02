@@ -37,6 +37,10 @@ import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
 import type { TextDirection } from "../../contracts/ui.js";
+import { formatSessionDisplayId } from "../../session/session-id.js";
+
+const STARTUP_TITLE_SEPARATOR = "  𓂀  ";
+const STARTUP_TITLE_SEPARATOR_ASCII = "  *  ";
 
 export interface StandardRendererOptions {
   readonly tokens: ResolvedTokens;
@@ -1079,6 +1083,16 @@ export class StandardRenderer {
     }
   }
 
+  #startupDashboardTitle(vm: StartupDashboardViewModel): string {
+    const version = vm.version.length > 0 ? vm.version : "unknown";
+    const session = vm.sessionId !== undefined
+      ? `session ${formatSessionDisplayId(vm.sessionId)}`
+      : "";
+    const separator = this.#useUnicode ? STARTUP_TITLE_SEPARATOR : STARTUP_TITLE_SEPARATOR_ASCII;
+    const raw = session.length > 0 ? `${version}${separator}${session}` : version;
+    return this.#isRtl() ? isolateLtr(raw) : raw;
+  }
+
   #startupCommands(vm: StartupDashboardViewModel): readonly { readonly name: string; readonly description: string }[] {
     if (vm.availableCommands.length > 0) {
       return vm.availableCommands;
@@ -1130,14 +1144,7 @@ export class StandardRenderer {
 
   #renderStartupDashboardLtr(vm: StartupDashboardViewModel): string {
     const lines: string[] = [];
-
-    // Version / session separator line
-    const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
-    const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
-    const eye = this.#useUnicode ? "𓂀" : "*";
-    const cardTitle = sessionText
-      ? `${versionText}  ${eye}  ${sessionText}`
-      : versionText;
+    const cardTitle = this.#startupDashboardTitle(vm);
 
     // Model route readiness line
     const readiness = vm.providerReadiness;
@@ -1266,12 +1273,7 @@ export class StandardRenderer {
 
   #renderStartupDashboardRtl(vm: StartupDashboardViewModel): string {
     const lines: string[] = [];
-    const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
-    const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
-    const eye = this.#useUnicode ? "𓂀" : "*";
-    const cardTitle = sessionText
-      ? `${versionText}  ${eye}  ${sessionText}`
-      : versionText;
+    const cardTitle = this.#startupDashboardTitle(vm);
 
     const readiness = vm.providerReadiness;
     let modelDot: string;

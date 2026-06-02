@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
 import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
@@ -23,6 +22,7 @@ import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
 import { resolveSetupCopy } from "./setup/setup-copy.js";
+import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
@@ -276,9 +276,11 @@ async function main(): Promise<void> {
   }
 
   const sessionDb = await openLocalSessionDb();
+  const restoredSessionId = await cliSessionStore.getSessionId(workspaceRoot);
+  const startupSessionId = resolveStartupSessionId(restoredSessionId);
 
   const runtime = await buildRuntime({
-    sessionId: await cliSessionStore.getSessionId(workspaceRoot),
+    sessionId: startupSessionId,
     sessionDb
   });
   await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
@@ -312,7 +314,7 @@ async function main(): Promise<void> {
       showResponseProgress: config.ui.showResponseProgress,
       refreshRuntime: async (options) => {
         const nextRuntime = await buildRuntime({
-          sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),
+          sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
           sessionDb: await openLocalSessionDb()
         });
         await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
@@ -343,7 +345,7 @@ async function main(): Promise<void> {
       text: argv.join(" "),
       runtime,
       refreshRuntime: async (options) => buildRuntime({
-        sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),
+        sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
         sessionDb: await openLocalSessionDb()
       }),
       modelSwitchContext,

@@ -92,6 +92,7 @@ import { collectSetupVerificationReport } from "../setup/verification.js";
 import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
 import { detectInstallMethod } from "../lifecycle/install-method.js";
 import { buildStartupUpdateHint } from "../lifecycle/startup-update.js";
+import { createSessionId } from "../session/session-id.js";
 
 export type RuntimeOptions = {
   tokens: ResolvedTokens;
@@ -398,7 +399,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const profileId = options.profileId ?? "default";
   const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
-  const sessionId = options.sessionId ?? "scaffold";
+  const sessionId = options.sessionId ?? createSessionId();
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
@@ -488,7 +489,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     await sessionDb.createSession({
       id: sessionId,
       profileId,
-      title: "EstaCoda v2 scaffold",
+      title: "EstaCoda session",
       metadata: {
         workspaceRoot,
         ...(options.sessionMetadata ?? {})
