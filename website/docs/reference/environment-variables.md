@@ -68,7 +68,7 @@ Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper
 
 | Variable | Channel |
 |----------|---------|
-| `ESTACODA_TELEGRAM_TOKEN` | Telegram bot token |
+| `ESTACODA_TELEGRAM_BOT_TOKEN` | Telegram bot token used by guided setup |
 | `ESTACODA_DISCORD_TOKEN` | Discord bot token |
 
 Email uses `passwordEnv` config keys that reference arbitrary env vars, for example `EMAIL_PASSWORD`.

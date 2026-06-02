@@ -427,7 +427,7 @@ describe("Session surfaces — startup dashboard", () => {
         agentName: "EstaCoda",
         taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
         version: "v0.0.5",
-        sessionId: "sess-9f7a2c1b",
+        sessionId: "4c6d7f55-7e8b-4f4f-8f39-111111111111",
         model: { provider: "openrouter", id: "deepseek-reasoner" },
         workspaceTrust: "trusted",
         workspaceVerification: "verified",

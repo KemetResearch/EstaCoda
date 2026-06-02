@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PersistentCliSessionStore } from "./cli-session-store.js";
+import { resolveStartupSessionId } from "../session/session-id.js";
 
 describe("PersistentCliSessionStore", () => {
   let tempDir: string;
@@ -48,5 +49,15 @@ describe("PersistentCliSessionStore", () => {
     });
 
     expect(store.path).toBe(explicitPath);
+  });
+});
+
+describe("resolveStartupSessionId", () => {
+  it("uses a restored workspace session id when present", () => {
+    expect(resolveStartupSessionId("restored-session", () => "new-session")).toBe("restored-session");
+  });
+
+  it("generates a session id when no workspace session was restored", () => {
+    expect(resolveStartupSessionId(undefined, () => "new-session")).toBe("new-session");
   });
 });

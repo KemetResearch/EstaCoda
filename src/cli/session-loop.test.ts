@@ -496,7 +496,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(getStartupReadiness).toHaveBeenCalledTimes(1);
-    expect(rendered).toContain("test-session");
+    expect(rendered).toContain("session test-ses");
     expect(rendered).toContain("Workspace Trust");
     expect(rendered).toContain("Workspace Verification");
     expect(rendered).toContain("Security Mode");
@@ -1343,7 +1343,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
-  it("renders bottom-chrome tool activity as durable transcript rows", async () => {
+  it("routes bottom-chrome tool activity through live slots and flushes durable results before the response", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1356,8 +1356,27 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const runtime = createEventEmittingMockRuntime([
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
-      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "tool-start", tool: "file.read", stepId: "s1", targetSummary: "old-start-only", activityId: "a" },
+      { kind: "tool-result", tool: "file.read", ok: true, chars: 10, sentChars: 10, targetSummary: "src/a.ts", activityId: "a" },
+      { kind: "tool-start", tool: "search.files", stepId: "s2", targetSummary: "renderRuntimeEvent", activityId: "b" },
+      { kind: "tool-result", tool: "search.files", ok: true, chars: 20, sentChars: 20, targetSummary: "renderRuntimeEvent", activityId: "b" },
+      { kind: "tool-start", tool: "file.write", stepId: "s3", targetSummary: "src/app.ts", activityId: "c" },
+      {
+        kind: "tool-result",
+        tool: "file.write",
+        ok: true,
+        chars: 30,
+        sentChars: 30,
+        targetSummary: "src/app.ts",
+        activityId: "c",
+        fileChangePreview: {
+          kind: "fileChangePreview",
+          path: "src/app.ts",
+          changeType: "added",
+          summary: ["Added 2 line(s)."],
+          diff: "+ one\n+ two",
+        },
+      },
       { kind: "agent-final", text: "Mock response" },
     ]);
 
@@ -1376,28 +1395,70 @@ describe("runSessionLoop — active turn spinner", () => {
       close: () => {},
     });
 
-    const startChunk = outputChunks.find((chunk) => {
-      const stripped = stripAnsi(chunk);
-      return stripped.includes("preparing") && stripped.includes("browser.status");
-    });
-    const startChunkIndex = outputChunks.findIndex((chunk) => chunk === startChunk);
-    const resultChunk = outputChunks.find((chunk, index) => {
-      const stripped = stripAnsi(chunk);
-      return index > startChunkIndex
-        && stripped.includes("│")
-        && stripped.includes("ms")
-        && !stripped.includes("preparing")
-        && !stripped.includes("mock-model");
-    });
-    expect(startChunk).toBeDefined();
-    expect(resultChunk).toBeDefined();
-    const toolChunks = [startChunk, resultChunk] as string[];
-    for (const chunk of toolChunks) {
-      expect(chunk).not.toContain("\x1b[1A\x1b[2K\r");
-      expect(chunk).not.toContain("\x1b[0J");
-      expect(stripAnsi(chunk)).not.toContain("mock-model");
-    }
-    expect(outputChunks.some((chunk) => stripAnsi(chunk).includes("mock-model"))).toBe(true);
+    const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    const liveStartChunk = strippedChunks.find((chunk) =>
+      chunk.includes("preparing") &&
+      chunk.includes("old-start-only") &&
+      chunk.includes("mock-model")
+    );
+    expect(liveStartChunk).toBeDefined();
+    expect(liveStartChunk?.split("\n").filter((line) => line.includes("old-start-only") || line === "\u00A0")).toHaveLength(5);
+
+    const finalLiveHudChunk = strippedChunks.reduce<string | undefined>(
+      (latest, chunk) =>
+        chunk.includes("mock-model") &&
+        chunk.includes("src/app.ts") &&
+        chunk.includes("renderRuntimeEvent") &&
+        !chunk.includes("+ one") &&
+        !chunk.includes("Mock response")
+          ? chunk
+          : latest,
+      undefined
+    );
+    expect(finalLiveHudChunk).toBeDefined();
+    const finalLiveToolLines = (finalLiveHudChunk ?? "").split("\n").filter((line) =>
+      line.replace(/^\r/u, "").startsWith("│")
+    );
+    expect(finalLiveToolLines).toHaveLength(5);
+    expect(finalLiveToolLines.join("\n")).not.toContain("old-start-only");
+    expect(finalLiveToolLines.join("\n")).toContain("src/a.ts");
+    expect(finalLiveToolLines.join("\n")).toContain("renderRuntimeEvent");
+    expect(finalLiveToolLines.join("\n")).toContain("src/app.ts");
+
+    const durableToolChunk = strippedChunks.find((chunk) =>
+      chunk.includes("src/a.ts") &&
+      chunk.includes("renderRuntimeEvent") &&
+      chunk.includes("src/app.ts") &&
+      chunk.includes("+ one") &&
+      !chunk.includes("mock-model") &&
+      !chunk.includes("preparing")
+    );
+    expect(durableToolChunk).toBeDefined();
+    expect(durableToolChunk).not.toContain("mock-model");
+    expect(durableToolChunk).not.toContain("context");
+    expect(durableToolChunk).not.toContain("preparing");
+    expect(durableToolChunk).not.toContain("old-start-only");
+    expect(durableToolChunk).toContain("+ two");
+
+    const durableRows = durableToolChunk ?? "";
+    const firstDurableTool = durableRows.indexOf("src/a.ts");
+    const lastDurableTool = durableRows.lastIndexOf("src/app.ts");
+    expect(firstDurableTool).toBeGreaterThan(-1);
+    expect(lastDurableTool).toBeGreaterThan(firstDurableTool);
+    const betweenDurableRows = durableRows.slice(firstDurableTool, lastDurableTool);
+    expect(betweenDurableRows).not.toContain("mock-model");
+    expect(betweenDurableRows).not.toContain("context");
+    expect(betweenDurableRows).not.toContain("𓂀");
+
+    const rendered = strippedChunks.join("");
+    const durableIndex = rendered.indexOf(durableRows);
+    const responseIndex = rendered.indexOf("Mock response");
+    expect(durableIndex).toBeGreaterThan(-1);
+    expect(responseIndex).toBeGreaterThan(durableIndex);
+    const betweenDurableFlushAndResponse = rendered.slice(durableIndex + durableRows.length, responseIndex);
+    expect(betweenDurableFlushAndResponse).not.toContain("mock-model");
+    expect(betweenDurableFlushAndResponse).not.toContain("context");
+    expect(rendered.slice(responseIndex)).toContain("mock-model");
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
@@ -1438,33 +1499,23 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const lastToolChunkIndex = strippedChunks.reduce(
-      (lastIndex, chunk, index) => chunk.includes("browser.status") ? index : lastIndex,
-      -1
-    );
-    const providerSpinnerChunkIndex = strippedChunks.findIndex((chunk, index) =>
-      index > lastToolChunkIndex && chunk.includes("scribbling")
-    );
-    const nextChromeChunkIndex = strippedChunks.findIndex((chunk, index) =>
-      index > providerSpinnerChunkIndex && chunk.includes("mock-model")
-    );
-    const chromeChunksAfterTool = strippedChunks.slice(lastToolChunkIndex + 1).filter((chunk) =>
-      chunk.includes("mock-model")
+    const providerSpinnerChunkIndex = strippedChunks.findIndex((chunk) =>
+      chunk.includes("browser.status") && chunk.includes("scribbling")
     );
     const providerSpinnerChunk = strippedChunks[providerSpinnerChunkIndex] ?? "";
+    const toolOffset = providerSpinnerChunk.indexOf("browser.status");
     const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
     const modelOffset = providerSpinnerChunk.indexOf("mock-model");
     const promptOffset = providerSpinnerChunk.indexOf("▸ hello");
 
-    expect(lastToolChunkIndex).toBeGreaterThan(-1);
-    expect(providerSpinnerChunkIndex).toBeGreaterThan(lastToolChunkIndex);
+    expect(providerSpinnerChunkIndex).toBeGreaterThan(-1);
+    expect(toolOffset).toBeGreaterThan(-1);
     expect(spinnerOffset).toBeGreaterThan(-1);
+    expect(spinnerOffset).toBeGreaterThan(toolOffset);
     if (modelOffset !== -1) {
       expect(modelOffset).toBeGreaterThan(spinnerOffset);
     }
-    expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
     expect(promptOffset).toBe(-1);
-    expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model"))).toBe(true);
   });
 
   it("attaches the active-turn command controller only during runtime.handle", async () => {

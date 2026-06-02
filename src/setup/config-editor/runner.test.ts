@@ -34,6 +34,7 @@ describe("runConfigEditor", () => {
 
   afterEach(async () => {
     delete process.env.PR8_SHELL_ONLY_KEY;
+    delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.DISCORD_BOT_TOKEN;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
@@ -236,11 +237,25 @@ describe("runConfigEditor", () => {
       },
     });
     await trustWorkspace(tempDir, workspaceRoot);
+    const reviewPrompts: Array<{ title: string; body?: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompt = fakePrompt({ values: ["strict"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Finalize configuration") {
+        reviewPrompts.push({
+          title: input.title,
+          body: input.body,
+          labels: input.options.map((option) => option.label),
+          descriptions: input.options.map((option) => option.description),
+        });
+      }
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["strict"] }),
+      prompt,
       defaultActionId: "edit-security-mode",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -259,6 +274,12 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest?.sections["security-mode"].length).toBe(1);
     expect(result.reviewManifest?.sections["verification-checks"].length).toBe(1);
     expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    expect(reviewPrompts).toEqual([expect.objectContaining({
+      title: "Finalize configuration",
+      body: expect.stringContaining("Selected area: Security"),
+      labels: ["Confirm", "Cancel"],
+      descriptions: ["Update your EstaCoda configuration", "Keep your existing configuration unchanged."],
+    })]);
     expect(config.security?.approvalMode).toBe("strict");
     expect(config.security?.assessor?.enabled).toBe(true);
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
@@ -439,14 +460,21 @@ describe("runConfigEditor", () => {
     });
   });
 
-  it("launches only after reviewed apply, verification, route re-collection, and explicit launch choice", async () => {
+  it("applies and verifies without showing the setup editor launch prompt", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["strict", true] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["strict", true, "launch"] }),
+      prompt,
       defaultActionId: "edit-security-mode",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -457,24 +485,30 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-security-mode");
-    expect(result.nextActionId).toBe("launch");
+    expect(result.nextActionId).toBeUndefined();
     expect(result.postApplyRouteDecision?.kind).toBe("configured-menu");
-    expect(result.applyEndState?.kind).toBe("launched");
-    if (result.applyEndState?.kind !== "launched") throw new Error("expected launch");
-    expect(result.applyEndState.acceptedDegraded).toBe(false);
-    expect(result.limitedModeAccepted).toBe(false);
+    expect(result.applyEndState?.kind).toBe("verified-ready");
     expect(result.output).toContain("Verification passed. Setup is ready.");
-    expect(result.output).toContain("Launch handoff accepted");
+    expect(result.output).not.toContain("Launch handoff accepted");
+    expect(promptTitles).not.toContain("Setup next action");
+    expect(result.output).not.toContain("Selected: Launch EstaCoda");
   });
 
-  it("requires explicit limited-mode acceptance before degraded launch handoff", async () => {
+  it("returns degraded setup output without limited-mode launch handoff", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["proactive", true] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["proactive", true, "accept-limited-mode"] }),
+      prompt,
       defaultActionId: "edit-workflow-learning",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -484,27 +518,22 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.nextActionId).toBe("accept-limited-mode");
+    expect(result.nextActionId).toBeUndefined();
     expect(result.postApplyRouteDecision).toBeDefined();
-    expect(result.applyEndState?.kind).toBe("launched");
-    if (result.applyEndState?.kind !== "launched") throw new Error("expected degraded launch");
-    expect(result.applyEndState.acceptedDegraded).toBe(true);
-    expect(result.limitedModeAccepted).toBe(true);
+    expect(result.applyEndState?.kind).toBe("verified-degraded");
     expect(result.output).toContain("Verification completed with warnings");
     expect(result.output).toContain("Verification warnings:");
     expect(result.output).toContain("Network inference is disabled for the selected hosted provider.");
     expect(result.output).toContain("Configured model context window is below 64K tokens.");
-    expect(result.output).toContain("Limited mode accepted for launch");
-    expect(result.output.indexOf("Network inference is disabled")).toBeLessThan(
-      result.output.indexOf("Limited mode accepted for launch")
-    );
+    expect(result.output).not.toContain("Limited mode accepted for launch");
+    expect(promptTitles).not.toContain("Setup next action");
   });
 
   it("does not expose launch after blocked verification", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const postApplyOptionLabels: string[][] = [];
-    const prompt = fakePrompt({ values: ["strict", true, "exit"] });
+    const prompt = fakePrompt({ values: ["strict", true] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       if (input.title === "Setup next action") {
@@ -527,18 +556,18 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(false);
     expect(result.exitCode).toBe(1);
-    expect(result.nextActionId).toBe("exit");
+    expect(result.nextActionId).toBeUndefined();
     expect(result.applyEndState?.kind).toBe("blocked");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
+    expect(postApplyOptionLabels).toEqual([]);
     expect(result.output).toContain("Verification blocked");
-    expect(result.output).toContain("Exited after setup apply without launching");
+    expect(result.output).not.toContain("Exited after setup apply without launching");
   });
 
   it("does not expose launch when post-apply verification cannot run", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const postApplyOptionLabels: string[][] = [];
-    const prompt = fakePrompt({ values: ["strict", true, "exit"] });
+    const prompt = fakePrompt({ values: ["strict", true] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       if (input.title === "Setup next action") {
@@ -558,17 +587,17 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.nextActionId).toBe("exit");
+    expect(result.nextActionId).toBeUndefined();
     expect(result.applyEndState?.kind).toBe("saved-not-launched");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
+    expect(postApplyOptionLabels).toEqual([]);
     expect(result.output).toContain("Setup prepared without launch handoff");
-    expect(result.output).toContain("Exited after setup apply without launching");
+    expect(result.output).not.toContain("Exited after setup apply without launching");
   });
 
   it("does not expose launch when the fresh post-apply route is still unsafe", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     const postApplyOptionLabels: string[][] = [];
-    const prompt = fakePrompt({ values: [true, true, "exit"] });
+    const prompt = fakePrompt({ values: [true, true] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       if (input.title === "Setup next action") {
@@ -591,12 +620,12 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.initialDecision.state.kind).toBe("untrusted-workspace");
     expect(result.postApplyRouteDecision?.state.kind).toBe("untrusted-workspace");
-    expect(result.nextActionId).toBe("exit");
+    expect(result.nextActionId).toBeUndefined();
     expect(result.applyEndState?.kind).toBe("verified-ready");
-    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit setup"]]);
+    expect(postApplyOptionLabels).toEqual([]);
   });
 
-  it("repair-again re-enters the editor with a fresh route without bypassing review/apply", async () => {
+  it("does not re-enter setup editor after existing-user apply", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const output: string[] = [];
@@ -604,7 +633,7 @@ describe("runConfigEditor", () => {
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["proactive", true, "repair-again", "exit"] }),
+      prompt: fakePrompt({ values: ["proactive", true] }),
       defaultActionId: "edit-workflow-learning",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -615,10 +644,10 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.selectedActionId).toBe("exit");
-    expect(result.reviewManifest).toBeUndefined();
-    expect(output.join("").match(/Setup Editor/g)).toHaveLength(2);
-    expect(output.join("")).toContain("Repair again selected. Re-entering setup editor.");
+    expect(result.selectedActionId).toBe("edit-workflow-learning");
+    expect(result.reviewManifest).toBeDefined();
+    expect(output.join("").match(/Setup Editor/g)).toHaveLength(1);
+    expect(output.join("")).not.toContain("Repair again selected. Re-entering setup editor.");
   });
 
   it("applies guided provider route repair through the shared flow and reviewed executor", async () => {
@@ -1360,7 +1389,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
+        values: ["telegram", "enable", "", "", "skip", true],
       }),
       defaultActionId: "configure-channels",
     });
@@ -1384,11 +1413,9 @@ describe("runConfigEditor", () => {
         values: [
           "telegram",
           "enable",
-          "TELEGRAM_BOT_TOKEN",
           "",
           "",
           "retry",
-          "TELEGRAM_BOT_TOKEN",
           "42",
           "",
           true,
@@ -1407,19 +1434,44 @@ describe("runConfigEditor", () => {
   it("applies reviewed Telegram optional capability with env ref and allowlisted identities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
+    const seenQuestions: string[] = [];
+    const seenCards: Array<{ title: string; bodyLines: readonly string[] }> = [];
+    const reviewPrompts: Array<{ title: string; body?: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const output: string[] = [];
+    const basePrompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
+      secret: "123456:stored-telegram-token",
+    });
+    const prompt = (async (question: string, options?: { secret?: boolean }) => {
+      seenQuestions.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = async (input) => {
+      if (input.title === "Finalize configuration") {
+        reviewPrompts.push({
+          title: input.title,
+          body: input.body,
+          labels: input.options.map((option) => option.label),
+          descriptions: input.options.map((option) => option.description),
+        });
+      }
+      return basePrompt.select!(input);
+    };
+    prompt.onboardingCard = (input) => {
+      seenCards.push({ title: input.title, bodyLines: input.bodyLines });
+    };
+    prompt.close = basePrompt.close;
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
-        secret: "123456:stored-telegram-token",
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
       }),
+      output: { write: (value) => output.push(value) },
     });
     const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const envFile = await readFile(profileEnvPath(tempDir), "utf8");
@@ -1429,20 +1481,45 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-channels");
+    expect(seenQuestions.some((question) => question.includes("Env var name to store Telegram bot token under"))).toBe(false);
+    expect(seenQuestions).toContain("Telegram bot API token: ");
+    expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
+    expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
+    expect(seenCards.map((card) => card.title)).toEqual(["Configure Telegram", "Configure Telegram", "Configure Telegram"]);
+    expect(seenCards[0]?.bodyLines).toContain("Connect Telegram bot");
+    expect(seenCards[0]?.bodyLines.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
+    expect(seenCards[1]?.bodyLines).toContain("Authorize Telegram users");
+    expect(seenCards[1]?.bodyLines.join("\n")).toContain("Open Telegram and search for @userinfobot.");
+    expect(seenCards[2]?.bodyLines).toContain("Authorize Telegram group chats");
+    expect(seenCards[2]?.bodyLines.join("\n")).toContain("Add @getidsbot or @chatIDrobot to the same group chat.");
+    expect(reviewPrompts).toEqual([expect.objectContaining({
+      title: "Finalize configuration",
+      body: expect.stringContaining("Selected area: Channels · Telegram"),
+      labels: ["Confirm", "Cancel"],
+      descriptions: ["Update your EstaCoda configuration", "Keep your existing configuration unchanged."],
+    })]);
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"]).toHaveLength(1);
     expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.output).not.toContain("Review manifest.");
+    expect(result.output).not.toContain("Configuration write.");
+    expect(result.output).not.toContain("Enabled optional capabilities.");
+    expect(result.output).not.toContain("Remote-control surfaces and allowed identities.");
+    expect(output.join("")).not.toContain("Review manifest.");
+    expect(output.join("")).not.toContain("Configuration write.");
+    expect(output.join("")).not.toContain("Enabled optional capabilities.");
+    expect(output.join("")).not.toContain("Remote-control surfaces and allowed identities.");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.telegram.capability",
     ]);
     expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-user-or-chat-id");
     expect(config.channels?.telegram).toEqual(expect.objectContaining({
       enabled: true,
-      botTokenEnv: "TELEGRAM_BOT_TOKEN",
+      botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
       allowedUserIds: ["42"],
       allowedChatIds: ["-100"],
     }));
     expect(rawConfig).not.toContain("123456:");
-    expect(envFile).toContain('TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
+    expect(envFile).toContain('ESTACODA_TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
@@ -1455,12 +1532,10 @@ describe("runConfigEditor", () => {
       values: [
         "telegram",
         "enable",
-        "TELEGRAM_BOT_TOKEN",
         "42",
         "-100",
         true,
         "Yes",
-        "exit",
       ],
       secret: "123456:stored-telegram-token",
     });
@@ -1489,9 +1564,7 @@ describe("runConfigEditor", () => {
     expect(actions.install).toHaveBeenCalledTimes(1);
     expect(actions.start).toHaveBeenCalledTimes(1);
     expect(promptTitles.indexOf(gatewayServiceActivationPromptTitle)).toBeGreaterThan(-1);
-    expect(promptTitles.indexOf(gatewayServiceActivationPromptTitle)).toBeLessThan(
-      promptTitles.indexOf(resolveSetupCopy("en", "setupEditor.prompt.postApply.title"))
-    );
+    expect(promptTitles).not.toContain(resolveSetupCopy("en", "setupEditor.prompt.postApply.title"));
     expect(result.output).toContain("Gateway service installed and started for configured Telegram channel.");
     expect(JSON.stringify(result)).not.toContain("123456:stored-telegram-token");
   });
@@ -1508,12 +1581,10 @@ describe("runConfigEditor", () => {
         values: [
           "telegram",
           "enable",
-          "TELEGRAM_BOT_TOKEN",
           "42",
           "-100",
           true,
           "Not now",
-          "exit",
         ],
         secret: "123456:stored-telegram-token",
       }),
@@ -1532,6 +1603,87 @@ describe("runConfigEditor", () => {
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
     expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+  });
+
+  it("does not offer gateway activation when a ready channel already existed before setup editor apply", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+          allowedUserIds: ["42"],
+        },
+      },
+    });
+    process.env.ESTACODA_TELEGRAM_BOT_TOKEN = "existing-telegram-token";
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual({
+      kind: "not-offered",
+      reason: "ready-channel-already-configured",
+    });
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("does not offer gateway activation when the managed service is already installed", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions({ installedBefore: true });
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual({
+      kind: "not-offered",
+      reason: "gateway-service-already-installed",
+    });
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
   });
 
   it("applies reviewed Discord beta channel with env ref and fail-closed allowlist", async () => {
@@ -1820,8 +1972,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", false],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", false],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1854,8 +2006,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;
@@ -1887,8 +2039,8 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({
-      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true, "exit"],
+  const prompt = fakePrompt({
+      values: ["telegram", "enable", "42", "-100", true, "exit"],
       secret: "123456:stored-telegram-token",
     });
     const baseSelect = prompt.select!;

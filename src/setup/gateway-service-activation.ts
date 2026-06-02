@@ -12,7 +12,7 @@ import { promptSetupChoice, setupPromptContext } from "./setup-prompts.js";
 import type { SetupCopyLocale } from "./setup-copy.js";
 import type { SetupReviewManifest } from "./setup-review-manifest.js";
 
-type GatewayActivationChannelId = "telegram" | "discord" | "whatsapp";
+export type GatewayActivationChannelId = "telegram" | "discord" | "whatsapp";
 
 type GatewayActivationChannel = {
   readonly id: GatewayActivationChannelId;
@@ -28,7 +28,11 @@ export type GatewayActivationServiceActions = {
 export type GatewayServiceActivationResult =
   | {
       readonly kind: "not-offered";
-      readonly reason: "readiness-gate-blocked" | "no-ready-new-channel";
+      readonly reason:
+        | "readiness-gate-blocked"
+        | "no-ready-new-channel"
+        | "ready-channel-already-configured"
+        | "gateway-service-already-installed";
     }
   | {
       readonly kind: "declined";
@@ -56,6 +60,7 @@ export type GatewayServiceActivationOptions = {
   readonly profileId?: string;
   readonly reviewManifest: SetupReviewManifest;
   readonly readinessGate: boolean;
+  readonly previouslyReadyChannelIds?: readonly GatewayActivationChannelId[];
   readonly serviceActions?: GatewayActivationServiceActions;
 };
 
@@ -65,8 +70,7 @@ const CHANNELS: readonly GatewayActivationChannel[] = [
   { id: "whatsapp", label: "WhatsApp" },
 ];
 
-export const gatewayServiceActivationPromptTitle =
-  "Would you like to install and start the EstaCoda gateway service now?";
+export const gatewayServiceActivationPromptTitle = "EstaCoda Gateway";
 
 export const gatewayServiceActivationNotNowGuidance =
   "Run estacoda gateway install then estacoda gateway start when you are ready.";
@@ -88,6 +92,21 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
   const channels = readyNewlyConfiguredChannels(options.reviewManifest, loaded);
   if (channels.length === 0) {
     return { kind: "not-offered", reason: "no-ready-new-channel" };
+  }
+  if ((options.previouslyReadyChannelIds?.length ?? 0) > 0) {
+    return { kind: "not-offered", reason: "ready-channel-already-configured" };
+  }
+
+  const actions = options.serviceActions ?? defaultServiceActions;
+  const stateHomeDir = resolveHomeDir(options.homeDir);
+  const serviceUserHomeDir = resolveOsHomeDir();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
+  const existing = await actions.probe({
+    serviceUserHomeDir,
+    profileId,
+  });
+  if (existing.installed) {
+    return { kind: "not-offered", reason: "gateway-service-already-installed" };
   }
 
   const channelList = formatChannelList(channels);
@@ -122,47 +141,31 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
     };
   }
 
-  return installAndStartGatewayService(options, channels);
+  return installAndStartGatewayService(channels, {
+    actions,
+    stateHomeDir,
+    serviceUserHomeDir,
+    profileId,
+    workspaceRoot: options.workspaceRoot,
+  });
 }
 
 async function installAndStartGatewayService(
-  options: GatewayServiceActivationOptions,
-  channels: readonly GatewayActivationChannel[]
-): Promise<GatewayServiceActivationResult> {
-  const actions = options.serviceActions ?? defaultServiceActions;
-  const stateHomeDir = resolveHomeDir(options.homeDir);
-  const serviceUserHomeDir = resolveOsHomeDir();
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
-
-  const existing = await actions.probe({
-    serviceUserHomeDir,
-    profileId,
-  });
-  if (existing.installed) {
-    const start = await actions.start({
-      serviceUserHomeDir,
-      profileId,
-    });
-    if (!start.ok) {
-      return {
-        kind: "failed",
-        channels,
-        phase: "start",
-        output: `Gateway service start failed: ${start.error}`,
-      };
-    }
-    return {
-      kind: "started",
-      channels,
-      installed: false,
-      output: `Gateway service started for configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`,
-    };
+  channels: readonly GatewayActivationChannel[],
+  context: {
+    readonly actions: GatewayActivationServiceActions;
+    readonly stateHomeDir: string;
+    readonly serviceUserHomeDir: string;
+    readonly profileId: string;
+    readonly workspaceRoot: string;
   }
+): Promise<GatewayServiceActivationResult> {
+  const { actions, stateHomeDir, serviceUserHomeDir, profileId, workspaceRoot } = context;
 
   const install = await actions.install({
     stateHomeDir,
     serviceUserHomeDir,
-    workspaceRoot: options.workspaceRoot,
+    workspaceRoot,
     profileId,
   });
   if (!install.ok) {
@@ -199,6 +202,15 @@ async function installAndStartGatewayService(
     installed: true,
     output: `Gateway service installed and started for configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`,
   };
+}
+
+export async function readyConfiguredGatewayChannelIds(
+  options: Pick<GatewayServiceActivationOptions, "homeDir" | "profileId" | "workspaceRoot">
+): Promise<readonly GatewayActivationChannelId[]> {
+  const loaded = await loadRuntimeConfig(options);
+  return CHANNELS
+    .filter((channel) => runtimeChannelIsReady(loaded, channel.id))
+    .map((channel) => channel.id);
 }
 
 function readyNewlyConfiguredChannels(

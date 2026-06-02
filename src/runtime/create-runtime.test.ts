@@ -349,6 +349,23 @@ function schemaAliasOrder(inputSchema: unknown): string[] {
 }
 
 describe("createRuntime token branding", () => {
+  it("generates a non-scaffold session id and default title when omitted", async () => {
+    const { sessionId: _sessionId, ...options } = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const runtime = await createRuntime({ ...options, sessionDb });
+
+    try {
+      expect(runtime.sessionId).not.toBe("scaffold");
+      expect(runtime.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+      await expect(sessionDb.getSession(runtime.sessionId)).resolves.toEqual(expect.objectContaining({
+        id: runtime.sessionId,
+        title: "EstaCoda session"
+      }));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("accepts resolved tokens and uses token branding", async () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const options = await minimalRuntimeOptions({ tokens });

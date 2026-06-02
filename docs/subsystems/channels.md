@@ -82,11 +82,20 @@ Adapters only render or normalize channel-specific transport events. They must n
 **Setup:**
 
 ```bash
-estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
+estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_BOT_TOKEN --allow-user 123456789
 estacoda channels enable telegram
 estacoda gateway install
 estacoda gateway start
 ```
+
+Normal guided setup asks for the Telegram bot API token, allowed Telegram user IDs, and allowed Telegram group chat IDs. It does not ask the user to choose the token env-var name. The collected token is stored under `ESTACODA_TELEGRAM_BOT_TOKEN`, and config points at it with `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. The raw bot token must not appear in config review, setup output, gateway diagnostics, or logs.
+
+Operator-facing setup steps:
+
+1. Use `@BotFather` and `/newbot` to create or select a Telegram bot and copy its API token.
+2. Use `@userinfobot` and `/start` to retrieve allowed Telegram user IDs.
+3. For group chats, add the EstaCoda bot plus `@getidsbot` or `@chatIDrobot` to the group. The ID bot replies with the group chat ID.
+4. Group chat IDs are usually long negative numbers.
 
 ## Discord Adapter
 

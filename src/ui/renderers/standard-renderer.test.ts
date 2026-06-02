@@ -927,7 +927,7 @@ describe("StandardRenderer — startup dashboard", () => {
       agentName: "EstaCoda",
       taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
       version: "v0.0.5",
-      sessionId: "sess-9f7a2c1b",
+      sessionId: "4c6d7f55-7e8b-4f4f-8f39-111111111111",
       model: { provider: "openrouter", id: "deepseek-reasoner" },
       workspaceTrust: "trusted",
       workspaceVerification: "verified",
@@ -943,7 +943,7 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("EstaCoda");
     expect(out).toContain("Kemet Research");
     expect(out).toContain("v0.0.5");
-    expect(out).toContain("sess-9f7a2c1b");
+    expect(out).toContain("session 4c6d7f55");
     expect(out).toContain("deepseek-reasoner");
     expect(out).toContain("ready");
     expect(out).toContain("Workspace Trust");
@@ -962,7 +962,8 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("/status");
     expect(stripAnsi(out)).not.toContain("│");
     const top = stripAnsi(out).split("\n").find((line) => line.startsWith("╭"));
-    expect(top).toContain(" v0.0.5  𓂀  sess-9f7a2c1b ");
+    expect(top).toContain(" v0.0.5  𓂀  session 4c6d7f55 ");
+    expect(top).not.toContain("4c6d7f55-7e8b-4f4f-8f39-111111111111");
     expect(top).not.toContain("─v0.0.5");
     for (const line of stripAnsi(out).split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
@@ -1072,6 +1073,8 @@ describe("StandardRenderer — startup dashboard", () => {
     // Should use ASCII dash for separator, not Unicode box-drawing
     expect(out).not.toContain("─");
     expect(out).toContain("-");
+    expect(out).not.toContain("𓂀");
+    expect(out).toContain("v0.0.5  *  session sess-abc");
   });
 
   it("keeps startup dashboard border styling isolated when title truncates", () => {
@@ -1080,7 +1083,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
       taglines: [],
-      version: "v0.0.5",
+      version: "v0.0.5-build-that-is-long-enough-to-truncate",
       sessionId: "session-id-that-is-long-enough-to-truncate",
       model: { provider: "p", id: "deepseek-reasoner" },
       workspaceTrust: "trusted",
@@ -1121,8 +1124,8 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("استعرض أدوات التشغيل");
     expect(out).toContain("موثوقة");
     expect(out).toContain("متحقق منها");
-    expect(out).toContain(isolateLtr("v0.0.5"));
-    expect(out).toContain(isolateLtr("sess-9f7a2c1b"));
+    expect(out).toContain(isolateLtr("v0.0.5  𓂀  session sess-9f7"));
+    expect(out).not.toContain(isolateLtr("sess-9f7a2c1b"));
     expect(out).toContain(isolateLtr("deepseek-reasoner"));
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("open"));
@@ -1142,7 +1145,7 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(commandFactLine?.indexOf("استعرض أدوات التشغيل")).toBeLessThan(commandFactLine?.indexOf("حالة تحقق مساحة العمل") ?? 0);
     const top = plain.split("\n").find((line) => line.startsWith("╭"));
     const bottom = plain.split("\n").find((line) => line.startsWith("╰"));
-    expect(top).toContain(` ${isolateLtr("v0.0.5")}  𓂀  ${isolateLtr("sess-9f7a2c1b")} `);
+    expect(top).toContain(` ${isolateLtr("v0.0.5  𓂀  session sess-9f7")} `);
     expect(bottom).toBeDefined();
     expectBalancedBidiIsolates(plain);
     for (const line of plain.split("\n")) {
@@ -1174,7 +1177,7 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("النموذج");
     expect(out).toContain("ثقة مساحة العمل");
     expect(out).toContain("الأوامر التفاعلية:");
-    expect(out).toContain(isolateLtr("v0.0.5"));
+    expect(out).toContain(isolateLtr("v0.0.5  𓂀  session session-"));
     expect(out).not.toContain("│");
     expect(out.split("\n").some((line) => line.includes("الأوامر التفاعلية:") && line.includes("ثقة مساحة العمل"))).toBe(false);
     expectBalancedBidiIsolates(out);

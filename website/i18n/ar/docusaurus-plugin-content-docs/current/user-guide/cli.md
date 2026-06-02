@@ -53,6 +53,10 @@ estacoda doctor --live      # فحص المزود المباشر
 
 الإعداد مُراجع، وليس مستقلًا. يبني manifest قبل التطبيق، ويخزن الاعتمادات كمراجع متغيرات بيئة في `.env` الخاص بالملف الشخصي المختار بأذونات `0600`، وينفذ تحققًا للقراءة فقط بعد التطبيق. لا تُعرض الأسرار الخام في مخرجات المراجعة.
 
+المستخدمون الحاليون الذين يشغّلون Setup Editor يحصلون على مسار مختلف بعد التطبيق. مطالبة المراجعة النهائية عنوانها `Finalize configuration`، وتعرض `Confirm selected configuration`، وتتضمن مجالًا محددًا ديناميكيًا مثل `Channels · Telegram` أو `Security`. خيار `Confirm` يحدّث إعدادات الملف الشخصي المحدد. خيار `Cancel` يترك الإعداد الحالي دون تغيير ولا يكتب أي إعدادات أو أسرار. تفاصيل manifest التقنية تبقى داخلية ولا تُطبع كمخرجات إعداد موجهة للمستخدم.
+
+بعد تطبيق Setup Editor للمستخدم الحالي، تعرض EstaCoda نتيجة التطبيق والتحقق ثم تخرج من مسار الإعداد. لا تعرض `Setup next action`، ولا تطبع `Selected: Launch EstaCoda`، ولا تسلم إلى `Launch EstaCoda`. يظل onboarding الأول هو المسار الذي يملك مطالبة التشغيل بعد إعداد جاهز ومتحقق.
+
 ---
 
 ## التتبع والتقييم
@@ -120,6 +124,19 @@ estacoda sessions compact <session-id> [--topic <topic>]
 | `/exit` | خروج من الجلسة |
 
 `/model` محدد بالجلسة افتراضيًا. `/model --global <provider>/<model>` يثبت المسار كنموذج أساسي للملف الشخصي بعد فحوصات الثقة. `/model --global clear` مرفوض؛ استخدم `estacoda model setup` لإدارة المسار الأساسي.
+
+محدد `/model` التفاعلي يعرض شاشتي الاختيار بعنواني `Select provider` و`Select model`. كلتاهما تستخدم صياغة محددة بالجلسة فقط: `Select the provider to use for this session only.` و`Select the model to use for this session only.`
+
+بعد تجاوز نموذج الجلسة، تطبع CLI إشعارًا مختصرًا ولا تعيد عرض لوحة بدء التشغيل:
+
+```text
+Model: deepseek-v4-flash
+Session model override set: deepseek/deepseek-v4-flash
+Scope: session
+Fallback routes unchanged.
+```
+
+مخرجات plain وCI وغير TTY تبقى بلا تنسيق. الطرفيات التفاعلية التي تدعم تنسيق standard قد تجعل تسميات الإشعار بخط عريض.
 
 ---
 

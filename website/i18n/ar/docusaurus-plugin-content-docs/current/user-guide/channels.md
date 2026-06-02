@@ -76,11 +76,21 @@ Telegram هي القناة البعيدة الحية المُثبتة لـ v0.1.
 **الإعداد:**
 
 ```bash
-estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
+estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_BOT_TOKEN --allow-user 123456789
 estacoda channels enable telegram
 estacoda gateway install
 estacoda gateway start
 ```
+
+الإعداد الموجّه العادي يطلب:
+
+- رمز API لبوت Telegram.
+- معرفات مستخدمي Telegram المسموح لهم.
+- معرفات محادثات مجموعات Telegram المسموح لها.
+
+الإعداد الموجّه العادي لا يطلب اسم متغير البيئة الخاص برمز البوت. يخزن الرمز تحت `ESTACODA_TELEGRAM_BOT_TOKEN`، وتشير الإعدادات إليه عبر `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. يجب ألا يظهر رمز البوت في مراجعة الإعداد أو مخرجات الإعداد.
+
+استخدم `@BotFather` و`/newbot` لإنشاء بوت ونسخ رمز API. استخدم `@userinfobot` و`/start` للحصول على معرفات مستخدمي Telegram. لمحادثات المجموعات، أضف بوت EstaCoda وأحد البوتين `@getidsbot` أو `@chatIDrobot` إلى المجموعة. يرد بوت المعرفات بمعرف محادثة المجموعة؛ وفي المجموعات يكون هذا عادةً رقمًا سالبًا طويلًا.
 
 **متطلبات الجاهزية:**
 

@@ -10,6 +10,7 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
+import type { TerminalCapabilities } from "../contracts/ui.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -36,9 +37,29 @@ function fakeRuntime(modelInfo: {
       title: "EstaCoda is ready",
       lines: []
     }),
+    describe: () => [
+      "EstaCoda is ready",
+      `model: ${modelInfo.provider}/${modelInfo.model}`,
+      "profile: default",
+      "tools: 86"
+    ].join("\n"),
     tools: () => [],
     dispose: async () => {}
   } as any;
+}
+
+function ttyCapabilities(): TerminalCapabilities {
+  return {
+    isTTY: true,
+    supportsColor: true,
+    supportsTrueColor: true,
+    supportsUnicode: true,
+    supportsEmoji: false,
+    terminalWidth: 120,
+    isDumb: false,
+    isCI: false,
+    supportsAnimation: false
+  };
 }
 
 async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
@@ -149,13 +170,13 @@ describe("session-loop /model", () => {
     expect(selectInputs).toMatchObject([
       {
         surface: "promptCard",
-        title: "Session model provider",
-        body: "Choose the provider to use for this session only."
+        title: "Select provider",
+        body: "Select the provider to use for this session only."
       },
       {
         surface: "promptCard",
-        title: "Session model",
-        body: "Choose the model to use for this session only."
+        title: "Select model",
+        body: "Select the model to use for this session only."
       }
     ]);
     const override = await sessionDb.getSessionModelOverride("test-session");
@@ -213,6 +234,131 @@ describe("session-loop /model", () => {
     expect(override?.route.provider).toBe("local");
     expect(override?.route.id).toBe("phi4:latest");
     expect(override?.source).toBe("cli");
+  });
+
+  it("/model set returns a focused session override notice without startup dashboard text", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const refreshed = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+
+    const result = await handleSlashCommand({
+      text: "/model set local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).not.toBe(false);
+    expect(result).not.toBe(true);
+    if (typeof result === "boolean") throw new Error("expected runtime refresh result");
+    const notice = result.notice(refreshed as any);
+    expect(notice).toBe([
+      "Session model override set: local/phi4:latest",
+      "Scope: session",
+      "Fallback routes unchanged."
+    ].join("\n"));
+    expect(notice).not.toContain("EstaCoda is ready");
+    expect(notice).not.toContain("profile:");
+    expect(notice).not.toContain("tools:");
+    expect(notice).not.toContain("model: local/phi4:latest");
+  });
+
+  it("/model set bolds notice labels only for TTY-capable styled output", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const refreshed = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const modelSwitchContext = async () => {
+      const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+      return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+    };
+
+    const styledResult = await handleSlashCommand({
+      text: "/model set local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain, capabilities: ttyCapabilities() },
+      modelSwitchContext,
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+    if (typeof styledResult === "boolean") throw new Error("expected styled runtime refresh result");
+    const styledNotice = styledResult.notice(refreshed as any);
+    expect(styledNotice).toContain("\u001b[1mSession model override set:\u001b[22m local/phi4:latest");
+    expect(styledNotice).toContain("\u001b[1mScope:\u001b[22m session");
+    expect(styledNotice).toContain("\u001b[1mFallback routes unchanged.\u001b[22m");
+
+    const plainResult = await handleSlashCommand({
+      text: "/model set local/phi4:latest",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      modelSwitchContext,
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+    if (typeof plainResult === "boolean") throw new Error("expected plain runtime refresh result");
+    expect(plainResult.notice(refreshed as any)).not.toContain("\u001b[1m");
   });
 
   it("/model --global persists only the profile primary route after local trust", async () => {

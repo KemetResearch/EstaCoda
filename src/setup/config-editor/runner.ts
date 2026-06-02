@@ -46,7 +46,6 @@ import {
   formatSetupCopy,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
-  renderSetupReviewManifest,
   setupProviderCredentialQuestion,
   setupCopyText,
 } from "../setup-prompts.js";
@@ -58,7 +57,6 @@ import {
   promptCredentialReuseChoice,
   promptFallbackRouteAction,
   promptModelCandidate,
-  promptConfigEditorPostApplyAction,
   promptOptionalCapabilityAction,
   promptProviderCandidate,
   promptSecurityMode,
@@ -85,6 +83,8 @@ import {
 } from "../optional-capability-flow.js";
 import {
   maybeOfferGatewayStartAfterChannelSetup,
+  readyConfiguredGatewayChannelIds,
+  type GatewayActivationChannelId,
   type GatewayServiceActivationOptions,
   type GatewayServiceActivationResult,
 } from "../gateway-service-activation.js";
@@ -661,9 +661,10 @@ async function reviewAndApplyManifest(
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
   } = {}
 ): Promise<ConfigEditorRunnerResult> {
-  const reviewText = renderSetupReviewManifest(reviewManifest, options.locale);
-  write(options, `${reviewText}\n`);
-  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, options.locale);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
+    selectedActionId,
+    reviewManifest,
+  }, options.locale);
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
@@ -686,6 +687,13 @@ async function finalizeReviewedApply(input: {
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
 }): Promise<RunOnceResult> {
   const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
+  const previouslyReadyGatewayChannelIds = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
+    ? await readyConfiguredGatewayChannelIds({
+        homeDir: options.homeDir,
+        profileId: options.profileId,
+        workspaceRoot: options.workspaceRoot,
+      })
+    : undefined;
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
@@ -722,6 +730,7 @@ async function finalizeReviewedApply(input: {
     applyPlanningResult,
     applyEndState,
     renderedApplyOutput: output,
+    previouslyReadyGatewayChannelIds,
   });
   return postApply;
 }
@@ -734,6 +743,7 @@ async function handlePostApplyHandoff(input: {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState: SetupApplyEndState;
   readonly renderedApplyOutput: string;
+  readonly previouslyReadyGatewayChannelIds?: readonly GatewayActivationChannelId[];
 }): Promise<RunOnceResult> {
   const {
     options,
@@ -743,6 +753,7 @@ async function handlePostApplyHandoff(input: {
     applyPlanningResult,
     applyEndState,
     renderedApplyOutput,
+    previouslyReadyGatewayChannelIds,
   } = input;
   const completedWithoutPrompt = applyEndState.kind === "cancelled";
   if (completedWithoutPrompt) {
@@ -768,6 +779,7 @@ async function handlePostApplyHandoff(input: {
     profileId: options.profileId,
     reviewManifest,
     readinessGate: handoffState !== "blocked",
+    previouslyReadyChannelIds: previouslyReadyGatewayChannelIds,
     serviceActions: options.gatewayServiceActivation?.serviceActions,
   });
   const gatewayServiceActivationOutput = "output" in gatewayServiceActivationResult
@@ -782,115 +794,12 @@ async function handlePostApplyHandoff(input: {
   if (handoffWarningOutput !== undefined) {
     write(options, `${handoffWarningOutput}\n`);
   }
-  const nextActionId = await promptConfigEditorPostApplyAction(options.prompt, {
-    state: handoffState,
-    launchEligible: handoffState === "ready",
-    limitedModeEligible: handoffState === "degraded",
-  }, options.locale);
-
-  if (nextActionId === "repair-again") {
-    const repairAgainSelected = setupCopyText(options.locale, "setupEditor.result.repairAgainSelected");
-    const output = [
-      renderedApplyOutput,
-      gatewayServiceActivationOutput,
-      handoffWarningOutput,
-      repairAgainSelected,
-    ].filter((line): line is string => line !== undefined).join("\n");
-    write(options, `${repairAgainSelected}\n`);
-    return {
-      completed: true,
-      exitCode: 0,
-      output,
-      initialDecision,
-      finalDecision: postApplyRouteDecision,
-      postApplyRouteDecision,
-      repairAgainDecision: postApplyRouteDecision,
-      selectedActionId,
-      nextActionId,
-      reviewManifest,
-      applyPlanningResult,
-      applyEndState,
-      gatewayServiceActivationResult,
-    };
-  }
-
-  if (nextActionId === "launch" && handoffState === "ready") {
-    const launchableEndState = launchableApplyEndState(applyEndState);
-    if (launchableEndState === undefined) {
-      throw new Error("Ready launch handoff requires a verified apply end state.");
-    }
-    const launchedEndState: SetupApplyEndState = {
-      kind: "launched",
-      verification: launchableEndState.verification,
-      launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
-      acceptedDegraded: false,
-    };
-    const launchOutput = renderSetupApplyEndState(launchedEndState, options.locale);
-    write(options, `${launchOutput}\n`);
-    return {
-      completed: true,
-      exitCode: 0,
-      output: [
-        renderedApplyOutput,
-        gatewayServiceActivationOutput,
-        handoffWarningOutput,
-        launchOutput,
-      ].filter((line): line is string => line !== undefined).join("\n"),
-      initialDecision,
-      finalDecision: postApplyRouteDecision,
-      postApplyRouteDecision,
-      selectedActionId,
-      nextActionId,
-      limitedModeAccepted: false,
-      reviewManifest,
-      applyPlanningResult,
-      applyEndState: launchedEndState,
-      gatewayServiceActivationResult,
-    };
-  }
-
-  if (nextActionId === "accept-limited-mode" && handoffState === "degraded") {
-    const launchableEndState = launchableApplyEndState(applyEndState);
-    if (launchableEndState === undefined) {
-      throw new Error("Limited-mode launch handoff requires a verified apply end state.");
-    }
-    const launchedEndState: SetupApplyEndState = {
-      kind: "launched",
-      verification: launchableEndState.verification,
-      launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
-      acceptedDegraded: true,
-    };
-    const launchOutput = renderSetupApplyEndState(launchedEndState, options.locale);
-    write(options, `${launchOutput}\n`);
-    return {
-      completed: true,
-      exitCode: 0,
-      output: [
-        renderedApplyOutput,
-        gatewayServiceActivationOutput,
-        handoffWarningOutput,
-        launchOutput,
-      ].filter((line): line is string => line !== undefined).join("\n"),
-      initialDecision,
-      finalDecision: postApplyRouteDecision,
-      postApplyRouteDecision,
-      selectedActionId,
-      nextActionId,
-      limitedModeAccepted: true,
-      reviewManifest,
-      applyPlanningResult,
-      applyEndState: launchedEndState,
-      gatewayServiceActivationResult,
-    };
-  }
 
   const exitOutput = [
     renderedApplyOutput,
     gatewayServiceActivationOutput,
     handoffWarningOutput,
-    "Exited after setup apply without launching.",
   ].filter((line): line is string => line !== undefined).join("\n");
-  write(options, "Exited after setup apply without launching.\n");
   return {
     completed: applyEndState.kind !== "blocked",
     exitCode: applyEndState.kind === "blocked" ? 1 : 0,
@@ -899,7 +808,6 @@ async function handlePostApplyHandoff(input: {
     finalDecision: postApplyRouteDecision,
     postApplyRouteDecision,
     selectedActionId,
-    nextActionId: "exit",
     reviewManifest,
     applyPlanningResult,
     applyEndState,
@@ -1034,9 +942,10 @@ async function reviewAndApplyResolvedRoute(
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const reviewText = renderSetupReviewManifest(reviewManifest, options.locale);
-  write(options, `${reviewText}\n`);
-  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, options.locale);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
+    selectedActionId: editorAction.id,
+    reviewManifest,
+  }, options.locale);
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });

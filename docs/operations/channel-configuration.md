@@ -24,7 +24,7 @@ Every channel object supports:
   "channels": {
     "telegram": {
       "enabled": true,
-      "botTokenEnv": "ESTACODA_TELEGRAM_TOKEN",
+      "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
       "allowedUserIds": ["123456789"],
       "allowedChatIds": ["-1001234567890"],
       "groupSessionsPerUser": true,
@@ -39,6 +39,16 @@ Every channel object supports:
   }
 }
 ```
+
+Guided setup asks for:
+
+- Telegram bot API token.
+- Allowed Telegram user IDs.
+- Allowed Telegram group chat IDs.
+
+Guided setup does not ask for the bot-token env-var name. The token is written to the selected profile `.env` as `ESTACODA_TELEGRAM_BOT_TOKEN`, and the profile config uses `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. Config review and setup output must redact the raw token.
+
+Use `@BotFather` and `/newbot` to get the bot API token. Use `@userinfobot` and `/start` to get Telegram user IDs. For group chats, add the EstaCoda bot and either `@getidsbot` or `@chatIDrobot` to the group; the ID bot replies with the group chat ID, usually a long negative number.
 
 ## Discord
 

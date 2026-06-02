@@ -75,6 +75,13 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.status.newCredentialPending",
   "onboarding.review",
   "onboarding.review.validation.accepted",
+  "setupEditor.review.title",
+  "setupEditor.review.body",
+  "setupEditor.review.selectedArea",
+  "setupEditor.review.confirm",
+  "setupEditor.review.confirm.description",
+  "setupEditor.review.cancel",
+  "setupEditor.review.cancel.description",
   "onboarding.launch.startNow",
   "onboarding.launch.startNow.yes",
   "onboarding.launch.startNow.no",
@@ -237,9 +244,15 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.channels.discord",
   "setupEditor.prompt.channels.discord.description",
   "setupEditor.prompt.telegram.summary",
-  "setupEditor.prompt.telegram.botTokenEnv",
+  "setupEditor.prompt.telegram.card.title",
+  "setupEditor.prompt.telegram.botToken.heading",
+  "setupEditor.prompt.telegram.botToken.body",
   "setupEditor.prompt.telegram.botToken",
+  "setupEditor.prompt.telegram.allowedUserIds.heading",
+  "setupEditor.prompt.telegram.allowedUserIds.body",
   "setupEditor.prompt.telegram.allowedUserIds",
+  "setupEditor.prompt.telegram.allowedChatIds.heading",
+  "setupEditor.prompt.telegram.allowedChatIds.body",
   "setupEditor.prompt.telegram.allowedChatIds",
   "setupEditor.prompt.telegram.remoteControlRisk",
   "setupEditor.prompt.telegram.incomplete.body",
@@ -479,6 +492,48 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("@BotFather"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("/newbot"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("@userinfobot"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("/start"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@getidsbot"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@chatIDrobot"));
+  });
+
+  it("uses the revised Telegram setup copy without truncating Arabic labels", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.channels.telegram.description")).toBe(
+      "Configure Telegram for private and group chats"
+    );
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.card.title")).toBe("Configure Telegram");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.botToken.heading")).toBe("Connect Telegram bot");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.botToken.body")).toContain(
+      "Open Telegram and search for the official @BotFather account."
+    );
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.botToken")).toBe("Telegram bot API token:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedUserIds.heading")).toBe("Authorize Telegram users");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedUserIds")).toBe("Allowed Telegram user ID(s):");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds.heading")).toBe("Authorize Telegram group chats");
+    expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds")).toBe("Allowed Telegram group chat ID(s):");
+
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.botToken.heading")).toBe("ربط بوت Telegram");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.heading")).toBe("اعتماد مستخدمي Telegram");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds")).toBe(
+      "معرّف/معرّفات مستخدم Telegram المسموح بها:"
+    );
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.heading")).toBe("اعتماد محادثات مجموعات Telegram");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds")).toBe(
+      "معرّف/معرّفات محادثات مجموعات Telegram"
+    );
+  });
+
+  it("contains the setup editor finalize-configuration review copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.review.title")).toBe("Finalize configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.body")).toBe("Confirm selected configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.selectedArea")).toBe("Selected area: {selectedArea}");
+    expect(rawSetupCopy("en", "setupEditor.review.confirm")).toBe("Confirm");
+    expect(rawSetupCopy("en", "setupEditor.review.confirm.description")).toBe("Update your EstaCoda configuration");
+    expect(rawSetupCopy("en", "setupEditor.review.cancel")).toBe("Cancel");
+    expect(rawSetupCopy("en", "setupEditor.review.cancel.description")).toBe("Keep your existing configuration unchanged.");
   });
 
   it("describes managed local STT as the normal onboarding path", () => {
