@@ -251,7 +251,7 @@ describe("service manager", () => {
     expect(content).toContain(`Environment="ESTACODA_HOME=${stateHomeDir}"`);
     expect(content).not.toContain(`Environment="HOME=${stateHomeDir}"`);
     expect(content).toContain("Environment=\"PATH=/opt/homebrew/bin:");
-    expect(content).toContain(`WorkingDirectory="${join(tmpDir, "workspace with spaces")}"`);
+    expect(content).toContain(`WorkingDirectory=${join(tmpDir, "workspace with spaces")}`);
     expect(content).toContain('"gateway" "run" "--profile" "default"');
     expect(content).not.toContain('"gateway" "start" "--profile" "default"');
     expect(content).not.toContain("--replace");
@@ -430,7 +430,7 @@ describe("service manager", () => {
     expect(content).toContain(`"${join(tmpDir, "%%i-work", "dist", "index%%.js")}"`);
     expect(content).toContain(`Environment="PATH=${join(tmpDir, "%%h-bin")}:`);
     expect(content).toContain(join(tmpDir, "%%i-path"));
-    expect(content).toContain(`WorkingDirectory="${join(tmpDir, "%%i-work")}"`);
+    expect(content).toContain(`WorkingDirectory=${join(tmpDir, "%%i-work")}`);
   });
 
   it("rejects systemd unit values with control characters before rendering", async () => {

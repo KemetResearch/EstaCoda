@@ -496,7 +496,7 @@ function renderSystemdUnit(options: {
     `Environment="${systemdEscapeEnvAssignment("HOME", options.serviceUserHomeDir)}"`,
     `Environment="${systemdEscapeEnvAssignment("ESTACODA_HOME", options.stateHomeDir)}"`,
     `Environment="${systemdEscapeEnvAssignment("PATH", path)}"`,
-    `WorkingDirectory=${systemdEscapeArg(options.resolved.cwd)}`,
+    `WorkingDirectory=${systemdEscapeScalar(options.resolved.cwd)}`,
   ].filter((line): line is string => line !== undefined);
 
   return [
