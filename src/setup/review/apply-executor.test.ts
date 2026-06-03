@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,7 +11,8 @@ import {
   createReviewedSetupApplyExecutor,
   executeReviewedSetupApplyPlan,
 } from "./apply-executor.js";
-import { resolveProfileStateHome } from "../../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
+import * as pythonEnvManager from "../../python-env/manager.js";
 
 type ReviewValues = Record<string, string | readonly string[] | boolean | number | undefined>;
 
@@ -306,6 +307,49 @@ function channelCapabilityPlan(summaryKey: "setupModules.discord.draft" | "setup
   };
 }
 
+function voiceCapabilityPlan(values: ReviewValues, input: { readonly homeDir: string }): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-voice-bundle"],
+    operations: [{
+      id: "test-voice",
+      kind: "config-patch",
+      sourceLineIds: ["test-voice-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["voice"],
+        path: profileConfigPath(input.homeDir),
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupModules.voice.draft",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -317,6 +361,7 @@ describe("reviewed setup apply executor", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -752,6 +797,129 @@ describe("reviewed setup apply executor", () => {
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:9222",
       autoLaunch: false,
+    });
+  });
+
+  it("creates the managed Python environment before applying reviewed local STT", async () => {
+    const stateRoot = resolveGlobalStateHome({ homeDir: tempDir }).stateRoot;
+    const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: true,
+      pythonBinary: join(stateRoot, "python-env", "bin", "python"),
+    });
+    const plan = voiceCapabilityPlan({
+      sttProvider: "local",
+      sttModel: "small",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      stt?: {
+        provider?: string;
+        local?: {
+          model?: string;
+          engine?: string;
+          fasterWhisper?: { enabled?: boolean; model?: string; allowModelDownload?: boolean };
+        };
+      };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(createSpy).toHaveBeenCalledWith({ stateRoot });
+    expect(config.stt).toEqual({
+      provider: "local",
+      local: {
+        model: "small",
+        engine: "faster-whisper",
+        fasterWhisper: {
+          enabled: true,
+          model: "small",
+          allowModelDownload: true,
+        },
+      },
+    });
+  });
+
+  it("does not write local STT config when managed Python setup fails", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    const initialConfig = {
+      model: { provider: "local", id: "hermes-local" },
+      stt: {
+        provider: "openai",
+        openai: { model: "gpt-4o-mini-transcribe", apiKeyEnv: "OPENAI_API_KEY" },
+      },
+    };
+    await writeFile(profileConfigPath(tempDir), JSON.stringify(initialConfig, null, 2), "utf8");
+    vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available",
+    });
+    const plan = voiceCapabilityPlan({
+      sttProvider: "local",
+      sttModel: "base",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Local faster-whisper STT setup failed");
+    expect(result.error).toContain("ensurepip is not available");
+    expect(config).toEqual(initialConfig);
+  });
+
+  it("does not create the managed Python environment for cloud STT or TTS-only voice apply", async () => {
+    const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: true,
+      pythonBinary: "/should-not-be-used",
+    });
+    const cloudResult = await applyReviewedSetupPlanOperations(voiceCapabilityPlan({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const ttsResult = await applyReviewedSetupPlanOperations(voiceCapabilityPlan({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir }), {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(cloudResult.ok).toBe(true);
+    expect(ttsResult.ok).toBe(true);
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(config.stt).toEqual({
+      provider: "openai",
+      openai: {
+        model: "gpt-4o-mini-transcribe",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
+    expect(config.tts).toEqual({
+      provider: "openai",
+      speed: 1,
+      openai: {
+        model: "gpt-4o-mini-tts",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
     });
   });
 

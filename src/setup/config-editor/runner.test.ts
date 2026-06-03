@@ -18,9 +18,17 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import * as pythonEnvManager from "../../python-env/manager.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
+}
+
+function mockManagedPythonEnvironment(homeDir: string): void {
+  vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+    ok: true,
+    pythonBinary: join(homeDir, ".estacoda", "python-env", "bin", "python"),
+  });
 }
 
 describe("runConfigEditor", () => {
@@ -34,6 +42,7 @@ describe("runConfigEditor", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.PR8_SHELL_ONLY_KEY;
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
@@ -2203,6 +2212,7 @@ describe("runConfigEditor", () => {
   it("configures local faster-whisper STT with prompt-card model choices", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
+    mockManagedPythonEnvironment(tempDir);
     const selectCalls: Array<{
       title: string;
       body: string;
@@ -2303,6 +2313,7 @@ describe("runConfigEditor", () => {
     it(`configures local faster-whisper STT model ${model}`, async () => {
       await writeUserConfig(tempDir, localReadyConfig());
       await trustWorkspace(tempDir, workspaceRoot);
+      mockManagedPythonEnvironment(tempDir);
 
       const result = await runConfigEditor({
         homeDir: tempDir,

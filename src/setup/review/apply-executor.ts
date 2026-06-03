@@ -36,7 +36,8 @@ import {
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
+import { createManagedEnvironment } from "../../python-env/manager.js";
 import {
   registerProviderConfig,
   registerProviderModel,
@@ -48,6 +49,7 @@ import type { AuxiliaryModelTask, ProviderId } from "../../contracts/provider.js
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
+import { resolveSetupCopy } from "../setup-copy.js";
 
 export type ReviewedSetupApplyExecutorOptions = {
   readonly workspaceRoot: string;
@@ -563,13 +565,24 @@ async function applyVoiceCapability(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<void> {
   const target = configApplyTarget(operation, options);
+  const sttProvider = sttProviderValue(operation.review.values.sttProvider);
+  if (sttProvider === "local") {
+    const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
+    const envResult = await createManagedEnvironment({ stateRoot: globalPaths.stateRoot });
+    if (!envResult.ok) {
+      throw new Error([
+        resolveSetupCopy("en", "setupEditor.apply.voice.localStt.failed"),
+        envResult.reason,
+      ].join("\n"));
+    }
+  }
   await setupVoiceConfig({
     ...target,
     input: {
       ttsProvider: ttsProviderValue(operation.review.values.ttsProvider),
       ttsModel: stringValue(operation.review.values.ttsModel),
       ttsApiKeyEnv: stringValue(operation.review.values.ttsApiKeyEnv),
-      sttProvider: sttProviderValue(operation.review.values.sttProvider),
+      sttProvider,
       sttModel: stringValue(operation.review.values.sttModel),
       sttApiKeyEnv: stringValue(operation.review.values.sttApiKeyEnv),
     },
