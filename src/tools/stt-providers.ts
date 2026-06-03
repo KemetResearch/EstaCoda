@@ -436,11 +436,13 @@ export function isFasterWhisperConfig(stt: LoadedRuntimeConfig["stt"]): boolean 
 }
 
 function fasterWhisperDownloadAllowed(stt: LoadedRuntimeConfig["stt"], gateway?: boolean): boolean {
-  if (gateway === true && stt.local?.fasterWhisper?.gatewayAllowModelDownload !== true) {
-    return false;
+  const fw = stt.local?.fasterWhisper;
+  if (gateway === true) {
+    if (fw?.gatewayAllowModelDownload === true) return true;
+    if (fw?.gatewayAllowModelDownload === false) return false;
+    return fw?.allowModelDownload === true;
   }
-  return stt.local?.fasterWhisper?.allowModelDownload === true ||
-    stt.local?.fasterWhisper?.gatewayAllowModelDownload === true;
+  return fw?.allowModelDownload === true || fw?.gatewayAllowModelDownload === true;
 }
 
 export function isFasterWhisperModelCached(

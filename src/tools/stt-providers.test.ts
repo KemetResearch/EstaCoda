@@ -409,4 +409,43 @@ describe("STT risk classification", () => {
 
     expect(isGatewayFasterWhisperDownloadDenied(stt, undefined, defaultHfHome)).toBe(false);
   });
+
+  it("falls back gatewayAllowModelDownload to allowModelDownload when unspecified", () => {
+    const stt: LoadedRuntimeConfig["stt"] = {
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "faster-whisper",
+        fasterWhisper: { enabled: true, allowModelDownload: true }
+      }
+    };
+
+    expect(isGatewayFasterWhisperDownloadDenied(stt)).toBe(false);
+  });
+
+  it("allows explicit gatewayAllowModelDownload=false to override allowModelDownload=true", () => {
+    const stt: LoadedRuntimeConfig["stt"] = {
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "faster-whisper",
+        fasterWhisper: { enabled: true, allowModelDownload: true, gatewayAllowModelDownload: false }
+      }
+    };
+
+    expect(isGatewayFasterWhisperDownloadDenied(stt)).toBe(true);
+  });
+
+  it("allows explicit gatewayAllowModelDownload=true to override allowModelDownload=false", () => {
+    const stt: LoadedRuntimeConfig["stt"] = {
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "faster-whisper",
+        fasterWhisper: { enabled: true, allowModelDownload: false, gatewayAllowModelDownload: true }
+      }
+    };
+
+    expect(isGatewayFasterWhisperDownloadDenied(stt)).toBe(false);
+  });
 });
