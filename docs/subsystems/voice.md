@@ -150,13 +150,13 @@ Without `--python-binary`, setup checks `~/.estacoda/python-env`, creates or rep
 
 With `--python-binary`, setup skips managed environment check/create and stores the custom path. That Python environment is operator-owned.
 
-Runtime behavior in Phase 1:
+Runtime behavior:
 
 - Runtime resolves configured `stt.local.pythonBinary` first, otherwise the managed venv path under `~/.estacoda/python-env`.
 - Runtime sets persistent model cache env defaults under `~/.estacoda/cache/huggingface`.
-- Runtime does not create the managed environment, install packages, or probe Python.
-- Gateway first-use package install is not part of Phase 1.
-- A later `voice doctor` command may inspect/repair this path. Gateway first-use install may be allowed later only for explicitly configured local STT; it is not implemented here.
+- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment before starting the worker.
+- Managed runtime setup installs only the pinned faster-whisper package into `~/.estacoda/python-env`; it does not mutate system Python or operator-owned venvs.
+- A later `voice doctor` command may inspect/repair this path.
 
 Operational behavior:
 
@@ -310,7 +310,7 @@ Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg,
 1. Canonicalize `attachment.localPath ?? attachment.path` under allowed media/audio roots.
 2. Validate file type and size with audio input validation.
 3. Check STT readiness and `stt.enabled !== false`.
-4. Reject gateway-triggered faster-whisper first-run downloads unless explicitly allowed.
+4. Apply faster-whisper download policy before any gateway-triggered first-run model download. Gateway downloads follow `allowModelDownload` by default, and `gatewayAllowModelDownload: false` explicitly blocks them.
 
 Allowed roots are profile-local channel media, audio cache, and selected profile temp audio roots used by voice-channel receive paths.
 

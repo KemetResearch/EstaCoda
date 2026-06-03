@@ -175,17 +175,16 @@ Command-engine escape hatch:
 
 `stt.local.engine: "command"` wins. It does not use managed faster-whisper.
 
-Runtime behavior in Phase 1:
+Runtime behavior:
 
 - Runtime resolves configured `stt.local.pythonBinary` first, otherwise the managed venv Python under `~/.estacoda/python-env`.
 - Runtime sets persistent `HF_HOME` / `TRANSFORMERS_CACHE` defaults under `~/.estacoda/cache/huggingface` for faster-whisper.
-- Runtime does not create the managed venv, install packages, or repair Python.
-- Gateway first-use package install is not implemented in Phase 1.
+- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment before starting the worker.
+- Managed runtime setup installs only the pinned faster-whisper package into `~/.estacoda/python-env`; it does not mutate system Python or operator-owned venvs.
 
-Planned but not implemented in this phase:
+Future work:
 
 - `voice doctor` may inspect/repair this path later.
-- Gateway first-use install may be allowed later for explicitly configured local STT. Do not rely on it yet.
 
 The worker file is packaged at:
 
@@ -287,7 +286,7 @@ Audit events do not log full private paths. They use stable path hashes and safe
 - Do not configure deferred providers as production-ready.
 - Keep gateway allowlists tight before enabling voice commands in group or guild contexts.
 - Treat Discord voice as a remote-control surface.
-- Keep gateway faster-whisper downloads disabled unless model-fetch side effects are acceptable.
+- If gateway-triggered model downloads are not acceptable, explicitly set `stt.local.fasterWhisper.gatewayAllowModelDownload: false`.
 - Keep command-engine STT and custom Python paths as explicit operator-owned escape hatches.
 - Do not install arbitrary user packages into the managed Python environment.
 - Keep ffmpeg and custom Python dependencies pinned or managed by the operator environment.

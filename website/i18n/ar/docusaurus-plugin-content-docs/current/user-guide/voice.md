@@ -326,13 +326,13 @@ estacoda voice setup --tts-provider openai
 
 لا يغيّر إعداد STT ولا يلمس بيئة Python المُدارة.
 
-### حدود مرحلة التشغيل
+### سلوك التشغيل
 
 - يحل runtime مسار `stt.local.pythonBinary` المُعد أولاً، وإلا يستخدم مسار venv المُدار تحت `~/.estacoda/python-env`.
 - يضبط runtime قيم `HF_HOME` / `TRANSFORMERS_CACHE` دائمة تحت `~/.estacoda/cache/huggingface`.
-- لا ينشئ runtime البيئة المُدارة، ولا يثبّت الحزم، ولا يصلح Python في Phase 1.
-- تثبيت الحزم عند أول استخدام عبر البوابة ليس جزءاً من Phase 1.
-- قد يضيف أمر `voice doctor` لاحقاً فحص/إصلاح هذا المسار. وقد يُسمح لاحقاً بتثبيت أول استخدام عبر البوابة لـ STT المحلي المضبوط صراحةً، لكنه غير مُنفذ هنا.
+- عندما يكون STT المحلي عبر faster-whisper مضبوطاً دون `pythonBinary` مخصص، ينشئ runtime بيئة Python المُدارة أو يصلحها قبل بدء العامل.
+- يثبّت إعداد runtime المُدار حزمة faster-whisper المثبّتة فقط داخل `~/.estacoda/python-env`؛ ولا يغيّر system Python أو venvs المملوكة للمشغل.
+- قد يضيف أمر `voice doctor` لاحقاً فحص/إصلاح هذا المسار.
 
 سلوك تشغيلي:
 
@@ -393,7 +393,7 @@ workers/faster-whisper/faster-whisper-worker.py
 1. توحيد `attachment.localPath ?? attachment.path` ضمن جذور الوسائط/الصوت المسموح بها.
 2. التحقق من نوع الملف والحجم باستخدام التحقق من صوت الإدخال.
 3. فحص جاهزية STT و `stt.enabled !== false`.
-4. رفض تنزيلات faster-whisper الأولى المُطلقة عبر البوابة ما لم يُسمح صراحةً.
+4. تطبيق سياسة تنزيل faster-whisper قبل أي تنزيل نموذج أولي تُطلقه البوابة. تتبع تنزيلات البوابة `allowModelDownload` افتراضياً، ويمنعها `gatewayAllowModelDownload: false` صراحةً.
 
 الجذور المسموح بها هي وسائط القنوات المحلية للملف الشخصي، وذاكرة تخزين الصوت المؤقتة، وجذور temp audio المستخدمة في مسارات استقبال قنوات الصوت.
 

@@ -193,7 +193,7 @@ Secret prompts are outside this chrome path. Pasted secret content must not appe
 
 ### Voice Security Boundaries
 
-Voice input is a remote-control surface when it arrives through a gateway. Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg normalization, hosted STT, downloads, or temp writes. It canonicalizes `attachment.localPath ?? attachment.path` under profile-local allowed media/audio roots, validates file type and size, checks STT readiness, and denies gateway-triggered faster-whisper first-run downloads unless explicitly allowed.
+Voice input is a remote-control surface when it arrives through a gateway. Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg normalization, hosted STT, downloads, or temp writes. It canonicalizes `attachment.localPath ?? attachment.path` under profile-local allowed media/audio roots, validates file type and size, checks STT readiness, and applies faster-whisper download policy before any gateway-triggered first-run model download. Gateway downloads follow `allowModelDownload` by default, and `gatewayAllowModelDownload: false` explicitly blocks them.
 
 Voice STT preprocess audit events are emitted through `gateway:stt:preprocess` and written to `~/.estacoda/profiles/<profile-id>/gateway/logs/voice-stt-preprocess.jsonl`. Deny/fail warnings use `[voice-stt-preprocess]`. Audit records use path hashes and safe attachment metadata instead of full private paths.
 
