@@ -26,6 +26,7 @@ import {
   buildRuntimeCacheState,
   buildGatewayCronRuntimeOptions,
   createVoiceTranscriptionAudit,
+  gatewayFasterWhisperWorkerConfigKey,
   type SupervisorInternalState,
 } from "./supervisor.js";
 import { readGatewayPid } from "./pid-file.js";
@@ -90,6 +91,67 @@ describe("gateway STT preprocess audit", () => {
     expect(jsonl).toContain("\"pathHash\":\"abc123\"");
     expect(jsonl).not.toContain(homeDir);
     expect(warnings[0]).toContain("[voice-stt-preprocess]");
+  });
+});
+
+describe("gateway faster-whisper worker config key", () => {
+  function stt(local: Record<string, unknown>) {
+    return {
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "faster-whisper",
+        fasterWhisper: { enabled: true },
+        ...local
+      }
+    } as any;
+  }
+
+  it("tracks construction-time worker options", () => {
+    const base = stt({
+      pythonBinary: "/old/python",
+      fasterWhisper: { enabled: true, hfHome: "/hf", queueDepth: 1, timeoutMs: 1000 }
+    });
+
+    expect(gatewayFasterWhisperWorkerConfigKey(base, "/default-hf")).not.toBe(
+      gatewayFasterWhisperWorkerConfigKey(stt({
+        pythonBinary: "/new/python",
+        fasterWhisper: { enabled: true, hfHome: "/hf", queueDepth: 1, timeoutMs: 1000 }
+      }), "/default-hf")
+    );
+    expect(gatewayFasterWhisperWorkerConfigKey(base, "/default-hf")).not.toBe(
+      gatewayFasterWhisperWorkerConfigKey(stt({
+        pythonBinary: "/old/python",
+        fasterWhisper: { enabled: true, hfHome: "/other-hf", queueDepth: 1, timeoutMs: 1000 }
+      }), "/default-hf")
+    );
+    expect(gatewayFasterWhisperWorkerConfigKey(base, "/default-hf")).not.toBe(
+      gatewayFasterWhisperWorkerConfigKey(stt({
+        pythonBinary: "/old/python",
+        fasterWhisper: { enabled: true, hfHome: "/hf", queueDepth: 2, timeoutMs: 1000 }
+      }), "/default-hf")
+    );
+    expect(gatewayFasterWhisperWorkerConfigKey(base, "/default-hf")).not.toBe(
+      gatewayFasterWhisperWorkerConfigKey(stt({
+        pythonBinary: "/old/python",
+        fasterWhisper: { enabled: true, hfHome: "/hf", queueDepth: 1, timeoutMs: 2000 }
+      }), "/default-hf")
+    );
+  });
+
+  it("does not churn for request-time transcription options", () => {
+    const base = stt({
+      model: "base",
+      fasterWhisper: { enabled: true, model: "base", device: "auto", computeType: "default" }
+    });
+    const changedRequestOptions = stt({
+      model: "small",
+      fasterWhisper: { enabled: true, model: "small", device: "cpu", computeType: "int8" }
+    });
+
+    expect(gatewayFasterWhisperWorkerConfigKey(base, "/default-hf")).toBe(
+      gatewayFasterWhisperWorkerConfigKey(changedRequestOptions, "/default-hf")
+    );
   });
 });
 

@@ -236,6 +236,7 @@ export type SupervisorInternalState = {
   signalExit?: Promise<void>;
   hookRegistry?: HookRegistry;
   gatewayLocalWhisper?: ManagedFasterWhisperWorker;
+  gatewayLocalWhisperConfigKey?: string;
 };
 
 function logInfo(message: string): void {
@@ -285,6 +286,19 @@ export function createVoiceTranscriptionAudit(input: {
       input.logWarning?.(`[voice-stt-preprocess] ${event.outcome}: ${event.reason ?? "unknown"} attachment=${event.attachment.id} pathHash=${event.attachment.pathHash ?? "none"}`);
     }
   };
+}
+
+export function gatewayFasterWhisperWorkerConfigKey(
+  stt: LoadedRuntimeConfig["stt"],
+  fasterWhisperDefaultHfHome: string
+): string {
+  return JSON.stringify({
+    engine: stt.local?.engine,
+    pythonBinary: stt.local?.pythonBinary,
+    hfHome: stt.local?.fasterWhisper?.hfHome ?? fasterWhisperDefaultHfHome,
+    queueDepth: stt.local?.fasterWhisper?.queueDepth,
+    timeoutMs: stt.local?.fasterWhisper?.timeoutMs
+  });
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -378,6 +392,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   if (state.gatewayLocalWhisper !== undefined) {
     try { await state.gatewayLocalWhisper.dispose(); } catch { /* ignore */ }
     state.gatewayLocalWhisper = undefined;
+    state.gatewayLocalWhisperConfigKey = undefined;
   }
 
   // 5. Close session DB if opened
@@ -1022,15 +1037,26 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
     const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
-    const gatewayLocalWhisperFor = (stt: LoadedRuntimeConfig["stt"]) => {
+    const gatewayLocalWhisperFor = async (stt: LoadedRuntimeConfig["stt"]) => {
       if (!isFasterWhisperConfig(stt)) {
+        if (state.gatewayLocalWhisper !== undefined) {
+          await state.gatewayLocalWhisper.dispose();
+          state.gatewayLocalWhisper = undefined;
+          state.gatewayLocalWhisperConfigKey = undefined;
+        }
         return undefined;
       }
-      state.gatewayLocalWhisper ??= new ManagedFasterWhisperWorker({
-        stateRoot: globalStateRoot,
-        stt,
-        defaultHfHome: fasterWhisperDefaultHfHome
-      });
+
+      const configKey = gatewayFasterWhisperWorkerConfigKey(stt, fasterWhisperDefaultHfHome);
+      if (state.gatewayLocalWhisper === undefined || state.gatewayLocalWhisperConfigKey !== configKey) {
+        await state.gatewayLocalWhisper?.dispose();
+        state.gatewayLocalWhisper = new ManagedFasterWhisperWorker({
+          stateRoot: globalStateRoot,
+          stt,
+          defaultHfHome: fasterWhisperDefaultHfHome
+        });
+        state.gatewayLocalWhisperConfigKey = configKey;
+      }
       return state.gatewayLocalWhisper;
     };
 
@@ -1051,7 +1077,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               fasterWhisperDefaultHfHome,
-              localWhisper: gatewayLocalWhisperFor(latestConfig.stt),
+              localWhisper: await gatewayLocalWhisperFor(latestConfig.stt),
               voiceStateManager,
               audit: voiceAudit
             });
@@ -1127,7 +1153,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               fasterWhisperDefaultHfHome,
-              localWhisper: gatewayLocalWhisperFor(latestConfig.stt),
+              localWhisper: await gatewayLocalWhisperFor(latestConfig.stt),
               voiceStateManager,
               audit: voiceAudit
             });
