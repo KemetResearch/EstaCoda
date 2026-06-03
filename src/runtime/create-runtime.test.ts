@@ -2975,7 +2975,7 @@ describe("createRuntime faster-whisper runtime wiring", () => {
       });
       expect(fasterWhisperMockState.constructedOptions[0].pythonBinary).toContain(join(stateRoot, "python-env"));
       expect(fasterWhisperMockState.constructedOptions[0].env?.HF_HOME).not.toContain("python-env");
-      expect(createSpy).toHaveBeenCalledWith({ stateRoot });
+      expect(createSpy).not.toHaveBeenCalled();
       expect(checkSpy).not.toHaveBeenCalled();
     } finally {
       createSpy.mockRestore();
@@ -2988,7 +2988,7 @@ describe("createRuntime faster-whisper runtime wiring", () => {
     }
   });
 
-  it("fails fast when managed Python environment creation fails", async () => {
+  it("does not fail runtime startup when managed Python environment creation fails", async () => {
     const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
     delete process.env.TRANSFORMERS_CACHE;
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
@@ -2999,12 +2999,17 @@ describe("createRuntime faster-whisper runtime wiring", () => {
     });
 
     try {
-      await expect(createRuntime({
+      const runtime = await createRuntime({
         ...options,
         homeDir,
         stt: fasterWhisperStt()
-      })).rejects.toThrow("Failed to create managed Python environment for faster-whisper: python3 not found");
-      expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
+      });
+      await runtime.dispose();
+
+      const stateRoot = join(homeDir, ".estacoda");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
+      expect(fasterWhisperMockState.constructedOptions[0].pythonBinary).toBe(expectedManagedPython(stateRoot));
     } finally {
       createSpy.mockRestore();
       if (originalTransformersCache === undefined) {

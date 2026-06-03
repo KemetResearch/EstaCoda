@@ -68,7 +68,7 @@ import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerati
 import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
 import { isFasterWhisperConfig } from "../tools/stt-providers.js";
-import { createManagedEnvironment, resolvePythonBinary } from "../python-env/manager.js";
+import { resolvePythonBinary } from "../python-env/manager.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
@@ -463,12 +463,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const audioCacheRoot = profilePaths.audioCachePath;
   const imageCacheRoot = profilePaths.imageCachePath;
   const persistentHfHome = options.stt?.local?.fasterWhisper?.hfHome ?? join(globalPaths.stateRoot, "cache", "huggingface");
-  if (options.stt !== undefined && isFasterWhisperConfig(options.stt) && options.localWhisper === undefined && !options.stt.local?.pythonBinary) {
-    const envResult = await createManagedEnvironment({ stateRoot: globalPaths.stateRoot });
-    if (!envResult.ok) {
-      throw new Error(`Failed to create managed Python environment for faster-whisper: ${envResult.reason}`);
-    }
-  }
   const localWhisper = options.localWhisper ?? (options.stt !== undefined && isFasterWhisperConfig(options.stt)
     ? new FasterWhisperWorkerClient({
         pythonBinary: resolvePythonBinary({
