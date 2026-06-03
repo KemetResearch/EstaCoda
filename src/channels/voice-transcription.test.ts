@@ -77,7 +77,7 @@ describe("injectVoiceTranscripts", () => {
         { id: "voice-1", kind: "audio", status: "ready", localPath: audio, originalName: "voice.ogg" }
       ]
     }), {
-      stt: { provider: "local", enabled: true, local: { command: "printf transcript" } },
+      stt: { provider: "local", enabled: true, local: { command: "printf transcript", normalizeWithFfmpeg: false } },
       allowedRoots: [roots.mediaRoot, roots.audioRoot]
     });
 
@@ -116,7 +116,7 @@ describe("injectVoiceTranscripts", () => {
     expect(result.metadata?.voiceTranscription).toEqual({ injected: true, count: 1 });
   });
 
-  it("denies gateway faster-whisper first-run downloads before worker startup", async () => {
+  it("denies gateway faster-whisper downloads when download is not allowed", async () => {
     const roots = await createRoots();
     const audio = join(roots.mediaRoot, "voice.ogg");
     await writeFile(audio, "audio");
@@ -145,6 +145,41 @@ describe("injectVoiceTranscripts", () => {
         provider: "local",
         attachment: expect.objectContaining({ id: "voice-1", pathHash: expect.any(String) })
       })
+    ]);
+    expect(JSON.stringify(events)).not.toContain(audio);
+  });
+
+  it("allows gateway faster-whisper downloads when allowModelDownload is true", async () => {
+    const roots = await createRoots();
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+    const transcribe = vi.fn(async () => ({ ok: true, text: "downloaded transcript", model: "base" }));
+    const events: unknown[] = [];
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio, bytes: 5 }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: {
+          engine: "faster-whisper",
+          fasterWhisper: { enabled: true, modelCached: false, allowModelDownload: true }
+        }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      localWhisper: { transcribe } as any,
+      audit: (event) => {
+        events.push(event);
+      }
+    });
+
+    expect(result.text).toContain("[Voice message transcript]\ndownloaded transcript");
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: "allow", provider: "local" })
     ]);
     expect(JSON.stringify(events)).not.toContain(audio);
   });
@@ -209,7 +244,7 @@ describe("injectVoiceTranscripts", () => {
         { id: "voice-1", kind: "voice", status: "ready", localPath: audioOne }
       ]
     }), {
-      stt: { provider: "local", enabled: true, local: { command: "printf 'Please summarize this deployment plan.'" } },
+      stt: { provider: "local", enabled: true, local: { command: "printf 'Please summarize this deployment plan.'", normalizeWithFfmpeg: false } },
       allowedRoots: [roots.mediaRoot, roots.audioRoot],
       voiceStateManager
     });
@@ -219,7 +254,7 @@ describe("injectVoiceTranscripts", () => {
         { id: "voice-2", kind: "voice", status: "ready", localPath: audioTwo }
       ]
     }), {
-      stt: { provider: "local", enabled: true, local: { command: "printf 'please summarize this deployment plan'" } },
+      stt: { provider: "local", enabled: true, local: { command: "printf 'please summarize this deployment plan'", normalizeWithFfmpeg: false } },
       allowedRoots: [roots.mediaRoot, roots.audioRoot],
       voiceStateManager
     });
