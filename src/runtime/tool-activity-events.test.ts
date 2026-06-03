@@ -304,7 +304,7 @@ describe("runtime tool activity events", () => {
     expect(events).toContainEqual(expect.objectContaining({
       kind: "tool-start",
       tool: "image.generate",
-      targetSummary: undefined,
+      targetSummary: "draw a square",
       activityId: expect.stringMatching(/^native-image-/),
     }));
     expect(events).toContainEqual(expect.objectContaining({

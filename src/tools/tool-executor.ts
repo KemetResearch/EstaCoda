@@ -462,16 +462,18 @@ export function summarizeSecurityTarget(toolName: string, input: Record<string, 
     return truncateSecuritySummary(input.command);
   }
 
-  if (typeof input.path === "string") {
-    return truncateSecuritySummary(input.path);
+  for (const key of ["path", "url", "file_path", "pattern", "query", "prompt", "goal"] as const) {
+    const summary = summarizeInputString(input[key]);
+    if (summary !== undefined) {
+      return summary;
+    }
   }
 
-  if (typeof input.url === "string") {
-    return truncateSecuritySummary(input.url);
-  }
-
-  if (typeof input.file_path === "string") {
-    return truncateSecuritySummary(input.file_path);
+  for (const key of ["content", "text", "code", "script"] as const) {
+    const summary = summarizeInputString(input[key], { firstLineOnly: true });
+    if (summary !== undefined) {
+      return summary;
+    }
   }
 
   return undefined;
@@ -673,6 +675,15 @@ function containsUrlUserInfoCredentials(value: string): boolean {
     }
   }
   return false;
+}
+
+function summarizeInputString(value: unknown, options?: { firstLineOnly?: boolean }): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const selected = options?.firstLineOnly === true ? value.split(/\r?\n/u)[0] ?? "" : value;
+  const trimmed = selected.trim();
+  return trimmed.length === 0 ? undefined : truncateSecuritySummary(trimmed);
 }
 
 function truncateSecuritySummary(value: string): string {

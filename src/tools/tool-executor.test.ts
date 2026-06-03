@@ -5,7 +5,7 @@ import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { ToolRegistry } from "./tool-registry.js";
-import { ToolExecutor } from "./tool-executor.js";
+import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -154,6 +154,25 @@ function expectNoRawSecrets(serialized: string, secrets: string[]): void {
     expect(serialized).not.toContain(secret);
   }
 }
+
+describe("summarizeSecurityTarget", () => {
+  it("summarizes primary target fields for channel tool progress", () => {
+    expect(summarizeSecurityTarget("file.search", { pattern: "import.*python-env|from.*python-env" })).toBe("import.*python-env|from.*python-env");
+    expect(summarizeSecurityTarget("web.search", { query: "faster-whisper gateway download" })).toBe("faster-whisper gateway download");
+    expect(summarizeSecurityTarget("image.generate", { prompt: "draw a square" })).toBe("draw a square");
+    expect(summarizeSecurityTarget("delegate_task", { goal: "audit channel progress rendering" })).toBe("audit channel progress rendering");
+  });
+
+  it("uses the first line for large text-like inputs", () => {
+    expect(summarizeSecurityTarget("execute_code", { code: "import os\nprint(os.getcwd())" })).toBe("import os");
+    expect(summarizeSecurityTarget("file.write", { content: "first line\nsecond line" })).toBe("first line");
+  });
+
+  it("preserves command and path precedence", () => {
+    expect(summarizeSecurityTarget("terminal.run", { command: "pnpm test", path: "src/app.ts" })).toBe("pnpm test");
+    expect(summarizeSecurityTarget("file.read", { path: "src/app.ts", query: "ignored" })).toBe("src/app.ts");
+  });
+});
 
 describe("ToolExecutor exception containment", () => {
   it("returns structured error when tool throws an uncaught exception", async () => {

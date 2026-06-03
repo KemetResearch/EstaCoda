@@ -23,7 +23,7 @@ export type ActivityLabelKey =
 
 const ACTIVITY_LABELS: Record<ActivityLabelLocale, Record<ActivityLabelKey, string>> = {
   en: {
-    thinking: "🌀 Thinking",
+    thinking: "◉ Thinking",
     inspect: "🕵️ Inspecting",
     read_files: "🗂️ Reading files",
     write_files: "✍️ Writing files",
@@ -32,7 +32,7 @@ const ACTIVITY_LABELS: Record<ActivityLabelLocale, Record<ActivityLabelKey, stri
     run_checks: "👾 Running checks",
     install_build: "📦 Installing/building",
     load_skill: "⚙️ Loading skill",
-    route_task: "🧬 Routing task",
+    route_task: "✦ Routing task",
     process_attachment: "📎 Processing attachment",
     inspect_media: "🖼️ Inspecting media",
     web_action: "🌐 Web action",
@@ -42,7 +42,7 @@ const ACTIVITY_LABELS: Record<ActivityLabelLocale, Record<ActivityLabelKey, stri
     failed: "❌ Failed"
   },
   ar: {
-    thinking: "🌀 جارٍ التفكير",
+    thinking: "◉ جارٍ التفكير",
     inspect: "🕵️ جارٍ الفحص",
     read_files: "🗂️ قراءة الملفات",
     write_files: "✍️ كتابة الملفات",
@@ -51,7 +51,7 @@ const ACTIVITY_LABELS: Record<ActivityLabelLocale, Record<ActivityLabelKey, stri
     run_checks: "👾 تشغيل الفحوصات",
     install_build: "📦 تثبيت/بناء",
     load_skill: "⚙️ تحميل مهارة",
-    route_task: "🧬 توجيه المهمة",
+    route_task: "✦ توجيه المهمة",
     process_attachment: "📎 معالجة مرفق",
     inspect_media: "🖼️ فحص الوسائط",
     web_action: "🌐 إجراء ويب",
@@ -75,8 +75,12 @@ export function renderChannelProgressLabel(
       return activityLabel(locale, "thinking");
     case "skill":
       return `${activityLabel(locale, "load_skill")}${event.name.length > 0 ? ` · ${event.name}` : ""}`;
-    case "tool-start":
-      return activityLabel(locale, activityKeyForTool(event.tool));
+    case "tool-start": {
+      const summary = event.targetSummary?.trim();
+      return summary === undefined || summary.length === 0
+        ? `${toolEmoji(event.tool)} ${event.tool}`
+        : `${toolEmoji(event.tool)} ${event.tool}: "${summary}"`;
+    }
     case "provider-attempt":
       return activityLabel(locale, "route_task");
     case "agent-final":
@@ -85,6 +89,112 @@ export function renderChannelProgressLabel(
     default:
       return "";
   }
+}
+
+export function toolEmoji(tool: string): string {
+  return CHANNEL_TOOL_EMOJI[tool] ?? fallbackToolEmoji(tool);
+}
+
+const CHANNEL_TOOL_EMOJI: Record<string, string> = {
+  "workflow.plan": "🜁",
+  "trajectory.record": "🜃",
+  "python.probe": "𓆙",
+  "document.probe": "📄",
+  "web.search": "🔎",
+  "web.extract": "🌐",
+  "web.crawl": "🕷️",
+  "browser.status": "🧿",
+  "browser.snapshot": "📸",
+  "browser.click": "🖱️",
+  "browser.type": "⌨️",
+  "browser.scroll": "📜",
+  "browser.press": "⌨️",
+  "browser.back": "↩️",
+  "browser.get_images": "🖼️",
+  "browser.console": "🖥️",
+  "browser.cdp": "🔌",
+  "browser.screenshot": "📸",
+  "browser.vision": "👁️",
+  "browser.dialog": "💬",
+  "browser.navigate": "🧭",
+  "file.read": "📖",
+  "file.write": "✍️",
+  "file.replace": "🔧",
+  "file.search": "🔎",
+  "terminal.run": "🖥️",
+  "media.probe-ffmpeg": "🎬",
+  "media.inspect": "🖼️",
+  "media.extract-frame": "🎞️",
+  "artifact.record": "◆",
+  "voice.speak": "🔊",
+  "voice.transcribe": "🎙️",
+  "image.generate": "🎨",
+  "vision.analyze": "👁️",
+  "process.start": "▶️",
+  "process.list": "📋",
+  "process.logs": "📜",
+  "process.stop": "⏹️",
+  "workspace.trust.status": "🔐",
+  "workspace.trust.grant": "✅",
+  "workspace.trust.revoke": "❌",
+  "config.provider.status": "⚙️",
+  "config.security.status": "🔐",
+  "config.compression.status": "🗜️",
+  "config.security.setup": "🔐",
+  "config.web.setup": "🌐",
+  "config.browser.setup": "🧭",
+  "config.mcp.status": "🔌",
+  "config.mcp.setup": "🔌",
+  "config.telegram.setup": "💬",
+  "config.telegram.status": "💬",
+  "config.image.status": "🎨",
+  "config.provider.setup": "⚙️",
+  "config.image.setup": "🎨",
+  cronjob: "◷",
+  "memory.curate": "🜂",
+  "memory.file_compact": "🗜️",
+  "memory.file_compaction_restore": "↩️",
+  "skill.list": "📜",
+  "skill.view": "☥",
+  "skill.inspect": "𓂀",
+  "skill.eval": "⚖️",
+  "skill.usage": "📈",
+  "skill.observe": "𓂀",
+  "skill.propose_patch": "🜏",
+  "skill.list_proposals": "📋",
+  "skill.review_proposals": "⚖️",
+  "skill.review_proposal": "⚖️",
+  "skill.approve_patch": "✅",
+  "skill.reject_patch": "❌",
+  "skill.promote_patch": "⬆️",
+  "skill.create": "✦",
+  "skill.patch": "🜏",
+  "skill.edit": "✍️",
+  "skill.delete": "🗑️",
+  "skill.rollback": "↩️",
+  "skill.reset": "🔄",
+  "skill.write_file": "✍️",
+  "skill.remove_file": "🗑️",
+  "skill.import": "📥",
+  "skill.export": "📤",
+  "knowledge.memory.inspect": "𓂀",
+  "knowledge.memory.deactivate": "⊘",
+  "knowledge.code.query": "𓂀",
+  delegate_task: "⚔️",
+  execute_code: "𓆙"
+};
+
+function fallbackToolEmoji(tool: string): string {
+  if (tool.startsWith("browser.") || tool.includes("browser")) return "🧿";
+  if (tool.startsWith("web.") || tool.includes("web")) return "🌐";
+  if (tool.startsWith("file.")) return "📄";
+  if (tool.startsWith("terminal.")) return "🖥️";
+  if (tool.startsWith("process.")) return "▶️";
+  if (tool.startsWith("skill.")) return "☥";
+  if (tool.startsWith("memory.")) return "🜂";
+  if (tool.startsWith("knowledge.")) return "𓂀";
+  if (tool.startsWith("config.")) return "⚙️";
+  return "⚙️";
 }
 
 export function activityKeyForTool(tool: string): ActivityLabelKey {
