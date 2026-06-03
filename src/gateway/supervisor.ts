@@ -45,6 +45,8 @@ import {
   deriveWhatsAppIdentityHash,
 } from "../channels/adapter-identity.js";
 import { injectVoiceTranscripts, type VoiceTranscriptionAuditEvent } from "../channels/voice-transcription.js";
+import { ManagedFasterWhisperWorker } from "../python-env/managed-faster-whisper-worker.js";
+import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { acquireGatewayLock, releaseGatewayLock } from "./gateway-lock.js";
 import { writeGatewayPid, removeGatewayPid } from "./pid-file.js";
 import { writeGatewayState, removeGatewayState } from "./supervisor-state.js";
@@ -233,6 +235,7 @@ export type SupervisorInternalState = {
   drainCancelled: boolean;
   signalExit?: Promise<void>;
   hookRegistry?: HookRegistry;
+  gatewayLocalWhisper?: ManagedFasterWhisperWorker;
 };
 
 function logInfo(message: string): void {
@@ -369,6 +372,12 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   if (state.runtimeCache !== undefined) {
     try { await state.runtimeCache.disposeAll(); } catch { /* ignore */ }
     state.runtimeCache = undefined;
+  }
+
+  // 4a. Dispose gateway-owned voice preprocessing worker
+  if (state.gatewayLocalWhisper !== undefined) {
+    try { await state.gatewayLocalWhisper.dispose(); } catch { /* ignore */ }
+    state.gatewayLocalWhisper = undefined;
   }
 
   // 5. Close session DB if opened
@@ -1013,6 +1022,17 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
     const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
+    const gatewayLocalWhisperFor = (stt: LoadedRuntimeConfig["stt"]) => {
+      if (!isFasterWhisperConfig(stt)) {
+        return undefined;
+      }
+      state.gatewayLocalWhisper ??= new ManagedFasterWhisperWorker({
+        stateRoot: globalStateRoot,
+        stt,
+        defaultHfHome: fasterWhisperDefaultHfHome
+      });
+      return state.gatewayLocalWhisper;
+    };
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
@@ -1031,6 +1051,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               fasterWhisperDefaultHfHome,
+              localWhisper: gatewayLocalWhisperFor(latestConfig.stt),
               voiceStateManager,
               audit: voiceAudit
             });
@@ -1106,6 +1127,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
               fasterWhisperDefaultHfHome,
+              localWhisper: gatewayLocalWhisperFor(latestConfig.stt),
               voiceStateManager,
               audit: voiceAudit
             });

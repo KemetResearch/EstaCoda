@@ -2,6 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+
+const pythonEnvMockState = vi.hoisted(() => ({
+  createManagedEnvironment: vi.fn()
+}));
+
+vi.mock("../python-env/manager.js", async () => {
+  const actual = await vi.importActual<typeof import("../python-env/manager.js")>("../python-env/manager.js");
+  return {
+    ...actual,
+    createManagedEnvironment: pythonEnvMockState.createManagedEnvironment
+  };
+});
+
 import {
   runGatewaySupervisor,
   runPrune,
@@ -209,6 +222,7 @@ describe("runGatewaySupervisor", () => {
   let profilePaths: ProfileStatePaths;
 
   beforeEach(async () => {
+    pythonEnvMockState.createManagedEnvironment.mockReset();
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
     profilePaths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
@@ -1166,6 +1180,74 @@ describe("runGatewaySupervisor", () => {
 
     expect(processed.text).toContain("[Voice message transcript]\ntranscript");
     expect(processed.attachments).toEqual([]);
+  });
+
+  it("starts when managed faster-whisper setup would fail and reports voice transcript unavailable on preprocessing", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: {
+          engine: "faster-whisper",
+          model: "base",
+          fasterWhisper: { enabled: true, model: "base", allowModelDownload: true }
+        }
+      }
+    }));
+    pythonEnvMockState.createManagedEnvironment.mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available; install python3.13-venv"
+    });
+    let capturedGatewayOptions: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          capturedGatewayOptions = input;
+          return { start: async () => {}, stop: async () => {}, hasPendingWork: () => false } as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(pythonEnvMockState.createManagedEnvironment).not.toHaveBeenCalled();
+
+    const audioPath = join(profilePaths.channelMediaPath, "voice.wav");
+    await mkdir(dirname(audioPath), { recursive: true });
+    await writeFile(audioPath, Buffer.from("RIFF....WAVEfmt data"));
+
+    const processed = await capturedGatewayOptions.preprocessMessage({
+      id: "telegram-voice-1",
+      channel: "telegram",
+      sessionKey: { platform: "telegram", chatId: "chat-1", userId: "user-1" },
+      text: "",
+      sender: { id: "user-1" },
+      receivedAt: "2026-01-01T00:00:00.000Z",
+      attachments: [{
+        id: "voice-1",
+        kind: "voice",
+        status: "ready",
+        localPath: audioPath,
+        mimeType: "audio/wav",
+        bytes: 20,
+      }]
+    });
+
+    expect(pythonEnvMockState.createManagedEnvironment).toHaveBeenCalledTimes(1);
+    expect(processed.text).toContain("[Voice transcript unavailable for voice-1]");
+    expect(processed.text).toContain("Local faster-whisper STT is unavailable");
+    expect(processed.text).toContain("ensurepip is not available");
+    expect(processed.text).toContain("EstaCoda can still run");
+    expect(processed.attachments).toEqual([
+      expect.objectContaining({ id: "voice-1" })
+    ]);
   });
 });
 
