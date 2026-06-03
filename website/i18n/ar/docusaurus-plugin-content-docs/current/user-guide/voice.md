@@ -269,7 +269,7 @@ Auto-TTS يتخطى:
         "computeType": "default",
         "hfHome": "/optional/model-cache",
         "allowModelDownload": true,
-        "gatewayAllowModelDownload": false,
+        "gatewayAllowModelDownload": true,
         "queueDepth": 1,
         "timeoutMs": 300000
       }
@@ -345,7 +345,8 @@ estacoda voice setup --tts-provider openai
 - المهلة الافتراضية 300 ثانية.
 - عمق الطابور الافتراضي 1 ما لم يُعدل.
 - تجاوز الطابور يفشل سريعًا.
-- ترفض البوابة تنزيلات النموذج الأولى افتراضيًا قبل بدء العامل. اضبط `gatewayAllowModelDownload: true` فقط عندما يكون هذا التأثير الجانبي مقبولًا.
+- تتبع تنزيلات النموذج الأولى عبر البوابة `allowModelDownload` افتراضيًا. مع القيمة الافتراضية `allowModelDownload: true`، قد تُنزّل أول رسالة صوتية عبر البوابة ملفات النموذج المضبوط.
+- اضبط `gatewayAllowModelDownload: false` عندما يجب أن تستخدم رسائل البوابة الصوتية النماذج المخزّنة مسبقًا فقط.
 - يسمح faster-whisper المحلي غير المُطلق من البوابة بتنزيل النماذج افتراضياً.
 - يُمرَّر `hfHome` إلى العامل عند ضبطه. وإلا تضبط EstaCoda `HF_HOME` افتراضياً إلى `~/.estacoda/cache/huggingface` وتحافظ على `TRANSFORMERS_CACHE` الموجود إذا ضبطته بيئة العملية مسبقاً.
 

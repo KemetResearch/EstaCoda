@@ -392,6 +392,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       cliVoice: {
         recorder,
         envOptions: {
+          env: {},
           platform: "darwin",
           commandExists: async (command) => command === "sox"
         }
@@ -454,6 +455,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       cliVoice: {
         recorder,
         envOptions: {
+          env: {},
           platform: "darwin",
           commandExists: async (command) => command === "sox"
         }

@@ -1473,6 +1473,9 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
   const provider = isSttProvider(value?.provider) ? value.provider : "local";
   const fasterWhisper = value?.local?.fasterWhisper ?? value?.local?.faster_whisper;
   const engine = value?.local?.engine ?? "faster-whisper";
+  const allowModelDownload = fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? true;
+  const gatewayAllowModelDownload =
+    fasterWhisper?.gatewayAllowModelDownload ?? fasterWhisper?.gateway_allow_model_download ?? allowModelDownload;
   return {
     ...value,
     provider,
@@ -1490,8 +1493,8 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
         device: fasterWhisper?.device ?? "auto",
         computeType: fasterWhisper?.computeType ?? fasterWhisper?.compute_type ?? "default",
         hfHome: fasterWhisper?.hfHome ?? fasterWhisper?.hf_home,
-        allowModelDownload: fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? true,
-        gatewayAllowModelDownload: fasterWhisper?.gatewayAllowModelDownload ?? fasterWhisper?.gateway_allow_model_download ?? false,
+        allowModelDownload,
+        gatewayAllowModelDownload,
         queueDepth: normalizeOptionalPositiveInteger(fasterWhisper?.queueDepth ?? fasterWhisper?.queue_depth) ?? undefined,
         timeoutMs: normalizeOptionalPositiveInteger(fasterWhisper?.timeoutMs ?? fasterWhisper?.timeout_ms) ?? undefined,
         modelCached: fasterWhisper?.modelCached ?? fasterWhisper?.model_cached

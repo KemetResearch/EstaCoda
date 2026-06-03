@@ -113,7 +113,7 @@ estacoda voice setup --stt-provider local --python-binary /path/to/python
 
 **العرض:** يبلغ نسخ الصوت في البوابة أن تنزيل نموذج faster-whisper غير مسموح.
 
-**السبب المحتمل:** يسمح faster-whisper المحلي بتنزيل النماذج للاستخدام المحلي العادي افتراضياً، لكن تنزيلات النموذج المُطلقة عبر البوابة معطلة افتراضياً.
+**السبب المحتمل:** عُطّلت تنزيلات النموذج عبر البوابة صراحةً باستخدام `stt.local.fasterWhisper.gatewayAllowModelDownload: false`، أو عُطّلت كل تنزيلات نموذج faster-whisper باستخدام `allowModelDownload: false`.
 
 **الفحص:**
 
@@ -124,7 +124,7 @@ ls -la ~/.estacoda/cache/huggingface
 
 **الإصلاح:**
 
-خزّن النموذج مسبقاً أثناء الإعداد/الاستخدام المحلي، أو اضبط `stt.local.fasterWhisper.gatewayAllowModelDownload: true` صراحةً فقط عندما تكون تنزيلات النماذج عبر البوابة مقبولة.
+اسمح بتنزيلات النموذج أو خزّن النموذج مسبقاً أثناء الإعداد/الاستخدام المحلي. إذا أردت السماح للتنزيل في الاستخدام المحلي/CLI مع إلزام رسائل البوابة الصوتية باستخدام نموذج مخزّن مسبقاً، اضبط `stt.local.fasterWhisper.gatewayAllowModelDownload: false`.
 
 ## قناة البوابة غير جاهزة
 

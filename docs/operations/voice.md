@@ -195,8 +195,8 @@ workers/faster-whisper/faster-whisper-worker.py
 
 Operational notes:
 
-- Gateway first-run model downloads are denied by default.
-- Set `stt.local.fasterWhisper.gatewayAllowModelDownload: true` only when the gateway is allowed to fetch model files.
+- Gateway first-run model downloads follow `allowModelDownload` by default. With the default `allowModelDownload: true`, the first gateway voice message may fetch the configured model files.
+- Set `stt.local.fasterWhisper.gatewayAllowModelDownload: false` when gateway voice messages must use only already-cached models.
 - Local faster-whisper allows model downloads by default for normal local use.
 - Use `hfHome` to override the model cache root when needed.
 - Without `hfHome`, EstaCoda defaults the worker cache path to `~/.estacoda/cache/huggingface` unless `TRANSFORMERS_CACHE` is already set in the process environment.

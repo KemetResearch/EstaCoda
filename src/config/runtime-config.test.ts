@@ -1290,9 +1290,60 @@ describe("loadRuntimeConfig media boundary", () => {
         device: "auto",
         computeType: "default",
         allowModelDownload: true,
-        gatewayAllowModelDownload: false
+        gatewayAllowModelDownload: true
       }
     });
+  });
+
+  it("inherits gateway faster-whisper model download permission from allowModelDownload", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        local: {
+          fasterWhisper: {
+            allowModelDownload: false
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.stt.local?.fasterWhisper?.allowModelDownload).toBe(false);
+    expect(loaded.stt.local?.fasterWhisper?.gatewayAllowModelDownload).toBe(false);
+  });
+
+  it("preserves explicit gateway faster-whisper model download opt-out", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        local: {
+          fasterWhisper: {
+            allowModelDownload: true,
+            gatewayAllowModelDownload: false
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.stt.local?.fasterWhisper?.allowModelDownload).toBe(true);
+    expect(loaded.stt.local?.fasterWhisper?.gatewayAllowModelDownload).toBe(false);
   });
 
   it("normalizes local STT python binary aliases", async () => {

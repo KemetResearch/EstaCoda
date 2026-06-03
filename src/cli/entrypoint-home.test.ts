@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -51,7 +51,17 @@ describe("entrypoint home directory propagation", () => {
   });
 
   it("uses the ESTACODA_HOME-resolved state home for entrypoint CLI session state", async () => {
-    await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });
+    const profilePaths = await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });
+    await writeFile(profilePaths.configPath, JSON.stringify({
+      model: { provider: "unconfigured", id: "unconfigured" },
+      stt: {
+        provider: "local",
+        local: {
+          engine: "command",
+          command: "mock-stt"
+        }
+      }
+    }, null, 2));
 
     const result = await runEntrypoint({
       argv: ["/status"],

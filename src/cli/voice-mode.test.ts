@@ -41,6 +41,7 @@ describe("CLI voice mode", () => {
       transcriber,
       id: () => "turn-1",
       envOptions: {
+        env: {},
         platform: "darwin",
         commandExists: async (command) => command === "sox"
       }

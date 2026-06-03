@@ -81,7 +81,7 @@ The following API modes are executable by current code:
 | **OpenAI** | `live-proven` | Hosted STT. |
 | **Groq** | `live-proven` | Hosted STT. |
 | **xAI** | `live-proven` | Hosted STT. |
-| **local** | `implemented` | Managed `faster-whisper` by default for `stt.provider: "local"`; command engine with explicit `stt.local.engine: "command"`. Gateway faster-whisper model download is disabled by default. |
+| **local** | `implemented` | Managed `faster-whisper` by default for `stt.provider: "local"`; command engine with explicit `stt.local.engine: "command"`. Gateway faster-whisper model downloads follow `allowModelDownload` by default and can be blocked with `gatewayAllowModelDownload: false`. |
 | **Mistral** | `experimental` | Deferred for v0.1.0. |
 
 ---

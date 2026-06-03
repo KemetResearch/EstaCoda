@@ -244,7 +244,7 @@ In v0.1.0, `stt.provider: "local"` defaults to managed faster-whisper:
         "computeType": "default",
         "hfHome": "/optional/model-cache",
         "allowModelDownload": true,
-        "gatewayAllowModelDownload": false,
+        "gatewayAllowModelDownload": true,
         "queueDepth": 1,
         "timeoutMs": 300000
       }

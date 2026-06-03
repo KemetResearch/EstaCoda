@@ -113,7 +113,7 @@ The managed venv is for pinned `faster-whisper==1.2.1` only. Do not use it for a
 
 **Symptom:** Gateway voice transcription reports that faster-whisper model download is not allowed.
 
-**Likely cause:** Local faster-whisper allows model downloads for normal local use by default, but gateway-triggered model downloads default to disabled.
+**Likely cause:** Gateway model downloads were explicitly disabled with `stt.local.fasterWhisper.gatewayAllowModelDownload: false`, or all faster-whisper model downloads were disabled with `allowModelDownload: false`.
 
 **Inspect:**
 
@@ -124,7 +124,7 @@ ls -la ~/.estacoda/cache/huggingface
 
 **Repair:**
 
-Pre-cache the model during local setup/use, or explicitly set `stt.local.fasterWhisper.gatewayAllowModelDownload: true` only when gateway-triggered model fetches are acceptable.
+Either allow model downloads, or pre-cache the model during local setup/use. If you want local/CLI use to download models but gateway voice messages to require a cached model, set `stt.local.fasterWhisper.gatewayAllowModelDownload: false`.
 
 ## Gateway channel not ready
 

@@ -114,7 +114,7 @@ Config shape:
         "computeType": "default",
         "hfHome": "/optional/model-cache",
         "allowModelDownload": true,
-        "gatewayAllowModelDownload": false,
+        "gatewayAllowModelDownload": true,
         "queueDepth": 1,
         "timeoutMs": 300000
       }
@@ -171,7 +171,8 @@ Operational behavior:
 - Default timeout is 300 seconds.
 - Default queue depth is 1 unless config overrides it.
 - Queue overflow fails fast.
-- The gateway denies first-run model downloads by default before worker startup. Set `gatewayAllowModelDownload: true` only when that side effect is acceptable.
+- Gateway first-run model downloads follow `allowModelDownload` by default. With the default `allowModelDownload: true`, the first gateway voice message may fetch the configured model files.
+- Set `gatewayAllowModelDownload: false` when gateway voice messages must use only already-cached models.
 - Local non-gateway faster-whisper allows model downloads by default.
 - `hfHome` is passed to the worker when configured. Otherwise EstaCoda defaults `HF_HOME` to `~/.estacoda/cache/huggingface` and preserves an existing `TRANSFORMERS_CACHE` if the process already set one.
 
