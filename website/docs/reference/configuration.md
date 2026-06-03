@@ -255,6 +255,8 @@ In v0.1.0, `stt.provider: "local"` defaults to managed faster-whisper:
 
 Omit `pythonBinary` for the managed path resolved under `~/.estacoda/python-env`, or set it to an operator-owned Python when using `estacoda voice setup --stt-provider local --python-binary /path/to/python`. The default model cache is `~/.estacoda/cache/huggingface`; it is separate from the venv.
 
+Gateway model downloads inherit `allowModelDownload`. Because `allowModelDownload` defaults to `true`, gateway-triggered first-run downloads are allowed by default; set `gatewayAllowModelDownload: false` only when gateway voice messages must require a cached model.
+
 Command mode is explicit:
 
 ```json

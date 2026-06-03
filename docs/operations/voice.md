@@ -179,8 +179,9 @@ Runtime behavior:
 
 - Runtime resolves configured `stt.local.pythonBinary` first, otherwise the managed venv Python under `~/.estacoda/python-env`.
 - Runtime sets persistent `HF_HOME` / `TRANSFORMERS_CACHE` defaults under `~/.estacoda/cache/huggingface` for faster-whisper.
-- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment before starting the worker.
+- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment lazily on first transcription.
 - Managed runtime setup installs only the pinned faster-whisper package into `~/.estacoda/python-env`; it does not mutate system Python or operator-owned venvs.
+- Managed Python setup failure does not block runtime or gateway startup; only local faster-whisper transcription is unavailable until the environment is repaired.
 
 Future work:
 
@@ -194,8 +195,8 @@ workers/faster-whisper/faster-whisper-worker.py
 
 Operational notes:
 
-- Gateway first-run model downloads follow `allowModelDownload` by default. With the default `allowModelDownload: true`, the first gateway voice message may fetch the configured model files.
-- Set `stt.local.fasterWhisper.gatewayAllowModelDownload: false` when gateway voice messages must use only already-cached models.
+- Gateway first-run model downloads inherit `allowModelDownload`. Because `allowModelDownload` defaults to `true`, the first gateway voice message may fetch the configured model files.
+- Set `stt.local.fasterWhisper.gatewayAllowModelDownload: false` only when gateway voice messages must use already-cached models.
 - Local faster-whisper allows model downloads by default for normal local use.
 - Use `hfHome` to override the model cache root when needed.
 - Without `hfHome`, EstaCoda defaults the worker cache path to `~/.estacoda/cache/huggingface` unless `TRANSFORMERS_CACHE` is already set in the process environment.
@@ -210,6 +211,7 @@ Common readiness cases:
 | `disabled` | `tts.enabled` or `stt.enabled` is `false`. | Enable the provider if intended. |
 | `not implemented` | Deferred provider selected. | Select an implemented provider. |
 | `python package missing` | faster-whisper import fails. | Run `estacoda voice setup --stt-provider local`, or repair `~/.estacoda/python-env`. If using `--python-binary`, repair that operator-owned environment. |
+| `venv support missing` | Python reports missing `ensurepip` or venv support. | Install OS venv support, for example `sudo apt install python3.13-venv` or `sudo apt install python3-venv`, then retry local STT setup. |
 | `download required` | Selected model is not cached and downloads are disallowed. | Pre-cache the model or explicitly allow download. |
 | `queue full` | faster-whisper queue depth exceeded. | Wait, raise queue depth, or reduce concurrent requests. |
 | `timeout` | STT request exceeded timeout. | Check model/device performance and timeout config. |

@@ -107,13 +107,13 @@ estacoda voice setup --stt-provider local
 estacoda voice setup --stt-provider local --python-binary /path/to/python
 ```
 
-The managed venv is for pinned `faster-whisper==1.2.1` only. Do not use it for arbitrary packages. If you use `--python-binary`, EstaCoda skips managed env check/create and leaves that Python environment to you.
+The managed venv is for pinned `faster-whisper==1.2.1` only. Do not use it for arbitrary packages. If setup reports missing `ensurepip` or venv support, install the OS venv package for your system Python, for example `sudo apt install python3.13-venv` or `sudo apt install python3-venv`, then rerun local STT setup. If you use `--python-binary`, EstaCoda skips managed env check/create and leaves that Python environment to you.
 
 ## Gateway local STT download denied
 
 **Symptom:** Gateway voice transcription reports that faster-whisper model download is not allowed.
 
-**Likely cause:** Gateway model downloads were explicitly disabled with `stt.local.fasterWhisper.gatewayAllowModelDownload: false`, or all faster-whisper model downloads were disabled with `allowModelDownload: false`.
+**Likely cause:** Gateway model downloads inherit `allowModelDownload`. Downloads are allowed by default because `allowModelDownload` defaults to `true`; this error means gateway downloads were explicitly disabled with `stt.local.fasterWhisper.gatewayAllowModelDownload: false`, or all faster-whisper model downloads were disabled with `allowModelDownload: false`.
 
 **Inspect:**
 

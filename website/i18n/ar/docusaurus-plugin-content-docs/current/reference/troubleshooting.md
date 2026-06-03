@@ -107,13 +107,13 @@ estacoda voice setup --stt-provider local
 estacoda voice setup --stt-provider local --python-binary /path/to/python
 ```
 
-الـ venv المُدار مخصص لـ `faster-whisper==1.2.1` المثبت بالإصدار فقط. لا تستخدمه لحزم عشوائية. إذا استخدمت `--python-binary`، تتخطى EstaCoda فحص/إنشاء البيئة المُدارة وتترك بيئة Python للمشغل.
+الـ venv المُدار مخصص لـ `faster-whisper==1.2.1` المثبت بالإصدار فقط. لا تستخدمه لحزم عشوائية. إذا أبلغ الإعداد عن نقص `ensurepip` أو دعم venv، ثبّت حزمة venv الخاصة بـ Python النظام، مثل `sudo apt install python3.13-venv` أو `sudo apt install python3-venv`، ثم أعد تشغيل إعداد STT المحلي. إذا استخدمت `--python-binary`، تتخطى EstaCoda فحص/إنشاء البيئة المُدارة وتترك بيئة Python للمشغل.
 
 ## تنزيل نموذج STT المحلي مرفوض في البوابة
 
 **العرض:** يبلغ نسخ الصوت في البوابة أن تنزيل نموذج faster-whisper غير مسموح.
 
-**السبب المحتمل:** عُطّلت تنزيلات النموذج عبر البوابة صراحةً باستخدام `stt.local.fasterWhisper.gatewayAllowModelDownload: false`، أو عُطّلت كل تنزيلات نموذج faster-whisper باستخدام `allowModelDownload: false`.
+**السبب المحتمل:** ترث تنزيلات النموذج عبر البوابة `allowModelDownload`. التنزيلات مسموحة افتراضياً لأن `allowModelDownload` افتراضياً `true`؛ يعني هذا الخطأ أن تنزيلات البوابة عُطّلت صراحةً باستخدام `stt.local.fasterWhisper.gatewayAllowModelDownload: false`، أو عُطّلت كل تنزيلات نموذج faster-whisper باستخدام `allowModelDownload: false`.
 
 **الفحص:**
 

@@ -330,8 +330,9 @@ estacoda voice setup --tts-provider openai
 
 - يحل runtime مسار `stt.local.pythonBinary` المُعد أولاً، وإلا يستخدم مسار venv المُدار تحت `~/.estacoda/python-env`.
 - يضبط runtime قيم `HF_HOME` / `TRANSFORMERS_CACHE` دائمة تحت `~/.estacoda/cache/huggingface`.
-- عندما يكون STT المحلي عبر faster-whisper مضبوطاً دون `pythonBinary` مخصص، ينشئ runtime بيئة Python المُدارة أو يصلحها قبل بدء العامل.
+- عندما يكون STT المحلي عبر faster-whisper مضبوطاً دون `pythonBinary` مخصص، ينشئ runtime بيئة Python المُدارة أو يصلحها عند أول عملية نسخ.
 - يثبّت إعداد runtime المُدار حزمة faster-whisper المثبّتة فقط داخل `~/.estacoda/python-env`؛ ولا يغيّر system Python أو venvs المملوكة للمشغل.
+- فشل إعداد Python المُدار لا يمنع بدء runtime أو البوابة؛ يصبح نسخ faster-whisper المحلي فقط غير متاح إلى أن تُصلح البيئة.
 - قد يضيف أمر `voice doctor` لاحقاً فحص/إصلاح هذا المسار.
 
 سلوك تشغيلي:
@@ -345,8 +346,8 @@ estacoda voice setup --tts-provider openai
 - المهلة الافتراضية 300 ثانية.
 - عمق الطابور الافتراضي 1 ما لم يُعدل.
 - تجاوز الطابور يفشل سريعًا.
-- تتبع تنزيلات النموذج الأولى عبر البوابة `allowModelDownload` افتراضيًا. مع القيمة الافتراضية `allowModelDownload: true`، قد تُنزّل أول رسالة صوتية عبر البوابة ملفات النموذج المضبوط.
-- اضبط `gatewayAllowModelDownload: false` عندما يجب أن تستخدم رسائل البوابة الصوتية النماذج المخزّنة مسبقًا فقط.
+- ترث تنزيلات النموذج الأولى عبر البوابة `allowModelDownload`. لأن `allowModelDownload` افتراضياً `true`، قد تُنزّل أول رسالة صوتية عبر البوابة ملفات النموذج المضبوط.
+- اضبط `gatewayAllowModelDownload: false` فقط عندما يجب أن تستخدم رسائل البوابة الصوتية نماذج مخزّنة مسبقًا.
 - يسمح faster-whisper المحلي غير المُطلق من البوابة بتنزيل النماذج افتراضياً.
 - يُمرَّر `hfHome` إلى العامل عند ضبطه. وإلا تضبط EstaCoda `HF_HOME` افتراضياً إلى `~/.estacoda/cache/huggingface` وتحافظ على `TRANSFORMERS_CACHE` الموجود إذا ضبطته بيئة العملية مسبقاً.
 
@@ -364,6 +365,7 @@ workers/faster-whisper/faster-whisper-worker.py
 | `disabled` | `tts.enabled` أو `stt.enabled` هي `false`. | فعّل المزود في إعدادات الملف الشخصي إذا كان مقصودًا. |
 | `not implemented` | مزود مؤجل مُحدد (مثل Mistral). | اختر مزودًا منفذًا. |
 | `python package missing` | فشل استيراد faster-whisper. | شغّل `estacoda voice setup --stt-provider local`، أو أصلح `~/.estacoda/python-env`. عند استخدام `--python-binary`، أصلح بيئة Python المملوكة للمشغل. |
+| `venv support missing` | يبلغ Python عن نقص `ensurepip` أو دعم venv. | ثبّت حزمة venv الخاصة بالنظام، مثل `sudo apt install python3.13-venv` أو `sudo apt install python3-venv`، ثم أعد محاولة إعداد STT المحلي. |
 | `download required` | النموذج المحدد غير مخبأ والتنزيلات ممنوعة. | خزّن النموذج مسبقًا أو اسمح بالتنزيل صراحةً. |
 | `queue full` | تجاوز عمق طابور faster-whisper. | انتظر، أو زِد عمق الطابور، أو قلل الطلبات المتزامنة. |
 | `timeout` | تجاوز طلب STT المهلة. | تحقق من أداء النموذج/الجهاز وإعدادات المهلة. |
@@ -393,7 +395,7 @@ workers/faster-whisper/faster-whisper-worker.py
 1. توحيد `attachment.localPath ?? attachment.path` ضمن جذور الوسائط/الصوت المسموح بها.
 2. التحقق من نوع الملف والحجم باستخدام التحقق من صوت الإدخال.
 3. فحص جاهزية STT و `stt.enabled !== false`.
-4. تطبيق سياسة تنزيل faster-whisper قبل أي تنزيل نموذج أولي تُطلقه البوابة. تتبع تنزيلات البوابة `allowModelDownload` افتراضياً، ويمنعها `gatewayAllowModelDownload: false` صراحةً.
+4. تطبيق سياسة تنزيل faster-whisper قبل أي تنزيل نموذج أولي تُطلقه البوابة. ترث تنزيلات البوابة `allowModelDownload`، وهو افتراضياً `true`؛ ويمنعها `gatewayAllowModelDownload: false` صراحةً.
 
 الجذور المسموح بها هي وسائط القنوات المحلية للملف الشخصي، وذاكرة تخزين الصوت المؤقتة، وجذور temp audio المستخدمة في مسارات استقبال قنوات الصوت.
 

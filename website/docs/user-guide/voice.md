@@ -330,8 +330,9 @@ It does not mutate STT config and does not touch the managed Python environment.
 
 - Runtime resolves configured `stt.local.pythonBinary` first, otherwise the managed venv path under `~/.estacoda/python-env`.
 - Runtime sets persistent `HF_HOME` / `TRANSFORMERS_CACHE` defaults under `~/.estacoda/cache/huggingface`.
-- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment before starting the worker.
+- When local faster-whisper STT is configured without a custom `pythonBinary`, runtime creates or repairs the managed Python environment lazily on first transcription.
 - Managed runtime setup installs only the pinned faster-whisper package into `~/.estacoda/python-env`; it does not mutate system Python or operator-owned venvs.
+- Managed Python setup failure does not block runtime or gateway startup; only local faster-whisper transcription is unavailable until the environment is repaired.
 - A later `voice doctor` command may inspect/repair this path.
 
 Operational behavior:
@@ -345,8 +346,8 @@ Operational behavior:
 - Default timeout is 300 seconds.
 - Default queue depth is 1 unless overridden.
 - Queue overflow fails fast.
-- Gateway first-run model downloads follow `allowModelDownload` by default. With the default `allowModelDownload: true`, the first gateway voice message may fetch the configured model files.
-- Set `gatewayAllowModelDownload: false` when gateway voice messages must use only already-cached models.
+- Gateway first-run model downloads inherit `allowModelDownload`. Because `allowModelDownload` defaults to `true`, the first gateway voice message may fetch the configured model files.
+- Set `gatewayAllowModelDownload: false` only when gateway voice messages must use already-cached models.
 - Local non-gateway faster-whisper allows model downloads by default.
 - `hfHome` is passed to the worker when configured. Otherwise EstaCoda defaults `HF_HOME` to `~/.estacoda/cache/huggingface` and preserves an existing `TRANSFORMERS_CACHE` if the process already set one.
 
@@ -364,6 +365,7 @@ workers/faster-whisper/faster-whisper-worker.py
 | `disabled` | `tts.enabled` or `stt.enabled` is `false`. | Enable the provider in profile config if intended. |
 | `not implemented` | Deferred provider selected (e.g., Mistral). | Select an implemented provider. |
 | `python package missing` | faster-whisper import fails. | Run `estacoda voice setup --stt-provider local`, or repair `~/.estacoda/python-env`. If using `--python-binary`, repair that operator-owned environment. |
+| `venv support missing` | Python reports missing `ensurepip` or venv support. | Install OS venv support, for example `sudo apt install python3.13-venv` or `sudo apt install python3-venv`, then retry local STT setup. |
 | `download required` | Selected model is not cached and downloads are disallowed. | Pre-cache the model or explicitly allow download. |
 | `queue full` | faster-whisper queue depth exceeded. | Wait, raise queue depth, or reduce concurrent requests. |
 | `timeout` | STT request exceeded timeout. | Check model/device performance and timeout config. |
@@ -393,7 +395,7 @@ Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg,
 1. Canonicalize `attachment.localPath ?? attachment.path` under allowed media/audio roots.
 2. Validate file type and size with audio input validation.
 3. Check STT readiness and `stt.enabled !== false`.
-4. Apply faster-whisper download policy before any gateway-triggered first-run model download. Gateway downloads follow `allowModelDownload` by default, and `gatewayAllowModelDownload: false` explicitly blocks them.
+4. Apply faster-whisper download policy before any gateway-triggered first-run model download. Gateway downloads inherit `allowModelDownload`, which defaults to `true`; `gatewayAllowModelDownload: false` explicitly blocks them.
 
 Allowed roots are profile-local channel media, audio cache, and selected profile temp audio roots used by voice-channel receive paths.
 
