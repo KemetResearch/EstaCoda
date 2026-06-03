@@ -492,6 +492,22 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttProvider.local")).toContain(isolateLtr("faster-whisper"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel.title")).toContain(isolateLtr("STT"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel")).toContain(isolateLtr("STT"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel")).toContain(isolateLtr("faster-whisper"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel")).toContain(isolateLtr("Python"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel.base")).toContain(isolateLtr("Base"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel.small")).toBe(isolateLtr("Small"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel.small.description")).toContain(isolateLtr("Base"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.localModel.medium")).toBe(isolateLtr("Medium"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("STT"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("faster-whisper"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("Python"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("Debian/Ubuntu"));
+    expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("python3-venv"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("@BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("/newbot"));
@@ -552,6 +568,21 @@ describe("setup copy", () => {
     expect(arabic).toContain(isolateLtr("pythonBinary"));
     expect(arabic).toContain(isolateLtr("~/.estacoda/python-env"));
     expect(arabic).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
+  });
+
+  it("defines setup editor local faster-whisper STT copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.sttProvider.local")).toBe("Local (via faster-whisper)");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttProvider.local")).toBe("محلي (عبر faster-whisper)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel.title")).toBe("Configure STT");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.localModel.title")).toBe("اضبط STT");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel")).toContain("Pick the faster-whisper STT model");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel")).toContain("managed Python environment");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.localModel")).toContain("بيئة Python المُدارة");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel.base")).toBe("Base (recommended for everyday use)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel.small")).toBe("Small");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.localModel.medium")).toBe("Medium");
+    expect(rawSetupCopy("en", "setupEditor.apply.voice.localStt.failed")).toContain("Local faster-whisper STT setup failed");
+    expect(rawSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain("فشل إعداد STT المحلي");
   });
 
   it("can return raw Arabic source copy without isolation for review tooling", () => {
