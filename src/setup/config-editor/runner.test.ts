@@ -18,6 +18,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import type { SetupApplyMode } from "../setup-apply-plan.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
 
 async function makeTempDir(): Promise<string> {
@@ -294,6 +295,33 @@ describe("runConfigEditor", () => {
     expect(config.security?.assessor?.enabled).toBe(true);
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
     expect(config.providers).toEqual((localReadyConfig() as { providers: unknown }).providers);
+  });
+
+  it("passes strict mode to setup editor apply execution", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let observedMode: SetupApplyMode | undefined;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["strict"] }),
+      defaultActionId: "edit-security-mode",
+      applyExecutor: {
+        apply: (_plan, context) => {
+          observedMode = context?.mode;
+          return {
+            ok: true,
+            appliedOperationIds: [],
+          };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(observedMode).toBe("strict");
   });
 
   it("writes active profile config without prompting for profile awareness", async () => {

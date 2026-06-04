@@ -363,6 +363,7 @@ export async function runFirstRunSetup(
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
       ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
+        mode: "firstRunTolerant",
         ...(pendingCredentialWrites.length > 0
           ? { deferredSecretWrites: pendingCredentialWrites }
           : {}),

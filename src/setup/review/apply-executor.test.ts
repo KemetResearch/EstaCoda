@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { buildOnboardingWizardDraftBundle } from "../setup-drafts.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "../setup-modules.js";
 import { buildSetupReviewManifest } from "../setup-review-manifest.js";
-import { executeSetupApplyPlan, planSetupApply, type SetupApplyPlan } from "../setup-apply-plan.js";
+import { executeSetupApplyPlan, planSetupApply, type SetupApplyMode, type SetupApplyPlan } from "../setup-apply-plan.js";
 import {
   applyReviewedSetupPlanOperations,
   createReviewedSetupApplyExecutor,
@@ -1084,6 +1084,85 @@ describe("reviewed setup apply executor", () => {
     expect(endState.kind).toBe("verified-ready");
     if (endState.kind !== "verified-ready") throw new Error("expected verified-ready");
     expect(endState.verification?.providerDiagnostic.status).toBe("ready");
+  });
+
+  it("defaults reviewed apply execution to strict mode", async () => {
+    const plan = onboardingPlan({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    let observedMode: SetupApplyMode | undefined;
+
+    const endState = await executeReviewedSetupApplyPlan(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      collectVerification: (options) => {
+        observedMode = options.mode;
+        return {
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "ready",
+            lines: ["Provider status: ready"],
+            warnings: [],
+          },
+          toolStatus: "skipped",
+          configSources: [profileConfigPath(tempDir)],
+          warnings: [],
+          issueCodes: [],
+        };
+      },
+    });
+
+    expect(endState.kind).toBe("verified-ready");
+    expect(observedMode).toBe("strict");
+  });
+
+  it("passes explicit reviewed apply mode through execution options", async () => {
+    const plan = onboardingPlan({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    let observedMode: SetupApplyMode | undefined;
+
+    const endState = await executeReviewedSetupApplyPlan(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "strict",
+      collectVerification: (options) => {
+        observedMode = options.mode;
+        return {
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "ready",
+            lines: ["Provider status: ready"],
+            warnings: [],
+          },
+          toolStatus: "skipped",
+          configSources: [profileConfigPath(tempDir)],
+          warnings: [],
+          issueCodes: [],
+        };
+      },
+    }, {
+      mode: "firstRunTolerant",
+    });
+
+    expect(endState.kind).toBe("verified-ready");
+    expect(observedMode).toBe("firstRunTolerant");
   });
 
   describe("verifyReviewedSetup profile config loading", () => {

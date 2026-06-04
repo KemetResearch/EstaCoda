@@ -19,7 +19,7 @@ import { runFirstRunSetup } from "./runner.js";
 import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
-import type { SetupApplyExecutor } from "../setup-apply-plan.js";
+import type { SetupApplyExecutor, SetupApplyMode } from "../setup-apply-plan.js";
 import {
   gatewayServiceActivationNotNowGuidance,
   gatewayServiceActivationPromptTitle,
@@ -624,6 +624,29 @@ describe("runFirstRunSetup", () => {
     }
     expect(result.launchRequested).toBeUndefined();
     expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
+  });
+
+  it("passes firstRunTolerant mode to reviewed apply execution", async () => {
+    let observedMode: SetupApplyMode | undefined;
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      flowEngine: flowEngine(),
+      applyExecutor: {
+        apply: (_plan, context) => {
+          observedMode = context?.mode;
+          return {
+            ok: true,
+            appliedOperationIds: [],
+          };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(observedMode).toBe("firstRunTolerant");
   });
 
   it("does not offer launch after degraded verification", async () => {

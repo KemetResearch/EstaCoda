@@ -11,6 +11,7 @@ import {
   type SetupApplyExecutionResult,
   type SetupApplyExecutor,
   type SetupApplyFlowOptions,
+  type SetupApplyMode,
   type SetupApplyOperation,
   type SetupApplyPlan,
   type SetupPostSaveVerificationRequest,
@@ -56,6 +57,7 @@ export type ReviewedSetupApplyExecutorOptions = {
   readonly homeDir?: string;
   readonly profileId?: string;
   readonly trustStorePath?: string;
+  readonly mode?: SetupApplyMode;
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
 
@@ -74,10 +76,15 @@ type PlanContext = {
 export function createReviewedSetupApplyExecutor(
   options: ReviewedSetupApplyExecutorOptions
 ): SetupApplyExecutor {
+  const mode = options.mode ?? "strict";
+  const normalizedOptions = { ...options, mode };
   return {
-    apply: (plan) => applyReviewedSetupPlanOperations(plan, options),
-    applyDeferredSecrets: (plan, writes) => applyReviewedSetupDeferredSecrets(plan, writes, options),
-    verify: (request) => verifyReviewedSetup(request, options),
+    apply: (plan, context) => applyReviewedSetupPlanOperations(plan, {
+      ...normalizedOptions,
+      mode: context?.mode ?? mode,
+    }),
+    applyDeferredSecrets: (plan, writes) => applyReviewedSetupDeferredSecrets(plan, writes, normalizedOptions),
+    verify: (request) => verifyReviewedSetup(request, normalizedOptions),
   };
 }
 
@@ -86,7 +93,11 @@ export async function executeReviewedSetupApplyPlan(
   options: ReviewedSetupApplyExecutorOptions,
   flowOptions: SetupApplyFlowOptions = {}
 ): Promise<SetupApplyEndState> {
-  return executeSetupApplyPlan(plan, createReviewedSetupApplyExecutor(options), flowOptions);
+  const mode = flowOptions.mode ?? options.mode ?? "strict";
+  return executeSetupApplyPlan(plan, createReviewedSetupApplyExecutor({ ...options, mode }), {
+    ...flowOptions,
+    mode,
+  });
 }
 
 export async function applyReviewedSetupPlanOperations(

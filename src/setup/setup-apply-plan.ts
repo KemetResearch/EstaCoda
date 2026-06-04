@@ -145,6 +145,10 @@ export type SetupApplyExecutionResult = {
   readonly warnings?: readonly OptionalCapabilityApplyWarning[];
 };
 
+export type SetupApplyExecutionContext = {
+  readonly mode: SetupApplyMode;
+};
+
 export type SetupDeferredSecretWrite = {
   readonly envVarName: string;
   readonly value: string;
@@ -157,7 +161,10 @@ export type SetupDeferredSecretApplyResult = {
 };
 
 export type SetupApplyExecutor = {
-  readonly apply: (plan: SetupApplyPlan) => Promise<SetupApplyExecutionResult> | SetupApplyExecutionResult;
+  readonly apply: (
+    plan: SetupApplyPlan,
+    context?: SetupApplyExecutionContext
+  ) => Promise<SetupApplyExecutionResult> | SetupApplyExecutionResult;
   readonly applyDeferredSecrets?: (
     plan: SetupApplyPlan,
     writes: readonly SetupDeferredSecretWrite[]
@@ -345,7 +352,8 @@ export async function executeSetupApplyPlan(
 ): Promise<SetupApplyEndState> {
   const allowAutomaticLaunch = options.allowAutomaticLaunch !== false;
   const deferredSecretWrites = options.deferredSecretWrites ?? [];
-  const saveResult = await executor.apply(plan);
+  const mode = options.mode ?? "strict";
+  const saveResult = await executor.apply(plan, { mode });
   if (!saveResult.ok) {
     return {
       kind: "blocked",
