@@ -612,10 +612,12 @@ export class StandardRenderer {
       ? this.#useUnicode ? "◂" : "<"
       : this.#useUnicode ? "▸" : ">";
 
+    const optionMarkerGap = " ";
+    const optionMarkerSlotWidth = measureVisibleWidth(selectedMarker) + measureVisibleWidth(optionMarkerGap);
     const rawContentLines: string[] = [
       ...vm.bodyLines,
       ...(vm.technicalLines ?? []),
-      ...vm.options.flatMap((option) => [option.label, option.description ?? ""]),
+      ...vm.options.flatMap((option) => [`${option.label}${" ".repeat(optionMarkerSlotWidth)}`, option.description ?? ""]),
       vm.hint ?? "",
     ].filter((line) => line.length > 0);
     const maxRawContent = Math.max(0, ...rawContentLines.map((line) => measureVisibleWidth(line)));
@@ -658,11 +660,14 @@ export class StandardRenderer {
       const option = vm.options[i];
       const isSelected = i === vm.selectedOptionIndex;
       const marker = isSelected ? this.#action(selectedMarker) : " ";
+      const optionLabelWidth = Math.max(1, contentWidth - optionMarkerSlotWidth);
       const optionText = option.technical === true
-        ? this.#localizedTechnical(option.label, locale, Math.max(1, contentWidth - 2))
-        : this.#localizedNatural(option.label, direction, Math.max(1, contentWidth - 2));
+        ? this.#localizedTechnical(option.label, locale, optionLabelWidth)
+        : this.#localizedNatural(option.label, direction, optionLabelWidth);
       const styledOption = this.#primary(optionText);
-      const optionRow = direction === "rtl" ? `${styledOption} ${marker}` : `${marker} ${styledOption}`;
+      const optionRow = direction === "rtl"
+        ? isolateRtl(closeOpenBidiIsolates(`${styledOption}${optionMarkerGap}${marker}`))
+        : `${marker}${optionMarkerGap}${styledOption}`;
       lines.push(direction === "rtl"
         ? `  ${padVisibleStart(optionRow, contentWidth)}`
         : `  ${optionRow}`);

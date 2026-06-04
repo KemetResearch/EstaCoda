@@ -540,6 +540,39 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).not.toContain("◂");
   });
 
+  it("keeps Arabic prompt-card markers after mixed-direction voice option labels", () => {
+    const caps = { ...fullCaps(), terminalWidth: 64 };
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: caps, locale: "ar" });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اضبط الصوت",
+      bodyLines: ["اختر مزوّد الصوت الذي تريد ضبطه."],
+      options: [
+        {
+          id: "voice-stt",
+          label: `اضبط مزوّد تحويل الكلام إلى نص (${isolateLtr("STT")})`,
+          description: "اضبط مزوّد تحويل الكلام إلى نص فقط.",
+        },
+        {
+          id: "voice-tts",
+          label: `اضبط مزوّد تحويل النص إلى كلام (${isolateLtr("TTS")})`,
+          description: "اضبط مزوّد تحويل النص إلى كلام فقط.",
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes(isolateLtr("STT")));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).not.toContain("...");
+    expect(selectedLine!.indexOf("◂")).toBeGreaterThan(selectedLine!.indexOf("اضبط"));
+    expect(plain).toContain(isolateLtr("TTS"));
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(caps.terminalWidth);
+    }
+  });
+
   it("keeps English no-Unicode onboarding selected marker before the label", () => {
     const r = renderer("dark", noUnicodeCaps());
     const plain = stripAnsi(r.renderOnboardingPromptCard(onboardingTrustCard()));
