@@ -132,10 +132,9 @@ export function setupProviderCredentialQuestion(
     readonly envVarName: string;
   }
 ): string {
-  return setupOutputLine(locale, [
-    setupCopyText(locale, "setupEditor.actions.storeProviderCredentialReference.description"),
-    `${renderDisplayToken(locale, input.providerName)} [${renderDisplayToken(locale, input.envVarName)}]: `,
-  ].join(" "));
+  return setupOutputLine(locale, formatSetupCopy(locale, "setupEditor.actions.storeProviderCredentialReference.description", {
+    providerName: input.providerName,
+  }) + " ");
 }
 
 export function setupPromptWithDefault(

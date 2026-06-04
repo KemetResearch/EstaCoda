@@ -54,16 +54,18 @@ describe("shared setup string prompt copy", () => {
       envVarName: "DEEPSEEK_API_KEY",
     });
 
-    expect(english).toContain(setupCopyText("en", "setupEditor.actions.storeProviderCredentialReference.description"));
-    expect(arabic).toContain(setupCopyText("ar", "setupEditor.actions.storeProviderCredentialReference.description"));
-    expect(english).toContain("DeepSeek [DEEPSEEK_API_KEY]: ");
-    expect(arabic).toBe(isolateRtl(`${setupCopyText("ar", "setupEditor.actions.storeProviderCredentialReference.description")} ${isolateLtr("DeepSeek")} [${isolateLtr("DEEPSEEK_API_KEY")}]: `));
-    expect(arabic).toContain(`${isolateLtr("DeepSeek")} [${isolateLtr("DEEPSEEK_API_KEY")}]: `);
-    expect(arabic).not.toContain("DeepSeek [DEEPSEEK_API_KEY]");
+    expect(english).toBe("Enter your DeepSeek API key. It will not be shown while you type: ");
+    expect(arabic).toBe(isolateRtl(`أدخل مفتاح ${isolateLtr("API")} الخاص بـ ${isolateLtr("DeepSeek")}. لن يظهر أثناء الكتابة: `));
+    expect(english).not.toContain("DEEPSEEK_API_KEY");
+    expect(arabic).not.toContain("DEEPSEEK_API_KEY");
     expect(setupProviderCredentialQuestion("ar", {
       providerName: "Telegram",
       envVarName: "ESTACODA_TELEGRAM_BOT_TOKEN",
-    })).toContain(isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN"));
+    })).toContain(isolateLtr("Telegram"));
+    expect(setupProviderCredentialQuestion("ar", {
+      providerName: "Telegram",
+      envVarName: "ESTACODA_TELEGRAM_BOT_TOKEN",
+    })).not.toContain("ESTACODA_TELEGRAM_BOT_TOKEN");
   });
 
   it("wraps Arabic raw prompt lines while isolating technical values", () => {

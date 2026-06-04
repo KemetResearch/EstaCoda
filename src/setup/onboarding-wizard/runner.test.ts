@@ -808,7 +808,7 @@ describe("runFirstRunSetup", () => {
 
     expect(seenQuestions).toContainEqual({ question: expectedQuestion, secret: true });
     expect(expectedQuestion).toContain(isolateLtr("OpenAI"));
-    expect(expectedQuestion).toContain(isolateLtr("OPENAI_API_KEY"));
+    expect(expectedQuestion).not.toContain("OPENAI_API_KEY");
     expect(JSON.stringify(result)).not.toContain("sk-arabic-secret");
     expect(JSON.stringify(result.wizardState)).not.toContain("\u2066");
     expect(JSON.stringify(result.wizardState)).not.toContain("\u2069");
