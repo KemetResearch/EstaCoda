@@ -63,8 +63,6 @@ export type ReviewedSetupApplyExecutorOptions = {
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
 
-const localSttManagedPythonWarningMessage = "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup.";
-
 type ConfigApplyTarget = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
@@ -605,7 +603,7 @@ async function applyVoiceCapability(
           capability: "voice",
           subCapability: "stt",
           code: "managed_python_setup_failed",
-          message: localSttManagedPythonWarningMessage,
+          message: resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.localSttSkipped"),
           cause: envResult.reason,
         });
       } else {

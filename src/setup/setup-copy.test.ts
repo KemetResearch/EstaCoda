@@ -48,6 +48,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.optionalCapabilities.more.title",
   "onboarding.optionalCapabilities.more.yes",
   "onboarding.optionalCapabilities.skipped",
+  "onboarding.optionalCapabilities.voice.localSttSkipped",
   "onboarding.optionalCapabilities.validation.skippable",
   "onboarding.summary.confirmTitle",
   "onboarding.summary.confirmMessage",
@@ -386,6 +387,7 @@ const APPLY_HANDOFF_KEYS = [
   "setupApply.endState.launched",
   "setupApply.endState.acceptedDegraded",
   "setupApply.repairRequired",
+  "setupApply.warnings.title",
 ] as const;
 
 const SETUP_VERIFICATION_KEYS = [
@@ -508,6 +510,11 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("Debian/Ubuntu"));
     expect(resolveSetupCopy("ar", "setupEditor.apply.voice.localStt.failed")).toContain(isolateLtr("python3-venv"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("STT"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("faster-whisper"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("Python"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("venv"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("@BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("/newbot"));
@@ -515,6 +522,17 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("/start"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@getidsbot"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@chatIDrobot"));
+  });
+
+  it("resolves onboarding local STT skipped warning copy", () => {
+    expect(resolveSetupCopy("en", "setupApply.warnings.title")).toBe("Optional capability warnings");
+    expect(resolveSetupCopy("ar", "setupApply.warnings.title")).toBe("تحذيرات القدرات الاختيارية");
+    expect(resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.localSttSkipped")).toBe(
+      "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup."
+    );
+    expect(rawSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toBe(
+      "اكتمل الإعداد، لكن تم تخطي STT المحلي عبر faster-whisper لأن EstaCoda لم تتمكن من إنشاء بيئة Python المُدارة. أصلح دعم Python venv، ثم أعد ضبط STT المحلي من الإعداد."
+    );
   });
 
   it("uses the revised Telegram setup copy without truncating Arabic labels", () => {

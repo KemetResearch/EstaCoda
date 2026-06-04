@@ -75,6 +75,7 @@ const TECHNICAL_TOKENS = [
   "~/.estacoda/python-env",
   "~/.estacoda/cache/huggingface",
   "Python",
+  "venv",
   "Base",
   "Small",
   "Medium",
@@ -174,6 +175,13 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.optionalCapabilities.more.title", "Configure other capabilities now", "اضبط قدرات أخرى الآن", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.more.yes", "Yes", "نعم", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.skipped", "Optional capabilities skipped. Core setup remains valid.", "تم تخطي القدرات الاختيارية. يظل الإعداد الأساسي صالحًا.", [], "optional-capability"),
+  copy(
+    "onboarding.optionalCapabilities.voice.localSttSkipped",
+    "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup.",
+    "اكتمل الإعداد، لكن تم تخطي STT المحلي عبر faster-whisper لأن EstaCoda لم تتمكن من إنشاء بيئة Python المُدارة. أصلح دعم Python venv، ثم أعد ضبط STT المحلي من الإعداد.",
+    ["STT", "faster-whisper", "EstaCoda", "Python", "venv"],
+    "optional-capability"
+  ),
   copy("onboarding.optionalCapabilities.promptCapability", "Enable {capabilityId}?", "هل تريد تفعيل {capabilityId}؟", ["{capabilityId}"], "optional-capability"),
   copy("onboarding.optionalCapabilities.enable", "Enable", "تفعيل", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.enableDescription", "Plan {capabilityId} as a reviewed optional capability.", "خطّط {capabilityId} كقدرة اختيارية تخضع للمراجعة.", ["{capabilityId}"], "optional-capability"),
@@ -586,6 +594,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupApply.endState.launched", "Launch handoff accepted.", "تم قبول تسليم التشغيل.", [], "agent-launch"),
   copy("setupApply.endState.acceptedDegraded", "Limited mode accepted for launch.", "تم قبول الوضع المحدود للتشغيل.", [], "agent-launch"),
   copy("setupApply.repairRequired", "Repair required before normal apply.", "الإصلاح مطلوب قبل التطبيق العادي.", [], "config-repair"),
+  copy("setupApply.warnings.title", "Optional capability warnings", "تحذيرات القدرات الاختيارية", [], "setup-review"),
 
   copy("setupValidation.provider.invalid", "Provider {providerId} is not available.", "المزوّد {providerId} غير متاح.", ["{providerId}"], "provider-selection"),
   copy("setupValidation.model.invalid", "Model {modelId} is not available for provider {providerId}.", "النموذج {modelId} غير متاح للمزوّد {providerId}.", ["{modelId}", "{providerId}"], "provider-selection"),
