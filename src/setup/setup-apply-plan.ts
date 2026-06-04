@@ -31,6 +31,10 @@ export type SetupApplyOperationKind =
   | "verification-request"
   | "launch-handoff";
 
+export type SetupApplyMode = "strict" | "firstRunTolerant";
+
+export type SetupApplyOperationClassification = "core" | "optionalCapability";
+
 export type SetupRepairIntentKind =
   | "credential-repair"
   | "workspace-trust-repair"
@@ -119,10 +123,26 @@ export type SetupLaunchHandoffIntent = {
   readonly requiresVerifiedReadyOrAcceptedDegraded: true;
 };
 
+export type OptionalCapabilityApplyWarning = {
+  readonly operationId?: string;
+  readonly capability: "voice" | "browser" | "vision" | "channels";
+  readonly subCapability?: "stt" | "tts" | "telegram" | "browser" | "imageGeneration";
+  readonly code:
+    | "managed_python_setup_failed"
+    | "missing_dependency"
+    | "credential_unavailable"
+    | "external_service_unavailable"
+    | "validation_failed"
+    | "unknown";
+  readonly message: string;
+  readonly cause?: string;
+};
+
 export type SetupApplyExecutionResult = {
   readonly ok: boolean;
   readonly appliedOperationIds: readonly string[];
   readonly error?: string;
+  readonly warnings?: readonly OptionalCapabilityApplyWarning[];
 };
 
 export type SetupDeferredSecretWrite = {
@@ -146,6 +166,7 @@ export type SetupApplyExecutor = {
 };
 
 export type SetupApplyFlowOptions = {
+  readonly mode?: SetupApplyMode;
   readonly acceptDegraded?: boolean;
   readonly allowAutomaticLaunch?: boolean;
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
@@ -158,12 +179,14 @@ export type SetupApplyEndState =
       readonly kind: "verified-ready";
       readonly verification: SetupVerificationReport;
       readonly launchHandoffIntent?: SetupLaunchHandoffIntent;
+      readonly warnings?: readonly OptionalCapabilityApplyWarning[];
     }
   | {
       readonly kind: "verified-degraded";
       readonly verification: SetupVerificationReport;
       readonly requiresExplicitContinueDecision: true;
       readonly launchHandoffIntent?: undefined;
+      readonly warnings?: readonly OptionalCapabilityApplyWarning[];
     }
   | {
       readonly kind: "blocked";
@@ -184,12 +207,14 @@ export type SetupApplyEndState =
       readonly kind: "saved-not-launched";
       readonly verification?: SetupVerificationReport;
       readonly launchHandoffIntent?: SetupLaunchHandoffIntent;
+      readonly warnings?: readonly OptionalCapabilityApplyWarning[];
     }
   | {
       readonly kind: "launched";
       readonly verification: SetupVerificationReport;
       readonly launchHandoffIntent: SetupLaunchHandoffIntent;
       readonly acceptedDegraded: boolean;
+      readonly warnings?: readonly OptionalCapabilityApplyWarning[];
     };
 
 export function planSetupApply(decision: SetupReviewDecision): SetupApplyPlanningResult {
@@ -333,6 +358,8 @@ export async function executeSetupApplyPlan(
       }],
     };
   }
+  const warnings = saveResult.warnings ?? [];
+  const warningPayload = warnings.length > 0 ? { warnings } : {};
 
   const deferredSecretResult = deferredSecretWrites.length > 0
     ? await applyDeferredSecretWrites(plan, executor, deferredSecretWrites)
@@ -358,6 +385,7 @@ export async function executeSetupApplyPlan(
     return {
       kind: "saved-not-launched",
       launchHandoffIntent: plan.launchHandoffIntent,
+      ...warningPayload,
     };
   }
 
@@ -392,6 +420,7 @@ export async function executeSetupApplyPlan(
         verification,
         launchHandoffIntent: plan.launchHandoffIntent,
         acceptedDegraded: true,
+        ...warningPayload,
       };
     }
     if (allowAutomaticLaunch && options.acceptDegraded === true) {
@@ -399,12 +428,14 @@ export async function executeSetupApplyPlan(
         kind: "saved-not-launched",
         verification,
         launchHandoffIntent: plan.launchHandoffIntent,
+        ...warningPayload,
       };
     }
     return {
       kind: "verified-degraded",
       verification,
       requiresExplicitContinueDecision: true,
+      ...warningPayload,
     };
   }
 
@@ -414,6 +445,7 @@ export async function executeSetupApplyPlan(
       verification,
       launchHandoffIntent: plan.launchHandoffIntent,
       acceptedDegraded: false,
+      ...warningPayload,
     };
   }
 
@@ -422,6 +454,7 @@ export async function executeSetupApplyPlan(
       kind: "saved-not-launched",
       verification,
       launchHandoffIntent: plan.launchHandoffIntent,
+      ...warningPayload,
     };
   }
 
@@ -429,6 +462,7 @@ export async function executeSetupApplyPlan(
     kind: "verified-ready",
     verification,
     launchHandoffIntent: plan.launchHandoffIntent,
+    ...warningPayload,
   };
 }
 
