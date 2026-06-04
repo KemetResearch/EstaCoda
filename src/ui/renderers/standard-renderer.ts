@@ -35,7 +35,7 @@ import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import type { TextDirection } from "../../contracts/ui.js";
 import { formatSessionDisplayId } from "../../session/session-id.js";
 
@@ -1837,18 +1837,6 @@ function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], conten
   }));
   const preferredWidth = Math.min(88, Math.max(56, widestLine));
   return Math.max(8, Math.min(contentWidth, preferredWidth));
-}
-
-function closeOpenBidiIsolates(value: string): string {
-  let openIsolates = 0;
-  for (const char of value) {
-    if (char === LRI || char === RLI) {
-      openIsolates += 1;
-    } else if (char === PDI && openIsolates > 0) {
-      openIsolates -= 1;
-    }
-  }
-  return openIsolates === 0 ? value : `${value}${PDI.repeat(openIsolates)}`;
 }
 
 function boundedFileChangePreviewLines(
