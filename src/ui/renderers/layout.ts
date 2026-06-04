@@ -274,7 +274,10 @@ function isCombiningChar(cp: number): boolean {
     (cp >= 0x1ab0 && cp <= 0x1aff) ||
     (cp >= 0x1dc0 && cp <= 0x1dff) ||
     (cp >= 0x20d0 && cp <= 0x20ff) ||
-    (cp >= 0xfe20 && cp <= 0xfe2f)
+    (cp >= 0xfe20 && cp <= 0xfe2f) ||
+    // Arabic diacritics (tashkeel / harakat)
+    (cp >= 0x064b && cp <= 0x065f) ||
+    (cp === 0x0670)
   );
 }
 
