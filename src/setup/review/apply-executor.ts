@@ -5,6 +5,7 @@ import {
 import { writeEnvSecret } from "../../config/env-secret-store.js";
 import {
   executeSetupApplyPlan,
+  type OptionalCapabilityApplyWarning,
   type SetupApplyEndState,
   type SetupDeferredSecretApplyResult,
   type SetupDeferredSecretWrite,
@@ -36,6 +37,7 @@ import {
   type TtsProvider,
   type UiFlavor,
   type UiLanguage,
+  type VoiceSetupInput,
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
@@ -60,6 +62,8 @@ export type ReviewedSetupApplyExecutorOptions = {
   readonly mode?: SetupApplyMode;
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
+
+const localSttManagedPythonWarningMessage = "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup.";
 
 type ConfigApplyTarget = {
   readonly workspaceRoot: string;
@@ -105,6 +109,7 @@ export async function applyReviewedSetupPlanOperations(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<SetupApplyExecutionResult> {
   const appliedOperationIds: string[] = [];
+  const warnings: OptionalCapabilityApplyWarning[] = [];
   const credentialOperationIds = new Set(
     plan.operations
       .filter((operation) => operation.kind === "credential-reference")
@@ -117,7 +122,7 @@ export async function applyReviewedSetupPlanOperations(
     for (const operation of plan.operations) {
       switch (operation.kind) {
         case "config-patch":
-          await applyConfigPatch(operation, context, options);
+          warnings.push(...await applyConfigPatch(operation, context, options));
           appliedOperationIds.push(operation.id);
           break;
         case "credential-reference":
@@ -148,6 +153,7 @@ export async function applyReviewedSetupPlanOperations(
     return {
       ok: true,
       appliedOperationIds,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   } catch (error) {
     return {
@@ -221,55 +227,53 @@ async function applyConfigPatch(
   operation: SetupApplyOperation,
   context: PlanContext,
   options: ReviewedSetupApplyExecutorOptions
-): Promise<void> {
+): Promise<readonly OptionalCapabilityApplyWarning[]> {
   switch (operation.review.summaryKey) {
     case "setupDrafts.providerModelRoute.summary":
     case "setupModules.provider.draft":
       await applyProviderRoute(operation, context, options);
-      return;
+      return [];
     case "setupDrafts.fallbackModelRoute.add.summary":
     case "setupDrafts.fallbackModelRoute.replace.summary":
       await applyFallbackRoute(operation, context, options);
-      return;
+      return [];
     case "setupDrafts.auxiliaryModelRoute.summary":
       await applyAuxiliaryModelRoute(operation, context, options);
-      return;
+      return [];
     case "setupDrafts.credentialReference.summary":
     case "setupModules.credentials.draft":
       await applyCredentialReference(operation, context, options);
-      return;
+      return [];
     case "setupDrafts.securityMode.summary":
     case "setupModules.security-mode.draft":
       await applySecurityMode(operation, options);
-      return;
+      return [];
     case "setupDrafts.workflowLearning.summary":
     case "setupModules.workflow-learning.draft":
       await applyWorkflowLearning(operation, options);
-      return;
+      return [];
     case "setupDrafts.uiPreferences.summary":
       await applyUiPreferences(operation, options);
-      return;
+      return [];
     case "setupDrafts.optionalCapabilities.summary":
-      await applyFirstRunOptionalCapabilities(operation, options);
-      return;
+      return applyFirstRunOptionalCapabilities(operation, options);
     case "setupModules.telegram.draft":
       await applyTelegramCapability(operation, options);
-      return;
+      return [];
     case "setupModules.discord.draft":
       await applyDiscordCapability(operation, options);
-      return;
+      return [];
     case "setupModules.whatsapp.draft":
       await applyWhatsAppCapability(operation, options);
-      return;
+      return [];
     case "setupModules.voice.draft":
-      await applyVoiceCapability(operation, options);
-      return;
+      return applyVoiceCapability(operation, options);
     case "setupModules.vision.draft":
       await applyVisionCapability(operation, options);
-      return;
+      return [];
     case "setupModules.browser.draft":
       await applyBrowserCapability(operation, options);
-      return;
+      return [];
     default:
       throw new Error(`Unsupported reviewed config operation: ${operation.review.summaryKey}`);
   }
@@ -482,15 +486,16 @@ async function applyUiPreferences(
 async function applyFirstRunOptionalCapabilities(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
-): Promise<void> {
-  if (operation.review.values.skipped === true) return;
+): Promise<readonly OptionalCapabilityApplyWarning[]> {
+  if (operation.review.values.skipped === true) return [];
   const capabilities = arrayValue(operation.review.values.capabilities);
+  const warnings: OptionalCapabilityApplyWarning[] = [];
   for (const capability of capabilities) {
     switch (capability) {
       case "channels":
         throw new Error("Remote-control capabilities require token references and allowed identities before apply.");
       case "voice":
-        await applyVoiceCapability(operation, options);
+        warnings.push(...await applyVoiceCapability(operation, options));
         break;
       case "vision":
         await applyVisionCapability(operation, options);
@@ -502,6 +507,7 @@ async function applyFirstRunOptionalCapabilities(
         throw new Error(`Unsupported optional capability: ${capability}`);
     }
   }
+  return warnings;
 }
 
 async function applyTelegramCapability(
@@ -574,30 +580,75 @@ async function applyWhatsAppCapability(
 async function applyVoiceCapability(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
-): Promise<void> {
+): Promise<readonly OptionalCapabilityApplyWarning[]> {
   const target = configApplyTarget(operation, options);
   const sttProvider = sttProviderValue(operation.review.values.sttProvider);
+  const input: VoiceSetupInput = {
+    ttsProvider: ttsProviderValue(operation.review.values.ttsProvider),
+    ttsModel: stringValue(operation.review.values.ttsModel),
+    ttsApiKeyEnv: stringValue(operation.review.values.ttsApiKeyEnv),
+    sttProvider,
+    sttModel: stringValue(operation.review.values.sttModel),
+    sttApiKeyEnv: stringValue(operation.review.values.sttApiKeyEnv),
+  };
+  const warnings: OptionalCapabilityApplyWarning[] = [];
   if (sttProvider === "local") {
     const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
     const envResult = await createManagedEnvironment({ stateRoot: globalPaths.stateRoot });
     if (!envResult.ok) {
-      throw new Error([
-        resolveSetupCopy("en", "setupEditor.apply.voice.localStt.failed"),
-        envResult.reason,
-      ].join("\n"));
+      if (isLocalSttTolerantVoiceOperation(operation, options)) {
+        delete input.sttProvider;
+        delete input.sttModel;
+        delete input.sttApiKeyEnv;
+        warnings.push({
+          operationId: operation.id,
+          capability: "voice",
+          subCapability: "stt",
+          code: "managed_python_setup_failed",
+          message: localSttManagedPythonWarningMessage,
+          cause: envResult.reason,
+        });
+      } else {
+        throw new Error([
+          resolveSetupCopy("en", "setupEditor.apply.voice.localStt.failed"),
+          envResult.reason,
+        ].join("\n"));
+      }
     }
+  }
+  if (!hasVoiceSetupInput(input)) {
+    return warnings;
   }
   await setupVoiceConfig({
     ...target,
-    input: {
-      ttsProvider: ttsProviderValue(operation.review.values.ttsProvider),
-      ttsModel: stringValue(operation.review.values.ttsModel),
-      ttsApiKeyEnv: stringValue(operation.review.values.ttsApiKeyEnv),
-      sttProvider,
-      sttModel: stringValue(operation.review.values.sttModel),
-      sttApiKeyEnv: stringValue(operation.review.values.sttApiKeyEnv),
-    },
+    input,
   });
+  return warnings;
+}
+
+function isLocalSttTolerantVoiceOperation(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): boolean {
+  return options.mode === "firstRunTolerant" &&
+    operation.kind === "config-patch" &&
+    operation.target?.kind === "config-scope" &&
+    operation.target.scope.includes("voice");
+}
+
+function hasVoiceSetupInput(input: VoiceSetupInput): boolean {
+  return input.ttsProvider !== undefined ||
+    input.ttsSpeed !== undefined ||
+    input.ttsVoice !== undefined ||
+    input.ttsModel !== undefined ||
+    input.ttsApiKeyEnv !== undefined ||
+    input.ttsApiKey !== undefined ||
+    input.sttProvider !== undefined ||
+    input.sttModel !== undefined ||
+    input.sttCommand !== undefined ||
+    input.sttApiKeyEnv !== undefined ||
+    input.sttApiKey !== undefined ||
+    input.pythonBinary !== undefined;
 }
 
 async function applyVisionCapability(

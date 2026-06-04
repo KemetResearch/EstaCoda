@@ -350,6 +350,52 @@ function voiceCapabilityPlan(values: ReviewValues, input: { readonly homeDir: st
   };
 }
 
+function firstRunVoiceOptionalCapabilityPlan(values: ReviewValues, input: { readonly homeDir: string }): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-first-run-voice-bundle"],
+    operations: [{
+      id: "test-first-run-voice",
+      kind: "config-patch",
+      sourceLineIds: ["test-first-run-voice-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["voice"],
+        path: profileConfigPath(input.homeDir),
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.optionalCapabilities.summary",
+        redacted: true,
+        values: {
+          capabilities: ["voice"],
+          ...values,
+        },
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -857,7 +903,7 @@ describe("reviewed setup apply executor", () => {
       ok: false,
       reason: "ensurepip is not available",
     });
-    const plan = voiceCapabilityPlan({
+    const plan = firstRunVoiceOptionalCapabilityPlan({
       sttProvider: "local",
       sttModel: "base",
       secretValuesIncluded: false,
@@ -875,6 +921,143 @@ describe("reviewed setup apply executor", () => {
     expect(config).toEqual(initialConfig);
   });
 
+  it("preserves existing TTS and skips local STT when managed Python setup fails in first-run tolerant mode", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    const initialConfig = {
+      model: { provider: "local", id: "hermes-local" },
+      tts: {
+        provider: "openai",
+        speed: 1,
+        openai: { model: "gpt-4o-mini-tts", apiKeyEnv: "OPENAI_API_KEY" },
+      },
+    };
+    await writeFile(profileConfigPath(tempDir), JSON.stringify(initialConfig, null, 2), "utf8");
+    vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available",
+    });
+    const plan = firstRunVoiceOptionalCapabilityPlan({
+      sttProvider: "local",
+      sttModel: "base",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "firstRunTolerant",
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      tts?: unknown;
+      stt?: unknown;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual([{
+      operationId: "test-first-run-voice",
+      capability: "voice",
+      subCapability: "stt",
+      code: "managed_python_setup_failed",
+      message: "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup.",
+      cause: "ensurepip is not available",
+    }]);
+    expect(config.tts).toEqual(initialConfig.tts);
+    expect(config.stt).toBeUndefined();
+  });
+
+  it("writes new TTS and skips local STT when managed Python setup fails in first-run tolerant mode", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+    }, null, 2), "utf8");
+    vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available",
+    });
+    const plan = firstRunVoiceOptionalCapabilityPlan({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+      sttProvider: "local",
+      sttModel: "base",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "firstRunTolerant",
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      stt?: unknown;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings?.[0]).toEqual(expect.objectContaining({
+      operationId: "test-first-run-voice",
+      capability: "voice",
+      subCapability: "stt",
+      code: "managed_python_setup_failed",
+      cause: "ensurepip is not available",
+    }));
+    expect(result.warnings?.[0]?.message).toContain("local faster-whisper STT was skipped");
+    expect(config.tts).toEqual({
+      provider: "openai",
+      speed: 1,
+      openai: {
+        model: "gpt-4o-mini-tts",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
+    expect(config.stt).toBeUndefined();
+  });
+
+  it("preserves existing STT when applying a TTS-only voice change", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    const initialStt = {
+      provider: "openai",
+      openai: { model: "gpt-4o-mini-transcribe", apiKeyEnv: "OPENAI_API_KEY" },
+    };
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      stt: initialStt,
+    }, null, 2), "utf8");
+    const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: true,
+      pythonBinary: "/should-not-be-used",
+    });
+    const plan = voiceCapabilityPlan({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "firstRunTolerant",
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      stt?: unknown;
+      tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toBeUndefined();
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(config.stt).toEqual(initialStt);
+    expect(config.tts).toEqual({
+      provider: "openai",
+      speed: 1,
+      openai: {
+        model: "gpt-4o-mini-tts",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
+  });
+
   it("does not create the managed Python environment for cloud STT or TTS-only voice apply", async () => {
     const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
       ok: true,
@@ -888,6 +1071,7 @@ describe("reviewed setup apply executor", () => {
     }, { homeDir: tempDir }), {
       homeDir: tempDir,
       workspaceRoot,
+      mode: "firstRunTolerant",
     });
     const ttsResult = await applyReviewedSetupPlanOperations(voiceCapabilityPlan({
       ttsProvider: "openai",
@@ -897,6 +1081,7 @@ describe("reviewed setup apply executor", () => {
     }, { homeDir: tempDir }), {
       homeDir: tempDir,
       workspaceRoot,
+      mode: "firstRunTolerant",
     });
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
