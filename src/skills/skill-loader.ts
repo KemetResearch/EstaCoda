@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type {
@@ -171,7 +172,15 @@ async function findSkillFiles(
     throw new Error(`Skill directory scan exceeded max file count ${options.maxFiles}`);
   }
 
-  const entries = await readdir(root, { withFileTypes: true });
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return files;
+    }
+    throw error;
+  }
 
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.isSymbolicLink()) {
