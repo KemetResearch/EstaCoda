@@ -5,8 +5,9 @@ import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
-import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
+import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
+import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
 
 export type WorkspaceToolOptions = {
   workspaceRoot: string;
@@ -28,10 +29,6 @@ const FILE_CHANGE_PREVIEW_LINES = 8;
 const MAX_TERMINAL_CONTEXT_SUMMARY_CHARS = 500;
 const MAX_TERMINAL_CONTEXT_COMMAND_CHARS = 220;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo"]);
-
-type ResolvedWorkspacePath =
-  | { ok: true; content: ""; path: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> };
 
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
   const root = resolve(options.workspaceRoot);
@@ -315,140 +312,6 @@ export const workspaceToolProvider: SessionToolProvider = {
     });
   }
 };
-
-async function resolveWorkspacePath(
-  root: string,
-  path: string | undefined,
-  options: { allowMissingLeaf?: boolean; allowDirectory?: boolean; forbidSymlinks?: boolean } = {}
-): Promise<ResolvedWorkspacePath> {
-  if (typeof path !== "string" || path.length === 0) {
-    return pathError("path must be a non-empty string");
-  }
-
-  // Step 1: Resolve target lexically under workspaceRoot
-  const candidate = resolve(root, path);
-
-  // Step 2: Reject traversal before filesystem mutation
-  const blockedReason = explainPathBlock(root, candidate);
-  if (blockedReason !== undefined) {
-    return pathError(blockedReason);
-  }
-
-  let canonical: string;
-
-  try {
-    canonical = await realpath(candidate);
-  } catch (error) {
-    if (options.allowMissingLeaf !== true) {
-      return pathError(error instanceof Error ? error.message : "path does not exist");
-    }
-
-    // Step 3: Find nearest existing ancestor
-    const ancestor = await findNearestExistingAncestor(candidate);
-    if (ancestor === undefined) {
-      return pathError("unable to resolve parent directory");
-    }
-
-    // Step 4: realpath nearest existing ancestor
-    let resolvedAncestor: string;
-    try {
-      resolvedAncestor = await realpath(ancestor);
-    } catch {
-      return pathError("unable to resolve parent directory");
-    }
-
-    // Reject symlinks in existing parent segments when required
-    if (options.forbidSymlinks === true) {
-      const symlinkCheck = await checkParentSegmentsForSymlinks(root, path);
-      if (symlinkCheck !== undefined) {
-        return pathError(symlinkCheck);
-      }
-    }
-
-    // Step 5: realpath workspaceRoot
-    let resolvedRoot: string;
-    try {
-      resolvedRoot = await realpath(root);
-    } catch {
-      resolvedRoot = root;
-    }
-
-    // Step 6: Verify ancestor realpath is inside workspaceRoot realpath
-    const ancestorRelative = relative(resolvedRoot, resolvedAncestor);
-    if (ancestorRelative.startsWith("..") || isAbsolute(ancestorRelative)) {
-      return pathError("path is outside the trusted workspace");
-    }
-
-    // Step 7 & 8: Build canonical from resolved ancestor + missing descendants
-    const missingSuffix = relative(ancestor, candidate);
-    canonical = resolve(resolvedAncestor, missingSuffix);
-
-    // Final containment verification
-    const finalRelative = relative(resolvedRoot, canonical);
-    if (finalRelative.startsWith("..") || isAbsolute(finalRelative)) {
-      return pathError("path is outside the trusted workspace");
-    }
-  }
-
-  // Additional containment check for success path (symlinks may have resolved outside)
-  const resolvedRoot = await realpath(root).catch(() => root);
-  const canonicalRelative = relative(resolvedRoot, canonical);
-  if (canonicalRelative.startsWith("..") || isAbsolute(canonicalRelative)) {
-    return pathError("path is outside the trusted workspace");
-  }
-
-  const targetStat = await stat(canonical).catch(() => undefined);
-  if (targetStat?.isDirectory() && options.allowDirectory !== true) {
-    return pathError("path points to a directory");
-  }
-
-  return {
-    ok: true,
-    content: "",
-    path: canonical
-  };
-}
-
-async function findNearestExistingAncestor(candidate: string): Promise<string | undefined> {
-  let current = dirname(candidate);
-  while (true) {
-    const statResult = await stat(current).catch(() => undefined);
-    if (statResult !== undefined) {
-      return current;
-    }
-    const parent = dirname(current);
-    if (parent === current) {
-      return undefined;
-    }
-    current = parent;
-  }
-}
-
-async function checkParentSegmentsForSymlinks(
-  root: string,
-  rawPath: string
-): Promise<string | undefined> {
-  const resolvedRoot = await realpath(root).catch(() => root);
-  const candidate = resolve(resolvedRoot, rawPath);
-  let current = dirname(candidate);
-
-  while (current !== resolvedRoot && current !== dirname(current)) {
-    try {
-      const statResult = await lstat(current);
-      if (statResult.isSymbolicLink()) {
-        return "path contains a symlink in parent directories";
-      }
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        return error instanceof Error ? error.message : "failed to inspect path segment";
-      }
-      // Segment does not exist; continue upward
-    }
-    current = dirname(current);
-  }
-
-  return undefined;
-}
 
 async function ensureSafeParentDirectories(
   targetPath: string,
@@ -887,18 +750,4 @@ function applyLineRange(content: string, lineStart?: number, lineEnd?: number): 
 
 function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
   return assessHardlineFloor(command, { environmentType })?.reason;
-}
-
-function errorResult(content: string): ToolResult {
-  return {
-    ok: false,
-    content
-  };
-}
-
-function pathError(content: string): ResolvedWorkspacePath {
-  return {
-    ok: false,
-    content
-  };
 }
