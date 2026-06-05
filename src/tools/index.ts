@@ -12,6 +12,7 @@ import { knowledgeMemoryToolProvider } from "./knowledge-memory-tools.js";
 import { mediaToolProvider } from "./media-tools.js";
 import { memoryFileCompactionToolProvider } from "./memory-file-compaction-tools.js";
 import { memoryToolProvider } from "./memory-tool.js";
+import { notebookToolProvider } from "./notebook-tools.js";
 import { processToolProvider } from "./process-tools.js";
 import { pythonToolProvider } from "./python-tools.js";
 import { skillToolProvider } from "./skill-tools.js";
@@ -35,6 +36,7 @@ export {
   mediaToolProvider,
   memoryFileCompactionToolProvider,
   memoryToolProvider,
+  notebookToolProvider,
   processToolProvider,
   pythonToolProvider,
   skillToolProvider,
@@ -64,6 +66,7 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: workspaceToolProvider, phase: "pre-skill-visibility" },
   { provider: globToolProvider, phase: "pre-skill-visibility" },
   { provider: grepToolProvider, phase: "pre-skill-visibility" },
+  { provider: notebookToolProvider, phase: "pre-skill-visibility" },
   { provider: mediaToolProvider, phase: "pre-skill-visibility" },
   { provider: voiceToolProvider, phase: "pre-skill-visibility" },
   { provider: imageGenerationToolProvider, phase: "pre-skill-visibility" },
