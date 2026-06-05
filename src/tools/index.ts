@@ -4,6 +4,8 @@ import { configToolProvider } from "./config-tools.js";
 import { cronToolProvider } from "./cron-tools.js";
 import { delegationToolProvider } from "./delegation-tools.js";
 import { executeCodeToolProvider } from "./execute-code-tool.js";
+import { globToolProvider } from "./glob-tools.js";
+import { grepToolProvider } from "./grep-tools.js";
 import { imageGenerationToolProvider } from "./image-generation-tools.js";
 import { knowledgeCodeToolProvider } from "./knowledge-code-tools.js";
 import { knowledgeMemoryToolProvider } from "./knowledge-memory-tools.js";
@@ -25,6 +27,8 @@ export {
   cronToolProvider,
   delegationToolProvider,
   executeCodeToolProvider,
+  globToolProvider,
+  grepToolProvider,
   imageGenerationToolProvider,
   knowledgeCodeToolProvider,
   knowledgeMemoryToolProvider,
@@ -58,6 +62,8 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: pythonToolProvider, phase: "pre-skill-visibility" },
   { provider: webToolProvider, phase: "pre-skill-visibility" },
   { provider: workspaceToolProvider, phase: "pre-skill-visibility" },
+  { provider: globToolProvider, phase: "pre-skill-visibility" },
+  { provider: grepToolProvider, phase: "pre-skill-visibility" },
   { provider: mediaToolProvider, phase: "pre-skill-visibility" },
   { provider: voiceToolProvider, phase: "pre-skill-visibility" },
   { provider: imageGenerationToolProvider, phase: "pre-skill-visibility" },

@@ -213,7 +213,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.search",
-      description: "Search text files inside the active workspace with a literal or regex query.",
+      description: "Search text files inside the active workspace with a simple literal or regex query. For ripgrep-backed search, file filtering, output modes, context, and pagination, prefer file.grep.",
       inputSchema: {
         type: "object",
         properties: {
