@@ -16,6 +16,7 @@ import type { FailureRecord } from "../contracts/failure.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { toFtsQuery } from "../search/fts-query.js";
 
 type SessionRow = {
   id: string;
@@ -1113,15 +1114,6 @@ function isSessionModelOverride(value: unknown): value is SessionModelOverride {
     typeof candidate.modelProfile.id === "string" &&
     typeof candidate.modelProfile.provider === "string"
   );
-}
-
-function toFtsQuery(query: string): string {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9\u0600-\u06ff]+/u)
-    .filter((term) => term.length > 1)
-    .map((term) => `"${term.replaceAll('"', '""')}"`)
-    .join(" OR ");
 }
 
 function rowToTrajectory(row: TrajectoryRow): Trajectory {
