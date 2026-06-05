@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MemoryPromotionRecord } from "../contracts/memory.js";
+import type { MemoryPersistenceService } from "./memory-persistence-service.js";
 
 type PromotionFile = {
   version: 1;
@@ -10,12 +11,14 @@ type PromotionFile = {
 export class MemoryPromotionStore {
   readonly #path: string;
   readonly #now: () => Date;
+  readonly #persistence: MemoryPersistenceService | undefined;
   readonly #records = new Map<string, MemoryPromotionRecord>();
   #loaded = false;
 
-  constructor(options: { path: string; now?: () => Date }) {
+  constructor(options: { path: string; now?: () => Date; persistence?: MemoryPersistenceService }) {
     this.#path = options.path;
     this.#now = options.now ?? (() => new Date());
+    this.#persistence = options.persistence;
   }
 
   async applyUserPreference(input: {
@@ -33,6 +36,7 @@ export class MemoryPromotionStore {
     superseded?: MemoryPromotionRecord;
   }> {
     await this.#ensureLoaded();
+    const previousRecords = new Map(this.#records);
     const now = this.#now().toISOString();
     const key = normalizeContentKey(input.content);
     const existing = this.#records.get(key);
@@ -47,7 +51,7 @@ export class MemoryPromotionStore {
         updatedAt: now
       };
       this.#records.set(key, updated);
-      await this.#flush();
+      await this.#flushWithRollback(previousRecords);
       return {
         action: "strengthened",
         record: updated
@@ -80,7 +84,7 @@ export class MemoryPromotionStore {
       };
       this.#records.set(normalizeContentKey(retired.content), retired);
       this.#records.set(key, record);
-      await this.#flush();
+      await this.#flushWithRollback(previousRecords);
       return {
         action: "replaced",
         record,
@@ -89,7 +93,7 @@ export class MemoryPromotionStore {
     }
 
     this.#records.set(key, record);
-    await this.#flush();
+    await this.#flushWithRollback(previousRecords);
     return {
       action: "created",
       record
@@ -110,6 +114,7 @@ export class MemoryPromotionStore {
     record: MemoryPromotionRecord;
   }> {
     await this.#ensureLoaded();
+    const previousRecords = new Map(this.#records);
     const now = this.#now().toISOString();
     const key = normalizeContentKey(input.content);
     const existing = this.#records.get(key);
@@ -124,7 +129,7 @@ export class MemoryPromotionStore {
         updatedAt: now
       };
       this.#records.set(key, updated);
-      await this.#flush();
+      await this.#flushWithRollback(previousRecords);
       return {
         action: "strengthened",
         record: updated
@@ -146,7 +151,7 @@ export class MemoryPromotionStore {
       sourceEventId: input.sourceEventId
     };
     this.#records.set(key, record);
-    await this.#flush();
+    await this.#flushWithRollback(previousRecords);
     return {
       action: "created",
       record
@@ -155,6 +160,7 @@ export class MemoryPromotionStore {
 
   async forgetUserPreference(content: string): Promise<MemoryPromotionRecord | undefined> {
     await this.#ensureLoaded();
+    const previousRecords = new Map(this.#records);
     const match = this.#findMatchingActiveRecord(content);
     if (match === undefined) {
       return undefined;
@@ -168,7 +174,7 @@ export class MemoryPromotionStore {
       updatedAt: this.#now().toISOString()
     };
     this.#records.set(normalizeContentKey(match.content), forgotten);
-    await this.#flush();
+    await this.#flushWithRollback(previousRecords);
     return forgotten;
   }
 
@@ -179,6 +185,7 @@ export class MemoryPromotionStore {
 
   async deactivateById(id: string): Promise<MemoryPromotionRecord | undefined> {
     await this.#ensureLoaded();
+    const previousRecords = new Map(this.#records);
     const record = [...this.#records.values()].find((r) => r.id === id);
     if (record === undefined) {
       return undefined;
@@ -189,7 +196,7 @@ export class MemoryPromotionStore {
       updatedAt: this.#now().toISOString()
     };
     this.#records.set(normalizeContentKey(record.content), deactivated);
-    await this.#flush();
+    await this.#flushWithRollback(previousRecords);
     return deactivated;
   }
 
@@ -200,11 +207,12 @@ export class MemoryPromotionStore {
 
   async restore(records: readonly MemoryPromotionRecord[]): Promise<void> {
     await this.#ensureLoaded();
+    const previousRecords = new Map(this.#records);
     this.#records.clear();
     for (const record of records) {
       this.#records.set(normalizeContentKey(record.content), record);
     }
-    await this.#flush();
+    await this.#flushWithRollback(previousRecords);
   }
 
   #findMatchingActiveRecord(content: string): MemoryPromotionRecord | undefined {
@@ -234,7 +242,16 @@ export class MemoryPromotionStore {
 
     this.#loaded = true;
     try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<PromotionFile>;
+      const content = this.#persistence === undefined
+        ? await readFile(this.#path, "utf8")
+        : await this.#persistence.readFile({
+            path: this.#path,
+            kind: "promotions.json"
+          });
+      if (content === undefined) {
+        return;
+      }
+      const parsed = JSON.parse(content) as Partial<PromotionFile>;
       const records = Array.isArray(parsed.records) ? parsed.records : [];
       for (const record of records) {
         if (typeof record?.content !== "string" || typeof record?.id !== "string") {
@@ -254,8 +271,29 @@ export class MemoryPromotionStore {
       version: 1,
       records: [...this.#records.values()].sort((left, right) => left.content.localeCompare(right.content))
     };
+    const content = `${JSON.stringify(file, null, 2)}\n`;
+    if (this.#persistence !== undefined) {
+      await this.#persistence.writeFile({
+        path: this.#path,
+        kind: "promotions.json",
+        content
+      });
+      return;
+    }
     await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await writeFile(this.#path, content, "utf8");
+  }
+
+  async #flushWithRollback(previousRecords: Map<string, MemoryPromotionRecord>): Promise<void> {
+    try {
+      await this.#flush();
+    } catch (error) {
+      this.#records.clear();
+      for (const [key, record] of previousRecords.entries()) {
+        this.#records.set(key, record);
+      }
+      throw error;
+    }
   }
 }
 

@@ -7,12 +7,14 @@ import type {
   MemorySearchResult,
   SkillOutcome
 } from "../contracts/memory.js";
+import { join } from "node:path";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryInspector } from "./memory-inspector.js";
 import type { MemoryStore } from "./memory-store.js";
+import type { MemoryPersistenceService } from "./memory-persistence-service.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -20,6 +22,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #saveRoots: Partial<Record<MemoryFileKind, string>>;
   readonly #promotionStore: MemoryPromotionStore | undefined;
   readonly #inspector: MemoryInspector | undefined;
+  readonly #persistence: MemoryPersistenceService | undefined;
 
   constructor(options: {
     store: MemoryStore;
@@ -27,8 +30,10 @@ export class LocalMemoryProvider implements MemoryProvider {
     saveRoots?: Partial<Record<MemoryFileKind, string>>;
     promotionStore?: MemoryPromotionStore;
     promotionStorePath?: string;
+    persistence?: MemoryPersistenceService;
   }) {
     this.#store = options.store;
+    this.#persistence = options.persistence;
     this.#saveRoots = options.saveRoots ?? (
       options.saveRoot === undefined
         ? {}
@@ -41,7 +46,8 @@ export class LocalMemoryProvider implements MemoryProvider {
     this.#promotionStore = options.promotionStore ?? (options.promotionStorePath === undefined
       ? undefined
       : new MemoryPromotionStore({
-          path: options.promotionStorePath
+          path: options.promotionStorePath,
+          persistence: this.#persistence
         }));
     this.#inspector = this.#promotionStore === undefined
       ? undefined
@@ -132,7 +138,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created" || applied.action === "replaced") {
           this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
-        await this.#save();
+        await this.#save([target]);
       } catch (error) {
         this.#store.write(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
@@ -157,7 +163,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created") {
           this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
-        await this.#save();
+        await this.#save([target]);
       } catch (error) {
         this.#store.write(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
@@ -166,8 +172,14 @@ export class LocalMemoryProvider implements MemoryProvider {
       return;
     }
 
-    this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
-    await this.#save();
+    const previousMarkdown = this.#store.read(target);
+    try {
+      this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
+      await this.#save([target]);
+    } catch (error) {
+      this.#store.write(target, previousMarkdown);
+      throw error;
+    }
   }
 
   async recordSkillOutcome(outcome: SkillOutcome): Promise<void> {
@@ -180,11 +192,18 @@ export class LocalMemoryProvider implements MemoryProvider {
       `summary:${sanitizeMemoryText(outcome.summary)}`
     ].filter((part) => part !== undefined).join(" | ");
 
-    for (const target of targets) {
-      this.#appendDedupe(target, line);
+    const previousMarkdown = new Map(targets.map((target) => [target, this.#store.read(target)] as const));
+    try {
+      for (const target of targets) {
+        this.#appendDedupe(target, line);
+      }
+      await this.#save(targets);
+    } catch (error) {
+      for (const [target, content] of previousMarkdown.entries()) {
+        this.#store.write(target, content);
+      }
+      throw error;
     }
-
-    await this.#save();
   }
 
   async inspectPromotions(): Promise<MemoryPromotionRecord[]> {
@@ -192,10 +211,20 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async forgetPromotion(content: string): Promise<MemoryPromotionRecord | undefined> {
+    const previousRecords = await this.#promotionStore?.list();
+    const previousMarkdown = this.#store.read("USER.md");
     const forgotten = await this.#promotionStore?.forgetUserPreference(content);
     if (forgotten !== undefined) {
-      this.#removeExactLine("USER.md", `- ${forgotten.content}`);
-      await this.#save();
+      try {
+        this.#removeExactLine("USER.md", `- ${forgotten.content}`);
+        await this.#save(["USER.md"]);
+      } catch (error) {
+        this.#store.write("USER.md", previousMarkdown);
+        if (previousRecords !== undefined) {
+          await this.#promotionStore?.restore(previousRecords);
+        }
+        throw error;
+      }
     }
     return forgotten;
   }
@@ -222,14 +251,26 @@ export class LocalMemoryProvider implements MemoryProvider {
     this.#store.write(file, lines.filter((line, index, array) => !(index === array.length - 1 && line.length === 0)).join("\n"));
   }
 
-  async #save(): Promise<void> {
-    for (const file of ["MEMORY.md", "USER.md", "SOUL.md"] as const) {
+  async #save(files: readonly MemoryFileKind[]): Promise<void> {
+    for (const file of uniqueFiles(files)) {
       const root = this.#saveRoots[file];
       if (root !== undefined) {
-        await this.#store.saveFileToDirectory(root, file);
+        if (this.#persistence === undefined) {
+          await this.#store.saveFileToDirectory(root, file);
+          continue;
+        }
+        await this.#persistence.writeFile({
+          path: join(root, file),
+          kind: file,
+          content: this.#store.read(file)
+        });
       }
     }
   }
+}
+
+function uniqueFiles(files: readonly MemoryFileKind[]): MemoryFileKind[] {
+  return [...new Set(files)];
 }
 
 function excerpt(content: string, index: number): string {

@@ -1,10 +1,14 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalMemoryProvider } from "./local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
+import {
+  MemoryPersistenceDriftError,
+  MemoryPersistenceService
+} from "./memory-persistence-service.js";
 import { MemoryBudgetOverflowError, MemoryStore } from "./memory-store.js";
 
 const tempDirs: string[] = [];
@@ -209,6 +213,119 @@ describe("LocalMemoryProvider", () => {
         active: true
       })
     ]);
+  });
+
+  it("detects external edits before saving provider memory changes", async () => {
+    const root = await makeTempDir();
+    const path = join(root, "USER.md");
+    await writeFile(path, "- original preference", "utf8");
+    const persistence = new MemoryPersistenceService();
+    const loaded = await persistence.readFile({
+      path,
+      kind: "USER.md"
+    });
+    const store = new MemoryStore();
+    store.write("USER.md", loaded ?? "");
+    const provider = new LocalMemoryProvider({
+      store,
+      saveRoot: root,
+      persistence
+    });
+    await writeFile(path, "- externally edited preference", "utf8");
+
+    await expect(provider.conclude({
+      id: "pref-drift",
+      kind: "user-preference",
+      content: "Prefer focused replies.",
+      confidence: 0.9
+    })).rejects.toThrow(MemoryPersistenceDriftError);
+
+    expect(await readFile(path, "utf8")).toBe("- externally edited preference");
+    expect(store.read("USER.md")).toBe("- original preference");
+  });
+
+  it("rolls back promotion markdown and metadata when markdown drift is refused", async () => {
+    const root = await makeTempDir();
+    const userPath = join(root, "USER.md");
+    const promotionsPath = join(root, "promotions.json");
+    await writeFile(userPath, "- Prefer concise replies.", "utf8");
+    const persistence = new MemoryPersistenceService();
+    const loaded = await persistence.readFile({
+      path: userPath,
+      kind: "USER.md"
+    });
+    const store = new MemoryStore();
+    store.write("USER.md", loaded ?? "");
+    const promotionStore = new MemoryPromotionStore({
+      path: promotionsPath,
+      persistence
+    });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "Prefer concise replies.",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({
+      store,
+      saveRoot: root,
+      promotionStore,
+      persistence
+    });
+    await writeFile(userPath, "- external edit stays on disk", "utf8");
+
+    await expect(provider.conclude({
+      id: "pref-replacement",
+      kind: "user-preference",
+      content: "Prefer detailed replies.",
+      confidence: 0.9
+    })).rejects.toThrow(MemoryPersistenceDriftError);
+
+    expect(await readFile(userPath, "utf8")).toBe("- external edit stays on disk");
+    expect(store.read("USER.md")).toBe("- Prefer concise replies.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "Prefer concise replies.",
+        active: true
+      })
+    ]);
+    const promotionsJson = await readFile(promotionsPath, "utf8");
+    expect(promotionsJson).toContain("pref-existing");
+    expect(promotionsJson).not.toContain("pref-replacement");
+  });
+
+  it("creates memory file backups only when explicitly configured", async () => {
+    const root = await makeTempDir();
+    const path = join(root, "MEMORY.md");
+    await writeFile(path, "- original fact", "utf8");
+    const persistence = new MemoryPersistenceService();
+    await persistence.readFile({
+      path,
+      kind: "MEMORY.md"
+    });
+
+    await persistence.writeFile({
+      path,
+      kind: "MEMORY.md",
+      content: "- updated fact"
+    });
+    expect((await readdir(root)).filter((entry) => entry.includes(".bak."))).toEqual([]);
+
+    const result = await persistence.writeFile({
+      path,
+      kind: "MEMORY.md",
+      content: "- second update",
+      policy: {
+        createBackup: true,
+        now: () => new Date("2026-06-01T00:00:00.000Z")
+      }
+    });
+
+    expect(result.backupPath).toBe(`${path}.bak.2026-06-01T00-00-00-000Z`);
+    expect(await readFile(result.backupPath!, "utf8")).toBe("- updated fact");
   });
 
   it("strips hidden reasoning before writing memory conclusions and skill outcomes", async () => {

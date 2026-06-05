@@ -29,6 +29,8 @@ export type SessionToolContext = {
   delegationManager?: import("../delegation/delegation-manager.js").DelegationManager;
   trustedWorkspace?: () => Promise<boolean>;
   memoryStore?: import("../memory/memory-store.js").MemoryStore;
+  memoryPersistenceService?: import("../memory/memory-persistence-service.js").MemoryPersistenceService;
+  memoryPersistencePaths?: Partial<Record<import("./memory.js").MemoryFileKind, string>>;
   memoryInspector?: import("../memory/memory-inspector.js").MemoryInspector;
   sessionDb?: import("./session.js").SessionDB;
   trajectoryRecorder?: import("../trajectory/trajectory-recorder.js").TrajectoryRecorder;
