@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_MEMORY_CONFIG } from "../config/memory-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore } from "../memory/memory-index-store.js";
@@ -367,6 +368,75 @@ describe("memory retrieval tools", () => {
     });
     expect(payload.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
       code: "memory-index-unavailable"
+    }));
+  });
+
+  it("memory.read rejects traversal shared-memory keys before fallback", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "SOUL.md": "Tool traversal must not expose this."
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: {
+        ...DEFAULT_MEMORY_CONFIG,
+        index: {
+          ...DEFAULT_MEMORY_CONFIG.index,
+          enabled: false
+        }
+      }
+    });
+    const readTool = createMemoryReadTool({
+      memoryRetrievalService: service,
+      profileId: "alpha"
+    });
+
+    const payload = parsePayload(await readTool.run({
+      source: "shared",
+      key: "../../profiles/alpha/SOUL.md"
+    }));
+
+    expect(payload).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid-shared-key"
+      }
+    });
+    expect(JSON.stringify(payload)).not.toContain("Tool traversal");
+  });
+
+  it("retrieval disabled returns structured tool diagnostics without content", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "USER.md": "Tool disabled retrieval must not expose this."
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: {
+        ...DEFAULT_MEMORY_CONFIG,
+        retrieval: {
+          ...DEFAULT_MEMORY_CONFIG.retrieval,
+          enabled: false
+        },
+        index: {
+          ...DEFAULT_MEMORY_CONFIG.index,
+          enabled: false
+        }
+      }
+    });
+    const readTool = createMemoryReadTool({
+      memoryRetrievalService: service,
+      profileId: "alpha"
+    });
+
+    const result = await readTool.run({ source: "USER.md" });
+    const payload = parsePayload(result);
+
+    expect(result.ok).toBe(false);
+    expect(payload.result).toBeNull();
+    expect(JSON.stringify(payload)).not.toContain("Tool disabled retrieval");
+    expect(payload.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+      code: "memory-retrieval-disabled"
     }));
   });
 

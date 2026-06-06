@@ -56,6 +56,23 @@ describe("CLI memory commands", () => {
     expect(result.output).toContain("pendingRebuildReason: none");
   });
 
+  it("memory index rebuild metadata survives a fresh status command", async () => {
+    const homeDir = await makeTempHome();
+    await seedProfileMemory(homeDir, {
+      "USER.md": "rebuild metadata memory"
+    });
+
+    const rebuild = await runMemoryCommand(homeDir, ["memory", "index", "rebuild"]);
+    const status = await runMemoryCommand(homeDir, ["memory", "index", "status"]);
+
+    expect(rebuild.exitCode).toBe(0);
+    expect(rebuild.output).not.toContain("lastRebuildAt: none");
+    expect(status.exitCode).toBe(0);
+    expect(status.output).not.toContain("lastRebuildAt: none");
+    expect(status.output).not.toContain("lastBackfillAt: none");
+    expect(status.output).toContain("pendingRebuildReason: none");
+  });
+
   it("memory index status works after deleting index file and reports pending rebuild", async () => {
     const homeDir = await makeTempHome();
     await seedProfileMemory(homeDir, {
@@ -192,6 +209,48 @@ describe("CLI memory commands", () => {
     expect(allowed.output).toContain("protected");
     expect(allowed.output).not.toContain("protected soul memory");
     expect(allowed.output).toContain("protectedClass: identity");
+  });
+
+  it("memory read rejects traversal shared keys without reading outside shared memory", async () => {
+    const homeDir = await makeTempHome();
+    await seedProfileMemory(homeDir, {
+      "SOUL.md": "CLI traversal must not expose protected identity."
+    });
+
+    const result = await runMemoryCommand(homeDir, [
+      "memory",
+      "read",
+      "shared",
+      "../../profiles/default/SOUL.md"
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Shared memory key is invalid.");
+    expect(result.output).not.toContain("CLI traversal");
+  });
+
+  it("memory retrieval disabled blocks CLI read and search", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    await seedProfileMemory(homeDir, {
+      "USER.md": "CLI disabled retrieval must not expose this."
+    });
+    await writeFile(paths.configPath, JSON.stringify({
+      memory: {
+        retrieval: { enabled: false },
+        index: { enabled: false }
+      }
+    }, null, 2), "utf8");
+
+    const read = await runMemoryCommand(homeDir, ["memory", "read", "USER.md"]);
+    const search = await runMemoryCommand(homeDir, ["memory", "search", "disabled"]);
+
+    expect(read.exitCode).toBe(1);
+    expect(read.output).toContain("memory-retrieval-disabled");
+    expect(read.output).not.toContain("CLI disabled retrieval");
+    expect(search.exitCode).toBe(0);
+    expect(search.output).toContain("memory-retrieval-disabled");
+    expect(search.output).not.toContain("CLI disabled retrieval");
   });
 
   it("memory read missing source returns structured diagnostics", async () => {

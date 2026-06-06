@@ -351,4 +351,75 @@ describe("LocalMemoryProvider", () => {
     expect(store.read("MEMORY.md")).toContain("Ran the checks.");
     expect(store.read("MEMORY.md")).not.toContain("private tool rationale");
   });
+
+  it("search excludes SOUL.md in the legacy fallback path", async () => {
+    const store = new MemoryStore();
+    store.write("SOUL.md", "protected-search-token identity");
+    store.write("USER.md", "visible-search-token preference");
+    const provider = new LocalMemoryProvider({ store });
+
+    const results = await provider.search("search-token");
+
+    expect(results).toEqual([
+      {
+        source: "USER.md",
+        content: "visible-search-token preference",
+        score: 1
+      }
+    ]);
+  });
+
+  it("search uses the retrieval service path when available and preserves MemorySearchResult shape", async () => {
+    const store = new MemoryStore();
+    store.write("USER.md", "legacy content should not be used");
+    const memorySearchService = {
+      search: async () => ({
+        results: [{
+          id: "indexed-result",
+          profileId: "alpha",
+          mode: "lexical" as const,
+          sourceType: "memory_file" as const,
+          source: "MEMORY.md",
+          memoryFileKind: "MEMORY.md" as const,
+          authority: "canonical" as const,
+          protectedClass: "none" as const,
+          contentHash: "hash",
+          content: "indexed search content",
+          excerpt: "indexed search content",
+          score: 0.5,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          contextLabel: "local-memory-context" as const,
+          instructionBoundary: "context-not-instruction" as const,
+          trusted: false as const
+        }],
+        diagnostics: {
+          mode: "lexical" as const,
+          profileId: "alpha",
+          indexEnabled: true,
+          indexAvailable: true,
+          fallbackUsed: false,
+          includeProtected: false,
+          resultCount: 1,
+          truncated: false,
+          redactionApplied: false,
+          diagnostics: []
+        }
+      })
+    };
+    const provider = new LocalMemoryProvider({
+      store,
+      memorySearchService,
+      profileId: "alpha"
+    });
+
+    const results = await provider.search("indexed", { limit: 3 });
+
+    expect(results).toEqual([
+      {
+        source: "MEMORY.md",
+        content: "indexed search content",
+        score: 0.5
+      }
+    ]);
+  });
 });

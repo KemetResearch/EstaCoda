@@ -795,7 +795,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     promotionStore: memoryPromotionStore,
     persistence: memoryPersistenceService,
-    memoryIndexSync
+    memoryIndexSync,
+    memorySearchService: memoryRetrievalService,
+    profileId
   });
   registerToolRegistrationPhase({
     registry: toolRegistry,

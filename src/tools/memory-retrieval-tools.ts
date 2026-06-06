@@ -4,6 +4,7 @@ import type {
   LocalMemoryRetrievalService,
   LocalMemorySearchResult
 } from "../memory/memory-retrieval-service.js";
+import { validateSharedMemoryKey } from "../memory/shared-memory.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 
 export const MEMORY_RETRIEVAL_TOOL_MAX_RESULT_CHARS = 20_000;
@@ -184,6 +185,17 @@ function readSourceInput(input: MemoryReadInput): (
         error: {
           code: "missing-shared-key",
           message: "memory.read source shared requires key."
+        }
+      };
+    }
+    try {
+      validateSharedMemoryKey(key);
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-shared-key",
+          message: "memory.read source shared key is invalid."
         }
       };
     }

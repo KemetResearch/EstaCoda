@@ -67,13 +67,13 @@ export async function listSharedMemory(options?: SharedMemoryOptions): Promise<S
   return result.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function resolveSharedMemoryPath(key: string, options?: SharedMemoryOptions): string {
+export function resolveSharedMemoryPath(key: string, options?: SharedMemoryOptions): string {
   const normalized = validateSharedMemoryKey(key);
   const filename = normalized.endsWith(".md") ? normalized : `${normalized}.md`;
   return join(resolveGlobalStateHome(options).sharedMemoryPath, filename);
 }
 
-function validateSharedMemoryKey(value: string): string {
+export function validateSharedMemoryKey(value: string): string {
   const key = value.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(key) || key === "." || key === "..") {
     throw new Error(`Invalid shared memory key: ${value}`);

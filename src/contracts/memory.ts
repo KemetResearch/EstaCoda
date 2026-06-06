@@ -191,6 +191,8 @@ export type MemoryRetrievalFallbackReason =
   | "index-unhealthy";
 
 export type MemoryRetrievalDiagnosticCode =
+  | "memory-retrieval-disabled"
+  | "memory-invalid-source"
   | "memory-index-disabled"
   | "memory-index-unavailable"
   | "memory-index-pending-rebuild"

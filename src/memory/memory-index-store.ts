@@ -5,7 +5,7 @@ import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 
 export const MEMORY_INDEX_SQLITE_FILENAME = "memory-index.sqlite";
-export const MEMORY_INDEX_SCHEMA_VERSION = 1;
+export const MEMORY_INDEX_SCHEMA_VERSION = 2;
 
 export type MemoryIndexStoreOptions = {
   path?: string;
@@ -39,6 +39,10 @@ type ColumnInfoRow = {
 
 type CountRow = {
   count: number;
+};
+
+type MetadataRow = {
+  value: string | null;
 };
 
 function isFileAlreadyExistsError(error: unknown): boolean {
@@ -107,6 +111,23 @@ export class MemoryIndexStore {
     };
   }
 
+  readMetadata(key: string): string | undefined {
+    const row = this.#db
+      .query<MetadataRow>("select value from memory_index_metadata where key = ?")
+      .get(key);
+    return row?.value ?? undefined;
+  }
+
+  writeMetadata(key: string, value: string): void {
+    this.#db
+      .query(
+        `insert into memory_index_metadata (key, value)
+         values (?, ?)
+         on conflict(key) do update set value = excluded.value`
+      )
+      .run(key, value);
+  }
+
   #migrate(): void {
     this.#db.exec(`
       pragma journal_mode = wal;
@@ -122,12 +143,15 @@ export class MemoryIndexStore {
 
     this.#db.exec("begin immediate");
     try {
-      if (this.#readSchemaVersion() < MEMORY_INDEX_SCHEMA_VERSION) {
+      if (this.#readSchemaVersion() < 1) {
         this.#migrateV1();
-        this.#db
-          .query("insert into schema_version (version) values (?) on conflict(version) do update set version = ?")
-          .run(MEMORY_INDEX_SCHEMA_VERSION, MEMORY_INDEX_SCHEMA_VERSION);
       }
+      if (this.#readSchemaVersion() < 2) {
+        this.#migrateV2();
+      }
+      this.#db
+        .query("insert into schema_version (version) values (?) on conflict(version) do update set version = ?")
+        .run(MEMORY_INDEX_SCHEMA_VERSION, MEMORY_INDEX_SCHEMA_VERSION);
       this.#db.exec("commit");
     } catch (error) {
       try {
@@ -137,6 +161,15 @@ export class MemoryIndexStore {
       }
       throw error;
     }
+  }
+
+  #migrateV2(): void {
+    this.#db.exec(`
+      create table if not exists memory_index_metadata (
+        key text primary key,
+        value text not null
+      );
+    `);
   }
 
   #migrateV1(): void {

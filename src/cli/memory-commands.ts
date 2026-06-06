@@ -12,6 +12,7 @@ import {
   type LocalMemoryRetrievalResult,
   type LocalMemorySearchResult
 } from "../memory/memory-retrieval-service.js";
+import { validateSharedMemoryKey } from "../memory/shared-memory.js";
 import type { MemoryConfig } from "../config/memory-config.js";
 import type { MemoryIndexedSourceType } from "../contracts/memory.js";
 
@@ -343,6 +344,11 @@ function parseReadSource(source: string, key: string | undefined): (
     const sourceKey = key?.trim();
     if (sourceKey === undefined || sourceKey.length === 0) {
       return { ok: false, error: "Usage: estacoda memory read shared <key>" };
+    }
+    try {
+      validateSharedMemoryKey(sourceKey);
+    } catch {
+      return { ok: false, error: "Shared memory key is invalid." };
     }
     return {
       ok: true,

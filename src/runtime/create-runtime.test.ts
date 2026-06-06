@@ -513,12 +513,16 @@ describe("createRuntime MCP trust gating", () => {
         sourceType: "memory_file",
         sourceId: "USER.md"
       });
-      expect(result.result?.content).toBe("Disabled index fallback context.");
+      expect(result.result).toBeNull();
+      expect(JSON.stringify(result)).not.toContain("Disabled index fallback context.");
       expect(result.diagnostics).toMatchObject({
         indexEnabled: false,
         indexAvailable: false,
-        fallbackUsed: true
+        fallbackUsed: false
       });
+      expect(result.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+        code: "memory-retrieval-disabled"
+      }));
     } finally {
       await runtime?.dispose();
       memorySpy.mockRestore();

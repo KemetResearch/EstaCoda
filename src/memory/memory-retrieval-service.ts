@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../config/memory-config.js";
-import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import type {
   MemoryAuthority,
   MemoryFileKind,
@@ -15,7 +14,12 @@ import type {
 } from "../contracts/memory.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { MemoryIndex } from "./memory-index.js";
-import { listSharedMemory } from "./shared-memory.js";
+import {
+  listSharedMemory,
+  readSharedMemory,
+  resolveSharedMemoryPath,
+  validateSharedMemoryKey
+} from "./shared-memory.js";
 
 const MEMORY_RETRIEVAL_MAX_RESULTS = 50;
 const MEMORY_RETRIEVAL_MAX_CHARS = 20_000;
@@ -114,6 +118,23 @@ export class LocalMemoryRetrievalService {
     const indexState = this.#indexState(input.profileId);
     const diagnostics: MemoryRetrievalDiagnostic[] = [];
 
+    if (!this.#config.retrieval.enabled) {
+      diagnostics.push(retrievalDisabledDiagnostic());
+      return {
+        result: null,
+        diagnostics: this.#diagnostics({
+          profileId: input.profileId,
+          includeProtected,
+          indexState,
+          fallbackUsed: false,
+          resultCount: 0,
+          truncated: false,
+          redactionApplied: false,
+          diagnostics
+        })
+      };
+    }
+
     if (isProtectedSource(input) && !includeProtected) {
       diagnostics.push({
         code: "memory-protected-filtered",
@@ -123,6 +144,24 @@ export class LocalMemoryRetrievalService {
         memoryFileKind: input.sourceId === "SOUL.md" ? "SOUL.md" : undefined,
         protectedClass: "identity"
       });
+      return {
+        result: null,
+        diagnostics: this.#diagnostics({
+          profileId: input.profileId,
+          includeProtected,
+          indexState,
+          fallbackUsed: false,
+          resultCount: 0,
+          truncated: false,
+          redactionApplied: false,
+          diagnostics
+        })
+      };
+    }
+
+    const sourceValidation = validateRetrievalSource(input);
+    if (sourceValidation.ok === false) {
+      diagnostics.push(sourceValidation.diagnostic);
       return {
         result: null,
         diagnostics: this.#diagnostics({
@@ -232,6 +271,23 @@ export class LocalMemoryRetrievalService {
     const indexState = this.#indexState(input.profileId);
     const diagnostics: MemoryRetrievalDiagnostic[] = [];
 
+    if (!this.#config.retrieval.enabled) {
+      diagnostics.push(retrievalDisabledDiagnostic());
+      return {
+        results: [],
+        diagnostics: this.#diagnostics({
+          profileId: input.profileId,
+          includeProtected,
+          indexState,
+          fallbackUsed: false,
+          resultCount: 0,
+          truncated: false,
+          redactionApplied: false,
+          diagnostics
+        })
+      };
+    }
+
     if (indexState.enabled && indexState.available && this.#index !== undefined) {
       const indexed = this.#index.searchLexical({
         profileId: input.profileId,
@@ -326,16 +382,17 @@ export class LocalMemoryRetrievalService {
       };
     }
 
-    const content = await readOptionalFile(sharedMemoryPath(this.#homeDir, input.sourceId));
+    const content = await readSharedMemory(input.sourceId, { homeDir: this.#homeDir });
     if (content === undefined) {
       return null;
     }
+    const sourcePath = resolveSharedMemoryPath(input.sourceId, { homeDir: this.#homeDir });
     return {
       profileId: input.profileId,
       sourceType: "shared_memory",
       sourceId: input.sourceId,
       sourceKey: input.sourceId,
-      sourcePath: sharedMemoryPath(this.#homeDir, input.sourceId),
+      sourcePath,
       authority: "canonical",
       protectedClass: "none",
       content,
@@ -418,7 +475,7 @@ export class LocalMemoryRetrievalService {
         sourceType: "shared_memory",
         sourceId: entry.key,
         sourceKey: entry.key,
-        sourcePath: sharedMemoryPath(this.#homeDir, entry.key),
+        sourcePath: resolveSharedMemoryPath(entry.key, { homeDir: this.#homeDir }),
         authority: "canonical",
         protectedClass: "none",
         content: entry.content,
@@ -475,6 +532,47 @@ function fallbackDiagnostics(indexState: { enabled: boolean; available: boolean 
     }];
   }
   return [];
+}
+
+function retrievalDisabledDiagnostic(): MemoryRetrievalDiagnostic {
+  return {
+    code: "memory-retrieval-disabled",
+    message: "Local memory retrieval is disabled by memory.retrieval.enabled."
+  };
+}
+
+function validateRetrievalSource(source: MemoryRetrievalSourceInput): (
+  | { ok: true }
+  | { ok: false; diagnostic: MemoryRetrievalDiagnostic }
+) {
+  if (source.sourceType === "memory_file") {
+    if (isProfileMemoryFileKind(source.sourceId)) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      diagnostic: {
+        code: "memory-invalid-source",
+        message: "Local memory file source must be USER.md, MEMORY.md, or SOUL.md.",
+        sourceType: source.sourceType,
+        source: source.sourceId
+      }
+    };
+  }
+
+  try {
+    validateSharedMemoryKey(source.sourceId);
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      diagnostic: {
+        code: "memory-invalid-source",
+        message: "Shared memory source key is invalid.",
+        sourceType: source.sourceType
+      }
+    };
+  }
 }
 
 function redactResult(result: MemoryRetrievalResult, maxChars: number): {
@@ -566,12 +664,6 @@ function profileMemoryPath(homeDir: string | undefined, profileId: string, kind:
     return paths.memoryMdPath;
   }
   return paths.soulMdPath;
-}
-
-function sharedMemoryPath(homeDir: string | undefined, sourceId: string): string {
-  const globalPaths = resolveGlobalStateHome({ homeDir });
-  const filename = sourceId.endsWith(".md") ? sourceId : `${sourceId}.md`;
-  return join(globalPaths.sharedMemoryPath, filename);
 }
 
 async function readOptionalFile(path: string): Promise<string | undefined> {

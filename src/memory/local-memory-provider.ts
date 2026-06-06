@@ -16,6 +16,9 @@ import { MemoryInspector } from "./memory-inspector.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { MemoryPersistenceService } from "./memory-persistence-service.js";
 import type { MemoryIndexWriteSync } from "./memory-index-sync.js";
+import type { LocalMemoryRetrievalService } from "./memory-retrieval-service.js";
+
+type LocalMemorySearchService = Pick<LocalMemoryRetrievalService, "search">;
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -25,6 +28,8 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #inspector: MemoryInspector | undefined;
   readonly #persistence: MemoryPersistenceService | undefined;
   readonly #memoryIndexSync: MemoryIndexWriteSync | undefined;
+  readonly #memorySearchService: LocalMemorySearchService | undefined;
+  readonly #profileId: string;
 
   constructor(options: {
     store: MemoryStore;
@@ -34,10 +39,14 @@ export class LocalMemoryProvider implements MemoryProvider {
     promotionStorePath?: string;
     persistence?: MemoryPersistenceService;
     memoryIndexSync?: MemoryIndexWriteSync;
+    memorySearchService?: LocalMemorySearchService;
+    profileId?: string;
   }) {
     this.#store = options.store;
     this.#persistence = options.persistence;
     this.#memoryIndexSync = options.memoryIndexSync;
+    this.#memorySearchService = options.memorySearchService;
+    this.#profileId = options.profileId ?? "default";
     this.#saveRoots = options.saveRoots ?? (
       options.saveRoot === undefined
         ? {}
@@ -85,16 +94,31 @@ export class LocalMemoryProvider implements MemoryProvider {
     };
   }
 
-  search(query: string, options: { limit?: number } = {}): MemorySearchResult[] {
+  search(query: string, options: { limit?: number } = {}): Promise<MemorySearchResult[]> | MemorySearchResult[] {
     const needle = query.trim().toLowerCase();
 
     if (needle.length === 0) {
       return [];
     }
 
+    if (this.#memorySearchService !== undefined) {
+      return this.#memorySearchService.search({
+        profileId: this.#profileId,
+        query,
+        maxResults: options.limit
+      }).then((result) => result.results.map((entry): MemorySearchResult => ({
+        source: entry.memoryFileKind ?? "SHARED.md",
+        content: entry.content,
+        score: entry.score
+      })));
+    }
+
     const results: MemorySearchResult[] = [];
 
     for (const [kind, content] of this.#store.snapshot().files.entries()) {
+      if (kind === "SOUL.md") {
+        continue;
+      }
       const index = content.toLowerCase().indexOf(needle);
 
       if (index === -1) {

@@ -384,6 +384,32 @@ describe("MemoryIndexSync", () => {
       cleanup();
     }
   });
+
+  it("persists rebuild lifecycle metadata across fresh sync instances", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "USER.md": "- Durable rebuild metadata."
+    });
+    const harness = createHarnessForHome(homeDir);
+
+    try {
+      const rebuild = await harness.sync.rebuild();
+      expect(rebuild.diagnostics.lastRebuildAt).toBe("2030-01-01T00:00:00.000Z");
+    } finally {
+      harness.cleanup();
+    }
+
+    const reopened = createHarnessForHome(homeDir);
+    try {
+      const diagnostics = reopened.sync.diagnostics();
+
+      expect(diagnostics.lastRebuildAt).toBe("2030-01-01T00:00:00.000Z");
+      expect(diagnostics.lastBackfillAt).toBe("2030-01-01T00:00:00.000Z");
+      expect(diagnostics.pendingRebuildReason).toBeUndefined();
+    } finally {
+      reopened.cleanup();
+    }
+  });
 });
 
 function createHarnessForHome(

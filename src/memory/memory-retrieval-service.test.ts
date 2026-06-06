@@ -271,6 +271,109 @@ describe("LocalMemoryRetrievalService", () => {
     ]);
   });
 
+  it("retrieval disabled blocks read without fallback", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "USER.md": "Disabled retrieval must not read this."
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: memoryConfig({
+        retrieval: { enabled: false },
+        index: { enabled: false }
+      })
+    });
+
+    const result = await service.read({
+      profileId: "alpha",
+      sourceType: "memory_file",
+      sourceId: "USER.md"
+    });
+
+    expect(result.result).toBeNull();
+    expect(result.diagnostics.fallbackUsed).toBe(false);
+    expect(JSON.stringify(result.diagnostics)).not.toContain("Disabled retrieval must not read this");
+    expect(result.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+      code: "memory-retrieval-disabled"
+    }));
+  });
+
+  it("retrieval disabled blocks search without fallback", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "USER.md": "disabled-search-token"
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: memoryConfig({
+        retrieval: { enabled: false },
+        index: { enabled: false }
+      })
+    });
+
+    const result = await service.search({
+      profileId: "alpha",
+      query: "disabled-search-token"
+    });
+
+    expect(result.results).toEqual([]);
+    expect(result.diagnostics.fallbackUsed).toBe(false);
+    expect(JSON.stringify(result.diagnostics)).not.toContain("disabled-search-token");
+    expect(result.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+      code: "memory-retrieval-disabled"
+    }));
+  });
+
+  it("index disabled still falls back when retrieval is enabled", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "USER.md": "Index disabled fallback remains available."
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: memoryConfig({
+        retrieval: { enabled: true },
+        index: { enabled: false }
+      })
+    });
+
+    const result = await service.read({
+      profileId: "alpha",
+      sourceType: "memory_file",
+      sourceId: "USER.md"
+    });
+
+    expect(result.result?.content).toBe("Index disabled fallback remains available.");
+    expect(result.diagnostics.fallbackUsed).toBe(true);
+    expect(result.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+      code: "memory-index-disabled"
+    }));
+  });
+
+  it("rejects traversal shared-memory fallback keys without reading outside shared memory", async () => {
+    const homeDir = await makeTempHome();
+    await writeProfileMemory(homeDir, "alpha", {
+      "SOUL.md": "Traversal must not expose protected identity."
+    });
+    const service = new LocalMemoryRetrievalService({
+      homeDir,
+      config: memoryConfig({ index: { enabled: false } })
+    });
+
+    const result = await service.read({
+      profileId: "alpha",
+      sourceType: "shared_memory",
+      sourceId: "../../profiles/alpha/SOUL.md"
+    });
+
+    expect(result.result).toBeNull();
+    expect(JSON.stringify(result.diagnostics)).not.toContain("Traversal must not expose");
+    expect(result.diagnostics.diagnostics).toContainEqual(expect.objectContaining({
+      code: "memory-invalid-source",
+      sourceType: "shared_memory"
+    }));
+  });
+
   it("bounds maxChars", async () => {
     const { service, index, cleanup } = await createIndexedService();
     index.indexMemoryFile({

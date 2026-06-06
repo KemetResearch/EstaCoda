@@ -117,6 +117,8 @@ export class MemoryIndexSync {
     this.#config = options.config ?? DEFAULT_MEMORY_CONFIG;
     this.#now = options.now ?? (() => new Date());
     this.#indexFileMissingAtStartup = options.indexFileMissingAtStartup === true;
+    this.#lastBackfillAt = this.#store.readMetadata("lastBackfillAt");
+    this.#lastRebuildAt = this.#store.readMetadata("lastRebuildAt");
   }
 
   diagnostics(): MemoryIndexSyncDiagnostics {
@@ -160,8 +162,10 @@ export class MemoryIndexSync {
       : await this.#boundedBackfill(startedAt);
 
     this.#lastBackfillAt = startedAt;
+    this.#store.writeMetadata("lastBackfillAt", startedAt);
     if (this.#config.index.reindexOnStartup) {
       this.#lastRebuildAt = startedAt;
+      this.#store.writeMetadata("lastRebuildAt", startedAt);
     }
     this.#addDiagnostic({
       code: "memory-index-backfill-completed",
@@ -192,6 +196,8 @@ export class MemoryIndexSync {
     const indexedEntries = await this.#fullBackfill(startedAt);
     this.#lastBackfillAt = startedAt;
     this.#lastRebuildAt = startedAt;
+    this.#store.writeMetadata("lastBackfillAt", startedAt);
+    this.#store.writeMetadata("lastRebuildAt", startedAt);
     this.#addDiagnostic({
       code: "memory-index-backfill-completed",
       message: "Local memory index explicit rebuild completed."
