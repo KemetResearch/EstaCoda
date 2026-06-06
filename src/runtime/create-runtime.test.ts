@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
+import { normalizeMemoryConfig } from "../config/memory-config.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -11,9 +13,10 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
 import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
+import type { SessionToolContext } from "../contracts/tool-context.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
-import { toolRegistrationPlan } from "../tools/index.js";
+import { knowledgeMemoryToolProvider, memoryToolProvider, sessionSearchToolProvider, toolRegistrationPlan } from "../tools/index.js";
 import * as pythonEnvManager from "../python-env/manager.js";
 
 type CapturedFasterWhisperOptions = {
@@ -235,6 +238,23 @@ async function createAudioFixture(prefix = "estacoda-runtime-audio-"): Promise<s
   return path;
 }
 
+async function writeProfileMemoryFixture(
+  homeDir: string,
+  profileId: string,
+  files: Partial<Record<"USER.md" | "MEMORY.md" | "SOUL.md", string>>
+): Promise<void> {
+  const paths = resolveProfileStateHome({ homeDir, profileId });
+  await mkdir(paths.profileRoot, { recursive: true });
+  for (const [file, content] of Object.entries(files)) {
+    const path = file === "USER.md"
+      ? paths.userMdPath
+      : file === "MEMORY.md"
+        ? paths.memoryMdPath
+        : paths.soulMdPath;
+    await writeFile(path, content, "utf8");
+  }
+}
+
 describe("createRuntime provider turn budgets", () => {
   it("passes the expanded default budgets to ProviderTurnLoop", async () => {
     const source = await readFile(new URL("./create-runtime.ts", import.meta.url), "utf8");
@@ -412,6 +432,113 @@ describe("createRuntime token branding", () => {
 });
 
 describe("createRuntime MCP trust gating", () => {
+  it("passes memoryRetrievalService through session tool contexts", async () => {
+    const options = await minimalRuntimeOptions();
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-memory-home-"));
+    await writeProfileMemoryFixture(homeDir, "alpha", {
+      "USER.md": "Runtime retrieval context."
+    });
+
+    const memoryContexts: SessionToolContext[] = [];
+    const knowledgeContexts: SessionToolContext[] = [];
+    const originalMemoryCreateTools = memoryToolProvider.createTools.bind(memoryToolProvider);
+    const originalKnowledgeCreateTools = knowledgeMemoryToolProvider.createTools.bind(knowledgeMemoryToolProvider);
+    const memorySpy = vi.spyOn(memoryToolProvider, "createTools").mockImplementation((ctx) => {
+      memoryContexts.push(ctx);
+      return originalMemoryCreateTools(ctx);
+    });
+    const knowledgeSpy = vi.spyOn(knowledgeMemoryToolProvider, "createTools").mockImplementation((ctx) => {
+      knowledgeContexts.push(ctx);
+      return originalKnowledgeCreateTools(ctx);
+    });
+
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      runtime = await createRuntime({
+        ...options,
+        homeDir,
+        profileId: "alpha"
+      });
+
+      expect(memoryContexts[0]?.memoryRetrievalService).toBeDefined();
+      expect(knowledgeContexts[0]?.memoryRetrievalService).toBe(memoryContexts[0]?.memoryRetrievalService);
+      const result = await memoryContexts[0]!.memoryRetrievalService!.read({
+        profileId: "alpha",
+        sourceType: "memory_file",
+        sourceId: "USER.md"
+      });
+      expect(result.result).toMatchObject({
+        source: "USER.md",
+        content: "Runtime retrieval context.",
+        contextLabel: "local-memory-context"
+      });
+    } finally {
+      await runtime?.dispose();
+      memorySpy.mockRestore();
+      knowledgeSpy.mockRestore();
+    }
+  });
+
+  it("constructs memoryRetrievalService with disabled memory index config", async () => {
+    const options = await minimalRuntimeOptions();
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-memory-disabled-"));
+    await writeProfileMemoryFixture(homeDir, "alpha", {
+      "USER.md": "Disabled index fallback context."
+    });
+
+    const contexts: SessionToolContext[] = [];
+    const originalCreateTools = memoryToolProvider.createTools.bind(memoryToolProvider);
+    const memorySpy = vi.spyOn(memoryToolProvider, "createTools").mockImplementation((ctx) => {
+      contexts.push(ctx);
+      return originalCreateTools(ctx);
+    });
+
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      runtime = await createRuntime({
+        ...options,
+        homeDir,
+        profileId: "alpha",
+        memory: normalizeMemoryConfig({
+          retrieval: { enabled: false },
+          index: { enabled: false }
+        })
+      });
+
+      const service = contexts[0]?.memoryRetrievalService;
+      expect(service).toBeDefined();
+      const result = await service!.read({
+        profileId: "alpha",
+        sourceType: "memory_file",
+        sourceId: "USER.md"
+      });
+      expect(result.result?.content).toBe("Disabled index fallback context.");
+      expect(result.diagnostics).toMatchObject({
+        indexEnabled: false,
+        indexAvailable: false,
+        fallbackUsed: true
+      });
+    } finally {
+      await runtime?.dispose();
+      memorySpy.mockRestore();
+    }
+  });
+
+  it("keeps memory retrieval wiring from registering memory read/search tools", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime(options);
+    try {
+      const names = runtime.tools().map((tool) => tool.name);
+
+      expect(sessionSearchToolProvider.name).toBe("sessionSearch");
+      expect(names).toContain("session_search");
+      expect(names).not.toContain("memory.read");
+      expect(names).not.toContain("memory.search");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("does not expose legacy onboarding runtime tools", async () => {
     const options = await minimalRuntimeOptions();
     const runtime = await createRuntime(options);

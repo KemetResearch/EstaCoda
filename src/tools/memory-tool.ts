@@ -67,7 +67,8 @@ export const memoryToolProvider: SessionToolProvider = {
         sessionDb: requireProviderDependency("memory", "sessionDb", ctx.sessionDb),
         trajectoryRecorder: requireProviderDependency("memory", "trajectoryRecorder", ctx.trajectoryRecorder),
         persistence: ctx.memoryPersistenceService,
-        persistencePaths: ctx.memoryPersistencePaths
+        persistencePaths: ctx.memoryPersistencePaths,
+        memoryIndexSync: ctx.memoryIndexSync
       })
     ];
   }

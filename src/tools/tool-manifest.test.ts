@@ -34,6 +34,16 @@ describe("toolRegistrationPlan", () => {
     expect(configEntry?.phase).toBe("pre-skill-visibility");
   });
 
+  it("does not register local memory read/search tools yet", () => {
+    const memoryEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memory");
+    const sessionSearchEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "sessionSearch");
+
+    expect(memoryEntry?.provider.kind).toBe("session");
+    expect(sessionSearchEntry?.provider.kind).toBe("session");
+    expect(sessionSearchEntry?.phase).toBe("pre-skill-visibility");
+    expect(toolRegistrationPlan.map((entry) => entry.provider.name)).not.toContain("memoryRetrieval");
+  });
+
   it("static providers expose non-empty tool arrays", () => {
     const staticProviders = toolRegistrationPlan
       .map((entry) => entry.provider)
