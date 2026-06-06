@@ -4,6 +4,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
+import { normalizeMemoryConfig } from "../config/memory-config.js";
 
 type FingerprintOptions = Parameters<typeof computeRuntimeFingerprint>[1];
 
@@ -29,6 +30,7 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       protectLastN: 20,
       experimental: false,
     },
+    memory: normalizeMemoryConfig(undefined),
     externalMemory: {
       enabled: false,
       timeoutMs: 750,
@@ -712,6 +714,44 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.externalMemoryConfigHash).not.toBe(fp1.externalMemoryConfigHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("memory retrieval config change changes fingerprint without changing external memory hash", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        memory: normalizeMemoryConfig({
+          retrieval: {
+            maxResults: base.memory.retrieval.maxResults + 1
+          }
+        }),
+      }),
+      opts
+    );
+    expect(fp2.memoryRetrievalConfigHash).not.toBe(fp1.memoryRetrievalConfigHash);
+    expect(fp2.externalMemoryConfigHash).toBe(fp1.externalMemoryConfigHash);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("memory index config change changes fingerprint without changing external memory hash", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        memory: normalizeMemoryConfig({
+          index: {
+            backfillOnStartup: "full"
+          }
+        }),
+      }),
+      opts
+    );
+    expect(fp2.memoryRetrievalConfigHash).not.toBe(fp1.memoryRetrievalConfigHash);
+    expect(fp2.externalMemoryConfigHash).toBe(fp1.externalMemoryConfigHash);
     expect(fp1).not.toEqual(fp2);
   });
 

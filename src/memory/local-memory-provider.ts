@@ -7,12 +7,18 @@ import type {
   MemorySearchResult,
   SkillOutcome
 } from "../contracts/memory.js";
+import { join } from "node:path";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryInspector } from "./memory-inspector.js";
 import type { MemoryStore } from "./memory-store.js";
+import type { MemoryPersistenceService } from "./memory-persistence-service.js";
+import type { MemoryIndexWriteSync } from "./memory-index-sync.js";
+import type { LocalMemoryRetrievalService } from "./memory-retrieval-service.js";
+
+type LocalMemorySearchService = Pick<LocalMemoryRetrievalService, "search">;
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -20,6 +26,10 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #saveRoots: Partial<Record<MemoryFileKind, string>>;
   readonly #promotionStore: MemoryPromotionStore | undefined;
   readonly #inspector: MemoryInspector | undefined;
+  readonly #persistence: MemoryPersistenceService | undefined;
+  readonly #memoryIndexSync: MemoryIndexWriteSync | undefined;
+  readonly #memorySearchService: LocalMemorySearchService | undefined;
+  readonly #profileId: string;
 
   constructor(options: {
     store: MemoryStore;
@@ -27,8 +37,16 @@ export class LocalMemoryProvider implements MemoryProvider {
     saveRoots?: Partial<Record<MemoryFileKind, string>>;
     promotionStore?: MemoryPromotionStore;
     promotionStorePath?: string;
+    persistence?: MemoryPersistenceService;
+    memoryIndexSync?: MemoryIndexWriteSync;
+    memorySearchService?: LocalMemorySearchService;
+    profileId?: string;
   }) {
     this.#store = options.store;
+    this.#persistence = options.persistence;
+    this.#memoryIndexSync = options.memoryIndexSync;
+    this.#memorySearchService = options.memorySearchService;
+    this.#profileId = options.profileId ?? "default";
     this.#saveRoots = options.saveRoots ?? (
       options.saveRoot === undefined
         ? {}
@@ -41,7 +59,8 @@ export class LocalMemoryProvider implements MemoryProvider {
     this.#promotionStore = options.promotionStore ?? (options.promotionStorePath === undefined
       ? undefined
       : new MemoryPromotionStore({
-          path: options.promotionStorePath
+          path: options.promotionStorePath,
+          persistence: this.#persistence
         }));
     this.#inspector = this.#promotionStore === undefined
       ? undefined
@@ -75,16 +94,31 @@ export class LocalMemoryProvider implements MemoryProvider {
     };
   }
 
-  search(query: string, options: { limit?: number } = {}): MemorySearchResult[] {
+  search(query: string, options: { limit?: number } = {}): Promise<MemorySearchResult[]> | MemorySearchResult[] {
     const needle = query.trim().toLowerCase();
 
     if (needle.length === 0) {
       return [];
     }
 
+    if (this.#memorySearchService !== undefined) {
+      return this.#memorySearchService.search({
+        profileId: this.#profileId,
+        query,
+        maxResults: options.limit
+      }).then((result) => result.results.map((entry): MemorySearchResult => ({
+        source: entry.memoryFileKind ?? "SHARED.md",
+        content: entry.content,
+        score: entry.score
+      })));
+    }
+
     const results: MemorySearchResult[] = [];
 
     for (const [kind, content] of this.#store.snapshot().files.entries()) {
+      if (kind === "SOUL.md") {
+        continue;
+      }
       const index = content.toLowerCase().indexOf(needle);
 
       if (index === -1) {
@@ -132,7 +166,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created" || applied.action === "replaced") {
           this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
-        await this.#save();
+        await this.#save([target]);
       } catch (error) {
         this.#store.write(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
@@ -157,7 +191,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         if (applied.action === "created") {
           this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
-        await this.#save();
+        await this.#save([target]);
       } catch (error) {
         this.#store.write(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
@@ -166,8 +200,14 @@ export class LocalMemoryProvider implements MemoryProvider {
       return;
     }
 
-    this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
-    await this.#save();
+    const previousMarkdown = this.#store.read(target);
+    try {
+      this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
+      await this.#save([target]);
+    } catch (error) {
+      this.#store.write(target, previousMarkdown);
+      throw error;
+    }
   }
 
   async recordSkillOutcome(outcome: SkillOutcome): Promise<void> {
@@ -180,11 +220,18 @@ export class LocalMemoryProvider implements MemoryProvider {
       `summary:${sanitizeMemoryText(outcome.summary)}`
     ].filter((part) => part !== undefined).join(" | ");
 
-    for (const target of targets) {
-      this.#appendDedupe(target, line);
+    const previousMarkdown = new Map(targets.map((target) => [target, this.#store.read(target)] as const));
+    try {
+      for (const target of targets) {
+        this.#appendDedupe(target, line);
+      }
+      await this.#save(targets);
+    } catch (error) {
+      for (const [target, content] of previousMarkdown.entries()) {
+        this.#store.write(target, content);
+      }
+      throw error;
     }
-
-    await this.#save();
   }
 
   async inspectPromotions(): Promise<MemoryPromotionRecord[]> {
@@ -192,10 +239,20 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async forgetPromotion(content: string): Promise<MemoryPromotionRecord | undefined> {
+    const previousRecords = await this.#promotionStore?.list();
+    const previousMarkdown = this.#store.read("USER.md");
     const forgotten = await this.#promotionStore?.forgetUserPreference(content);
     if (forgotten !== undefined) {
-      this.#removeExactLine("USER.md", `- ${forgotten.content}`);
-      await this.#save();
+      try {
+        this.#removeExactLine("USER.md", `- ${forgotten.content}`);
+        await this.#save(["USER.md"]);
+      } catch (error) {
+        this.#store.write("USER.md", previousMarkdown);
+        if (previousRecords !== undefined) {
+          await this.#promotionStore?.restore(previousRecords);
+        }
+        throw error;
+      }
     }
     return forgotten;
   }
@@ -222,14 +279,42 @@ export class LocalMemoryProvider implements MemoryProvider {
     this.#store.write(file, lines.filter((line, index, array) => !(index === array.length - 1 && line.length === 0)).join("\n"));
   }
 
-  async #save(): Promise<void> {
-    for (const file of ["MEMORY.md", "USER.md", "SOUL.md"] as const) {
+  async #save(files: readonly MemoryFileKind[]): Promise<void> {
+    for (const file of uniqueFiles(files)) {
       const root = this.#saveRoots[file];
       if (root !== undefined) {
-        await this.#store.saveFileToDirectory(root, file);
+        if (this.#persistence === undefined) {
+          await this.#store.saveFileToDirectory(root, file);
+        } else {
+          await this.#persistence.writeFile({
+            path: join(root, file),
+            kind: file,
+            content: this.#store.read(file)
+          });
+        }
       }
+      await this.#syncMemoryIndex(file, root === undefined ? undefined : join(root, file));
     }
   }
+
+  async #syncMemoryIndex(file: MemoryFileKind, sourcePath: string | undefined): Promise<void> {
+    if (this.#memoryIndexSync === undefined) {
+      return;
+    }
+    try {
+      await this.#memoryIndexSync.syncMemoryFile({
+        file,
+        content: this.#store.read(file),
+        sourcePath
+      });
+    } catch {
+      // Memory index sync is derived state; authoritative memory writes stay committed.
+    }
+  }
+}
+
+function uniqueFiles(files: readonly MemoryFileKind[]): MemoryFileKind[] {
+  return [...new Set(files)];
 }
 
 function excerpt(content: string, index: number): string {

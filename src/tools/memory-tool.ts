@@ -7,6 +7,11 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { ExternalMemoryRuntimeConfig } from "../memory/external-memory-provider.js";
 import { mirrorMemoryWriteToExternalProviders } from "../memory/external-memory-provider.js";
 import { isMemoryBudgetOverflowError, type MemoryStore } from "../memory/memory-store.js";
+import {
+  isMemoryPersistenceDriftError,
+  type MemoryPersistenceService
+} from "../memory/memory-persistence-service.js";
+import type { MemoryIndexWriteSync } from "../memory/memory-index-sync.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
@@ -18,6 +23,9 @@ export type MemoryToolOptions = {
   workspaceRoot?: string;
   sessionDb?: Pick<SessionDB, "appendEvent">;
   trajectoryRecorder?: Pick<TrajectoryRecorder, "record">;
+  persistence?: MemoryPersistenceService;
+  persistencePaths?: Partial<Record<MemoryFileKind, string>>;
+  memoryIndexSync?: MemoryIndexWriteSync;
 };
 
 export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOptions = {}): RegisteredTool<MemoryToolInput> {
@@ -57,7 +65,10 @@ export const memoryToolProvider: SessionToolProvider = {
         sessionId: ctx.currentSessionId,
         workspaceRoot: ctx.workspaceRoot,
         sessionDb: requireProviderDependency("memory", "sessionDb", ctx.sessionDb),
-        trajectoryRecorder: requireProviderDependency("memory", "trajectoryRecorder", ctx.trajectoryRecorder)
+        trajectoryRecorder: requireProviderDependency("memory", "trajectoryRecorder", ctx.trajectoryRecorder),
+        persistence: ctx.memoryPersistenceService,
+        persistencePaths: ctx.memoryPersistencePaths,
+        memoryIndexSync: ctx.memoryIndexSync
       })
     ];
   }
@@ -84,6 +95,7 @@ async function applyMemoryToolInput(
   options: MemoryToolOptions
 ): Promise<ToolResult> {
   const operation = toOperation(input);
+  const previous = memoryStore.read(operation.file);
   try {
     memoryStore.apply(operation);
   } catch (error) {
@@ -103,6 +115,42 @@ async function applyMemoryToolInput(
     }
     throw error;
   }
+
+  if (options.persistence !== undefined) {
+    const path = options.persistencePaths?.[operation.file];
+    try {
+      if (path !== undefined) {
+        await options.persistence.writeFile({
+          path,
+          kind: operation.file,
+          content: memoryStore.read(operation.file)
+        });
+      }
+    } catch (error) {
+      memoryStore.write(operation.file, previous);
+      if (isMemoryPersistenceDriftError(error)) {
+        return {
+          ok: false,
+          content: `${operation.file} was not updated because the disk file changed after memory was loaded.`,
+          metadata: {
+            error: error.code,
+            kind: error.kind,
+            path: error.path,
+            expected: error.expected,
+            actual: error.actual
+          }
+        };
+      }
+      throw error;
+    }
+  }
+
+  const indexSyncWarning = await syncLocalMemoryIndex({
+    memoryIndexSync: options.memoryIndexSync,
+    operation,
+    content: memoryStore.read(operation.file),
+    sourcePath: options.persistencePaths?.[operation.file]
+  });
 
   const mirror = await mirrorMemoryWriteToExternalProviders({
     entry: {
@@ -127,6 +175,7 @@ async function applyMemoryToolInput(
     mirrorWarnings: mirror.warnings
   });
   const warnings = [
+    ...indexSyncWarning,
     ...mirror.warnings,
     ...auditWarnings
   ];
@@ -141,6 +190,27 @@ async function applyMemoryToolInput(
       warnings
     }
   };
+}
+
+async function syncLocalMemoryIndex(input: {
+  memoryIndexSync: MemoryIndexWriteSync | undefined;
+  operation: MemoryOperation;
+  content: string;
+  sourcePath?: string;
+}): Promise<string[]> {
+  if (input.memoryIndexSync === undefined) {
+    return [];
+  }
+  try {
+    const result = await input.memoryIndexSync.syncMemoryFile({
+      file: input.operation.file,
+      content: input.content,
+      sourcePath: input.sourcePath
+    });
+    return result.warning === undefined ? [] : [result.warning];
+  } catch (error) {
+    return [`memory index sync failed for ${input.operation.file}: ${errorMessage(error)}`];
+  }
 }
 
 async function recordExternalMemoryMirrorWrite(input: {

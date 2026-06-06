@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ExternalMemoryProvider } from "../contracts/memory.js";
@@ -7,6 +7,21 @@ import type { TrajectoryEvent, TrajectoryEventKind } from "../contracts/trajecto
 import { createFileExternalMemoryProvider } from "./external-memory-provider.js";
 import { createMemoryTool } from "../tools/memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
+import { MemoryPersistenceService } from "./memory-persistence-service.js";
+
+const tempDirs: string[] = [];
+
+async function makeTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    await rm(tempDirs.pop()!, { recursive: true, force: true });
+  }
+});
 
 describe("memory.curate", () => {
   it("does not accept AGENTS.md", async () => {
@@ -39,6 +54,58 @@ describe("memory.curate", () => {
       }
     });
     expect(store.read("USER.md")).toBe("short");
+  });
+
+  it("detects external disk edits before writing memory.curate changes", async () => {
+    const root = await makeTempDir("estacoda-memory-tool-drift-");
+    const path = join(root, "USER.md");
+    await writeFile(path, "- original preference", "utf8");
+    const persistence = new MemoryPersistenceService();
+    const loaded = await persistence.readFile({
+      path,
+      kind: "USER.md"
+    });
+    const store = new MemoryStore();
+    store.write("USER.md", loaded ?? "");
+    const tool = createMemoryTool(store, {
+      persistence,
+      persistencePaths: {
+        "USER.md": path
+      }
+    });
+    await writeFile(path, "- externally edited preference with sentinel-current", "utf8");
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- proposed sentinel-new preference"
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      error: "memory-disk-drift",
+      kind: "USER.md",
+      path
+    });
+    expect(await readFile(path, "utf8")).toBe("- externally edited preference with sentinel-current");
+    expect(store.read("USER.md")).toBe("- original preference");
+    const diagnostic = JSON.stringify(result);
+    expect(diagnostic).not.toContain("sentinel-current");
+    expect(diagnostic).not.toContain("sentinel-new");
+  });
+
+  it("keeps duplicate rejection behavior unchanged", async () => {
+    const store = new MemoryStore();
+    store.write("USER.md", "- Prefer concise replies.");
+    const tool = createMemoryTool(store);
+
+    await expect(tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Prefer concise replies."
+    })).rejects.toThrow("Duplicate memory entry rejected in USER.md");
+
+    expect(store.read("USER.md")).toBe("- Prefer concise replies.");
   });
 
   it("does not fail local memory writes when external mirror writes fail", async () => {
@@ -87,7 +154,7 @@ describe("memory.curate", () => {
   });
 
   it("mirrors memory writes to the file-backed external provider when explicitly enabled", async () => {
-    const profileRoot = await mkdtemp(join(tmpdir(), "estacoda-memory-tool-file-provider-"));
+    const profileRoot = await makeTempDir("estacoda-memory-tool-file-provider-");
     const store = new MemoryStore();
     const provider = createFileExternalMemoryProvider({
       profileRoot,

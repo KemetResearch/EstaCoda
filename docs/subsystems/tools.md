@@ -25,6 +25,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `src/tools/execute-code-tool.ts` | ~240 | Code execution |
 | `src/tools/vision-tools.ts` | ~200 | Image analysis |
 | `src/tools/media-tools.ts` | ~280 | Media handling |
+| `src/tools/session-search-tool.ts` | ~200 | Deterministic raw historical session browse/search/scroll |
 
 ## Builtin Tools
 
@@ -45,7 +46,10 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `voice.speak` | `external-side-effect` | `smoke-tested` |
 | `voice.transcribe` | `safe` | `smoke-tested` |
 | `execute_code` | `caution` | `smoke-tested` |
-| `memory` | `safe` | `smoke-tested` |
+| `memory.curate` | `workspace-write` | `smoke-tested` |
+| `memory.read` | `read-only-local` | `smoke-tested` |
+| `memory.search` | `read-only-local` | `smoke-tested` |
+| `session_search` | `read-only-local` | `smoke-tested` |
 | `skill.*` | `safe` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
@@ -112,6 +116,37 @@ Implemented voice providers and security boundaries are documented in [Voice](./
 - Deferred: local TTS providers and Mistral TTS/STT.
 
 Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
+
+## Memory Retrieval Tools
+
+`memory.read` and `memory.search` are deterministic read-only-local tools for bounded local lexical memory retrieval. They use the local memory retrieval service, not `SessionRecallService`, and they do not call auxiliary/model providers or summarize content.
+
+| Tool | Inputs | Behavior |
+|------|--------|----------|
+| `memory.read` | `source`, `key`, `includeProtected`, `maxChars` | Reads bounded local memory context by source |
+| `memory.search` | `query`, `includeProtected`, `maxResults`, `maxChars` | Searches local memory lexically |
+
+`maxChars` is accepted and bounded internally. `memory.search` also accepts `maxResults`, which is bounded internally. Output is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. Diagnostics are structured and do not expose raw memory content.
+
+Protected memory remains excluded by default. `SOUL.md` is indexed as protected and is returned only when `includeProtected` is explicit. If the local index is disabled or unavailable, the retrieval service falls back to safe substring read/search while preserving protected filtering.
+
+`session_search` is separate: it browses/searches historical sessions, does not expose `maxChars`, and returns untrusted historical reference context. `memory.read` and `memory.search` read/search local memory files and shared memory. Neither surface upgrades returned content into higher-priority instruction.
+
+## Session Search Tool
+
+`session_search` is a deterministic read-only-local tool for raw historical session browse/search/scroll. It uses `SessionSearchService` and stays separate from `SessionRecallService`. It does not call auxiliary/model providers, does not summarize, and does not make historical content authoritative.
+
+Modes:
+
+| Mode | Inputs | Behavior |
+|------|--------|----------|
+| `browse` | `limit`, `sort` | Lists recent sessions for the active profile/workspace where available |
+| `search` | `query`, `limit`, `sort`, `role_filter` | Searches historical messages |
+| `scroll` | `session_id`, `around_message_id`, `window` | Returns a deterministic message window around a message id |
+
+The schema exposes result/message-count knobs only: `limit` and `window`. It must not expose `maxChars`; text-size caps are system-controlled internally. `browse` and `search` default to `10` results and clamp at `20`. `scroll` defaults to a `5` message window and clamps at `20`. Per-message excerpts, session previews, and total tool output are internally capped by the service and the registered tool `maxResultSizeChars`.
+
+Output is bounded, redacted, source-labeled, and explicitly marked as untrusted historical reference context. Historical content is useful for locating prior work, but it is not current instruction authority. Current user instructions and runtime policy outrank historical session content. Profile/workspace filtering is applied where available, active/current session exclusion is used where configured or available, and missing sessions/messages return structured diagnostics.
 
 ## Tool Execution
 

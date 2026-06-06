@@ -40,6 +40,7 @@ export type RuntimeFingerprint = {
   webMaxContentChars: number;
   webResearchHash: string;
   compressionConfigHash: string;
+  memoryRetrievalConfigHash: string;
   externalMemoryConfigHash: string;
   disableCronTools: boolean;
 
@@ -124,6 +125,7 @@ export function computeRuntimeFingerprint(
       crawlBackend: config.web.crawlBackend
     }),
     compressionConfigHash: stableJsonHash(config.compression),
+    memoryRetrievalConfigHash: stableJsonHash(config.memory),
     externalMemoryConfigHash: stableJsonHash(config.externalMemory),
     disableCronTools: options.disableCronTools,
     skillAutonomy: config.skills.autonomy,

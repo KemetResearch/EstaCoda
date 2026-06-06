@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
@@ -11,13 +12,18 @@ import { createSupervisedLocalCdpBrowserBackend } from "../browser/supervised-lo
 import { BrowserSessionLifecycle, registerEmergencyCleanup } from "../browser/session-lifecycle.js";
 import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
+import { MemoryIndex } from "../memory/memory-index.js";
+import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
+import { MemoryIndexSync } from "../memory/memory-index-sync.js";
+import { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
+import { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import { MemoryStore } from "../memory/memory-store.js";
-import { loadIdentityContext } from "../memory/identity-loader.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
@@ -113,6 +119,7 @@ export type RuntimeOptions = {
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
   memoryProvider?: MemoryProvider;
+  memory?: LoadedRuntimeConfig["memory"];
   externalMemory?: LoadedRuntimeConfig["externalMemory"];
   externalMemoryProviders?: ExternalMemoryProvider[];
   userMemoryRoot?: string;
@@ -212,6 +219,10 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     sessionDb: input.sessionDb,
     trajectoryRecorder: input.trajectoryRecorder,
     memoryStore: input.memoryStore,
+    memoryPersistenceService: input.memoryPersistenceService,
+    memoryPersistencePaths: input.memoryPersistencePaths,
+    memoryIndexSync: input.memoryIndexSync,
+    memoryRetrievalService: input.memoryRetrievalService,
     memoryFileCompactionService: input.memoryFileCompactionService,
     workspaceFsAdapter: input.workspaceFsAdapter,
     webFetch: input.webFetch,
@@ -251,7 +262,8 @@ function buildPostMemoryProviderToolContext(input: SessionToolContext): SessionT
     profileId: input.profileId,
     sessionId: input.sessionId,
     currentSessionId: input.currentSessionId,
-    memoryInspector: input.memoryInspector
+    memoryInspector: input.memoryInspector,
+    memoryRetrievalService: input.memoryRetrievalService
   };
 }
 
@@ -407,6 +419,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
+  const memoryPersistenceService = new MemoryPersistenceService();
+  const memoryPersistencePaths = {
+    "USER.md": profilePaths.userMdPath,
+    "MEMORY.md": profilePaths.memoryMdPath,
+    "SOUL.md": profilePaths.soulMdPath
+  };
+  const memoryConfig = options.memory ?? normalizeMemoryConfig(undefined);
+  const memoryIndexPath = resolveMemoryIndexStorePath({ homeDir: options.homeDir, profileId });
+  const memoryIndexEnabled = memoryConfig.index.enabled === true;
+  const memoryIndexFileMissingAtStartup = !existsSync(memoryIndexPath);
+  const memoryIndexStore = memoryIndexEnabled
+    ? new MemoryIndexStore({ path: memoryIndexPath })
+    : undefined;
+  const memoryIndex = memoryIndexStore === undefined
+    ? undefined
+    : new MemoryIndex({ store: memoryIndexStore });
+  const memoryIndexSync = memoryIndexStore === undefined || memoryIndex === undefined
+    ? undefined
+    : new MemoryIndexSync({
+        index: memoryIndex,
+        store: memoryIndexStore,
+        profileId,
+        homeDir: options.homeDir,
+        config: memoryConfig,
+        indexFileMissingAtStartup: memoryIndexFileMissingAtStartup
+      });
+  const memoryRetrievalService = new LocalMemoryRetrievalService({
+    index: memoryIndex,
+    config: memoryConfig,
+    homeDir: options.homeDir
+  });
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
   const cronStore = options.cronStore ?? new CronStore({
     path: join(profilePaths.cronPath, "jobs.json"),
@@ -639,6 +682,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     trajectoryRecorder,
     memoryStore,
+    memoryPersistenceService,
+    memoryPersistencePaths,
+    memoryIndexSync,
+    memoryRetrievalService,
     memoryFileCompactionService,
     workspaceFsAdapter: options.workspaceFsAdapter,
     webFetch: options.webFetch,
@@ -706,22 +753,39 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     })
   });
 
-  const identityContext = await loadIdentityContext({ profilePaths });
+  const [userMemory, soulMemory, profileMemory] = await Promise.all([
+    memoryPersistenceService.readFile({
+      path: profilePaths.userMdPath,
+      kind: "USER.md"
+    }),
+    memoryPersistenceService.readFile({
+      path: profilePaths.soulMdPath,
+      kind: "SOUL.md"
+    }),
+    memoryPersistenceService.readFile({
+      path: profilePaths.memoryMdPath,
+      kind: "MEMORY.md"
+    })
+  ]);
   const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
   const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
   if (sharedMemoryContent !== undefined) {
     memoryStore.write("SHARED.md", sharedMemoryContent);
   }
-  if (identityContext.user !== undefined) {
-    memoryStore.write("USER.md", identityContext.user);
+  if (userMemory !== undefined) {
+    memoryStore.write("USER.md", userMemory);
   }
-  if (identityContext.soul !== undefined) {
-    memoryStore.write("SOUL.md", identityContext.soul);
+  if (soulMemory !== undefined) {
+    memoryStore.write("SOUL.md", soulMemory);
   }
-  if (identityContext.memory !== undefined) {
-    memoryStore.write("MEMORY.md", identityContext.memory);
+  if (profileMemory !== undefined) {
+    memoryStore.write("MEMORY.md", profileMemory);
   }
-  const memoryPromotionStore = new MemoryPromotionStore({ path: profilePaths.promotionsPath });
+  await memoryIndexSync?.backfillOnStartup();
+  const memoryPromotionStore = new MemoryPromotionStore({
+    path: profilePaths.promotionsPath,
+    persistence: memoryPersistenceService
+  });
   const memoryProvider = options.memoryProvider ?? new LocalMemoryProvider({
     store: memoryStore,
     saveRoots: {
@@ -729,7 +793,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       "MEMORY.md": profileMemoryRoot,
       "SOUL.md": profileMemoryRoot
     },
-    promotionStore: memoryPromotionStore
+    promotionStore: memoryPromotionStore,
+    persistence: memoryPersistenceService,
+    memoryIndexSync,
+    memorySearchService: memoryRetrievalService,
+    profileId
   });
   registerToolRegistrationPhase({
     registry: toolRegistry,
@@ -740,7 +808,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       profileId,
       sessionId,
       currentSessionId: () => sessionRuntimeContext.currentSessionId(),
-      memoryInspector: memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
+      memoryInspector: memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined,
+      memoryRetrievalService
     })
   });
   const skillLearningManager = new SkillLearningManager({
@@ -1250,6 +1319,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await browserSessionLifecycle?.cleanupAll();
       await localWhisper?.dispose?.();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
+      memoryIndexSync?.dispose();
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close
         : undefined;

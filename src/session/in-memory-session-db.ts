@@ -10,6 +10,7 @@ import type {
   SessionSearchResult
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
+import { tokenizeSearchTerms } from "../search/fts-query.js";
 
 const SESSION_MODEL_OVERRIDE_METADATA_KEY = "sessionModelOverride";
 
@@ -182,7 +183,7 @@ export class InMemorySessionDB implements SessionDB {
   }
 
   async search(query: string, options: { profileId?: string; limit?: number } = {}): Promise<SessionSearchResult[]> {
-    const terms = tokenize(query);
+    const terms = tokenizeSearchTerms(query);
 
     if (terms.length === 0) {
       return [];
@@ -222,13 +223,6 @@ export class InMemorySessionDB implements SessionDB {
       session.updatedAt = this.#now().toISOString();
     }
   }
-}
-
-function tokenize(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9\u0600-\u06ff]+/u)
-    .filter((term) => term.length > 1);
 }
 
 function scoreMessage(content: string, terms: string[]): number {

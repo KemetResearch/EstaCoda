@@ -175,9 +175,9 @@ function registerAll(): void {
     name: "memory",
     aliases: [],
     category: "Info",
-    description: "Inspect promoted memory conclusions",
+    description: "Inspect memory state",
     visibility: "public",
-    scope: "slash",
+    scope: "both",
   });
   commandRegistry.register({
     name: "tools",

@@ -286,11 +286,19 @@ Text-to-speech and speech-to-text.
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `memory` | `safe` | Profile memory files |
-| `memory.file_compact` | `safe` | Creates compaction backup |
-| `memory.file_compaction_restore` | `safe` | Restores from backup |
+| `memory.curate` | `workspace-write` | Profile memory files |
+| `memory.read` | `read-only-local` | None |
+| `memory.search` | `read-only-local` | None |
+| `memory.file_compact` | `workspace-write` | Creates compaction backup |
+| `memory.file_compaction_restore` | `workspace-write` | Restores from backup |
 
-**Behavior:** `memory.file_compact` compacts `USER.md` or `MEMORY.md`. It supports dry-run, scans generated output before writes, and creates backups. It never targets `SOUL.md` or `AGENTS.md`. Uses the auxiliary `memory_compaction` route.
+**Read/search behavior:** `memory.read` and `memory.search` use local lexical memory retrieval. `memory.read` reads bounded local memory by source. `memory.search` searches local memory lexically. Both accept `maxChars`, which is bounded internally. `memory.search` also accepts bounded `maxResults`.
+
+Output is redacted, source-labeled, marked as local memory context, and treated as context rather than instruction. Diagnostics are structured. If the local index is disabled or unavailable, the service falls back to safe substring read/search while preserving protected filtering.
+
+`SOUL.md` is indexed as protected and is excluded by default. Protected entries are returned only when `includeProtected` is explicit, and protected excerpts remain bounded. `AGENTS.md` is not memory and is never indexed as memory.
+
+**Write/compaction behavior:** `memory.curate` writes curated local memory through drift-aware persistence. External disk edits fail closed by default, and diagnostics do not expose raw memory content. `memory.file_compact` compacts `USER.md` or `MEMORY.md`. It supports dry-run, scans generated output before writes, and creates backups. It never targets `SOUL.md` or `AGENTS.md`. Uses the auxiliary `memory_compaction` route.
 
 ### Skill tools
 
@@ -315,6 +323,28 @@ Text-to-speech and speech-to-text.
 | `config.compression.status` | `safe` | None |
 
 **Behavior:** Shows normalized compression config, auxiliary route status, and latest session compression state. Does not mutate config or expose credentials.
+
+### Session search tool
+
+| Tool | Risk | State touched |
+|------|------|---------------|
+| `session_search` | `read-only-local` | None |
+
+**Behavior:** Deterministic raw historical session browse/search/scroll. It uses the local session database through `SessionSearchService`; it is separate from `SessionRecallService`, does not use auxiliary/model summarization, and does not make historical content authoritative.
+
+Modes:
+
+| Mode | Inputs |
+|------|--------|
+| `browse` | `limit`, `sort` |
+| `search` | `query`, `limit`, `sort`, `role_filter` |
+| `scroll` | `session_id`, `around_message_id`, `window` |
+
+Output is bounded, redacted, source-labeled, and marked as untrusted historical reference context. Current instructions and runtime policy outrank historical session content. Profile/workspace filtering is applied where available, and active/current session exclusion is used where configured or available.
+
+Limits are internal except for result/message-count knobs. `browse` and `search` default to `10` results and clamp at `20`. `scroll` defaults to `5` messages and clamps at `20`. The schema must not expose `maxChars`; per-message excerpts, session previews, and total tool output are capped internally by the service and fixed registered tool result size.
+
+**Failure modes:** Missing session database, missing sessions, or missing messages return structured diagnostics. Large messages are excerpted before return.
 
 ### Knowledge tools
 

@@ -19,9 +19,17 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/memory/memory-prompt-context-builder.ts` | ~200 | Canonical prompt memory context builder |
 | `src/memory/memory-recall-orchestrator.ts` | ~230 | Per-turn recall and external-memory orchestration |
 | `src/memory/memory-promotion.ts` | ~260 | Promote repeated preferences and facts |
+| `src/memory/memory-persistence-service.ts` | ~300 | Drift-aware local memory write safety |
 | `src/memory/memory-tool.ts` | ~140 | Agent-facing `memory.curate` curation tool |
+| `src/memory/memory-index-store.ts` | ~260 | Profile-state SQLite schema/lifecycle for the local lexical index |
+| `src/memory/memory-index.ts` | ~560 | Local lexical index writes, read/search, status, and vacuum |
+| `src/memory/memory-index-sync.ts` | ~520 | Startup backfill and post-write index sync orchestration |
+| `src/memory/memory-retrieval-service.ts` | ~620 | Bounded local lexical memory read/search with fallback |
+| `src/cli/memory-commands.ts` | ~430 | CLI memory index/read/search commands |
+| `src/tools/memory-retrieval-tools.ts` | ~270 | Agent-facing `memory.read` and `memory.search` tools |
 | `src/memory/memory-file-compaction-service.ts` | ~540 | Manual memory-file compaction and restore service |
 | `src/memory/external-memory-provider.ts` | ~530 | External memory lifecycle helpers and file-backed provider |
+| `src/session/session-search-service.ts` | ~360 | Deterministic raw session browse/search/scroll |
 
 ## Memory Files
 
@@ -41,6 +49,143 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 ```
 
 `AGENTS.md` is not a memory file. It is project context loaded through `ProjectContextLoader`, and it should never be curated, compacted, deactivated, promoted, or mirrored as memory.
+
+## Retrieval Write And Storage Boundaries
+
+Local memory retrieval keeps storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
+
+```text
+<profile-state-dir>/memory-index.sqlite
+```
+
+The index is a rebuildable mirror of memory content, not source of truth. It is inspectable, safe to delete and rebuild, separate from authoritative memory files, and must not mix memory-index authority with session transcript authority. It follows the existing SQLite adapter, migration, and lifecycle patterns.
+
+`memory-index.sqlite` lifecycle rules:
+
+- Stored under profile state, for example `<profile-state-dir>/memory-index.sqlite`.
+- Opened through the runtime/profile lifecycle.
+- Closed and disposed with runtime disposal.
+- Safe to delete while the runtime is stopped.
+- Missing file at startup reports a pending rebuild.
+- Bounded backfill may recreate the file.
+- Full rebuild is explicit through `estacoda memory index rebuild`.
+- Runtime cache/fingerprint accounts for retrieval config and index path.
+
+Authoritative memory source invariants:
+
+- `MemoryStore` remains the in-memory representation of local memory files.
+- Profile memory files remain authoritative for `USER.md`, `SOUL.md`, and `MEMORY.md`.
+- Shared memory files remain authoritative under global shared memory.
+- `promotions.json` remains authoritative for promotion metadata.
+- The memory index is always derived and rebuildable.
+
+Local memory disk writes go through the drift-aware `MemoryPersistenceService`. `memory.curate`, `LocalMemoryProvider`, and promotion write/rollback flows use this persistence path instead of placing disk drift checks inside bare `MemoryStore`. The service is a write-safety boundary for authoritative memory files; it is not a retrieval system, memory index, or session search layer.
+
+Protected memory remains protected even when indexed. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but it is excluded from read/search unless `includeProtected` is true. Semantic recall must never use `SOUL.md`, even if it is indexed, and protected entries must remain excluded from semantic-facing retrieval paths.
+
+Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+
+## Local Lexical Memory Retrieval
+
+Local memory retrieval is implemented as a deterministic lexical path over authoritative memory files. It is not semantic recall, vector search, embedding retrieval, session search, or a new memory authority layer.
+
+Implemented user/operator-facing surfaces:
+
+| Surface | Boundary |
+|---------|----------|
+| `memory.read` | Agent-facing bounded local memory read by source/kind |
+| `memory.search` | Agent-facing local lexical memory search |
+| `estacoda memory index path` | Print the profile-state index path |
+| `estacoda memory index status` | Inspect index path, health, and pending rebuild state |
+| `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
+| `estacoda memory search <query>` | Search local memory lexically from the CLI |
+| `estacoda memory read <source>` | Read a bounded local memory source from the CLI |
+
+The local index is a rebuildable mirror. Its profile-state SQLite path is:
+
+```text
+<profile-state-dir>/memory-index.sqlite
+```
+
+Deleting `memory-index.sqlite` does not delete or mutate authoritative memory files. A missing or unhealthy index is an operator repair problem, not memory loss. Status and rebuild commands are inspection/repair paths for the mirror. If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search use safe direct file read or substring search fallback where possible while preserving protected-memory filtering.
+
+Authoritative source boundaries:
+
+- Profile memory files remain authoritative for `USER.md`, `SOUL.md`, and `MEMORY.md`.
+- Shared memory files remain authoritative under global shared memory.
+- `promotions.json` remains authoritative for promotion metadata.
+- `AGENTS.md` is project context, not memory.
+- `AGENTS.md` is never indexed as memory.
+- The local index is always derived and rebuildable.
+
+Shared memory may be mirrored for lexical retrieval, but the index must preserve its shared/global source boundary. Mirroring shared memory into the index must not convert shared files into profile-local authority or promotion metadata.
+
+Protected memory rules:
+
+- `SOUL.md` is indexed as protected for parity, status, and rebuild checks.
+- `SOUL.md` is excluded from `memory.read`, `memory.search`, and CLI read/search unless `includeProtected` or `--include-protected` is explicit.
+- Protected excerpts remain bounded.
+- Semantic recall must never use protected identity/safety entries.
+- Protected entries remain excluded from semantic-facing retrieval paths.
+
+Retrieval output and sizing:
+
+- `memory.read` and `memory.search` accept `maxChars`; the retrieval service bounds it internally.
+- `memory.search` accepts `maxResults`; the retrieval service bounds it internally.
+- CLI read/search expose bounded sizing flags and use the same local lexical retrieval service.
+- `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally.
+- Lexical memory retrieval is deterministic by default.
+- Semantic memory retrieval is out of scope for Phase 1.
+- Output is redacted, source-labeled, and marked as local memory context, not instruction.
+- Missing sources, empty results, fallback use, truncation, redaction, and protected filtering return structured diagnostics without raw memory content in diagnostic fields.
+- Returned memory content is context, not a higher-priority instruction. System, developer, repo, `AGENTS.md`, security, and current user instructions still outrank retrieved memory.
+
+CLI read supports these sources:
+
+| Source | Behavior |
+|--------|----------|
+| `USER.md` | Reads profile user memory |
+| `MEMORY.md` | Reads profile learned/project memory |
+| `SOUL.md` | Denied unless `--include-protected` is explicit |
+| `shared` | Reads global shared memory by key |
+
+Index inspection and repair workflow:
+
+```bash
+estacoda memory index path
+estacoda memory index status
+# Stop the runtime before deleting the index file.
+rm <profile-state-dir>/memory-index.sqlite
+estacoda memory index status
+estacoda memory index rebuild
+estacoda memory index status
+```
+
+The index is inspectable and deletable. Missing index files report pending rebuild or empty-index diagnostics. Bounded startup backfill may recreate the file. Full rebuild is explicit through `estacoda memory index rebuild`, is idempotent, repopulates from authoritative memory files, and indexes `SOUL.md` as protected.
+
+`session_search` is separate from local memory retrieval. It browses/searches historical sessions and does not expose `maxChars`. `memory.read` and `memory.search` read/search local memory and may expose `maxChars`. Historical session content and memory retrieval results are both context/reference material, not higher-priority instruction.
+
+## Drift-Aware Local Persistence
+
+Local memory writes are protected against silent overwrite of externally edited files. Before writing, `MemoryPersistenceService` compares the loaded disk snapshot with the current disk state. The tracked snapshot includes:
+
+- path
+- kind
+- `mtimeMs`
+- size
+- content hash
+
+Save behavior is fail-closed by default:
+
+- Re-stat and read the current file before overwrite.
+- Compare current disk state against the loaded snapshot.
+- Refuse the write when the file drifted after load.
+- Preserve the current disk file on drift refusal.
+- Return structured diagnostics without raw memory content.
+- Do not create backup files by default.
+- Create `.bak.<timestamp>` files only when explicitly configured by the operation policy.
+
+Authoritative memory files remain authoritative. `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, and `promotions.json` are still the sources of truth. The persistence service only guards local disk writes; it does not make derived indexes or retrieved session content authoritative.
 
 ## Prompt Assembly
 
@@ -114,9 +259,9 @@ Promotion overflow after an otherwise successful assistant response is non-fatal
 
 Scanner/safety rejection prevents secret-looking promotion text from being written to memory. A failed promotion must not leave active promotion metadata, and prompt memory rendering must not resurrect rejected or manually deleted entries from stale metadata.
 
-## Memory Tool
+## Memory Tools
 
-The agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
+The current agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
 
 | Kind | Description |
 |------|-------------|
@@ -124,7 +269,9 @@ The agent-facing memory write surface is `memory.curate`. It accepts a `kind` va
 | `replace` | Replace an existing entry via substring matching (`match`) |
 | `remove` | Remove an entry via substring matching (`match`) |
 
-There is no `read` action — memory content is automatically injected into the system prompt.
+Local lexical retrieval uses separate `memory.read` and `memory.search` tools instead of overloading `memory.curate` with read behavior. These tools are read-only-local surfaces over local memory context; they do not write memory, promote content, or change the prompt authority model.
+
+`memory.read` reads bounded local memory content by source. `memory.search` performs deterministic lexical search. Both tools accept `maxChars`; `memory.search` also accepts `maxResults`. Returned content is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. If the local index is disabled or unavailable, the retrieval service uses safe substring read/search fallback while preserving protected filtering.
 
 `memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. It does not manage `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
 
@@ -203,13 +350,40 @@ Interactive slash-command recall is available where the runtime exposes session 
 /sessions recall <query>
 ```
 
-`SessionRecallService` uses SQLite FTS, groups hits by source session, loads bounded surrounding messages, and uses the auxiliary `session_search` route when configured. If auxiliary summarization is unavailable or fails, recall falls back to deterministic snippets.
+`SessionRecallService` uses SQLite FTS, groups hits by source session, loads bounded surrounding messages, and uses the auxiliary model route named `session_search` when configured. That auxiliary route is separate from the `session_search` runtime tool described below. If auxiliary summarization is unavailable or fails, recall falls back to deterministic snippets.
 
 Recall is profile-scoped and workspace-scoped when a workspace root is supplied. Sessions with matching workspace metadata are eligible; sessions with non-matching metadata are excluded. Metadata-less legacy sessions are excluded when workspace-scoped recall is active, but may be included in same-profile recall when no workspace root is supplied.
 
 Every recall block is labeled as untrusted historical context and includes source session diagnostics. Recalled content cannot override system, developer, repo, `AGENTS.md`, security, local memory, or current user instructions.
 
 Runtime recall is intentionally narrow. It is only injected for high-confidence continuity language such as "last time", "what did we decide", "what did I say about", "continue from", "we discussed", or relevant "remember ..." phrasing. Ordinary turns do not trigger broad recall.
+
+## Deterministic Session Search Tool
+
+`session_search` is deterministic raw historical session browsing, search, and scroll. It is useful for finding prior sessions or messages, not for deciding current instructions. Historical content returned by the tool is untrusted reference material. Current user instructions, runtime policy, system/developer instructions, repo instructions, `AGENTS.md`, and security policy outrank any historical session content.
+
+The tool uses `SessionSearchService`. It is separate from `SessionRecallService`, does not call auxiliary/model providers, and does not summarize. It does not make historical content authoritative and does not write memory.
+
+Supported modes:
+
+| Mode | Purpose |
+|------|---------|
+| `browse` | List recent matching sessions |
+| `search` | Search raw historical messages |
+| `scroll` | Load a deterministic message window around a message id |
+
+Bounds and output rules:
+
+- Output is bounded, redacted, source-labeled, and explicitly marked as untrusted historical reference context.
+- Tool output is capped by the fixed registered `maxResultSizeChars`.
+- `browse` and `search` expose `limit`; default is `10`, max is `20`.
+- `scroll` exposes `window`; default is `5`, max is `20`.
+- The tool exposes result/message-count knobs only: `limit` and `window`.
+- The schema must not expose `maxChars`.
+- Text-size caps, per-message excerpts, and session previews are controlled internally.
+- Profile and workspace filtering are applied where available.
+- Active/current session exclusion is used where configured or available.
+- Missing sessions or messages return structured diagnostics.
 
 ## External Memory
 

@@ -11,10 +11,12 @@ import { knowledgeCodeToolProvider } from "./knowledge-code-tools.js";
 import { knowledgeMemoryToolProvider } from "./knowledge-memory-tools.js";
 import { mediaToolProvider } from "./media-tools.js";
 import { memoryFileCompactionToolProvider } from "./memory-file-compaction-tools.js";
+import { memoryRetrievalToolProvider } from "./memory-retrieval-tools.js";
 import { memoryToolProvider } from "./memory-tool.js";
 import { notebookToolProvider } from "./notebook-tools.js";
 import { processToolProvider } from "./process-tools.js";
 import { pythonToolProvider } from "./python-tools.js";
+import { sessionSearchToolProvider } from "./session-search-tool.js";
 import { skillToolProvider } from "./skill-tools.js";
 import { visionToolProvider } from "./vision-tools.js";
 import { voiceToolProvider } from "./voice-tools.js";
@@ -35,10 +37,12 @@ export {
   knowledgeMemoryToolProvider,
   mediaToolProvider,
   memoryFileCompactionToolProvider,
+  memoryRetrievalToolProvider,
   memoryToolProvider,
   notebookToolProvider,
   processToolProvider,
   pythonToolProvider,
+  sessionSearchToolProvider,
   skillToolProvider,
   visionToolProvider,
   voiceToolProvider,
@@ -76,7 +80,9 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: configToolProvider, phase: "pre-skill-visibility" },
   { provider: cronToolProvider, phase: "pre-skill-visibility" },
   { provider: memoryToolProvider, phase: "pre-skill-visibility" },
+  { provider: memoryRetrievalToolProvider, phase: "pre-skill-visibility" },
   { provider: memoryFileCompactionToolProvider, phase: "pre-skill-visibility" },
+  { provider: sessionSearchToolProvider, phase: "pre-skill-visibility" },
   { provider: skillToolProvider, phase: "post-skill-visibility" },
   { provider: knowledgeMemoryToolProvider, phase: "post-memory-provider" },
   {
