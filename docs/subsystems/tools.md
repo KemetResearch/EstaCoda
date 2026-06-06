@@ -25,6 +25,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `src/tools/execute-code-tool.ts` | ~240 | Code execution |
 | `src/tools/vision-tools.ts` | ~200 | Image analysis |
 | `src/tools/media-tools.ts` | ~280 | Media handling |
+| `src/tools/session-search-tool.ts` | ~200 | Deterministic raw historical session browse/search/scroll |
 
 ## Builtin Tools
 
@@ -46,6 +47,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `voice.transcribe` | `safe` | `smoke-tested` |
 | `execute_code` | `caution` | `smoke-tested` |
 | `memory` | `safe` | `smoke-tested` |
+| `session_search` | `read-only-local` | `smoke-tested` |
 | `skill.*` | `safe` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
@@ -112,6 +114,22 @@ Implemented voice providers and security boundaries are documented in [Voice](./
 - Deferred: local TTS providers and Mistral TTS/STT.
 
 Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
+
+## Session Search Tool
+
+`session_search` is a deterministic read-only-local tool for raw historical session browse/search/scroll. It uses `SessionSearchService` and stays separate from `SessionRecallService`. It does not call auxiliary/model providers, does not summarize, and does not make historical content authoritative.
+
+Modes:
+
+| Mode | Inputs | Behavior |
+|------|--------|----------|
+| `browse` | `limit`, `sort` | Lists recent sessions for the active profile/workspace where available |
+| `search` | `query`, `limit`, `sort`, `role_filter` | Searches historical messages |
+| `scroll` | `session_id`, `around_message_id`, `window` | Returns a deterministic message window around a message id |
+
+The schema exposes result/message-count knobs only: `limit` and `window`. It must not expose `maxChars`; text-size caps are system-controlled internally. `browse` and `search` default to `10` results and clamp at `20`. `scroll` defaults to a `5` message window and clamps at `20`. Per-message excerpts, session previews, and total tool output are internally capped by the service and the registered tool `maxResultSizeChars`.
+
+Output is bounded, redacted, source-labeled, and explicitly marked as untrusted historical reference context. Historical content is useful for locating prior work, but it is not current instruction authority. Current user instructions and runtime policy outrank historical session content. Profile/workspace filtering is applied where available, active/current session exclusion is used where configured or available, and missing sessions/messages return structured diagnostics.
 
 ## Tool Execution
 

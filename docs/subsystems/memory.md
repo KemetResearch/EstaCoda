@@ -19,9 +19,11 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/memory/memory-prompt-context-builder.ts` | ~200 | Canonical prompt memory context builder |
 | `src/memory/memory-recall-orchestrator.ts` | ~230 | Per-turn recall and external-memory orchestration |
 | `src/memory/memory-promotion.ts` | ~260 | Promote repeated preferences and facts |
+| `src/memory/memory-persistence-service.ts` | ~300 | Drift-aware local memory write safety |
 | `src/memory/memory-tool.ts` | ~140 | Agent-facing `memory.curate` curation tool |
 | `src/memory/memory-file-compaction-service.ts` | ~540 | Manual memory-file compaction and restore service |
 | `src/memory/external-memory-provider.ts` | ~530 | External memory lifecycle helpers and file-backed provider |
+| `src/session/session-search-service.ts` | ~360 | Deterministic raw session browse/search/scroll |
 
 ## Memory Files
 
@@ -71,11 +73,33 @@ Authoritative memory source invariants:
 - `promotions.json` remains authoritative for promotion metadata.
 - The memory index is always derived and rebuildable.
 
-Local memory disk writes must go through one drift-aware persistence path. Today, `memory.curate` writes directly to `MemoryStore`, while `LocalMemoryProvider` also has save behavior. The preferred follow-up direction is a `MemoryPersistenceService` used by `memory.curate`, `LocalMemoryProvider`, promotions, compaction, and later index sync hooks. This is preferred over overloading `LocalMemoryProvider` with tool-specific write behavior.
+Local memory disk writes go through the drift-aware `MemoryPersistenceService`. `memory.curate`, `LocalMemoryProvider`, and promotion write/rollback flows use this persistence path instead of placing disk drift checks inside bare `MemoryStore`. The service is a write-safety boundary for authoritative memory files; it is not a retrieval system, memory index, or session search layer.
 
 Protected memory remains protected even when indexed. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but it is excluded from read/search unless `includeProtected` is true. Semantic recall must never use `SOUL.md`, even if it is indexed, and protected entries must remain excluded from semantic-facing retrieval paths.
 
-Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. Future `session_search` work will build deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+
+## Drift-Aware Local Persistence
+
+Local memory writes are protected against silent overwrite of externally edited files. Before writing, `MemoryPersistenceService` compares the loaded disk snapshot with the current disk state. The tracked snapshot includes:
+
+- path
+- kind
+- `mtimeMs`
+- size
+- content hash
+
+Save behavior is fail-closed by default:
+
+- Re-stat and read the current file before overwrite.
+- Compare current disk state against the loaded snapshot.
+- Refuse the write when the file drifted after load.
+- Preserve the current disk file on drift refusal.
+- Return structured diagnostics without raw memory content.
+- Do not create backup files by default.
+- Create `.bak.<timestamp>` files only when explicitly configured by the operation policy.
+
+Authoritative memory files remain authoritative. `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, and `promotions.json` are still the sources of truth. The persistence service only guards local disk writes; it does not make derived indexes or retrieved session content authoritative.
 
 ## Prompt Assembly
 
@@ -238,13 +262,40 @@ Interactive slash-command recall is available where the runtime exposes session 
 /sessions recall <query>
 ```
 
-`SessionRecallService` uses SQLite FTS, groups hits by source session, loads bounded surrounding messages, and uses the auxiliary `session_search` route when configured. If auxiliary summarization is unavailable or fails, recall falls back to deterministic snippets.
+`SessionRecallService` uses SQLite FTS, groups hits by source session, loads bounded surrounding messages, and uses the auxiliary model route named `session_search` when configured. That auxiliary route is separate from the `session_search` runtime tool described below. If auxiliary summarization is unavailable or fails, recall falls back to deterministic snippets.
 
 Recall is profile-scoped and workspace-scoped when a workspace root is supplied. Sessions with matching workspace metadata are eligible; sessions with non-matching metadata are excluded. Metadata-less legacy sessions are excluded when workspace-scoped recall is active, but may be included in same-profile recall when no workspace root is supplied.
 
 Every recall block is labeled as untrusted historical context and includes source session diagnostics. Recalled content cannot override system, developer, repo, `AGENTS.md`, security, local memory, or current user instructions.
 
 Runtime recall is intentionally narrow. It is only injected for high-confidence continuity language such as "last time", "what did we decide", "what did I say about", "continue from", "we discussed", or relevant "remember ..." phrasing. Ordinary turns do not trigger broad recall.
+
+## Deterministic Session Search Tool
+
+`session_search` is deterministic raw historical session browsing, search, and scroll. It is useful for finding prior sessions or messages, not for deciding current instructions. Historical content returned by the tool is untrusted reference material. Current user instructions, runtime policy, system/developer instructions, repo instructions, `AGENTS.md`, and security policy outrank any historical session content.
+
+The tool uses `SessionSearchService`. It is separate from `SessionRecallService`, does not call auxiliary/model providers, and does not summarize. It does not make historical content authoritative and does not write memory.
+
+Supported modes:
+
+| Mode | Purpose |
+|------|---------|
+| `browse` | List recent matching sessions |
+| `search` | Search raw historical messages |
+| `scroll` | Load a deterministic message window around a message id |
+
+Bounds and output rules:
+
+- Output is bounded, redacted, source-labeled, and explicitly marked as untrusted historical reference context.
+- Tool output is capped by the fixed registered `maxResultSizeChars`.
+- `browse` and `search` expose `limit`; default is `10`, max is `20`.
+- `scroll` exposes `window`; default is `5`, max is `20`.
+- The tool exposes result/message-count knobs only: `limit` and `window`.
+- The schema must not expose `maxChars`.
+- Text-size caps, per-message excerpts, and session previews are controlled internally.
+- Profile and workspace filtering are applied where available.
+- Active/current session exclusion is used where configured or available.
+- Missing sessions or messages return structured diagnostics.
 
 ## External Memory
 

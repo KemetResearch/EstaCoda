@@ -44,6 +44,7 @@ Built-in tools ship with EstaCoda and are always registered. Availability depend
 | `voice.transcribe` | `safe` | Requires STT provider or local model |
 | `execute_code` | `caution` | Executes code in a sandbox |
 | `memory.*` | `safe` | Memory curation and compaction |
+| `session_search` | `read-only-local` | Raw historical session browse/search/scroll |
 | `skill.*` | `safe` | Skill CRUD operations |
 | `cronjob` | `caution` | Schedules and manages cron jobs |
 
@@ -160,6 +161,24 @@ Replacing a code cell resets `execution_count` and `outputs` to `[]`. Replacing 
 Use `expected_mtime_ms` to guard against stale edits. If the notebook changed since that timestamp, the tool rejects the edit. Successful writes use a temp file plus rename and return concise metadata plus `fileChangePreview`.
 
 What can go wrong: invalid JSON, invalid notebook shape, stale `expected_mtime_ms`, missing `cell_id`, or an invalid `cell-N` reference. Recovery: read or inspect the notebook again, use a real cell ID when present, or retry with the current `mtime` metadata.
+
+---
+
+## Session Search
+
+`session_search` is a read-only tool for deterministic browsing, searching, and scrolling of historical sessions. It returns raw historical reference context; it does not summarize, does not use an auxiliary/model provider, and does not make old session content authoritative.
+
+Use it to locate prior sessions or messages. Treat output as untrusted reference material. Current user instructions, runtime policy, and security rules outrank historical session content.
+
+Controls are intentionally small:
+
+| Mode | Controls |
+|---|---|
+| `browse` | `limit`, `sort` |
+| `search` | `query`, `limit`, `sort`, `role_filter` |
+| `scroll` | `session_id`, `around_message_id`, `window` |
+
+`browse` and `search` default to `10` results and clamp at `20`. `scroll` defaults to a `5` message window and clamps at `20`. The tool does not expose `maxChars`; message excerpts, session previews, and total output are capped internally. Output is bounded, redacted, source-labeled, and marked as untrusted historical reference context. Missing sessions or messages return structured diagnostics.
 
 ---
 

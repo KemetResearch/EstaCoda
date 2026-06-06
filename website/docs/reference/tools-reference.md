@@ -316,6 +316,28 @@ Text-to-speech and speech-to-text.
 
 **Behavior:** Shows normalized compression config, auxiliary route status, and latest session compression state. Does not mutate config or expose credentials.
 
+### Session search tool
+
+| Tool | Risk | State touched |
+|------|------|---------------|
+| `session_search` | `read-only-local` | None |
+
+**Behavior:** Deterministic raw historical session browse/search/scroll. It uses the local session database through `SessionSearchService`; it is separate from `SessionRecallService`, does not use auxiliary/model summarization, and does not make historical content authoritative.
+
+Modes:
+
+| Mode | Inputs |
+|------|--------|
+| `browse` | `limit`, `sort` |
+| `search` | `query`, `limit`, `sort`, `role_filter` |
+| `scroll` | `session_id`, `around_message_id`, `window` |
+
+Output is bounded, redacted, source-labeled, and marked as untrusted historical reference context. Current instructions and runtime policy outrank historical session content. Profile/workspace filtering is applied where available, and active/current session exclusion is used where configured or available.
+
+Limits are internal except for result/message-count knobs. `browse` and `search` default to `10` results and clamp at `20`. `scroll` defaults to `5` messages and clamps at `20`. The schema must not expose `maxChars`; per-message excerpts, session previews, and total tool output are capped internally by the service and fixed registered tool result size.
+
+**Failure modes:** Missing session database, missing sessions, or missing messages return structured diagnostics. Large messages are excerpted before return.
+
 ### Knowledge tools
 
 | Tool | Risk | State touched |
