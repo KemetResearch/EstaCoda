@@ -4,6 +4,7 @@ import type { ModelProfile, ProviderAdapter, ProviderId, ResolvedModelRoute } fr
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { createOpenAICompatibleProvider, type FetchLike } from "../providers/openai-compatible-provider.js";
 import { diagnoseProviderConfig, diagnoseProviderLive } from "./provider-diagnostics.js";
+import { normalizeMemoryConfig } from "./memory-config.js";
 
 const modelProfile: ModelProfile = {
   id: "gpt-5",
@@ -69,6 +70,7 @@ function loadedConfig(input: {
       protectFirstN: 3,
       protectLastN: 20
     },
+    memory: normalizeMemoryConfig(undefined),
     externalMemory: {
       enabled: false,
       timeoutMs: 750,

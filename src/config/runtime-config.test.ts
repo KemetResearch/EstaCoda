@@ -551,6 +551,74 @@ describe("loadRuntimeConfig compression", () => {
 });
 
 describe("loadRuntimeConfig external memory", () => {
+  it("exposes normalized local memory retrieval config by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.memory).toEqual({
+      retrieval: {
+        enabled: true,
+        mode: "lexical",
+        maxResults: 10,
+        maxChars: 4_000
+      },
+      index: {
+        enabled: true,
+        backfillOnStartup: "bounded",
+        reindexOnStartup: false,
+        vacuumIntervalDays: 7
+      }
+    });
+  });
+
+  it("normalizes local memory retrieval config separately from external memory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      memory: {
+        retrieval: {
+          enabled: false,
+          maxResults: "20",
+          maxChars: "8000"
+        },
+        index: {
+          enabled: false,
+          backfillOnStartup: "off",
+          reindexOnStartup: true,
+          vacuumIntervalDays: "30"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.memory).toEqual({
+      retrieval: {
+        enabled: false,
+        mode: "lexical",
+        maxResults: 20,
+        maxChars: 8_000
+      },
+      index: {
+        enabled: false,
+        backfillOnStartup: "off",
+        reindexOnStartup: true,
+        vacuumIntervalDays: 30
+      }
+    });
+    expect(loaded.externalMemory).toEqual({
+      enabled: false,
+      timeoutMs: 750,
+      maxResults: 3,
+      maxChars: 2500,
+      mirrorWrites: false
+    });
+  });
+
   it("exposes disabled normalized external memory config by default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

@@ -47,6 +47,7 @@ import { resolveOsHomeDir } from "./home-dir.js";
 import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
+import { normalizeMemoryConfig, type MemoryConfig, type MemoryConfigInput } from "./memory-config.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -349,6 +350,7 @@ export type EstaCodaConfig = {
     extractBackend?: string;
     crawlBackend?: string;
   };
+  memory?: MemoryConfigInput;
   compression?: Partial<SessionCompressionConfig>;
   externalMemory?: Partial<ExternalMemoryConfig>;
   external_memory?: Partial<ExternalMemoryConfig>;
@@ -482,6 +484,7 @@ export type LoadedRuntimeConfig = {
     crawlBackend?: string;
   };
   compression: SessionCompressionConfig;
+  memory: MemoryConfig;
   externalMemory: ExternalMemoryConfig;
   browser: {
     backend: BrowserBackendKind;
@@ -810,6 +813,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       crawlBackend: config.web?.crawlBackend
     },
     compression: normalizeSessionCompressionConfig(config.compression),
+    memory: normalizeMemoryConfig(config.memory),
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
     browser: {
       backend: config.browser?.backend ?? "unconfigured",
@@ -900,6 +904,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     compression: {
       ...(merged.compression ?? {}),
       ...(config.compression ?? {})
+    },
+    memory: {
+      ...(merged.memory ?? {}),
+      ...(config.memory ?? {})
     },
     externalMemory: {
       ...(merged.externalMemory ?? merged.external_memory ?? {}),

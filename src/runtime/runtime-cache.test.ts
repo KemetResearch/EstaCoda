@@ -69,6 +69,7 @@ function fakeFingerprint(overrides?: Partial<RuntimeFingerprint>): RuntimeFinger
     webMaxContentChars: 5000,
     webResearchHash: "0000000000000000",
     compressionConfigHash: "0000000000000000",
+    memoryRetrievalConfigHash: "0000000000000000",
     externalMemoryConfigHash: "0000000000000000",
     disableCronTools: false,
     skillAutonomy: "suggest",
@@ -128,6 +129,20 @@ describe("RuntimeCache", () => {
     await proxy1.dispose();
 
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
+    const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
+    const stats = cache.stats();
+    expect(stats.totalCreated).toBe(2);
+    expect(stats.totalDisposed).toBe(1);
+    await proxy2.dispose();
+  });
+
+  it("get() creates new runtime when memory retrieval fingerprint changes", async () => {
+    const cache = createCache();
+    const fp1 = fakeFingerprint();
+    const proxy1 = await cache.get("s1", fp1, fakeSecurityPolicy);
+    await proxy1.dispose();
+
+    const fp2 = fakeFingerprint({ memoryRetrievalConfigHash: "1111111111111111" });
     const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(2);
