@@ -41,6 +41,41 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 ---
 
+## Local Lexical Retrieval Boundary
+
+Phase 1 defines local lexical memory retrieval. It is planned as deterministic read/search over authoritative memory files, not semantic recall, vector search, session search, or a new memory authority layer.
+
+Planned user/operator-facing surfaces:
+
+| Surface | Purpose |
+|---|---|
+| `memory.read` | Read bounded local memory content by memory source/kind |
+| `memory.search` | Search local memory content lexically |
+| `estacoda memory index status` | Inspect local index path, health, and pending rebuild state |
+| `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
+
+The local lexical index is a rebuildable mirror stored under profile state:
+
+```text
+<profile-state-dir>/memory-index.sqlite
+```
+
+Deleting this SQLite file must not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`. Index status and rebuild commands are operator repair paths for the mirror. If the index is disabled, missing, or unavailable, future read/search behavior should fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
+
+Authoritative source boundaries:
+
+- `USER.md`, `SOUL.md`, and `MEMORY.md` remain profile-local source files.
+- Shared memory files remain authoritative under global shared memory.
+- `promotions.json` remains authoritative for promotion metadata.
+- `AGENTS.md` is not memory and is never indexed as memory.
+- Shared memory may be mirrored for lexical retrieval, but the index must preserve its shared/global source boundary.
+
+Protected identity/safety memory remains protected. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but `memory.read` and `memory.search` must exclude it unless `includeProtected` is true. Semantic recall must never use protected identity/safety entries, and protected entries remain excluded from semantic-facing retrieval paths.
+
+`memory.read` and `memory.search` may accept `maxChars` because they return memory content directly. `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally. Returned memory content is context, not a higher-priority instruction.
+
+---
+
 ## Trusted Learned Memory vs. Untrusted Recall
 
 Not all memory is treated the same way.
@@ -145,7 +180,7 @@ The agent-facing memory write surface is `memory.curate`. It accepts:
 | `replace` | Replace an existing entry by substring match |
 | `remove` | Remove an entry by substring match |
 
-There is no `read` action. Memory content is automatically injected into the system prompt.
+Phase 1 defines separate local lexical retrieval surfaces, `memory.read` and `memory.search`, instead of adding read behavior to `memory.curate`. Until those retrieval surfaces are implemented and enabled, memory content is injected through prompt assembly rather than exposed through the write tool.
 
 ---
 

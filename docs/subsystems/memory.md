@@ -46,7 +46,7 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 ## Retrieval Write And Storage Boundaries
 
-Upcoming local memory retrieval work must keep storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
+Phase 1 local memory retrieval work must keep storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
 
 ```text
 <profile-state-dir>/memory-index.sqlite
@@ -78,6 +78,53 @@ Local memory disk writes go through the drift-aware `MemoryPersistenceService`. 
 Protected memory remains protected even when indexed. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but it is excluded from read/search unless `includeProtected` is true. Semantic recall must never use `SOUL.md`, even if it is indexed, and protected entries must remain excluded from semantic-facing retrieval paths.
 
 Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+
+## Local Lexical Memory Retrieval Boundaries
+
+Phase 1 local memory retrieval is a deterministic lexical retrieval path over authoritative memory files. It is not semantic recall, vector search, embedding retrieval, session search, or a new memory authority layer.
+
+Planned user/operator-facing capabilities:
+
+| Surface | Boundary |
+|---------|----------|
+| `memory.read` | Read bounded local memory content by memory source/kind |
+| `memory.search` | Search local memory content lexically |
+| `estacoda memory index status` | Inspect index path, health, and pending rebuild state |
+| `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
+
+The local index is a rebuildable mirror. Its profile-state SQLite path is:
+
+```text
+<profile-state-dir>/memory-index.sqlite
+```
+
+Deleting `memory-index.sqlite` must not delete or mutate authoritative memory files. A missing or unhealthy index is an operator repair problem, not memory loss. Status and rebuild commands are inspection/repair paths for the mirror. If the index is disabled, missing, or unavailable, future read/search behavior should fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
+
+Authoritative source boundaries:
+
+- Profile memory files remain authoritative for `USER.md`, `SOUL.md`, and `MEMORY.md`.
+- Shared memory files remain authoritative under global shared memory.
+- `promotions.json` remains authoritative for promotion metadata.
+- `AGENTS.md` is project context, not memory.
+- `AGENTS.md` is never indexed as memory.
+- The local index is always derived and rebuildable.
+
+Shared memory may be mirrored for lexical retrieval, but the index must preserve its shared/global source boundary. Mirroring shared memory into the index must not convert shared files into profile-local authority or promotion metadata.
+
+Protected memory rules:
+
+- `SOUL.md` is indexed as protected for parity, status, and rebuild checks.
+- `SOUL.md` is excluded from `memory.read` and `memory.search` unless `includeProtected` is true.
+- Semantic recall must never use protected identity/safety entries.
+- Protected entries remain excluded from semantic-facing retrieval paths.
+
+Retrieval output and sizing:
+
+- `memory.read` and `memory.search` may accept `maxChars` because they return memory content directly.
+- `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally.
+- Lexical memory retrieval is deterministic by default.
+- Semantic memory retrieval is out of scope for Phase 1.
+- Returned memory content is context, not a higher-priority instruction. System, developer, repo, `AGENTS.md`, security, and current user instructions still outrank retrieved memory.
 
 ## Drift-Aware Local Persistence
 
@@ -173,9 +220,9 @@ Promotion overflow after an otherwise successful assistant response is non-fatal
 
 Scanner/safety rejection prevents secret-looking promotion text from being written to memory. A failed promotion must not leave active promotion metadata, and prompt memory rendering must not resurrect rejected or manually deleted entries from stale metadata.
 
-## Memory Tool
+## Memory Tools
 
-The agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
+The current agent-facing memory write surface is `memory.curate`. It accepts a `kind` value:
 
 | Kind | Description |
 |------|-------------|
@@ -183,7 +230,7 @@ The agent-facing memory write surface is `memory.curate`. It accepts a `kind` va
 | `replace` | Replace an existing entry via substring matching (`match`) |
 | `remove` | Remove an entry via substring matching (`match`) |
 
-There is no `read` action — memory content is automatically injected into the system prompt.
+Phase 1 defines separate local lexical retrieval surfaces, `memory.read` and `memory.search`, instead of overloading `memory.curate` with read behavior. Until those retrieval surfaces are implemented and enabled, memory content continues to be injected through the prompt assembly path rather than exposed through the write tool.
 
 `memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. It does not manage `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
 
