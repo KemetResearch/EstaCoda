@@ -11,6 +11,7 @@ import {
   isMemoryPersistenceDriftError,
   type MemoryPersistenceService
 } from "../memory/memory-persistence-service.js";
+import type { MemoryIndexWriteSync } from "../memory/memory-index-sync.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
@@ -24,6 +25,7 @@ export type MemoryToolOptions = {
   trajectoryRecorder?: Pick<TrajectoryRecorder, "record">;
   persistence?: MemoryPersistenceService;
   persistencePaths?: Partial<Record<MemoryFileKind, string>>;
+  memoryIndexSync?: MemoryIndexWriteSync;
 };
 
 export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOptions = {}): RegisteredTool<MemoryToolInput> {
@@ -142,6 +144,13 @@ async function applyMemoryToolInput(
     }
   }
 
+  const indexSyncWarning = await syncLocalMemoryIndex({
+    memoryIndexSync: options.memoryIndexSync,
+    operation,
+    content: memoryStore.read(operation.file),
+    sourcePath: options.persistencePaths?.[operation.file]
+  });
+
   const mirror = await mirrorMemoryWriteToExternalProviders({
     entry: {
       profileId: options.profileId ?? "default",
@@ -165,6 +174,7 @@ async function applyMemoryToolInput(
     mirrorWarnings: mirror.warnings
   });
   const warnings = [
+    ...indexSyncWarning,
     ...mirror.warnings,
     ...auditWarnings
   ];
@@ -179,6 +189,27 @@ async function applyMemoryToolInput(
       warnings
     }
   };
+}
+
+async function syncLocalMemoryIndex(input: {
+  memoryIndexSync: MemoryIndexWriteSync | undefined;
+  operation: MemoryOperation;
+  content: string;
+  sourcePath?: string;
+}): Promise<string[]> {
+  if (input.memoryIndexSync === undefined) {
+    return [];
+  }
+  try {
+    const result = await input.memoryIndexSync.syncMemoryFile({
+      file: input.operation.file,
+      content: input.content,
+      sourcePath: input.sourcePath
+    });
+    return result.warning === undefined ? [] : [result.warning];
+  } catch (error) {
+    return [`memory index sync failed for ${input.operation.file}: ${errorMessage(error)}`];
+  }
 }
 
 async function recordExternalMemoryMirrorWrite(input: {

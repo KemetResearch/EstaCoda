@@ -15,6 +15,7 @@ import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryInspector } from "./memory-inspector.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { MemoryPersistenceService } from "./memory-persistence-service.js";
+import type { MemoryIndexWriteSync } from "./memory-index-sync.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -23,6 +24,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #promotionStore: MemoryPromotionStore | undefined;
   readonly #inspector: MemoryInspector | undefined;
   readonly #persistence: MemoryPersistenceService | undefined;
+  readonly #memoryIndexSync: MemoryIndexWriteSync | undefined;
 
   constructor(options: {
     store: MemoryStore;
@@ -31,9 +33,11 @@ export class LocalMemoryProvider implements MemoryProvider {
     promotionStore?: MemoryPromotionStore;
     promotionStorePath?: string;
     persistence?: MemoryPersistenceService;
+    memoryIndexSync?: MemoryIndexWriteSync;
   }) {
     this.#store = options.store;
     this.#persistence = options.persistence;
+    this.#memoryIndexSync = options.memoryIndexSync;
     this.#saveRoots = options.saveRoots ?? (
       options.saveRoot === undefined
         ? {}
@@ -257,14 +261,30 @@ export class LocalMemoryProvider implements MemoryProvider {
       if (root !== undefined) {
         if (this.#persistence === undefined) {
           await this.#store.saveFileToDirectory(root, file);
-          continue;
+        } else {
+          await this.#persistence.writeFile({
+            path: join(root, file),
+            kind: file,
+            content: this.#store.read(file)
+          });
         }
-        await this.#persistence.writeFile({
-          path: join(root, file),
-          kind: file,
-          content: this.#store.read(file)
-        });
       }
+      await this.#syncMemoryIndex(file, root === undefined ? undefined : join(root, file));
+    }
+  }
+
+  async #syncMemoryIndex(file: MemoryFileKind, sourcePath: string | undefined): Promise<void> {
+    if (this.#memoryIndexSync === undefined) {
+      return;
+    }
+    try {
+      await this.#memoryIndexSync.syncMemoryFile({
+        file,
+        content: this.#store.read(file),
+        sourcePath
+      });
+    } catch {
+      // Memory index sync is derived state; authoritative memory writes stay committed.
     }
   }
 }
