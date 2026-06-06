@@ -34,14 +34,16 @@ describe("toolRegistrationPlan", () => {
     expect(configEntry?.phase).toBe("pre-skill-visibility");
   });
 
-  it("does not register local memory read/search tools yet", () => {
+  it("registers local memory read/search tools without changing session_search schema", () => {
     const memoryEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memory");
+    const memoryRetrievalEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memoryRetrieval");
     const sessionSearchEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "sessionSearch");
 
     expect(memoryEntry?.provider.kind).toBe("session");
+    expect(memoryRetrievalEntry?.provider.kind).toBe("session");
+    expect(memoryRetrievalEntry?.phase).toBe("pre-skill-visibility");
     expect(sessionSearchEntry?.provider.kind).toBe("session");
     expect(sessionSearchEntry?.phase).toBe("pre-skill-visibility");
-    expect(toolRegistrationPlan.map((entry) => entry.provider.name)).not.toContain("memoryRetrieval");
   });
 
   it("static providers expose non-empty tool arrays", () => {
