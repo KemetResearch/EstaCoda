@@ -461,6 +461,8 @@ function emptySyncDiagnostics(path: string) {
     staleEntries: 0,
     protectedEntries: 0,
     indexedEntries: 0,
+    indexedProfiles: 0,
+    ftsHealthy: true,
     empty: true,
     missingIndexFile: false,
     warnings: [],

@@ -44,6 +44,8 @@ export type MemoryIndexSyncDiagnostics = {
   staleEntries: number;
   protectedEntries: number;
   indexedEntries: number;
+  indexedProfiles: number;
+  ftsHealthy: boolean;
   empty: boolean;
   missingIndexFile: boolean;
   warnings: string[];
@@ -168,6 +170,35 @@ export class MemoryIndexSync {
 
     return {
       mode,
+      indexedEntries,
+      diagnostics: this.diagnostics()
+    };
+  }
+
+  async rebuild(): Promise<MemoryIndexBackfillResult> {
+    if (!this.#config.index.enabled) {
+      this.#addDiagnostic({
+        code: "memory-index-disabled",
+        message: "Local memory index rebuild skipped because memory.index.enabled is false."
+      });
+      return {
+        mode: "full",
+        indexedEntries: 0,
+        diagnostics: this.diagnostics()
+      };
+    }
+
+    const startedAt = this.#now().toISOString();
+    const indexedEntries = await this.#fullBackfill(startedAt);
+    this.#lastBackfillAt = startedAt;
+    this.#lastRebuildAt = startedAt;
+    this.#addDiagnostic({
+      code: "memory-index-backfill-completed",
+      message: "Local memory index explicit rebuild completed."
+    });
+
+    return {
+      mode: "full",
       indexedEntries,
       diagnostics: this.diagnostics()
     };
@@ -346,6 +377,8 @@ export class MemoryIndexSync {
       staleEntries,
       protectedEntries: status.protectedEntries,
       indexedEntries: status.indexedEntries,
+      indexedProfiles: status.indexedProfiles,
+      ftsHealthy: status.ftsHealthy,
       empty: status.empty,
       missingIndexFile: this.#indexFileMissingAtStartup,
       warnings: [...this.#warnings],

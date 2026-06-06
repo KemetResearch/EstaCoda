@@ -96,6 +96,7 @@ import { evolutionCommand } from "./evolution-commands.js";
 import { flowCommand } from "./flow-commands.js";
 import { packCommand } from "./pack-commands.js";
 import { skillsCommand } from "./skill-commands.js";
+import { memoryCommand } from "./memory-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import { promptForApiKey } from "./secret-prompt.js";
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
@@ -310,6 +311,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return evolutionCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
+    case "memory":
+      return memoryCommand(options, args);
     case "packs":
       return packCommand(options, args);
     case "skills":

@@ -51,6 +51,10 @@ type ProtectedCountRow = {
   count: number;
 };
 
+type ProfileCountRow = {
+  count: number;
+};
+
 export type MemoryIndexSourceIdentity = {
   profileId: string;
   sourceType: MemoryIndexedSourceType;
@@ -113,6 +117,7 @@ export type MemoryIndexStatus = {
   enabled: boolean;
   available: boolean;
   indexedEntries: number;
+  indexedProfiles: number;
   protectedEntries: number;
   staleEntries: number;
   ftsHealthy: boolean;
@@ -314,6 +319,11 @@ export class MemoryIndex {
         } protected_class != 'none'`
       )
       .get(...profileParams)?.count ?? 0;
+    const indexedProfiles = options.profileId === undefined
+      ? this.#store.db
+        .query<ProfileCountRow>("select count(distinct profile_id) as count from memory_index")
+        .get()?.count ?? 0
+      : indexedEntries > 0 ? 1 : 0;
     const ftsHealthy = hasRequiredSchema(schema);
     const diagnostics: MemoryRetrievalDiagnostic[] = [];
 
@@ -335,6 +345,7 @@ export class MemoryIndex {
       enabled: options.enabled ?? true,
       available: ftsHealthy,
       indexedEntries,
+      indexedProfiles,
       protectedEntries,
       staleEntries: 0,
       ftsHealthy,

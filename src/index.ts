@@ -421,6 +421,7 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     "knowledge",
     "local",
     "manifest",
+    "memory",
     "mcp",
     "model",
     "packs",
