@@ -824,6 +824,9 @@ describe("reviewed setup apply executor", () => {
       browser: {
         backend: "local-cdp",
         cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--headless=new"],
+        chromeFlags: ["--no-first-run", "--disable-gpu"],
         autoLaunch: true,
       },
       skippedModules: ["telegram", "voice", "vision"],
@@ -836,12 +839,22 @@ describe("reviewed setup apply executor", () => {
 
     expect(result.ok).toBe(true);
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
-      browser?: { backend?: string; cdpUrl?: string; autoLaunch?: boolean };
+      browser?: {
+        backend?: string;
+        cdpUrl?: string;
+        launchExecutable?: string;
+        launchArgs?: string[];
+        chromeFlags?: string[];
+        autoLaunch?: boolean;
+      };
     };
 
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:9222",
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: false,
     });
   });

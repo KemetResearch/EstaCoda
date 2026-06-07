@@ -75,6 +75,9 @@ function moduleContext(overrides: SetupModuleContext = {}): SetupModuleContext {
     browser: {
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:9222",
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: true,
     },
     voice: {
@@ -287,6 +290,22 @@ describe("setup review manifest", () => {
 
     expect(browserLine?.review.values.autoLaunchRequested).toBe(true);
     expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
+  });
+
+  it("lists structured browser launch fields in reviewed setup values", () => {
+    const manifest = buildSetupReviewManifest([buildSetupModuleDraftBundle(moduleContext())]);
+    const browserLine = manifest.sections["enabled-optional-capabilities"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.capability"));
+
+    expect(browserLine?.review.values).toMatchObject({
+      backend: "local-cdp",
+      cdpUrl: "http://127.0.0.1:9222",
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
+      autoLaunchRequested: true,
+      autoLaunchWillRunNow: false
+    });
   });
 
   it("lists verification checks as read-only", () => {

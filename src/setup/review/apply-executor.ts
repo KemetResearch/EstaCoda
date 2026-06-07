@@ -676,6 +676,9 @@ async function applyBrowserCapability(
       backend: browserBackendValue(operation.review.values.backend ?? operation.review.values.browserBackend) ?? "local-cdp",
       cdpUrl: stringValue(operation.review.values.cdpUrl),
       launchCommand: stringValue(operation.review.values.launchCommand),
+      launchExecutable: stringValue(operation.review.values.launchExecutable),
+      launchArgs: optionalArrayValue(operation.review.values.launchArgs),
+      chromeFlags: optionalArrayValue(operation.review.values.chromeFlags),
       autoLaunch: false,
     },
   });
@@ -771,6 +774,11 @@ function stringValue(value: unknown): string | undefined {
 function arrayValue(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function optionalArrayValue(value: unknown): string[] | undefined {
+  const values = arrayValue(value);
+  return values.length > 0 ? values : undefined;
 }
 
 function booleanValue(value: unknown): boolean | undefined {

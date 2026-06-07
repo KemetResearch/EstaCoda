@@ -2116,7 +2116,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       output: [
         "EstaCoda browser backend",
         "  estacoda browser status",
-        "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222",
+        "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run",
         "  estacoda browser setup --backend browserbase --cloud-provider browserbase",
         "  estacoda browser test",
         "  estacoda browser disable"
@@ -2133,8 +2133,13 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         subcommand === "test" ? "EstaCoda browser test" : undefined,
         `Browser backend: ${config.browser.backend}`,
         config.browser.cloudProvider === undefined ? undefined : `Cloud provider: ${config.browser.cloudProvider}`,
+        `Supervised mode: ${config.browser.supervised ? "enabled" : "disabled"}`,
         config.browser.cdpUrl === undefined ? undefined : `CDP URL: ${config.browser.cdpUrl}`,
-        config.browser.launchCommand === undefined ? undefined : `Launch command: ${config.browser.launchCommand}`,
+        config.browser.launchExecutable === undefined ? undefined : `Launch executable: ${config.browser.launchExecutable}`,
+        config.browser.launchArgs === undefined ? undefined : `Launch args: ${config.browser.launchArgs.length}`,
+        config.browser.chromeFlags === undefined ? undefined : `Chrome flags: ${config.browser.chromeFlags.length}`,
+        config.browser.launchCommand === undefined ? undefined : `Deprecated launch command: ${config.browser.launchCommand}`,
+        ...deprecatedLaunchCommandWarnings(config.browser.launchCommand),
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
         `Config sources: ${config.sources.join(", ") || "none"}`,
         subcommand === "test"
@@ -2161,7 +2166,11 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       `Browser backend: ${result.config.browser?.backend ?? "unconfigured"}.`,
       result.config.browser?.cloudProvider === undefined ? undefined : `Cloud provider: ${result.config.browser.cloudProvider}`,
       result.config.browser?.cdpUrl === undefined ? undefined : `CDP URL: ${result.config.browser.cdpUrl}`,
-      result.config.browser?.launchCommand === undefined ? undefined : `Launch command: ${result.config.browser.launchCommand}`,
+      result.config.browser?.launchExecutable === undefined ? undefined : `Launch executable: ${result.config.browser.launchExecutable}`,
+      result.config.browser?.launchArgs === undefined ? undefined : `Launch args: ${result.config.browser.launchArgs.length}`,
+      result.config.browser?.chromeFlags === undefined ? undefined : `Chrome flags: ${result.config.browser.chromeFlags.length}`,
+      result.config.browser?.launchCommand === undefined ? undefined : `Deprecated launch command: ${result.config.browser.launchCommand}`,
+      ...deprecatedLaunchCommandWarnings(result.config.browser?.launchCommand),
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
       `Config: ${result.path}`
     ].filter((line) => line !== undefined).join("\n")
@@ -3813,12 +3822,34 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
     } else if (arg === "--launch-command") {
       parsed.launchCommand = next;
       index += 1;
+    } else if (arg === "--launch-executable") {
+      parsed.launchExecutable = next;
+      index += 1;
+    } else if (arg === "--launch-arg") {
+      parsed.launchArgs = [...(parsed.launchArgs ?? []), next as string];
+      index += 1;
+    } else if (arg === "--chrome-flag") {
+      parsed.chromeFlags = [...(parsed.chromeFlags ?? []), next as string];
+      index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
     }
   }
 
   return parsed;
+}
+
+function deprecatedLaunchCommandWarnings(launchCommand: string | undefined): string[] {
+  if (launchCommand === undefined || !launchCommandNeedsMigration(launchCommand)) {
+    return [];
+  }
+  return [
+    "Warning: browser.launchCommand is deprecated and preserved as raw data; use --launch-executable plus repeated --launch-arg instead."
+  ];
+}
+
+function launchCommandNeedsMigration(value: string): boolean {
+  return /\s/.test(value) || /[;&|<>`$\\\r\n]/.test(value);
 }
 
 function parseTelegramArgs(args: string[]): TelegramSetupInput {
