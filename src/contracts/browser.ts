@@ -38,6 +38,9 @@ export type BrowserSnapshot = {
     ref: string;
     role?: string;
     name?: string;
+    value?: string;
+    disabled?: boolean;
+    checked?: boolean | "mixed";
   }>;
   pendingDialogs?: Array<{
     id: string;
@@ -61,6 +64,7 @@ export type BrowserSnapshot = {
 
 export type BrowserActionInput = {
   sessionId?: string;
+  full?: boolean;
   ref?: string;
   text?: string;
   key?: string;
@@ -94,6 +98,7 @@ export type BrowserNavigateInput = {
 export type BrowserNavigateResult = {
   session: BrowserSession;
   snapshot: BrowserSnapshot;
+  metadata?: Record<string, unknown>;
 };
 
 export type BrowserBackendStatus = {
@@ -103,6 +108,12 @@ export type BrowserBackendStatus = {
   reason?: string;
   version?: string;
   browser?: string;
+  hybridRouting?: boolean;
+  lastNavigationBackend?: BrowserBackendKind;
+  lastRouteReason?: string;
+  fallbackFromCloud?: boolean;
+  fallbackProvider?: BrowserCloudProviderKind;
+  fallbackReason?: string;
 };
 
 export type BrowserBackend = {
@@ -124,4 +135,6 @@ export type BrowserBackend = {
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
+  closeSession?(sessionId: string): Promise<void> | void;
+  close?(): Promise<void> | void;
 };

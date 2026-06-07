@@ -505,7 +505,9 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.browser.summary", "Choose a browser backend. Setup records references only; it will not launch a browser during planning.", "اختر واجهة متصفح. يسجّل الإعداد المراجع فقط؛ ولن يشغّل متصفحًا أثناء التخطيط.", [], "optional-capability"),
   copy("setupEditor.prompt.browser.backend", "Browser backend", "واجهة المتصفح", [], "optional-capability"),
   copy("setupEditor.prompt.browser.cdpUrl", "CDP URL", "رابط CDP", [], "optional-capability"),
-  copy("setupEditor.prompt.browser.launchCommand", "Browser launch command", "أمر تشغيل المتصفح", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.launchExecutable", "Browser launch executable", "مسار ملف تشغيل المتصفح", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.launchArgs", "Browser launch arguments (comma-separated)", "وسائط تشغيل المتصفح (مفصولة بفواصل)", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.chromeFlags", "Chrome flags (comma-separated)", "أعلام Chrome (مفصولة بفواصل)", [], "optional-capability"),
   copy("setupEditor.prompt.browser.noAutoLaunch", "Setup will not launch a browser during planning.", "لن يشغّل الإعداد متصفحًا أثناء التخطيط.", [], "optional-capability"),
   copy("setupModules.provider.title", "Provider", "المزوّد", [], "provider-selection"),
   copy("setupModules.provider.review", "Provider {providerId} with model {modelId}.", "المزوّد {providerId} مع النموذج {modelId}.", ["{providerId}", "{modelId}"], "provider-selection"),
@@ -610,7 +612,6 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupValidation.cancel.noMutation", "Cancelled. No config, secret, trust-store, or state mutation was planned.", "تم الإلغاء. لم يتم تخطيط أي تغيير في الإعدادات أو الأسرار أو مخزن الثقة أو الحالة.", [], "none"),
   copy("setupValidation.secret.rawValueBlocked", "Raw secret values are not shown or stored in review metadata.", "لا تُعرض قيم الأسرار الخام ولا تُحفظ في بيانات المراجعة.", [], "credential-reference"),
   copy("setupValidation.remote.identityMissing", "Remote-control capability {capabilityId} requires allowed identities.", "قدرة التحكم عن بُعد {capabilityId} تتطلب هويات مسموحًا بها.", ["{capabilityId}"], "optional-capability"),
-  copy("setupValidation.browser.noAutoLaunch", "Browser setup will not auto-launch {launchCommand} during planning.", "لن يشغّل إعداد المتصفح {launchCommand} تلقائيًا أثناء التخطيط.", ["{launchCommand}"], "optional-capability"),
 ] as const satisfies readonly SetupCopyEntry[];
 
 export type SetupCopyKey = (typeof SETUP_COPY_ENTRIES)[number]["key"];

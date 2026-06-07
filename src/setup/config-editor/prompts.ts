@@ -1043,13 +1043,19 @@ export async function promptBrowserCapability(
   current: {
     readonly backend?: BrowserBackendKind;
     readonly cdpUrl?: string;
+    readonly launchExecutable?: string;
+    readonly launchArgs?: readonly string[];
+    readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
   },
   locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly backend: BrowserBackendKind;
   readonly cdpUrl: string;
-  readonly launchCommand: string;
+  readonly launchExecutable: string;
+  readonly launchArgs: string[];
+  readonly chromeFlags: string[];
+  readonly launchCommand?: string;
   readonly autoLaunch: false;
 }> {
   const backend = await promptSetupChoice(prompt, {
@@ -1067,16 +1073,29 @@ export async function promptBrowserCapability(
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl")),
     current.cdpUrl ?? "http://127.0.0.1:9222"
   );
-  const launchCommand = await promptSetupStringWithDefault(
+  const launchExecutable = await promptSetupStringWithDefault(
     prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchCommand")),
-    current.launchCommand ?? ""
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
+    current.launchExecutable ?? ""
+  );
+  const launchArgsInput = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
+    current.launchArgs?.join(", ") ?? ""
+  );
+  const chromeFlagsInput = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
+    current.chromeFlags?.join(", ") ?? ""
   );
 
   return {
     backend,
     cdpUrl,
-    launchCommand,
+    launchExecutable: launchExecutable.trim(),
+    launchArgs: splitCsv(launchArgsInput),
+    chromeFlags: splitCsv(chromeFlagsInput),
+    launchCommand: current.launchCommand,
     autoLaunch: false,
   };
 }

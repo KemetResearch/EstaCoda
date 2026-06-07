@@ -16,6 +16,7 @@ function normalizeSnapshot(result: unknown): unknown {
 function getTool(name: string) {
   const tool = createWebTools({
     browserBackend: createMockBrowserBackend({ title: "Test Page", text: "Hello world." }),
+    currentSessionId: () => "snapshot-runtime-session",
     resolveHostname: async () => ["93.184.216.34"]
   }).find((candidate) => candidate.name === name);
   if (tool === undefined) {

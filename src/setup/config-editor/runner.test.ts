@@ -2448,7 +2448,9 @@ describe("runConfigEditor", () => {
           "enable",
           "local-cdp",
           "http://127.0.0.1:1",
-          "google-chrome --remote-debugging-port=9222",
+          "/usr/bin/chromium",
+          "--headless=new",
+          "--no-first-run, --disable-gpu",
           true,
         ],
       }),
@@ -2464,7 +2466,15 @@ describe("runConfigEditor", () => {
       tts?: unknown;
       stt?: unknown;
       imageGen?: unknown;
-      browser?: { backend?: string; cdpUrl?: string; launchCommand?: string; autoLaunch?: boolean };
+      browser?: {
+        backend?: string;
+        cdpUrl?: string;
+        launchExecutable?: string;
+        launchArgs?: string[];
+        chromeFlags?: string[];
+        launchCommand?: string;
+        autoLaunch?: boolean;
+      };
     };
     const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
       .find((line) => line.sourceDraftIds.includes("setup-module.browser.capability"));
@@ -2479,7 +2489,9 @@ describe("runConfigEditor", () => {
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
-      launchCommand: "google-chrome --remote-debugging-port=9222",
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: false,
     });
     expect(config.channels).toBeUndefined();

@@ -130,7 +130,7 @@ export async function resolveEffectiveSessionModelOverride(
     return undefined;
   }
 
-  const configuredRoute = findCurrentConfiguredOverrideRoute(override, context.config);
+  const configuredRoute = await findCurrentConfiguredOverrideRoute(override, context);
   if (configuredRoute === undefined) {
     return { ok: false, override, message: "Stored model override is no longer present in the active provider config." };
   }
@@ -146,6 +146,10 @@ export async function resolveEffectiveSessionModelOverride(
   if (!selected.ok) {
     return { ok: false, override, message: selected.message };
   }
+  const networkDisabledReason = providerNetworkDisabledReason(selected.route, context.config.providers?.[selected.route.provider]);
+  if (networkDisabledReason !== undefined) {
+    return { ok: false, override, message: networkDisabledReason };
+  }
 
   return {
     ok: true,
@@ -154,10 +158,11 @@ export async function resolveEffectiveSessionModelOverride(
   };
 }
 
-function findCurrentConfiguredOverrideRoute(
+async function findCurrentConfiguredOverrideRoute(
   override: SessionModelOverride,
-  config: EstaCodaConfig
-): ResolvedModelRoute | undefined {
+  context: ModelSwitchContext
+): Promise<ResolvedModelRoute | undefined> {
+  const config = context.config;
   const stored = override.route;
   const alias = findMatchingAliasRoute(override, config);
   if (alias !== undefined) {
@@ -176,11 +181,7 @@ function findCurrentConfiguredOverrideRoute(
     (route.baseUrl === undefined || route.baseUrl === stored.baseUrl)
   );
   const providerModelMatches = providerConfig.models?.includes(stored.id) ?? false;
-  if (!primaryMatches && fallback === undefined && !providerModelMatches) {
-    return undefined;
-  }
-
-  return buildResolvedModelRoute({
+  const candidate = buildResolvedModelRoute({
     provider: stored.provider,
     model: stored.id,
     profile: override.modelProfile,
@@ -191,6 +192,26 @@ function findCurrentConfiguredOverrideRoute(
     apiMode: providerConfig.apiMode,
     authMethod: providerConfig.authMethod
   });
+  const catalogMatches = await storedOverrideModelIsSelectable(candidate, context);
+  if (!primaryMatches && fallback === undefined && !providerModelMatches && !catalogMatches) {
+    return undefined;
+  }
+
+  return candidate;
+}
+
+async function storedOverrideModelIsSelectable(
+  route: ResolvedModelRoute,
+  context: ModelSwitchContext
+): Promise<boolean> {
+  const catalog = await createModelSelectionCatalog({
+    config: context.config,
+    providerRegistry: context.providerRegistry,
+    homeDir: context.homeDir,
+    modelsDevOptions: context.modelsDevOptions,
+    allowNetwork: false
+  });
+  return (await catalog.resolveModel(route.provider, route.id, route.baseUrl)) !== undefined;
 }
 
 function findMatchingAliasRoute(
@@ -293,6 +314,10 @@ async function resolveExecutableRoute(
       apiMode: route.apiMode ?? providerConfig?.apiMode,
       authMethod: route.authMethod ?? providerConfig?.authMethod
     });
+  const adapter = context.providerRegistry.get(canonicalRoute.provider);
+  if (adapter === undefined || adapter.executable === false) {
+    return reject("selection-failed", `Provider ${canonicalRoute.provider} is not executable.`);
+  }
   let seededConfig = context.config;
   seededConfig = applyRegisterProviderConfig(seededConfig, {
     provider: canonicalRoute.provider,
@@ -344,6 +369,24 @@ async function resolveExecutableRoute(
   }
 
   return { ok: true, route: resolvedRoute };
+}
+
+function providerNetworkDisabledReason(
+  route: ResolvedModelRoute,
+  providerConfig: NonNullable<EstaCodaConfig["providers"]>[string] | undefined
+): string | undefined {
+  if (providerConfig === undefined) {
+    return undefined;
+  }
+  const meta = getProviderMetadata(route.provider);
+  const kind = providerConfig.kind ?? "openai-compatible";
+  const authMethod = route.authMethod ?? providerConfig.authMethod ?? meta.defaultAuthMethod;
+  if (kind !== "openai-compatible" || authMethod === "none") {
+    return undefined;
+  }
+  return providerConfig.enableNetwork === true
+    ? undefined
+    : `Provider ${route.provider} network inference is not enabled.`;
 }
 
 function reject(

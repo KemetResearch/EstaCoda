@@ -11,6 +11,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
+import type { BrowserBackend } from "../contracts/browser.js";
 import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionToolContext } from "../contracts/tool-context.js";
@@ -74,7 +75,10 @@ const mockModel: ModelProfile = {
 class FakeRuntimeCdpSocket implements CdpWebSocketLike {
   readonly readyState = 1;
   readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
+  closeCount = 0;
   readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
+  #contextCounter = 0;
+  #targetCounter = 0;
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -83,8 +87,13 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
-    const result = message.method === "Runtime.evaluate"
-      ? {
+    let result: unknown;
+    if (message.method === "Target.createBrowserContext") {
+      result = { browserContextId: `runtime-context-${++this.#contextCounter}` };
+    } else if (message.method === "Target.createTarget") {
+      result = { targetId: `runtime-target-${++this.#targetCounter}` };
+    } else if (message.method === "Runtime.evaluate") {
+      result = {
         result: {
           value: JSON.stringify({
             sessionId: "runtime-cdp-session",
@@ -94,8 +103,10 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
             elements: []
           })
         }
-      }
-      : { ok: true, method: message.method };
+      };
+    } else {
+      result = { ok: true, method: message.method };
+    }
     this.#emit("message", { data: JSON.stringify({ id: message.id, result }) });
     if (message.method === "Page.navigate") {
       setTimeout(() => this.#emit("message", { data: JSON.stringify({ method: "Page.loadEventFired", params: {} }) }), 0);
@@ -103,6 +114,7 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
   }
 
   close(): void {
+    this.closeCount += 1;
     this.#emit("close", {});
   }
 
@@ -124,14 +136,14 @@ function createRuntimeCdpFetch(): CdpFetchLike {
     if (url.endsWith("/json/version")) {
       return cdpResponse({
         Browser: "Chrome/125.0.0.0",
-        "Protocol-Version": "1.3"
+        "Protocol-Version": "1.3",
+        webSocketDebuggerUrl: "ws://runtime-cdp/browser"
       });
     }
-    if (url.includes("/json/new?")) {
-      return cdpResponse({
-        id: "runtime-target",
-        webSocketDebuggerUrl: "ws://runtime-cdp/target"
-      });
+    if (url.endsWith("/json/list")) {
+      return cdpResponse([
+        { id: "runtime-target-1", type: "page", webSocketDebuggerUrl: "ws://runtime-cdp/target-1" }
+      ]);
     }
     throw new Error(`Unexpected CDP URL: ${url}`);
   });
@@ -145,6 +157,49 @@ function cdpResponse(payload: unknown): Awaited<ReturnType<CdpFetchLike>> {
     json: async () => payload,
     text: async () => JSON.stringify(payload)
   };
+}
+
+type BrowserbaseFetchCall = {
+  url: string;
+  method: string | undefined;
+  body: string | undefined;
+};
+
+function createRuntimeBrowserbaseFetch(input: {
+  calls: BrowserbaseFetchCall[];
+  closeStatus?: number;
+}): typeof globalThis.fetch {
+  return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const call = {
+      url: url.toString(),
+      method: init?.method,
+      body: typeof init?.body === "string" ? init.body : undefined
+    };
+    input.calls.push(call);
+
+    if (call.url.endsWith("/v1/sessions") && call.method === "POST") {
+      return browserbaseResponse(200, {
+        id: "bb-runtime-session",
+        connectUrl: "wss://connect.browserbase.test/runtime-session"
+      });
+    }
+
+    if (call.url.endsWith("/v1/sessions/bb-runtime-session") && call.method === "POST") {
+      return browserbaseResponse(input.closeStatus ?? 200, { id: "bb-runtime-session" });
+    }
+
+    return browserbaseResponse(404, {});
+  }) as typeof globalThis.fetch;
+}
+
+function browserbaseResponse(status: number, payload: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status >= 200 && status < 300 ? "OK" : "Error",
+    json: async () => payload,
+    text: async () => JSON.stringify(payload)
+  } as Response;
 }
 
 function createMockProviderRegistry(): ProviderRegistry {
@@ -730,6 +785,7 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "full",
               "sessionId",
             ],
             "toolsets": [
@@ -2520,8 +2576,129 @@ describe("createRuntime browser backend wiring", () => {
       expect(result?.result?.ok).toBe(true);
       expect(socket.sent.map((message) => message.method)).toContain("Fetch.enable");
       expect(socket.sent.map((message) => message.method)).toContain("Page.navigate");
+      await runtime.dispose();
+      expect(socket.closeCount).toBeGreaterThan(0);
+      await expect(runtime.dispose()).resolves.toBeUndefined();
     } finally {
       await runtime.dispose();
+    }
+  });
+
+  it("releases a runtime-owned Browserbase session during runtime dispose", async () => {
+    const options = await minimalRuntimeOptions();
+    const browserbaseCalls: BrowserbaseFetchCall[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = createRuntimeBrowserbaseFetch({ calls: browserbaseCalls });
+    vi.stubEnv("BROWSERBASE_API_KEY", "bb_runtime_key");
+    vi.stubEnv("BROWSERBASE_PROJECT_ID", "project_runtime");
+    const runtime = await createRuntime({
+      ...options,
+      cdpFetch: createRuntimeCdpFetch(),
+      cdpWebSocketFactory: () => new FakeRuntimeCdpSocket(),
+      browser: {
+        backend: "browserbase",
+        autoLaunch: false,
+        cloudSpendApproved: true,
+        cloudFallback: false
+      }
+    });
+
+    try {
+      expect(browserbaseCalls).toEqual([]);
+
+      const result = await runtime.executeTool?.({
+        tool: "browser.navigate",
+        toolInput: { url: "https://93.184.216.34/" }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      expect(browserbaseCalls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+        "POST /v1/sessions"
+      ]);
+
+      await runtime.dispose();
+      await expect(runtime.dispose()).resolves.toBeUndefined();
+
+      expect(browserbaseCalls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+        "POST /v1/sessions",
+        "POST /v1/sessions/bb-runtime-session"
+      ]);
+      expect(JSON.parse(browserbaseCalls[1]?.body ?? "{}")).toEqual({
+        status: "REQUEST_RELEASE"
+      });
+    } finally {
+      await runtime.dispose();
+      globalThis.fetch = originalFetch;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("does not call Browserbase when an unused runtime-owned Browserbase backend is disposed", async () => {
+    const options = await minimalRuntimeOptions();
+    const browserbaseCalls: BrowserbaseFetchCall[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = createRuntimeBrowserbaseFetch({ calls: browserbaseCalls });
+    vi.stubEnv("BROWSERBASE_API_KEY", "bb_runtime_key");
+    vi.stubEnv("BROWSERBASE_PROJECT_ID", "project_runtime");
+    const runtime = await createRuntime({
+      ...options,
+      cdpFetch: createRuntimeCdpFetch(),
+      cdpWebSocketFactory: () => new FakeRuntimeCdpSocket(),
+      browser: {
+        backend: "browserbase",
+        autoLaunch: false,
+        cloudSpendApproved: true
+      }
+    });
+
+    try {
+      await runtime.dispose();
+      await expect(runtime.dispose()).resolves.toBeUndefined();
+
+      expect(browserbaseCalls).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      globalThis.fetch = originalFetch;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("surfaces Browserbase release failures during runtime dispose", async () => {
+    const options = await minimalRuntimeOptions();
+    const browserbaseCalls: BrowserbaseFetchCall[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = createRuntimeBrowserbaseFetch({ calls: browserbaseCalls, closeStatus: 400 });
+    vi.stubEnv("BROWSERBASE_API_KEY", "bb_runtime_key");
+    vi.stubEnv("BROWSERBASE_PROJECT_ID", "project_runtime");
+    const runtime = await createRuntime({
+      ...options,
+      cdpFetch: createRuntimeCdpFetch(),
+      cdpWebSocketFactory: () => new FakeRuntimeCdpSocket(),
+      browser: {
+        backend: "browserbase",
+        autoLaunch: false,
+        cloudSpendApproved: true,
+        cloudFallback: false
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "browser.navigate",
+        toolInput: { url: "https://93.184.216.34/" }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      await expect(runtime.dispose()).rejects.toThrow("Browserbase POST /v1/sessions/bb-runtime-session failed with HTTP 400.");
+      await expect(runtime.dispose()).resolves.toBeUndefined();
+      expect(browserbaseCalls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+        "POST /v1/sessions",
+        "POST /v1/sessions/bb-runtime-session"
+      ]);
+    } finally {
+      await runtime.dispose();
+      globalThis.fetch = originalFetch;
+      vi.unstubAllEnvs();
     }
   });
 
@@ -2561,6 +2738,39 @@ describe("createRuntime browser backend wiring", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("does not close an injected browserBackend during runtime dispose", async () => {
+    const options = await minimalRuntimeOptions();
+    const close = vi.fn(async () => undefined);
+    const injectedBackend: BrowserBackend & { close: () => Promise<void> } = {
+      kind: "mock",
+      close,
+      isAvailable: () => true,
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async (input) => ({
+        session: {
+          id: "injected",
+          backend: "mock",
+          currentUrl: input.url,
+          createdAt: new Date(0).toISOString()
+        },
+        snapshot: {
+          sessionId: "injected",
+          url: input.url,
+          text: "Injected backend",
+          elements: []
+        }
+      })
+    };
+    const runtime = await createRuntime({
+      ...options,
+      browserBackend: injectedBackend
+    });
+
+    await expect(runtime.dispose()).resolves.toBeUndefined();
+    await expect(runtime.dispose()).resolves.toBeUndefined();
+    expect(close).not.toHaveBeenCalled();
   });
 });
 

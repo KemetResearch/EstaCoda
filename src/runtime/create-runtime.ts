@@ -137,8 +137,16 @@ export type RuntimeOptions = {
     cloudProvider?: string;
     cdpUrl?: string;
     launchCommand?: string;
+    launchExecutable?: string;
+    launchArgs?: string[];
+    chromeFlags?: string[];
     autoLaunch: boolean;
     supervised?: boolean;
+    hybridRouting?: boolean;
+    cloudFallback?: boolean;
+    cloudSpendApproved?: "pending" | boolean;
+    summarizeSnapshots?: LoadedRuntimeConfig["browser"]["summarizeSnapshots"];
+    snapshotSummarizeThreshold?: LoadedRuntimeConfig["browser"]["snapshotSummarizeThreshold"];
   };
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
@@ -210,8 +218,10 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     audioCacheRoot: input.audioCacheRoot,
     imageCacheRoot: input.imageCacheRoot,
     browserBackend: input.browserBackend,
+    browserConfig: input.browserConfig,
     mainRoute: input.mainRoute,
     visionRoute: input.visionRoute,
+    compressionRoute: input.compressionRoute,
     providerRegistry: input.providerRegistry,
     providerExecutor: input.providerExecutor,
     processManager: input.processManager,
@@ -604,6 +614,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   let browserLifecycleBackend: (BrowserBackend & {
     closeSession?: (sessionId: string) => void | Promise<void>;
   }) | undefined;
+  let ownedBrowserBackend: (BrowserBackend & {
+    close?: () => void | Promise<void>;
+  }) | undefined;
   const browserSessionLifecycle = supervisedLocalCdp
     ? new BrowserSessionLifecycle({
       onCleanup: async (sessionId) => {
@@ -614,11 +627,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const unregisterBrowserEmergencyCleanup = browserSessionLifecycle === undefined
     ? undefined
     : registerEmergencyCleanup(browserSessionLifecycle);
-  const browserBackend = options.browserBackend ?? (
-    supervisedLocalCdp
+  const browserBackend = options.browserBackend ?? (() => {
+    const created = supervisedLocalCdp
       ? createSupervisedLocalCdpBrowserBackend({
         cdpUrl: options.browser?.cdpUrl,
         launchCommand: options.browser?.launchCommand,
+        launchExecutable: options.browser?.launchExecutable,
+        launchArgs: options.browser?.launchArgs,
+        chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,
@@ -630,13 +646,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         cloudProvider: options.browser?.cloudProvider,
         cdpUrl: options.browser?.cdpUrl,
         launchCommand: options.browser?.launchCommand,
+        launchExecutable: options.browser?.launchExecutable,
+        launchArgs: options.browser?.launchArgs,
+        chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        hybridRouting: options.browser?.hybridRouting,
+        cloudFallback: options.browser?.cloudFallback,
+        cloudSpendApproved: options.browser?.cloudSpendApproved,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,
         supervised: options.browser?.supervised,
         securityConfig: options.securityConfig
-      })
-  );
+      });
+    ownedBrowserBackend = created as BrowserBackend & {
+      close?: () => void | Promise<void>;
+    };
+    return created;
+  })();
   browserLifecycleBackend = browserBackend as BrowserBackend & {
     closeSession?: (sessionId: string) => void | Promise<void>;
   };
@@ -673,8 +699,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     audioCacheRoot,
     imageCacheRoot,
     browserBackend,
+    browserConfig: options.browser,
     mainRoute,
     visionRoute,
+    compressionRoute,
     providerRegistry,
     providerExecutor,
     processManager,
@@ -1317,6 +1345,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();
+      await ownedBrowserBackend?.close?.();
       await localWhisper?.dispose?.();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       memoryIndexSync?.dispose();

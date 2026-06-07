@@ -2,9 +2,12 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
-import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { deriveBrowserSessionKey } from "../browser/session-key.js";
+import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -21,7 +24,12 @@ export type WebToolOptions = {
   enableNetwork?: boolean;
   maxContentChars?: number;
   webConfig?: WebResearchConfig;
+  browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
   workspaceRoot?: string;
+  currentSessionId?: () => string;
+  mainRoute?: ResolvedModelRoute;
+  snapshotAuxiliaryRoute?: ResolvedAuxiliaryRoute;
+  providerExecutor?: Pick<ProviderExecutor, "complete">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
   visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
@@ -78,6 +86,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
   const urlGuard = createUrlGuard(options);
+  const deriveBrowserInput = <TInput extends { sessionId?: string }>(input: TInput): TInput & { sessionId: string } =>
+    withDerivedBrowserSessionId(input, options.currentSessionId);
 
   return [
     createWebSearchTool(options.webConfig),
@@ -222,18 +232,26 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status.endpoint === undefined ? undefined : `Endpoint: ${status.endpoint}`,
             status.browser === undefined ? undefined : `Browser: ${status.browser}`,
             status.version === undefined ? undefined : `Protocol: ${status.version}`,
+            status.hybridRouting === undefined ? undefined : `Hybrid routing: ${status.hybridRouting ? "enabled" : "disabled"}`,
+            status.lastNavigationBackend === undefined ? undefined : `Last served backend: ${status.lastNavigationBackend}`,
             status.reason === undefined ? undefined : `Reason: ${status.reason}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: status
         };
       }
     },
-    createBrowserSnapshotTool(browserBackend),
+    createBrowserSnapshotTool(browserBackend, deriveBrowserInput, {
+      browserConfig: options.browserConfig,
+      mainRoute: options.mainRoute,
+      snapshotAuxiliaryRoute: options.snapshotAuxiliaryRoute,
+      providerExecutor: options.providerExecutor
+    }),
     createBrowserActionTool({
       name: "browser.click",
       description: "Click an interactive browser element by ref from browser.snapshot.",
       progressLabel: "clicking browser element",
       browserBackend,
+      deriveBrowserInput,
       method: "click",
       inputSchema: {
         type: "object",
@@ -249,6 +267,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Type text into an input element by ref from browser.snapshot.",
       progressLabel: "typing in browser",
       browserBackend,
+      deriveBrowserInput,
       method: "type",
       inputSchema: {
         type: "object",
@@ -265,6 +284,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Scroll the current browser page up or down.",
       progressLabel: "scrolling browser",
       browserBackend,
+      deriveBrowserInput,
       method: "scroll",
       inputSchema: {
         type: "object",
@@ -280,6 +300,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Press a keyboard key in the current browser page.",
       progressLabel: "pressing browser key",
       browserBackend,
+      deriveBrowserInput,
       method: "press",
       inputSchema: {
         type: "object",
@@ -294,6 +315,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Navigate the current browser page back in history.",
       progressLabel: "going back in browser",
       browserBackend,
+      deriveBrowserInput,
       method: "back",
       inputSchema: {
         type: "object",
@@ -320,7 +342,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.getImages === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.get_images");
         }
-        const images = await browserBackend.getImages(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const images = await browserBackend.getImages(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in images) {
           return {
             ok: false,
@@ -356,7 +379,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.console === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.console");
         }
-        const entries = await browserBackend.console(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const entries = await browserBackend.console(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in entries) {
           return {
             ok: false,
@@ -395,26 +419,27 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.cdp === undefined) {
           return withDebug(unsupportedBrowserTool(browserBackend, "browser.cdp"), debug);
         }
+        const browserInput = deriveBrowserInput(input);
         debug.log("browser.cdp.start", {
           backend: browserBackend.kind,
-          method: input.method,
-          params: input.params
+          method: browserInput.method,
+          params: browserInput.params
         });
-        const guardFailure = await guardBrowserCdpInput(input, urlGuard, browserBackend.kind);
+        const guardFailure = await guardBrowserCdpInput(browserInput, urlGuard, browserBackend.kind);
         if (guardFailure !== undefined) {
           debug.log("browser.cdp.blocked", {
             backend: browserBackend.kind,
-            method: input.method,
+            method: browserInput.method,
             reason: guardFailure.metadata.reason,
             url: guardFailure.metadata.url
           });
           return withDebug(guardFailure, debug);
         }
-        const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
+        const result = await browserBackend.cdp(browserInput).catch((error: unknown) => ({ error }));
         if (typeof result === "object" && result !== null && "error" in result) {
           debug.log("browser.cdp.error", {
             backend: browserBackend.kind,
-            method: input.method,
+            method: browserInput.method,
             error: result.error instanceof Error ? result.error.message : "Browser CDP command failed."
           });
           return withDebug({
@@ -425,7 +450,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         }
         debug.log("browser.cdp.complete", {
           backend: browserBackend.kind,
-          method: input.method,
+          method: browserInput.method,
           responseShape: describeValueShape(result)
         });
         return {
@@ -453,7 +478,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.screenshot === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.screenshot");
         }
-        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const screenshot = await browserBackend.screenshot(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in screenshot) {
           return {
             ok: false,
@@ -499,7 +525,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             metadata: { backend: browserBackend.kind, reason: "vision-unavailable" }
           };
         }
-        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const screenshot = await browserBackend.screenshot(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in screenshot) {
           return {
             ok: false,
@@ -532,6 +559,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Accept or dismiss a native JavaScript dialog in the active local-CDP browser session.",
       progressLabel: "responding to browser dialog",
       browserBackend,
+      deriveBrowserInput,
       method: "dialog",
       inputSchema: {
         type: "object",
@@ -557,7 +585,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "navigating browser",
       maxResultSizeChars: 4000,
       isAvailable: () => browserBackend.isAvailable(),
-      run: async (input: { url?: string; text?: string }, context) => {
+      run: async (input: { url?: string; text?: string; sessionId?: string }, context) => {
         const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -596,7 +624,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ok: false,
             content: [
               `Browser navigation requested for ${redactUrlForMetadata(url)}.`,
-              "No browser backend is configured yet. Next backends to wire: local CDP, Firecrawl, Browserbase/Camofox."
+              "No browser backend is configured yet. Configure local CDP with `estacoda browser setup --backend local-cdp` or Browserbase with `estacoda browser setup --backend browserbase --cloud-provider browserbase` and `estacoda browser approve-cloud`. Firecrawl, Camofox, and Browser Use remain deferred."
             ].join("\n"),
             metadata: {
               url: redactUrlForMetadata(url),
@@ -618,7 +646,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }, debug);
         }
 
-        const result = await browserBackend.navigate({ url, signal: context?.signal }).catch((error: unknown) => ({
+        const browserInput = deriveBrowserInput({ url, sessionId: input.sessionId, signal: context?.signal });
+        const result = await browserBackend.navigate(browserInput).catch((error: unknown) => ({
           error
         }));
 
@@ -663,6 +692,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           requestedUrl: url,
           finalUrl: result.snapshot.url
         });
+        const botDetectionWarning = browserBotDetectionWarning(result.snapshot);
         return {
           ok: true,
           content: [
@@ -670,14 +700,16 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             `Session: ${result.session.id}`,
             `URL: ${result.snapshot.url}`,
             result.snapshot.title === undefined ? undefined : `Title: ${result.snapshot.title}`,
+            botDetectionWarning === undefined ? undefined : `Warning: ${botDetectionWarning}`,
             "",
-            renderBrowserSnapshot(result.snapshot)
+            renderBrowserSnapshot(result.snapshot, { maxChars: 4000 })
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             url: redactUrlForMetadata(url),
             backend: result.session.backend,
             session: result.session,
             snapshot: result.snapshot,
+            ...(result.metadata ?? {}),
             ...debugMetadata(debug)
           }
         };
@@ -698,7 +730,12 @@ export const webToolProvider: SessionToolProvider = {
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
       webConfig: ctx.webConfig,
+      browserConfig: ctx.browserConfig,
       workspaceRoot: ctx.workspaceRoot,
+      currentSessionId: () => ctx.currentSessionId(),
+      mainRoute: ctx.mainRoute,
+      snapshotAuxiliaryRoute: ctx.compressionRoute,
+      providerExecutor: ctx.providerExecutor,
       securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
@@ -978,14 +1015,27 @@ function safeHostname(url: string): string | undefined {
   }
 }
 
-function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {
+type BrowserSessionInput = BrowserActionInput | BrowserNavigateInput;
+type DeriveBrowserInput = <TInput extends BrowserSessionInput>(input: TInput) => TInput & { sessionId: string };
+
+function createBrowserSnapshotTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput,
+  options: {
+    browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
+    mainRoute?: ResolvedModelRoute;
+    snapshotAuxiliaryRoute?: ResolvedAuxiliaryRoute;
+    providerExecutor?: Pick<ProviderExecutor, "complete">;
+  } = {}
+): RegisteredTool {
   return {
     name: "browser.snapshot",
     description: "Get a text snapshot of the current browser page with interactive element refs like @e1.",
     inputSchema: {
       type: "object",
       properties: {
-        sessionId: { type: "string" }
+        sessionId: { type: "string" },
+        full: { type: "boolean" }
       }
     },
     riskClass: "read-only-network",
@@ -993,22 +1043,43 @@ function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTo
     progressLabel: "snapshotting browser",
     maxResultSizeChars: 8000,
     isAvailable: () => browserBackend.isAvailable(),
-    run: async (input: BrowserActionInput) => {
+    run: async (input: BrowserActionInput, context) => {
+      const debug = createBrowserDebugSession();
       if (browserBackend.snapshot === undefined) {
-        return unsupportedBrowserTool(browserBackend, "browser.snapshot");
+        return withDebug(unsupportedBrowserTool(browserBackend, "browser.snapshot"), debug);
       }
-      const snapshot = await browserBackend.snapshot(input).catch((error: unknown) => ({ error }));
+      const browserInput = deriveBrowserInput(input);
+      const snapshot = await browserBackend.snapshot(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
-        return {
+        return withDebug({
           ok: false,
           content: snapshot.error instanceof Error ? snapshot.error.message : "Browser snapshot failed.",
           metadata: { backend: browserBackend.kind }
-        };
+        }, debug);
       }
+      const renderedSnapshot = renderBrowserSnapshot(snapshot, { full: browserInput.full === true });
+      const summarizeResult = await maybeSummarizeSnapshot({
+        renderedSnapshot,
+        userTask: browserInput.text,
+        signal: context?.signal
+      }, {
+        mode: options.browserConfig?.summarizeSnapshots ?? "auto",
+        threshold: options.browserConfig?.snapshotSummarizeThreshold ?? 8_000,
+        maxResultSizeChars: 8_000,
+        providerExecutor: options.providerExecutor,
+        auxiliaryRoute: options.snapshotAuxiliaryRoute,
+        mainRoute: options.mainRoute,
+        debug
+      });
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot),
-        metadata: { backend: browserBackend.kind, snapshot }
+        content: summarizeResult.content,
+        metadata: {
+          backend: browserBackend.kind,
+          snapshot,
+          ...(summarizeResult.summarized ? { summarized: true } : {}),
+          ...debugMetadata(debug)
+        }
       };
     }
   };
@@ -1019,6 +1090,7 @@ function createBrowserActionTool(input: {
   description: string;
   progressLabel: string;
   browserBackend: BrowserBackend;
+  deriveBrowserInput: DeriveBrowserInput;
   method: "click" | "type" | "scroll" | "press" | "back" | "dialog";
   inputSchema: RegisteredTool["inputSchema"];
 }): RegisteredTool {
@@ -1036,7 +1108,8 @@ function createBrowserActionTool(input: {
       if (method === undefined) {
         return unsupportedBrowserTool(input.browserBackend, input.name);
       }
-      const snapshot = await method(toolInput).catch((error: unknown) => ({ error }));
+      const browserInput = input.deriveBrowserInput(toolInput);
+      const snapshot = await method(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
         return {
           ok: false,
@@ -1046,10 +1119,28 @@ function createBrowserActionTool(input: {
       }
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot),
+        content: renderBrowserSnapshot(snapshot, { maxChars: 8000 }),
         metadata: { backend: input.browserBackend.kind, snapshot }
       };
     }
+  };
+}
+
+function withDerivedBrowserSessionId<TInput extends { sessionId?: string }>(
+  input: TInput,
+  currentSessionId: (() => string) | undefined
+): TInput & { sessionId: string } {
+  const sessionId = deriveBrowserSessionKey({
+    currentSessionId: () => {
+      if (currentSessionId === undefined) {
+        throw new Error("Browser session key requires a current runtime session ID when no explicit browser sessionId is provided.");
+      }
+      return currentSessionId();
+    }
+  }, input.sessionId);
+  return {
+    ...input,
+    sessionId
   };
 }
 
@@ -1097,12 +1188,19 @@ async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: 
   return { path, bytes: file.size };
 }
 
-function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
+type BrowserSnapshotRenderOptions = {
+  full?: boolean;
+  maxChars?: number;
+};
+
+function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapshotRenderOptions = {}): string {
   const elements = snapshot.elements ?? [];
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
-  return [
+  const content = [
+    options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
+    "",
     snapshot.text,
     pendingDialogs.length === 0 ? undefined : "",
     pendingDialogs.length === 0 ? undefined : "Pending dialogs:",
@@ -1125,8 +1223,44 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
     }),
     elements.length === 0 ? undefined : "",
     elements.length === 0 ? undefined : "Interactive elements:",
-    ...elements.map((element) => `${element.ref} ${element.role ?? "element"} ${element.name ?? ""}`.trim())
+    ...elements.map((element) => renderBrowserSnapshotElement(element))
   ].filter((line) => line !== undefined).join("\n");
+  return truncateRenderedBrowserSnapshot(content, options.maxChars);
+}
+
+function renderBrowserSnapshotElement(element: NonNullable<BrowserSnapshot["elements"]>[number]): string {
+  const details = [
+    element.name,
+    element.value === undefined ? undefined : `value=${JSON.stringify(element.value)}`,
+    element.disabled === undefined ? undefined : `disabled=${element.disabled}`,
+    element.checked === undefined ? undefined : `checked=${element.checked}`
+  ].filter((part): part is string => part !== undefined && part.length > 0);
+  return `${element.ref} ${element.role ?? "element"} ${details.join(" ")}`.trim();
+}
+
+function truncateRenderedBrowserSnapshot(content: string, maxChars: number | undefined): string {
+  if (maxChars === undefined || content.length <= maxChars) {
+    return content;
+  }
+  return truncateSnapshotText(content, maxChars);
+}
+
+const BOT_DETECTION_TITLE_PATTERNS = [
+  "access denied",
+  "bot detected",
+  "captcha",
+  "cloudflare",
+  "checking your browser",
+  "just a moment",
+  "attention required"
+];
+
+function browserBotDetectionWarning(snapshot: BrowserSnapshot): string | undefined {
+  const haystack = [snapshot.title, snapshot.text].filter((value): value is string => typeof value === "string").join("\n").toLowerCase();
+  if (BOT_DETECTION_TITLE_PATTERNS.some((pattern) => haystack.includes(pattern))) {
+    return "The page may be showing a bot-detection, CAPTCHA, or access-denied interstitial. Navigation succeeded, but browser actions may be limited.";
+  }
+  return undefined;
 }
 
 function unsupportedBrowserTool(browserBackend: BrowserBackend, tool: string) {

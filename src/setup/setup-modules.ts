@@ -73,6 +73,9 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly backend?: BrowserBackendKind;
     readonly cdpUrl?: string;
     readonly launchCommand?: string;
+    readonly launchExecutable?: string;
+    readonly launchArgs?: readonly string[];
+    readonly chromeFlags?: readonly string[];
     readonly autoLaunch?: boolean;
   };
   readonly voice?: {
@@ -435,6 +438,9 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     backend: context.browser?.backend,
     cdpUrl: context.browser?.cdpUrl,
     launchCommand: context.browser?.launchCommand,
+    launchExecutable: context.browser?.launchExecutable,
+    launchArgs: context.browser?.launchArgs,
+    chromeFlags: context.browser?.chromeFlags,
     autoLaunchRequested: context.browser?.autoLaunch === true,
     autoLaunchWillRunNow: false,
   }),

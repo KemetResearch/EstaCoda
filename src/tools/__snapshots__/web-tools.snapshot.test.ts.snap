@@ -3,9 +3,11 @@
 exports[`web and browser golden snapshots > browser.navigate output matches golden > browser-navigate-mock 1`] = `
 {
   "content": "Browser: mock
-Session: mock-browser-session
+Session: snapshot-runtime-session:main
 URL: https://example.com/
 Title: Test Page
+
+[Compact viewport snapshot]
 
 Hello world.
 
@@ -40,7 +42,9 @@ Interactive elements:
 
 exports[`web and browser golden snapshots > browser.snapshot output matches golden > browser-snapshot-mock 1`] = `
 {
-  "content": "Hello world.
+  "content": "[Compact viewport snapshot]
+
+Hello world.
 
 Interactive elements:
 @e1 button Mock Button",

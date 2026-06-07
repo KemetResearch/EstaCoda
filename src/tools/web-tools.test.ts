@@ -2,9 +2,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BrowserActionInput, BrowserBackend } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
-import { createWebTools, type FetchLike } from "./web-tools.js";
+import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
 import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
 import type { WebResearchProvider } from "./web-research-provider.js";
 
@@ -34,6 +36,13 @@ function tool(name: string, tools = createWebTools()) {
     throw new Error(`Missing tool ${name}`);
   }
   return found;
+}
+
+function createTestWebTools(options: WebToolOptions = {}) {
+  return createWebTools({
+    currentSessionId: () => "test-runtime-session",
+    ...options
+  });
 }
 
 function createFetchResponse(input: {
@@ -68,6 +77,66 @@ const publicResolver = async (hostname: string) => hostname === "localhost"
   ? ["127.0.0.1"]
   : ["93.184.216.34"];
 
+const summaryModelProfile = {
+  id: "summary-model",
+  provider: "openai" as const,
+  contextWindowTokens: 128_000,
+  supportsTools: false,
+  supportsVision: false,
+  supportsStructuredOutput: true
+};
+
+const summaryRoute: ResolvedModelRoute = {
+  provider: "openai",
+  id: "summary-model",
+  profile: summaryModelProfile
+};
+
+const snapshotAuxiliaryRoute: ResolvedAuxiliaryRoute = {
+  task: "compression",
+  route: summaryRoute,
+  source: "explicit",
+  fallbackToMain: false,
+  diagnostics: []
+};
+
+function okProviderResult(content: string): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      provider: "openai",
+      model: "summary-model"
+    },
+    fallbackUsed: false,
+    attempts: [{ provider: "openai", model: "summary-model", ok: true, content }],
+    toolCalls: []
+  };
+}
+
+function createSummaryExecutor(content: string): Pick<ProviderExecutor, "complete"> {
+  return {
+    complete: vi.fn(async () => okProviderResult(content))
+  };
+}
+
+function createLargeSnapshotBackend(text = "Snapshot text. ".repeat(800)): BrowserBackend {
+  return {
+    ...createMockBrowserBackend(),
+    snapshot: async () => ({
+      sessionId: "session-1",
+      url: "https://example.com/",
+      title: "Large Snapshot",
+      text,
+      elements: [
+        { ref: "@e1", role: "button", name: "Save" },
+        { ref: "@e2", role: "textbox", name: "Email", value: "ada@example.com" }
+      ]
+    })
+  };
+}
+
 function createInvalidRefBackend(): BrowserBackend {
   const backend = createMockBrowserBackend();
   return {
@@ -87,6 +156,84 @@ function createRecordingCdpBackend(calls: BrowserActionInput[] = []): BrowserBac
         method: input.method,
         params: input.params ?? {}
       };
+    }
+  };
+}
+
+function createSessionRecordingBrowserBackend(calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = []): BrowserBackend {
+  const snapshotFor = (input: BrowserActionInput | BrowserNavigateInput = {}): ReturnType<NonNullable<BrowserBackend["snapshot"]>> extends Promise<infer T> ? T : never => ({
+    sessionId: input.sessionId ?? "missing-session",
+    url: "https://example.com/",
+    title: "Recorded Browser Page",
+    text: `Recorded browser snapshot for ${input.sessionId ?? "missing-session"}.`,
+    elements: [{ ref: "@e1", role: "button", name: "Recorded Button" }]
+  });
+
+  return {
+    kind: "mock",
+    isAvailable: () => true,
+    status: () => ({ backend: "mock", available: true }),
+    navigate: async (input) => {
+      calls.push({ method: "navigate", input });
+      return {
+        session: {
+          id: input.sessionId ?? "missing-session",
+          backend: "mock",
+          currentUrl: input.url,
+          createdAt: "2026-04-18T00:00:00.000Z"
+        },
+        snapshot: {
+          ...snapshotFor(input),
+          url: input.url
+        }
+      };
+    },
+    snapshot: async (input = {}) => {
+      calls.push({ method: "snapshot", input });
+      return snapshotFor(input);
+    },
+    click: async (input) => {
+      calls.push({ method: "click", input });
+      return snapshotFor(input);
+    },
+    type: async (input) => {
+      calls.push({ method: "type", input });
+      return snapshotFor(input);
+    },
+    scroll: async (input) => {
+      calls.push({ method: "scroll", input });
+      return snapshotFor(input);
+    },
+    press: async (input) => {
+      calls.push({ method: "press", input });
+      return snapshotFor(input);
+    },
+    back: async (input = {}) => {
+      calls.push({ method: "back", input });
+      return snapshotFor(input);
+    },
+    getImages: async (input = {}) => {
+      calls.push({ method: "getImages", input });
+      return [{ src: "https://example.com/recorded.png", alt: "Recorded image" }];
+    },
+    console: async (input = {}) => {
+      calls.push({ method: "console", input });
+      return [{ level: "log", text: `Recorded console for ${input.sessionId ?? "missing-session"}` }];
+    },
+    cdp: async (input) => {
+      calls.push({ method: "cdp", input });
+      return { method: input.method ?? "Browser.getVersion" };
+    },
+    screenshot: async (input = {}) => {
+      calls.push({ method: "screenshot", input });
+      return {
+        mimeType: "image/png",
+        base64: "iVBORw0KGgo="
+      };
+    },
+    dialog: async (input = {}) => {
+      calls.push({ method: "dialog", input });
+      return snapshotFor(input);
     }
   };
 }
@@ -674,7 +821,7 @@ describe("web and browser tools baselines", () => {
   });
 
   it("navigates with the mock browser backend and includes backend metadata", async () => {
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: createMockBrowserBackend({ sessionId: "nav-session", title: "Nav Title", text: "Nav text." }),
       resolveHostname: publicResolver
     }));
@@ -683,21 +830,92 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Browser: mock");
-    expect(result.content).toContain("Session: nav-session");
+    expect(result.content).toContain("Session: test-runtime-session:main");
     expect(result.content).toContain("URL: https://example.com/app");
+    expect(result.content).toContain("[Compact viewport snapshot]");
     expect(result.metadata).toMatchObject({
       url: "https://example.com/app",
       backend: "mock",
       session: {
-        id: "nav-session",
+        id: "test-runtime-session:main",
         backend: "mock",
         currentUrl: "https://example.com/app"
       }
     });
   });
 
+  it("propagates browser.navigate backend metadata such as cloud fallback details", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend({ sessionId: "nav-session", title: "Nav Title", text: "Nav text." }),
+      kind: "browserbase",
+      async navigate(input) {
+        return {
+          session: {
+            id: input.sessionId ?? "nav-session",
+            backend: "local-cdp",
+            currentUrl: input.url,
+            createdAt: "2026-06-07T00:00:00.000Z"
+          },
+          snapshot: {
+            sessionId: input.sessionId ?? "nav-session",
+            url: input.url,
+            text: "Fallback snapshot."
+          },
+          metadata: {
+            fallbackFromCloud: true,
+            fallbackProvider: "browserbase",
+            fallbackReason: "Browserbase network error."
+          }
+        };
+      }
+    };
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toMatchObject({
+      backend: "local-cdp",
+      fallbackFromCloud: true,
+      fallbackProvider: "browserbase",
+      fallbackReason: "Browserbase network error."
+    });
+  });
+
+  it.each([
+    "Cloudflare",
+    "Just a moment",
+    "Access Denied",
+    "CAPTCHA required"
+  ])("warns when browser.navigate reaches a likely bot-detection page: %s", async (title) => {
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ title, text: "Challenge page." }),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Warning: The page may be showing a bot-detection, CAPTCHA, or access-denied interstitial.");
+  });
+
+  it("does not warn for normal browser.navigate page titles", async () => {
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ title: "Example Domain", text: "Normal page." }),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).not.toContain("Warning:");
+  });
+
   it("reports unconfigured browser.navigate without calling a backend", async () => {
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: createUnconfiguredBrowserBackend(),
       resolveHostname: publicResolver
     }));
@@ -713,7 +931,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks unsafe browser.navigate URLs before backend availability checks", async () => {
     const backend = createUnconfiguredBrowserBackend();
-    const navigate = tool("browser.navigate", createWebTools({ browserBackend: backend }));
+    const navigate = tool("browser.navigate", createTestWebTools({ browserBackend: backend }));
 
     await expect(navigate.run({ url: "http://169.254.169.254" })).resolves.toMatchObject({
       ok: false,
@@ -735,7 +953,7 @@ describe("web and browser tools baselines", () => {
 
   it("browser.navigate debug enabled includes redacted URL and blocked reason", async () => {
     vi.stubEnv("ESTACODA_BROWSER_DEBUG", "true");
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: createMockBrowserBackend()
     }));
 
@@ -761,7 +979,7 @@ describe("web and browser tools baselines", () => {
   });
 
   it("blocks secret-bearing browser.navigate URLs without leaking raw values", async () => {
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: createMockBrowserBackend()
     }));
 
@@ -777,7 +995,7 @@ describe("web and browser tools baselines", () => {
   });
 
   it("blocks website-policy browser.navigate URLs before backend availability checks", async () => {
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: createMockBrowserBackend(),
       resolveHostname: publicResolver,
       securityConfig: {
@@ -819,7 +1037,7 @@ describe("web and browser tools baselines", () => {
         };
       }
     };
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: backend,
       resolveHostname: publicResolver
     }));
@@ -857,7 +1075,7 @@ describe("web and browser tools baselines", () => {
         };
       }
     };
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: backend,
       resolveHostname: publicResolver
     }));
@@ -895,7 +1113,7 @@ describe("web and browser tools baselines", () => {
         };
       }
     };
-    const navigate = tool("browser.navigate", createWebTools({
+    const navigate = tool("browser.navigate", createTestWebTools({
       browserBackend: backend,
       resolveHostname: publicResolver,
       securityConfig: {
@@ -927,7 +1145,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -954,7 +1172,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Target.createTarget with private URLs", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -974,7 +1192,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.evaluate with unsafe URL literals", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1007,7 +1225,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.evaluate navigation expressions with unsafe URL literals", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1052,7 +1270,7 @@ describe("web and browser tools baselines", () => {
 
   it("fails closed for browser.cdp Runtime.evaluate network expressions without checkable URLs", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1074,7 +1292,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.evaluate secret-bearing URLs without leaking raw values", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls),
       resolveHostname: publicResolver
     }));
@@ -1100,7 +1318,7 @@ describe("web and browser tools baselines", () => {
   it("browser.cdp debug logs method without leaking raw dangerous Runtime.evaluate expression", async () => {
     vi.stubEnv("ESTACODA_WEB_TOOLS_DEBUG", "true");
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls),
       resolveHostname: publicResolver
     }));
@@ -1141,7 +1359,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.evaluate secret-bearing navigation URLs without leaking raw values", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1165,7 +1383,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.callFunctionOn with unsafe literal URL usage", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1191,7 +1409,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp Runtime.callFunctionOn with navigation-capable literal URL usage", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1217,7 +1435,7 @@ describe("web and browser tools baselines", () => {
 
   it("applies browser.cdp allowPrivateUrls without bypassing the metadata floor", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls),
       securityConfig: {
         allowPrivateUrls: true,
@@ -1246,7 +1464,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks browser.cdp URLs matched by website policy", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls),
       resolveHostname: publicResolver,
       securityConfig: {
@@ -1273,7 +1491,7 @@ describe("web and browser tools baselines", () => {
 
   it("keeps safe read-only browser.cdp commands working", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1294,7 +1512,7 @@ describe("web and browser tools baselines", () => {
 
   it("blocks raw browser.cdp methods that are not clearly read-only", async () => {
     const calls: BrowserActionInput[] = [];
-    const cdp = tool("browser.cdp", createWebTools({
+    const cdp = tool("browser.cdp", createTestWebTools({
       browserBackend: createRecordingCdpBackend(calls)
     }));
 
@@ -1311,14 +1529,155 @@ describe("web and browser tools baselines", () => {
     expect(calls).toEqual([]);
   });
 
+  it("passes derived browser session keys through the shared browser tool paths", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-web-tools-session-test-"));
+    tempRoots.push(workspaceRoot);
+    const operations: Array<{
+      toolName: string;
+      backendMethod: string;
+      input: Record<string, unknown>;
+      options?: Partial<WebToolOptions>;
+    }> = [
+      { toolName: "browser.navigate", backendMethod: "navigate", input: { url: "https://example.com" } },
+      { toolName: "browser.snapshot", backendMethod: "snapshot", input: {} },
+      { toolName: "browser.click", backendMethod: "click", input: { ref: "@e1" } },
+      { toolName: "browser.type", backendMethod: "type", input: { ref: "@e1", text: "hello" } },
+      { toolName: "browser.scroll", backendMethod: "scroll", input: { direction: "down", amount: 300 } },
+      { toolName: "browser.back", backendMethod: "back", input: {} },
+      { toolName: "browser.press", backendMethod: "press", input: { key: "Enter" } },
+      { toolName: "browser.console", backendMethod: "console", input: {} },
+      { toolName: "browser.get_images", backendMethod: "getImages", input: {} },
+      { toolName: "browser.screenshot", backendMethod: "screenshot", input: {}, options: { workspaceRoot } },
+      {
+        toolName: "browser.vision",
+        backendMethod: "screenshot",
+        input: { prompt: "describe" },
+        options: {
+          workspaceRoot,
+          visionAnalyzer: async () => ({ ok: true, content: "vision ok" })
+        }
+      },
+      { toolName: "browser.dialog", backendMethod: "dialog", input: { action: "accept" } },
+      { toolName: "browser.cdp", backendMethod: "cdp", input: { method: "Browser.getVersion" } }
+    ];
+
+    for (const operation of operations) {
+      const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+      const browserBackend = createSessionRecordingBrowserBackend(calls);
+      const browserTool = tool(operation.toolName, createTestWebTools({
+        browserBackend,
+        currentSessionId: () => "runtime-session",
+        resolveHostname: publicResolver,
+        ...(operation.options ?? {})
+      }));
+
+      const result = await browserTool.run(operation.input);
+
+      expect(result.ok, operation.toolName).toBe(true);
+      expect(calls).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          method: operation.backendMethod,
+          input: expect.objectContaining({ sessionId: "runtime-session:main" })
+        })
+      ]));
+    }
+  });
+
+  it("does not require a browser session key for browser.status", async () => {
+    const status = tool("browser.status", createWebTools({
+      browserBackend: createSessionRecordingBrowserBackend()
+    }));
+
+    const result = await status.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Browser backend: mock");
+  });
+
+  it("preserves explicit browser session IDs and treats blank explicit IDs as absent", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session"
+    }));
+
+    await expect(snapshot.run({ sessionId: "shared-browser" })).resolves.toMatchObject({ ok: true });
+    await expect(snapshot.run({ sessionId: "   " })).resolves.toMatchObject({ ok: true });
+
+    expect(calls.map((call) => call.input.sessionId)).toEqual([
+      "shared-browser",
+      "runtime-session:main"
+    ]);
+  });
+
+  it("browser.snapshot accepts full options and forwards them to the backend", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session"
+    }));
+
+    expect(snapshot.inputSchema).toMatchObject({
+      properties: {
+        full: { type: "boolean" }
+      }
+    });
+    await expect(snapshot.run({ full: false })).resolves.toMatchObject({ ok: true });
+    await expect(snapshot.run({ full: true })).resolves.toMatchObject({ ok: true });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      expect.objectContaining({ sessionId: "runtime-session:main", full: false }),
+      expect.objectContaining({ sessionId: "runtime-session:main", full: true })
+    ]);
+  });
+
+  it("isolates parent and child runtime sessions while allowing explicit sharing", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const browserBackend = createSessionRecordingBrowserBackend(calls);
+    const parentNavigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "parent-session",
+      resolveHostname: publicResolver
+    }));
+    const childNavigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "child-session",
+      resolveHostname: publicResolver
+    }));
+
+    await expect(parentNavigate.run({ url: "https://example.com/parent" })).resolves.toMatchObject({ ok: true });
+    await expect(childNavigate.run({ url: "https://example.com/child" })).resolves.toMatchObject({ ok: true });
+    await expect(parentNavigate.run({ url: "https://example.com/shared", sessionId: "shared-browser" })).resolves.toMatchObject({ ok: true });
+    await expect(childNavigate.run({ url: "https://example.com/shared", sessionId: "shared-browser" })).resolves.toMatchObject({ ok: true });
+
+    expect(calls.map((call) => call.input.sessionId)).toEqual([
+      "parent-session:main",
+      "child-session:main",
+      "shared-browser",
+      "shared-browser"
+    ]);
+  });
+
+  it("fails with the session-key error when no runtime browser session can be derived", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(),
+      currentSessionId: () => "   "
+    }));
+
+    await expect(snapshot.run({})).rejects.toThrow(
+      "Browser session key requires a current runtime session ID when no explicit browser sessionId is provided."
+    );
+  });
+
   it("renders browser snapshot text and interactive elements", async () => {
-    const snapshot = tool("browser.snapshot", createWebTools({
+    const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: createMockBrowserBackend({ title: "Snapshot Title", text: "Snapshot text." })
     }));
 
     const result = await snapshot.run({});
 
     expect(result.ok).toBe(true);
+    expect(result.content).toContain("[Compact viewport snapshot]");
     expect(result.content).toContain("Snapshot text.");
     expect(result.content).toContain("Interactive elements:");
     expect(result.content).toContain("@e1 button Mock Button");
@@ -1330,6 +1689,187 @@ describe("web and browser tools baselines", () => {
         elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
       }
     });
+  });
+
+  it("renders full browser snapshot headers and concise element state", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://example.com",
+          title: "Snapshot Title",
+          text: "Snapshot text.",
+          elements: [
+            { ref: "@e1", role: "textbox", name: "Email", value: "ada@example.com", disabled: false },
+            { ref: "@e2", role: "checkbox", name: "Subscribe", checked: "mixed" }
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({ full: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("[Full page snapshot]");
+    expect(result.content).toContain("@e1 textbox Email value=\"ada@example.com\" disabled=false");
+    expect(result.content).toContain("@e2 checkbox Subscribe checked=mixed");
+  });
+
+  it("browser.snapshot defaults to compact rendering when full is omitted or false", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ text: "Compact text." })
+    }));
+
+    const omitted = await snapshot.run({});
+    const explicitFalse = await snapshot.run({ full: false });
+
+    expect(omitted.content).toContain("[Compact viewport snapshot]");
+    expect(explicitFalse.content).toContain("[Compact viewport snapshot]");
+    expect(omitted.content).not.toContain("[Full page snapshot]");
+  });
+
+  it("truncates rendered browser snapshots with a clear suffix", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://example.com",
+          text: "x".repeat(9_000),
+          elements: []
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content.length).toBeLessThanOrEqual(8_000);
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+  });
+
+  it("browser.snapshot summarizeSnapshots=false skips LLM summarization and truncates", async () => {
+    const executor = createSummaryExecutor("summary");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
+      browserConfig: {
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content.length).toBeLessThanOrEqual(8_000);
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot summarizeSnapshots=true summarizes oversized output and marks metadata", async () => {
+    const executor = createSummaryExecutor("Condensed snapshot with @e1 Save and @e2 Email.");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(result.content).toBe("Condensed snapshot with @e1 Save and @e2 Email.");
+    expect(result.metadata).toMatchObject({ summarized: true });
+  });
+
+  it("browser.snapshot summarizeSnapshots=true does not call the provider below threshold", async () => {
+    const executor = createSummaryExecutor("summary");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ text: "Small snapshot." }),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 50_000
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot auto summarization requires an auxiliary route", async () => {
+    const executor = createSummaryExecutor("auto summary");
+    const withoutRoute = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 20
+      },
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+    const withRoute = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const skipped = await withoutRoute.run({});
+    const summarized = await withRoute.run({});
+
+    expect(skipped.ok).toBe(true);
+    expect(skipped.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(summarized.ok).toBe(true);
+    expect(summarized.metadata).toMatchObject({ summarized: true });
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("browser.snapshot consumes summarization config from the session tool context", async () => {
+    const executor = createSummaryExecutor("Context summary with @e1.");
+    const snapshot = tool("browser.snapshot", webToolProvider.createTools({
+      workspaceRoot: "/tmp/workspace",
+      profileId: "default",
+      sessionId: "runtime-session",
+      currentSessionId: () => "runtime-session",
+      channelMediaRoot: "/tmp/channel-media",
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 20
+      },
+      mainRoute: summaryRoute,
+      compressionRoute: snapshotAuxiliaryRoute,
+      providerExecutor: executor as ProviderExecutor,
+      providerRegistry: {} as never
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toBe("Context summary with @e1.");
+    expect(result.metadata).toMatchObject({ summarized: true });
+    expect(executor.complete).toHaveBeenCalledTimes(1);
   });
 
   it("renders browser snapshot observability sections when present", async () => {
@@ -1350,7 +1890,7 @@ describe("web and browser tools baselines", () => {
         elements: [{ ref: "@e1", role: "button", name: "Continue" }]
       })
     };
-    const snapshot = tool("browser.snapshot", createWebTools({ browserBackend }));
+    const snapshot = tool("browser.snapshot", createTestWebTools({ browserBackend }));
 
     const result = await snapshot.run({});
 
@@ -1365,7 +1905,7 @@ describe("web and browser tools baselines", () => {
   });
 
   it("returns ok false for browser.click with an invalid ref", async () => {
-    const click = tool("browser.click", createWebTools({
+    const click = tool("browser.click", createTestWebTools({
       browserBackend: createInvalidRefBackend()
     }));
 
@@ -1379,7 +1919,7 @@ describe("web and browser tools baselines", () => {
   it("writes browser.screenshot under a temp workspace root", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-web-tools-test-"));
     tempRoots.push(workspaceRoot);
-    const screenshot = tool("browser.screenshot", createWebTools({
+    const screenshot = tool("browser.screenshot", createTestWebTools({
       browserBackend: createMockBrowserBackend(),
       workspaceRoot
     }));
@@ -1400,7 +1940,7 @@ describe("web and browser tools baselines", () => {
   });
 
   it("returns unavailable for browser.vision without an analyzer", async () => {
-    const vision = tool("browser.vision", createWebTools({
+    const vision = tool("browser.vision", createTestWebTools({
       browserBackend: createMockBrowserBackend()
     }));
 
