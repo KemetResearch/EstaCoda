@@ -3,7 +3,7 @@
 exports[`web and browser golden snapshots > browser.navigate output matches golden > browser-navigate-mock 1`] = `
 {
   "content": "Browser: mock
-Session: mock-browser-session
+Session: snapshot-runtime-session:main
 URL: https://example.com/
 Title: Test Page
 

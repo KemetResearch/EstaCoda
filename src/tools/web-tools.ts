@@ -2,9 +2,10 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
-import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -22,6 +23,7 @@ export type WebToolOptions = {
   maxContentChars?: number;
   webConfig?: WebResearchConfig;
   workspaceRoot?: string;
+  currentSessionId?: () => string;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
   visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
@@ -78,6 +80,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
   const urlGuard = createUrlGuard(options);
+  const deriveBrowserInput = <TInput extends { sessionId?: string }>(input: TInput): TInput & { sessionId: string } =>
+    withDerivedBrowserSessionId(input, options.currentSessionId);
 
   return [
     createWebSearchTool(options.webConfig),
@@ -228,12 +232,13 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         };
       }
     },
-    createBrowserSnapshotTool(browserBackend),
+    createBrowserSnapshotTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
       description: "Click an interactive browser element by ref from browser.snapshot.",
       progressLabel: "clicking browser element",
       browserBackend,
+      deriveBrowserInput,
       method: "click",
       inputSchema: {
         type: "object",
@@ -249,6 +254,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Type text into an input element by ref from browser.snapshot.",
       progressLabel: "typing in browser",
       browserBackend,
+      deriveBrowserInput,
       method: "type",
       inputSchema: {
         type: "object",
@@ -265,6 +271,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Scroll the current browser page up or down.",
       progressLabel: "scrolling browser",
       browserBackend,
+      deriveBrowserInput,
       method: "scroll",
       inputSchema: {
         type: "object",
@@ -280,6 +287,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Press a keyboard key in the current browser page.",
       progressLabel: "pressing browser key",
       browserBackend,
+      deriveBrowserInput,
       method: "press",
       inputSchema: {
         type: "object",
@@ -294,6 +302,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Navigate the current browser page back in history.",
       progressLabel: "going back in browser",
       browserBackend,
+      deriveBrowserInput,
       method: "back",
       inputSchema: {
         type: "object",
@@ -320,7 +329,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.getImages === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.get_images");
         }
-        const images = await browserBackend.getImages(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const images = await browserBackend.getImages(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in images) {
           return {
             ok: false,
@@ -356,7 +366,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.console === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.console");
         }
-        const entries = await browserBackend.console(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const entries = await browserBackend.console(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in entries) {
           return {
             ok: false,
@@ -395,26 +406,27 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.cdp === undefined) {
           return withDebug(unsupportedBrowserTool(browserBackend, "browser.cdp"), debug);
         }
+        const browserInput = deriveBrowserInput(input);
         debug.log("browser.cdp.start", {
           backend: browserBackend.kind,
-          method: input.method,
-          params: input.params
+          method: browserInput.method,
+          params: browserInput.params
         });
-        const guardFailure = await guardBrowserCdpInput(input, urlGuard, browserBackend.kind);
+        const guardFailure = await guardBrowserCdpInput(browserInput, urlGuard, browserBackend.kind);
         if (guardFailure !== undefined) {
           debug.log("browser.cdp.blocked", {
             backend: browserBackend.kind,
-            method: input.method,
+            method: browserInput.method,
             reason: guardFailure.metadata.reason,
             url: guardFailure.metadata.url
           });
           return withDebug(guardFailure, debug);
         }
-        const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
+        const result = await browserBackend.cdp(browserInput).catch((error: unknown) => ({ error }));
         if (typeof result === "object" && result !== null && "error" in result) {
           debug.log("browser.cdp.error", {
             backend: browserBackend.kind,
-            method: input.method,
+            method: browserInput.method,
             error: result.error instanceof Error ? result.error.message : "Browser CDP command failed."
           });
           return withDebug({
@@ -425,7 +437,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         }
         debug.log("browser.cdp.complete", {
           backend: browserBackend.kind,
-          method: input.method,
+          method: browserInput.method,
           responseShape: describeValueShape(result)
         });
         return {
@@ -453,7 +465,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (browserBackend.screenshot === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.screenshot");
         }
-        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const screenshot = await browserBackend.screenshot(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in screenshot) {
           return {
             ok: false,
@@ -499,7 +512,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             metadata: { backend: browserBackend.kind, reason: "vision-unavailable" }
           };
         }
-        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        const browserInput = deriveBrowserInput(input);
+        const screenshot = await browserBackend.screenshot(browserInput).catch((error: unknown) => ({ error }));
         if ("error" in screenshot) {
           return {
             ok: false,
@@ -532,6 +546,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       description: "Accept or dismiss a native JavaScript dialog in the active local-CDP browser session.",
       progressLabel: "responding to browser dialog",
       browserBackend,
+      deriveBrowserInput,
       method: "dialog",
       inputSchema: {
         type: "object",
@@ -557,7 +572,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "navigating browser",
       maxResultSizeChars: 4000,
       isAvailable: () => browserBackend.isAvailable(),
-      run: async (input: { url?: string; text?: string }, context) => {
+      run: async (input: { url?: string; text?: string; sessionId?: string }, context) => {
         const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -618,7 +633,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }, debug);
         }
 
-        const result = await browserBackend.navigate({ url, signal: context?.signal }).catch((error: unknown) => ({
+        const browserInput = deriveBrowserInput({ url, sessionId: input.sessionId, signal: context?.signal });
+        const result = await browserBackend.navigate(browserInput).catch((error: unknown) => ({
           error
         }));
 
@@ -699,6 +715,7 @@ export const webToolProvider: SessionToolProvider = {
       maxContentChars: ctx.webMaxContentChars,
       webConfig: ctx.webConfig,
       workspaceRoot: ctx.workspaceRoot,
+      currentSessionId: () => ctx.currentSessionId(),
       securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
@@ -978,7 +995,10 @@ function safeHostname(url: string): string | undefined {
   }
 }
 
-function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {
+type BrowserSessionInput = BrowserActionInput | BrowserNavigateInput;
+type DeriveBrowserInput = <TInput extends BrowserSessionInput>(input: TInput) => TInput & { sessionId: string };
+
+function createBrowserSnapshotTool(browserBackend: BrowserBackend, deriveBrowserInput: DeriveBrowserInput): RegisteredTool {
   return {
     name: "browser.snapshot",
     description: "Get a text snapshot of the current browser page with interactive element refs like @e1.",
@@ -997,7 +1017,8 @@ function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTo
       if (browserBackend.snapshot === undefined) {
         return unsupportedBrowserTool(browserBackend, "browser.snapshot");
       }
-      const snapshot = await browserBackend.snapshot(input).catch((error: unknown) => ({ error }));
+      const browserInput = deriveBrowserInput(input);
+      const snapshot = await browserBackend.snapshot(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
         return {
           ok: false,
@@ -1019,6 +1040,7 @@ function createBrowserActionTool(input: {
   description: string;
   progressLabel: string;
   browserBackend: BrowserBackend;
+  deriveBrowserInput: DeriveBrowserInput;
   method: "click" | "type" | "scroll" | "press" | "back" | "dialog";
   inputSchema: RegisteredTool["inputSchema"];
 }): RegisteredTool {
@@ -1036,7 +1058,8 @@ function createBrowserActionTool(input: {
       if (method === undefined) {
         return unsupportedBrowserTool(input.browserBackend, input.name);
       }
-      const snapshot = await method(toolInput).catch((error: unknown) => ({ error }));
+      const browserInput = input.deriveBrowserInput(toolInput);
+      const snapshot = await method(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
         return {
           ok: false,
@@ -1050,6 +1073,24 @@ function createBrowserActionTool(input: {
         metadata: { backend: input.browserBackend.kind, snapshot }
       };
     }
+  };
+}
+
+function withDerivedBrowserSessionId<TInput extends { sessionId?: string }>(
+  input: TInput,
+  currentSessionId: (() => string) | undefined
+): TInput & { sessionId: string } {
+  const sessionId = deriveBrowserSessionKey({
+    currentSessionId: () => {
+      if (currentSessionId === undefined) {
+        throw new Error("Browser session key requires a current runtime session ID when no explicit browser sessionId is provided.");
+      }
+      return currentSessionId();
+    }
+  }, input.sessionId);
+  return {
+    ...input,
+    sessionId
   };
 }
 
