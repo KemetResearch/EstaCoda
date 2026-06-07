@@ -295,7 +295,9 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.browser.summary",
   "setupEditor.prompt.browser.backend",
   "setupEditor.prompt.browser.cdpUrl",
-  "setupEditor.prompt.browser.launchCommand",
+  "setupEditor.prompt.browser.launchExecutable",
+  "setupEditor.prompt.browser.launchArgs",
+  "setupEditor.prompt.browser.chromeFlags",
   "setupEditor.prompt.browser.noAutoLaunch",
 ] as const;
 
@@ -444,7 +446,6 @@ const VALIDATION_KEYS = [
   "setupValidation.cancel.noMutation",
   "setupValidation.secret.rawValueBlocked",
   "setupValidation.remote.identityMissing",
-  "setupValidation.browser.noAutoLaunch",
 ] as const;
 
 describe("setup copy", () => {

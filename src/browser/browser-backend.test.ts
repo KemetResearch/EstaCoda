@@ -192,8 +192,8 @@ describe("browser backend baselines", () => {
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("No backend in this test.");
   });
 
-  it("keeps legacy cloud backend values recognized but unavailable", async () => {
-    for (const backendKind of ["browserbase", "firecrawl", "camofox"] as const) {
+  it("keeps deferred cloud backend values recognized but unavailable", async () => {
+    for (const backendKind of ["firecrawl", "camofox"] as const) {
       const backend = createBrowserBackendFromConfig({ backend: backendKind });
 
       expect(backend.kind).toBe(backendKind);
@@ -204,6 +204,31 @@ describe("browser backend baselines", () => {
       });
       await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow();
     }
+  });
+
+  it("routes Browserbase backend through credential and spend approval checks", async () => {
+    const missing = createBrowserBackendFromConfig({ backend: "browserbase" });
+
+    await expect(missing.status()).resolves.toMatchObject({
+      backend: "browserbase",
+      available: false,
+      reason: "BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID are missing.",
+    });
+
+    const pending = createBrowserBackendFromConfig({
+      backend: "browserbase",
+      browserbase: { apiKey: "bb_test_key", projectId: "project_123" },
+      cloudSpendApproved: "pending",
+    });
+
+    await expect(pending.status()).resolves.toMatchObject({
+      backend: "browserbase",
+      available: false,
+      reason: expect.stringContaining("may incur charges"),
+    });
+    await expect(pending.navigate({ url: "https://example.com" })).rejects.toThrow(
+      "may incur charges",
+    );
   });
 
   it("surfaces cloud provider missing env and cloud approval reasons", async () => {

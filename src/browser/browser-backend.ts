@@ -1009,7 +1009,7 @@ export function createBrowserBackendFromConfig(config: {
 }
 
 function createCloudProviderStatusBackend(config: {
-  backend: "browserbase" | "firecrawl" | "camofox" | "unconfigured";
+  backend: "firecrawl" | "camofox" | "unconfigured";
   cloudProvider: string;
 }): BrowserBackend {
   registerDefaultBrowserProviders();
@@ -1021,7 +1021,7 @@ function createCloudProviderStatusBackend(config: {
     });
     const providerLabel = selection.providerName ?? config.cloudProvider;
     const reason = selection.availability.available
-      ? `${providerLabel} browser provider is available, but cloud browser sessions are not implemented in this release.`
+      ? `${providerLabel} browser provider is registered, but this browser backend is deferred in this release.`
       : selection.availability.reason ?? `${providerLabel} browser provider is unavailable.`;
 
     return {

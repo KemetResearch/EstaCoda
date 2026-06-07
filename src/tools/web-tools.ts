@@ -624,7 +624,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ok: false,
             content: [
               `Browser navigation requested for ${redactUrlForMetadata(url)}.`,
-              "No browser backend is configured yet. Next backends to wire: local CDP, Firecrawl, Browserbase/Camofox."
+              "No browser backend is configured yet. Configure local CDP with `estacoda browser setup --backend local-cdp` or Browserbase with `estacoda browser setup --backend browserbase --cloud-provider browserbase` and `estacoda browser approve-cloud`. Firecrawl, Camofox, and Browser Use remain deferred."
             ].join("\n"),
             metadata: {
               url: redactUrlForMetadata(url),
