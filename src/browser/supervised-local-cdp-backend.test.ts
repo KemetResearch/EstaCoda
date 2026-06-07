@@ -109,6 +109,16 @@ function createFetch(overrides?: {
   });
 }
 
+function createFetchWithFailingEndpoint(failingEndpoint: string): CdpFetchLike {
+  const fallback = createFetch();
+  return vi.fn(async (url: string, init) => {
+    if (url.startsWith(failingEndpoint)) {
+      throw new Error("Configured CDP endpoint is unavailable.");
+    }
+    return fallback(url, init);
+  });
+}
+
 function response(input: {
   ok: boolean;
   status: number;
@@ -121,6 +131,16 @@ function response(input: {
     statusText: input.statusText,
     json: async () => input.payload,
     text: async () => JSON.stringify(input.payload)
+  };
+}
+
+function createLaunchedChrome(endpoint = "http://127.0.0.1:4567") {
+  return {
+    endpoint,
+    port: 4567,
+    processId: 123,
+    userDataDir: "/tmp/estacoda-chrome-test",
+    kill: vi.fn(async () => undefined)
   };
 }
 
@@ -189,6 +209,142 @@ describe("supervised local CDP backend", () => {
     });
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:9222/json/new?https%3A%2F%2Fexample.com%2Fstart", expect.objectContaining({ method: "PUT" }));
     expect(socket.sent.map((message) => message.method)).toContain("Page.navigate");
+  });
+
+  it("auto-launches supervised local CDP when no cdpUrl is configured", async () => {
+    const socket = new FakeCdpSocket();
+    const fetch = createFetch();
+    const findChromiumExecutable = vi.fn(async () => ({
+      executablePath: "/usr/bin/chromium",
+      source: "launchExecutable" as const
+    }));
+    const launchedChrome = createLaunchedChrome();
+    const launchChrome = vi.fn(async () => launchedChrome);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      launchExecutable: "/usr/bin/chromium",
+      launchCommand: "google-chrome",
+      launchArgs: ["--app=https://example.test"],
+      chromeFlags: ["--disable-gpu"],
+      fetch,
+      webSocketFactory: () => socket,
+      findChromiumExecutable,
+      launchChrome
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start", sessionId: "session-1" })).resolves.toMatchObject({
+      session: {
+        id: "session-1",
+        backend: "local-cdp",
+        currentUrl: "https://example.com/final"
+      }
+    });
+
+    expect(findChromiumExecutable).toHaveBeenCalledWith({
+      launchExecutable: "/usr/bin/chromium",
+      launchCommand: "google-chrome"
+    });
+    expect(launchChrome).toHaveBeenCalledWith(expect.objectContaining({
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--app=https://example.test"],
+      chromeFlags: ["--disable-gpu"]
+    }));
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/new?https%3A%2F%2Fexample.com%2Fstart", expect.objectContaining({ method: "PUT" }));
+  });
+
+  it("reuses a working explicit cdpUrl when autoLaunch is enabled", async () => {
+    const findChromiumExecutable = vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const }));
+    const launchChrome = vi.fn(async () => createLaunchedChrome());
+    const fetch = createFetch();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222/",
+      autoLaunch: true,
+      fetch,
+      webSocketFactory: () => new FakeCdpSocket(),
+      findChromiumExecutable,
+      launchChrome
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+
+    expect(findChromiumExecutable).not.toHaveBeenCalled();
+    expect(launchChrome).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:9222/json/new?https%3A%2F%2Fexample.com%2Fstart", expect.objectContaining({ method: "PUT" }));
+  });
+
+  it("falls back to auto-launch when an explicit cdpUrl fails", async () => {
+    const findChromiumExecutable = vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const }));
+    const launchedChrome = createLaunchedChrome("http://127.0.0.1:7788");
+    const launchChrome = vi.fn(async () => launchedChrome);
+    const fetch = createFetchWithFailingEndpoint("http://127.0.0.1:9222");
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      autoLaunch: true,
+      fetch,
+      webSocketFactory: () => new FakeCdpSocket(),
+      findChromiumExecutable,
+      launchChrome
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start", sessionId: "session-1" })).resolves.toMatchObject({
+      session: {
+        id: "session-1",
+        currentUrl: "https://example.com/final"
+      }
+    });
+
+    expect(launchChrome).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:9222/json/new?https%3A%2F%2Fexample.com%2Fstart", expect.objectContaining({ method: "PUT" }));
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:7788/json/new?https%3A%2F%2Fexample.com%2Fstart", expect.objectContaining({ method: "PUT" }));
+  });
+
+  it("fails clearly when auto-launch cannot find Chromium", async () => {
+    const findChromiumExecutable = vi.fn(async () => ({ executablePath: undefined }));
+    const launchChrome = vi.fn(async () => createLaunchedChrome());
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      findChromiumExecutable,
+      launchChrome
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(
+      "Chromium executable was not found using browser.launchExecutable, deprecated browser.launchCommand, CHROME_PATH, CHROMIUM_PATH, node_modules/.bin/chromium, platform defaults, Homebrew paths, or Docker paths. Set browser.launchExecutable or pass --launch-executable."
+    );
+    expect(launchChrome).not.toHaveBeenCalled();
+  });
+
+  it("surfaces Chrome launch failures directly", async () => {
+    const launchFailure = new Error("Chrome DevToolsActivePort contained an invalid port: nope");
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
+      launchChrome: vi.fn(async () => {
+        throw launchFailure;
+      })
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(launchFailure.message);
+  });
+
+  it("explains the fallback sequence when explicit cdpUrl and auto-launch both fail", async () => {
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      autoLaunch: true,
+      fetch: createFetchWithFailingEndpoint("http://127.0.0.1:9222"),
+      webSocketFactory: () => new FakeCdpSocket(),
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
+      launchChrome: vi.fn(async () => {
+        throw new Error("Chrome DevToolsActivePort contained an invalid port: nope");
+      })
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(
+      "Configured CDP endpoint http://127.0.0.1:9222 failed (Configured CDP endpoint is unavailable.); auto-launch fallback also failed: Chrome DevToolsActivePort contained an invalid port: nope"
+    );
   });
 
   it("snapshot() returns the existing session supervisor snapshot", async () => {
@@ -356,7 +512,7 @@ describe("supervised local CDP backend", () => {
   it("lifecycle cleanup closes the matching supervisor session", async () => {
     const socket = new FakeCdpSocket();
     let backend: ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
-      closeSession(sessionId: string): void;
+      closeSession(sessionId: string): Promise<void>;
     };
     const lifecycle = new BrowserSessionLifecycle({
       onCleanup: (sessionId) => backend.closeSession(sessionId)
@@ -376,5 +532,73 @@ describe("supervised local CDP backend", () => {
     expect(unregister).toHaveBeenCalledWith("session-1");
     await expect(backend.snapshot?.({ sessionId: "session-1" })).rejects.toThrow("Browser session not found: session-1");
     lifecycle.stop();
+  });
+
+  it("lifecycle cleanup kills only auto-launched Chrome and is idempotent", async () => {
+    const launchedChrome = createLaunchedChrome();
+    let backend: ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
+      closeSession(sessionId: string): Promise<void>;
+    };
+    const lifecycle = new BrowserSessionLifecycle({
+      onCleanup: (sessionId) => backend.closeSession(sessionId)
+    });
+    backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      lifecycle,
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
+      launchChrome: vi.fn(async () => launchedChrome)
+    }) as typeof backend;
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await lifecycle.cleanupAll();
+    await lifecycle.cleanupAll();
+    await backend.closeSession("session-1");
+
+    expect(launchedChrome.kill).toHaveBeenCalledTimes(1);
+    await expect(backend.snapshot?.({ sessionId: "session-1" })).rejects.toThrow("Browser session not found: session-1");
+    lifecycle.stop();
+  });
+
+  it("does not kill external Chrome when reusing an explicit cdpUrl", async () => {
+    const launchedChrome = createLaunchedChrome();
+    let backend: ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
+      closeSession(sessionId: string): Promise<void>;
+    };
+    const lifecycle = new BrowserSessionLifecycle({
+      onCleanup: (sessionId) => backend.closeSession(sessionId)
+    });
+    backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      autoLaunch: true,
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      lifecycle,
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
+      launchChrome: vi.fn(async () => launchedChrome)
+    }) as typeof backend;
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await lifecycle.cleanupAll();
+
+    expect(launchedChrome.kill).not.toHaveBeenCalled();
+    lifecycle.stop();
+  });
+
+  it("kills auto-launched Chrome when backend initialization fails after launch", async () => {
+    const launchedChrome = createLaunchedChrome();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      fetch: createFetch(),
+      webSocketFactory: () => {
+        throw new Error("CDP WebSocket connection failed.");
+      },
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
+      launchChrome: vi.fn(async () => launchedChrome)
+    });
+
+    await expect(backend.navigate({ url: "https://example.com/start", sessionId: "session-1" })).rejects.toThrow("CDP WebSocket connection failed.");
+    expect(launchedChrome.kill).toHaveBeenCalledTimes(1);
   });
 });

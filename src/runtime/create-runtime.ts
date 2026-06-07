@@ -137,6 +137,9 @@ export type RuntimeOptions = {
     cloudProvider?: string;
     cdpUrl?: string;
     launchCommand?: string;
+    launchExecutable?: string;
+    launchArgs?: string[];
+    chromeFlags?: string[];
     autoLaunch: boolean;
     supervised?: boolean;
   };
@@ -619,6 +622,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ? createSupervisedLocalCdpBrowserBackend({
         cdpUrl: options.browser?.cdpUrl,
         launchCommand: options.browser?.launchCommand,
+        launchExecutable: options.browser?.launchExecutable,
+        launchArgs: options.browser?.launchArgs,
+        chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,
@@ -630,6 +636,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         cloudProvider: options.browser?.cloudProvider,
         cdpUrl: options.browser?.cdpUrl,
         launchCommand: options.browser?.launchCommand,
+        launchExecutable: options.browser?.launchExecutable,
+        launchArgs: options.browser?.launchArgs,
+        chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,

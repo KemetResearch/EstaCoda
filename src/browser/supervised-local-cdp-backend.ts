@@ -12,16 +12,23 @@ import type { CdpFetchLike, CdpWebSocketFactory } from "./cdp-client.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
+import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
+import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
   launchCommand?: string;
+  launchExecutable?: string;
+  launchArgs?: string[];
+  chromeFlags?: string[];
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
   lifecycle?: BrowserSessionLifecycle;
+  findChromiumExecutable?: (options?: ChromiumFinderOptions) => Promise<ChromiumFinderResult>;
+  launchChrome?: (options: ChromeLauncherOptions) => Promise<LaunchedChrome>;
 };
 
 type SupervisedSession = {
@@ -30,11 +37,23 @@ type SupervisedSession = {
   supervisor: CDPSupervisor;
 };
 
+type ResolvedCdpTarget = {
+  endpoint: string;
+  launchedDuringCall: boolean;
+  target: {
+    id?: string;
+    url?: string;
+    webSocketDebuggerUrl: string;
+  };
+};
+
 export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalCdpBackendOptions = {}): BrowserBackend {
-  const endpoint = normalizeCdpUrl(options.cdpUrl);
+  const configuredEndpoint = normalizeCdpUrl(options.cdpUrl);
   const lifecycle = options.lifecycle;
   const sessions = new Map<string, SupervisedSession>();
   let latestSessionId: string | undefined;
+  let launchedChrome: LaunchedChrome | undefined;
+  let launchPromise: Promise<LaunchedChrome> | undefined;
   lifecycle?.start();
 
   const getSession = (input?: BrowserActionInput): SupervisedSession => {
@@ -50,10 +69,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return session;
   };
 
-  const closeSession = (sessionId: string): void => {
+  const closeSession = async (sessionId: string): Promise<void> => {
     const session = sessions.get(sessionId);
     if (session === undefined) {
       lifecycle?.unregister(sessionId);
+      await closeLaunchedChromeIfIdle();
       return;
     }
     sessions.delete(sessionId);
@@ -62,24 +82,127 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     }
     session.supervisor.close();
     lifecycle?.unregister(sessionId);
+    await closeLaunchedChromeIfIdle();
+  };
+
+  const closeLaunchedChromeIfIdle = async (): Promise<void> => {
+    if (sessions.size > 0) {
+      return;
+    }
+    await killLaunchedChrome();
+  };
+
+  const killLaunchedChrome = async (): Promise<void> => {
+    const chrome = launchedChrome;
+    launchedChrome = undefined;
+    launchPromise = undefined;
+    if (chrome !== undefined) {
+      await chrome.kill();
+    }
+  };
+
+  const ensureAutoLaunchedChrome = async (): Promise<{
+    chrome: LaunchedChrome;
+    launchedDuringCall: boolean;
+  }> => {
+    if (launchedChrome !== undefined) {
+      return { chrome: launchedChrome, launchedDuringCall: false };
+    }
+    const finder = options.findChromiumExecutable ?? findChromiumExecutable;
+    const launcher = options.launchChrome ?? launchChrome;
+    let created = false;
+    launchPromise ??= (async () => {
+      const found = await finder({
+        launchExecutable: options.launchExecutable,
+        launchCommand: options.launchCommand
+      });
+      if (found.executablePath === undefined) {
+        throw new Error([
+          "Chromium executable was not found using browser.launchExecutable, deprecated browser.launchCommand, CHROME_PATH, CHROMIUM_PATH, node_modules/.bin/chromium, platform defaults, Homebrew paths, or Docker paths.",
+          "Set browser.launchExecutable or pass --launch-executable."
+        ].join(" "));
+      }
+      created = true;
+      const chrome = await launcher({
+        launchExecutable: found.executablePath,
+        launchArgs: options.launchArgs,
+        chromeFlags: options.chromeFlags,
+        fetch: options.fetch as typeof globalThis.fetch | undefined
+      });
+      launchedChrome = chrome;
+      return chrome;
+    })();
+
+    try {
+      const chrome = await launchPromise;
+      return { chrome, launchedDuringCall: created };
+    } catch (error) {
+      launchPromise = undefined;
+      throw error;
+    }
+  };
+
+  const resolveCdpTarget = async (url: string): Promise<ResolvedCdpTarget> => {
+    let configuredEndpointFailure: unknown;
+    if (configuredEndpoint !== undefined) {
+      try {
+        return {
+          endpoint: configuredEndpoint,
+          launchedDuringCall: false,
+          target: await createCdpTarget({
+            endpoint: configuredEndpoint,
+            url,
+            fetch: options.fetch,
+          })
+        };
+      } catch (error) {
+        if (options.autoLaunch !== true) {
+          throw error;
+        }
+        configuredEndpointFailure = error;
+      }
+    } else if (options.autoLaunch !== true) {
+      throw new Error("CDP URL is not configured.");
+    }
+
+    try {
+      const launched = await ensureAutoLaunchedChrome();
+      try {
+        return {
+          endpoint: launched.chrome.endpoint,
+          launchedDuringCall: launched.launchedDuringCall,
+          target: await createCdpTarget({
+            endpoint: launched.chrome.endpoint,
+            url,
+            fetch: options.fetch,
+          })
+        };
+      } catch (error) {
+        if (launched.launchedDuringCall) {
+          await killLaunchedChrome();
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (configuredEndpointFailure !== undefined) {
+        throw new Error(
+          `Configured CDP endpoint ${configuredEndpoint} failed (${errorMessage(configuredEndpointFailure)}); auto-launch fallback also failed: ${errorMessage(error)}`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
   };
 
   const backend: BrowserBackend & {
-    closeSession(sessionId: string): void;
+    closeSession(sessionId: string): Promise<void>;
   } = {
     kind: "local-cdp",
-    isAvailable: async () => (await checkLocalCdpStatus(endpoint, options.fetch)).available,
-    status: () => checkLocalCdpStatus(endpoint, options.fetch),
+    isAvailable: async () => (await checkLocalCdpStatus(launchedChrome?.endpoint ?? configuredEndpoint, options.fetch)).available,
+    status: () => checkLocalCdpStatus(launchedChrome?.endpoint ?? configuredEndpoint, options.fetch),
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
-      if (endpoint === undefined) {
-        throw new Error("CDP URL is not configured.");
-      }
-
-      const target = await createCdpTarget({
-        endpoint,
-        url: input.url,
-        fetch: options.fetch,
-      });
+      const resolved = await resolveCdpTarget(input.url);
+      const target = resolved.target;
       const sessionId = input.sessionId ?? target.id ?? `cdp-${Date.now()}`;
       const existing = sessions.get(sessionId);
       let createdSupervisor = false;
@@ -131,6 +254,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       } catch (error) {
         if (createdSupervisor) {
           supervisor.close();
+        }
+        if (resolved.launchedDuringCall) {
+          await killLaunchedChrome();
         }
         throw error;
       }
@@ -252,6 +378,10 @@ function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
   } catch {
     return [];
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function createCdpTarget(input: {

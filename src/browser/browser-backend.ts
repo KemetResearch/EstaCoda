@@ -80,6 +80,9 @@ export function createMockBrowserBackend(input: {
 export type LocalCdpBrowserBackendOptions = {
   cdpUrl?: string;
   launchCommand?: string;
+  launchExecutable?: string;
+  launchArgs?: string[];
+  chromeFlags?: string[];
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
@@ -535,6 +538,9 @@ export function createBrowserBackendFromConfig(config: {
   cloudProvider?: string;
   cdpUrl?: string;
   launchCommand?: string;
+  launchExecutable?: string;
+  launchArgs?: string[];
+  chromeFlags?: string[];
   autoLaunch?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
@@ -548,6 +554,9 @@ export function createBrowserBackendFromConfig(config: {
         return createSupervisedLocalCdpBrowserBackend({
           cdpUrl: config.cdpUrl,
           launchCommand: config.launchCommand,
+          launchExecutable: config.launchExecutable,
+          launchArgs: config.launchArgs,
+          chromeFlags: config.chromeFlags,
           autoLaunch: config.autoLaunch,
           fetch: config.fetch,
           webSocketFactory: config.webSocketFactory,
@@ -558,6 +567,9 @@ export function createBrowserBackendFromConfig(config: {
       return createLocalCdpBrowserBackend({
         cdpUrl: config.cdpUrl,
         launchCommand: config.launchCommand,
+        launchExecutable: config.launchExecutable,
+        launchArgs: config.launchArgs,
+        chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory

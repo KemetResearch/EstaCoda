@@ -231,4 +231,26 @@ describe("browser backend baselines", () => {
       reason: "CDP endpoint returned 503 Service Unavailable"
     });
   });
+
+  it("keeps unsupervised local CDP explicit-url only even when autoLaunch is set", async () => {
+    const backend = createLocalCdpBrowserBackend({
+      autoLaunch: true,
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--disable-gpu"],
+      fetch: createCdpFetch({
+        ok: true,
+        status: 200,
+        statusText: "OK"
+      })
+    });
+
+    await expect(backend.isAvailable()).resolves.toBe(false);
+    await expect(backend.status()).resolves.toEqual({
+      backend: "local-cdp",
+      available: false,
+      reason: "CDP URL is not configured."
+    });
+    await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("CDP URL is not configured.");
+  });
 });
