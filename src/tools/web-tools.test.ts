@@ -844,6 +844,47 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("propagates browser.navigate backend metadata such as cloud fallback details", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend({ sessionId: "nav-session", title: "Nav Title", text: "Nav text." }),
+      kind: "browserbase",
+      async navigate(input) {
+        return {
+          session: {
+            id: input.sessionId ?? "nav-session",
+            backend: "local-cdp",
+            currentUrl: input.url,
+            createdAt: "2026-06-07T00:00:00.000Z"
+          },
+          snapshot: {
+            sessionId: input.sessionId ?? "nav-session",
+            url: input.url,
+            text: "Fallback snapshot."
+          },
+          metadata: {
+            fallbackFromCloud: true,
+            fallbackProvider: "browserbase",
+            fallbackReason: "Browserbase network error."
+          }
+        };
+      }
+    };
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toMatchObject({
+      backend: "local-cdp",
+      fallbackFromCloud: true,
+      fallbackProvider: "browserbase",
+      fallbackReason: "Browserbase network error."
+    });
+  });
+
   it.each([
     "Cloudflare",
     "Just a moment",

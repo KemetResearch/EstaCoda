@@ -98,6 +98,7 @@ export type BrowserNavigateInput = {
 export type BrowserNavigateResult = {
   session: BrowserSession;
   snapshot: BrowserSnapshot;
+  metadata?: Record<string, unknown>;
 };
 
 export type BrowserBackendStatus = {
@@ -107,6 +108,9 @@ export type BrowserBackendStatus = {
   reason?: string;
   version?: string;
   browser?: string;
+  fallbackFromCloud?: boolean;
+  fallbackProvider?: BrowserCloudProviderKind;
+  fallbackReason?: string;
 };
 
 export type BrowserBackend = {

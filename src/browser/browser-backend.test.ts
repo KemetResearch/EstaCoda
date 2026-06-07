@@ -120,14 +120,14 @@ describe("browser backend baselines", () => {
     }
   });
 
-  it("surfaces cloud provider missing env and not-implemented reasons", async () => {
+  it("surfaces cloud provider missing env and cloud approval reasons", async () => {
     const missing = createBrowserBackendFromConfig({
       backend: "unconfigured",
       cloudProvider: "browserbase"
     });
 
     await expect(missing.status()).resolves.toMatchObject({
-      backend: "unconfigured",
+      backend: "browserbase",
       available: false,
       reason: "BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID are missing."
     });
@@ -140,9 +140,9 @@ describe("browser backend baselines", () => {
     });
 
     await expect(configured.status()).resolves.toMatchObject({
-      backend: "unconfigured",
+      backend: "browserbase",
       available: false,
-      reason: "Browserbase provider is registered but not yet implemented."
+      reason: expect.stringContaining("may incur charges")
     });
   });
 

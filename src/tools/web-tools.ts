@@ -707,6 +707,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             backend: result.session.backend,
             session: result.session,
             snapshot: result.snapshot,
+            ...(result.metadata ?? {}),
             ...debugMetadata(debug)
           }
         };

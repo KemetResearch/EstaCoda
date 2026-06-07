@@ -134,7 +134,7 @@ describe("browser provider registry", () => {
     });
   });
 
-  it("provider stubs remain unavailable with missing and present env", async () => {
+  it("provider stubs remain unavailable while Browserbase becomes available with env", async () => {
     registerDefaultBrowserProviders();
 
     expect(await getBrowserProvider("browserbase")?.getAvailability()).toEqual({
@@ -148,8 +148,7 @@ describe("browser provider registry", () => {
     });
     vi.stubEnv("BROWSERBASE_PROJECT_ID", "project");
     expect(await getBrowserProvider("browserbase")?.getAvailability()).toEqual({
-      available: false,
-      reason: "Browserbase provider is registered but not yet implemented."
+      available: true
     });
 
     expect(await getBrowserProvider("browser-use")?.getAvailability()).toEqual({
@@ -172,10 +171,10 @@ describe("browser provider registry", () => {
     });
   });
 
-  it("provider stubs throw if createSession is called directly", async () => {
+  it("providers without an approved backend path do not create sessions directly", async () => {
     registerDefaultBrowserProviders();
 
-    await expect(getBrowserProvider("browserbase")?.createSession("task")).rejects.toThrow("not yet implemented");
+    await expect(getBrowserProvider("browserbase")?.createSession("task")).rejects.toThrow("cloudSpendApproved");
     await expect(getBrowserProvider("browser-use")?.createSession("task")).rejects.toThrow("not yet implemented");
     await expect(getBrowserProvider("firecrawl")?.createSession("task")).rejects.toThrow("not yet implemented");
     await expect(getBrowserProvider("camofox")?.createSession("task")).rejects.toThrow("not yet implemented");

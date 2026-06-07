@@ -4,6 +4,7 @@ import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
+import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions } from "./browser-providers/browserbase-provider.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
@@ -542,11 +543,14 @@ export function createBrowserBackendFromConfig(config: {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  cloudFallback?: boolean;
+  cloudSpendApproved?: "pending" | boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
   supervised?: boolean;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
+  browserbase?: Pick<BrowserbaseBrowserBackendOptions, "apiKey" | "projectId" | "client" | "createClient" | "browserbaseFetch" | "createSupervisedBackend" | "log">;
 }): BrowserBackend {
   switch (config.backend) {
     case "local-cdp":
@@ -575,6 +579,29 @@ export function createBrowserBackendFromConfig(config: {
         webSocketFactory: config.webSocketFactory
       });
     case "unconfigured":
+      if (config.cloudProvider === "browserbase") {
+        return createBrowserbaseBrowserBackend({
+          apiKey: config.browserbase?.apiKey,
+          projectId: config.browserbase?.projectId,
+          client: config.browserbase?.client,
+          createClient: config.browserbase?.createClient,
+          browserbaseFetch: config.browserbase?.browserbaseFetch,
+          createSupervisedBackend: config.browserbase?.createSupervisedBackend,
+          log: config.browserbase?.log,
+          cloudSpendApproved: config.cloudSpendApproved,
+          cloudFallback: config.cloudFallback,
+          cdpUrl: config.cdpUrl,
+          launchCommand: config.launchCommand,
+          launchExecutable: config.launchExecutable,
+          launchArgs: config.launchArgs,
+          chromeFlags: config.chromeFlags,
+          autoLaunch: config.autoLaunch,
+          fetch: config.fetch,
+          webSocketFactory: config.webSocketFactory,
+          securityConfig: config.securityConfig,
+          resolveHostname: config.resolveHostname
+        });
+      }
       if (config.cloudProvider !== undefined) {
         return createCloudProviderStatusBackend({
           backend: "unconfigured",
@@ -583,6 +610,27 @@ export function createBrowserBackendFromConfig(config: {
       }
       return createUnconfiguredBrowserBackend();
     case "browserbase":
+      return createBrowserbaseBrowserBackend({
+        apiKey: config.browserbase?.apiKey,
+        projectId: config.browserbase?.projectId,
+        client: config.browserbase?.client,
+        createClient: config.browserbase?.createClient,
+        browserbaseFetch: config.browserbase?.browserbaseFetch,
+        createSupervisedBackend: config.browserbase?.createSupervisedBackend,
+        log: config.browserbase?.log,
+        cloudSpendApproved: config.cloudSpendApproved,
+        cloudFallback: config.cloudFallback,
+        cdpUrl: config.cdpUrl,
+        launchCommand: config.launchCommand,
+        launchExecutable: config.launchExecutable,
+        launchArgs: config.launchArgs,
+        chromeFlags: config.chromeFlags,
+        autoLaunch: config.autoLaunch,
+        fetch: config.fetch,
+        webSocketFactory: config.webSocketFactory,
+        securityConfig: config.securityConfig,
+        resolveHostname: config.resolveHostname
+      });
     case "firecrawl":
     case "camofox":
       return createCloudProviderStatusBackend({
