@@ -133,7 +133,7 @@ export function redactUrlForMetadata(url: string): string {
   }
 }
 
-function parseHttpUrl(value: string): URL | undefined {
+export function parseHttpUrl(value: string): URL | undefined {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : undefined;
@@ -142,11 +142,11 @@ function parseHttpUrl(value: string): URL | undefined {
   }
 }
 
-function isAlwaysBlockedHostname(hostname: string): boolean {
+export function isAlwaysBlockedHostname(hostname: string): boolean {
   return ALWAYS_BLOCKED_HOSTNAMES.includes(hostname as (typeof ALWAYS_BLOCKED_HOSTNAMES)[number]);
 }
 
-async function resolveHostname(hostname: string, resolver: ResolveHostnameFn | undefined): Promise<string[]> {
+export async function resolveHostname(hostname: string, resolver: ResolveHostnameFn | undefined): Promise<string[]> {
   if (resolver !== undefined) {
     return await resolver(hostname);
   }
@@ -158,7 +158,7 @@ async function resolveHostname(hostname: string, resolver: ResolveHostnameFn | u
   return resolved.map((entry) => entry.address);
 }
 
-function normalizeHostname(hostname: string): string {
+export function normalizeHostname(hostname: string): string {
   return stripIpv6Brackets(hostname).trim().toLowerCase().replace(/\.+$/, "");
 }
 
@@ -166,7 +166,7 @@ function stripIpv6Brackets(value: string): string {
   return value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
 }
 
-function normalizeIpForChecks(value: string): string | undefined {
+export function normalizeIpForChecks(value: string): string | undefined {
   const trimmed = stripIpv6Brackets(value.trim()).toLowerCase();
   if (isIP(trimmed) === 0) {
     return undefined;
@@ -203,7 +203,7 @@ function normalizeIpv4Mapped(ip: string): string {
   ].join(".");
 }
 
-function isPrivateOrInternalIp(ip: string): boolean {
+export function isPrivateOrInternalIp(ip: string): boolean {
   if (isIP(ip) === 4) {
     return isPrivateOrInternalIpv4(ip);
   }
