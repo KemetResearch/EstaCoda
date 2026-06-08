@@ -47,6 +47,7 @@ export type CreateWorkflowRunInput = {
   intent: IntentRoute;
   plan: WorkflowPlan;
   selectedSkill?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type StartWorkflowRunResult =
@@ -87,7 +88,7 @@ export class WorkflowEngine {
       checkpointCount: 0,
       stepCount: 0,
       retryCount: 0,
-      metadata: {}
+      metadata: input.metadata ?? {}
     };
 
     await this.#store.atomicTransition(run.id, async (tx) => {

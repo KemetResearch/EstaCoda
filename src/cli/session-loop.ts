@@ -61,6 +61,7 @@ import {
 } from "./voice-mode.js";
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
+import { beginExplicitWorkflowRun } from "../workflow/workflow-begin.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1962,6 +1963,7 @@ async function handleWorkflowCommand(input: {
     case "help":
       return [
         "Workflow operator commands (v0.8)",
+        "  /workflow begin <objective>        Create, start, and activate a workflow",
         "  /workflow status [runId]           Show workflow status (active workflow if omitted)",
         "  /workflow pause <runId> [reason]   Request pause at next safe boundary",
         "  /workflow resume <runId>           Resume a paused/interrupted/waiting workflow",
@@ -1978,6 +1980,22 @@ async function handleWorkflowCommand(input: {
         "  /workflow activate <runId>         Activate workflow for this session",
         "  /workflow deactivate               Clear active workflow"
       ].join("\n");
+
+    case "begin": {
+      const objective = rest.join(" ").trim();
+      if (objective.length === 0) return "Usage: /workflow begin <objective>";
+      const result = await beginExplicitWorkflowRun({
+        engine: workflow.engine,
+        sessionId: input.runtime.sessionId,
+        objective
+      });
+      workflow.setActiveRunId(result.run.id);
+      return [
+        `Created workflow: ${result.run.id}`,
+        `Started workflow: ${result.run.id}`,
+        `Activated workflow: ${result.run.id}`
+      ].join("\n");
+    }
 
     case "status": {
       const runId = rest[0] ?? workflow.activeRunId ?? undefined;

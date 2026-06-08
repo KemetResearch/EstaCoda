@@ -9,6 +9,7 @@ import { WorkflowEngine } from "../workflow/workflow-engine.js";
 import { WorkflowCommandDispatcher } from "../workflow/workflow-command-dispatcher.js";
 import { WorkflowProcessRegistry } from "../workflow/workflow-process-registry.js";
 import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../workflow/workflow-event-summary-service.js";
+import { beginExplicitWorkflowRun } from "../workflow/workflow-begin.js";
 
 export async function workflowCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
@@ -18,6 +19,8 @@ export async function workflowCommand(options: CliOptions, args: string[]): Prom
 
   try {
     switch (subcommand) {
+      case "begin":
+        return await workflowBegin(db, profileId, restArgs, options.runtime?.sessionId);
       case "list":
         return await workflowList(db, profileId);
       case "show":
@@ -93,6 +96,8 @@ function createWorkflowServices(db: SQLiteSessionDB, profileId: string) {
 function workflowHelp(): string {
   return [
     "EstaCoda workflow commands (v0.8)",
+    "  estacoda workflow begin --session <sessionId> <objective>",
+    "                                                   Create and start a workflow run",
     "  estacoda workflow list                          List workflow runs",
     "  estacoda workflow show <runId>                   Show workflow run details",
     "  estacoda workflow status <runId>                 Show workflow run status",
@@ -109,6 +114,74 @@ function workflowHelp(): string {
     "  estacoda workflow checkpoint <runId> <name>      Create a checkpoint",
     "  estacoda workflow summarize <runId>              Summarize workflow events"
   ].join("\n");
+}
+
+async function workflowBegin(db: SQLiteSessionDB, profileId: string, args: string[], runtimeSessionId?: string): Promise<CliCommandResult> {
+  const parsed = parseWorkflowBeginArgs(args);
+  const sessionId = parsed.sessionId ?? runtimeSessionId;
+  if (parsed.error !== undefined) {
+    return { handled: true, exitCode: 1, output: parsed.error };
+  }
+  if (sessionId === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: [
+        "Usage: estacoda workflow begin --session <sessionId> <objective>",
+        "Workflow begin requires an explicit session ID outside an interactive session."
+      ].join("\n")
+    };
+  }
+  const objective = parsed.objective;
+  if (objective.length === 0) {
+    return { handled: true, exitCode: 1, output: "Usage: estacoda workflow begin --session <sessionId> <objective>" };
+  }
+
+  const session = await db.getSessionForProfile(sessionId, profileId);
+  if (session === undefined) {
+    return { handled: true, exitCode: 1, output: `Session not found in active profile: ${sessionId}` };
+  }
+
+  const { engine } = createWorkflowServices(db, profileId);
+  const result = await beginExplicitWorkflowRun({
+    engine,
+    sessionId,
+    objective
+  });
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      `Created workflow: ${result.run.id}`,
+      `Started workflow: ${result.run.id}`,
+      `Not activated. Use /workflow activate ${result.run.id} inside an interactive session.`
+    ].join("\n")
+  };
+}
+
+function parseWorkflowBeginArgs(args: string[]): { sessionId?: string; objective: string; error?: string } {
+  const objectiveParts: string[] = [];
+  let sessionId: string | undefined;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--session") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { objective: "", error: "Usage: estacoda workflow begin --session <sessionId> <objective>" };
+      }
+      sessionId = value;
+      index++;
+      continue;
+    }
+    objectiveParts.push(arg);
+  }
+
+  return {
+    sessionId,
+    objective: objectiveParts.join(" ").trim()
+  };
 }
 
 async function workflowList(db: SQLiteSessionDB, profileId: string): Promise<CliCommandResult> {
