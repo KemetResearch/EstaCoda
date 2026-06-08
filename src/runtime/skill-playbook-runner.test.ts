@@ -2,15 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 
 function runRecorder() {
   return {
-    recordWorkflowStep: vi.fn(),
+    recordSkillPlaybookStep: vi.fn(),
   };
 }
 
-function intent(): Parameters<SkillWorkflowExecutor["executeSkillWorkflow"]>[0]["intent"] {
+function intent(): Parameters<SkillPlaybookRunner["runSkillPlaybook"]>[0]["intent"] {
   return {
     nativeIntent: "general",
     labels: ["test"],
@@ -64,10 +64,10 @@ function skillWithSteps(count: number): SkillDefinition {
   };
 }
 
-describe("SkillWorkflowExecutor execution cap", () => {
-  it("continues deterministic skill workflows past four executable steps", async () => {
+describe("SkillPlaybookRunner execution cap", () => {
+  it("continues deterministic skill playbooks past four executable steps", async () => {
     const executeTool = vi.fn(async (request: { tool: string }) => execution(request.tool));
-    const executor = new SkillWorkflowExecutor({
+    const executor = new SkillPlaybookRunner({
       toolExecutor: {
         executeTool,
       } as never,
@@ -75,7 +75,7 @@ describe("SkillWorkflowExecutor execution cap", () => {
       sessionId: "s1",
     });
 
-    const executions = await executor.executeSkillWorkflow({
+    const executions = await executor.runSkillPlaybook({
       selectedSkill: skillWithSteps(5),
       intent: intent(),
       trustedWorkspace: true,
@@ -86,9 +86,9 @@ describe("SkillWorkflowExecutor execution cap", () => {
     expect(executeTool).toHaveBeenCalledTimes(5);
   });
 
-  it("stops deterministic skill workflows at fifty executable steps", async () => {
+  it("stops deterministic skill playbooks at fifty executable steps", async () => {
     const executeTool = vi.fn(async (request: { tool: string }) => execution(request.tool));
-    const executor = new SkillWorkflowExecutor({
+    const executor = new SkillPlaybookRunner({
       toolExecutor: {
         executeTool,
       } as never,
@@ -96,7 +96,7 @@ describe("SkillWorkflowExecutor execution cap", () => {
       sessionId: "s1",
     });
 
-    const executions = await executor.executeSkillWorkflow({
+    const executions = await executor.runSkillPlaybook({
       selectedSkill: skillWithSteps(60),
       intent: intent(),
       trustedWorkspace: true,

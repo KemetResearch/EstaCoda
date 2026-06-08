@@ -9,7 +9,7 @@ export type SkillPermissionExpectation =
   | "ask-before-credential-access"
   | "ask-before-destructive-action";
 
-export type SkillWorkflowStep = {
+export type SkillPlaybookStepSpec = {
   id: string;
   description: string;
   toolsets?: ToolsetName[];
@@ -20,7 +20,7 @@ export type SkillWorkflowStep = {
   outputTarget?: string;
 };
 
-export type SkillWorkflowPlanStepStatus =
+export type CompiledSkillPlaybookStepStatus =
   | "planned"
   | "running"
   | "succeeded"
@@ -29,7 +29,7 @@ export type SkillWorkflowPlanStepStatus =
   | "skipped"
   | "fallback-used";
 
-export type SkillWorkflowPlanStep = {
+export type CompiledSkillPlaybookStep = {
   id: string;
   description: string;
   preferredToolsets: ToolsetName[];
@@ -38,14 +38,14 @@ export type SkillWorkflowPlanStep = {
   fallbackTo: string[];
   successCriteria: string[];
   outputTarget?: string;
-  status: SkillWorkflowPlanStepStatus;
+  status: CompiledSkillPlaybookStepStatus;
   tool?: string;
   reason?: string;
 };
 
-export type SkillWorkflowPlan = {
+export type CompiledSkillPlaybook = {
   skill: string;
-  steps: SkillWorkflowPlanStep[];
+  steps: CompiledSkillPlaybookStep[];
   warnings?: string[];
 };
 
@@ -131,7 +131,7 @@ export type SkillDefinition = {
   visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
-  workflow: SkillWorkflowStep[];
+  workflow: SkillPlaybookStepSpec[];
   permissionExpectations: SkillPermissionExpectation[];
   examples: string[];
   evaluations: SkillEvaluation[];

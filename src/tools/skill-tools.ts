@@ -224,7 +224,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           type: { type: "string" },
           lesson: { type: "string" },
           promptSummary: { type: "string" },
-          selectedWorkflowStep: { type: "string" },
+          selectedPlaybookStep: { type: "string" },
           toolsAttempted: { type: "array", items: { type: "string" } },
           outcome: { type: "string" },
           candidateImprovement: { type: "string" }
@@ -241,7 +241,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type?: "success" | "failure" | "blocked" | "partial" | "note";
         lesson?: string;
         promptSummary?: string;
-        selectedWorkflowStep?: string;
+        selectedPlaybookStep?: string;
         toolsAttempted?: string[];
         outcome?: "succeeded" | "failed" | "blocked" | "partial";
         candidateImprovement?: string;
@@ -259,7 +259,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           type: input.type,
           lesson: input.lesson,
           promptSummary: input.promptSummary,
-          selectedWorkflowStep: input.selectedWorkflowStep,
+          selectedPlaybookStep: input.selectedPlaybookStep,
           toolsAttempted: input.toolsAttempted,
           outcome: input.outcome,
           candidateImprovement: input.candidateImprovement,

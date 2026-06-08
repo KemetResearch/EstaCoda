@@ -13,7 +13,7 @@ import type {
   SkillResourceKind,
   SkillSourceKind,
   SkillVisibilityRules,
-  SkillWorkflowStep
+  SkillPlaybookStepSpec
 } from "../contracts/skill.js";
 import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -440,7 +440,7 @@ function isNativeIntent(value: string): value is NativeIntent {
     value === "general";
 }
 
-function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWorkflowStep[] {
+function normalizeWorkflow(value: unknown, fallback: SkillPlaybookStepSpec): SkillPlaybookStepSpec[] {
   if (value === undefined) {
     return [fallback];
   }

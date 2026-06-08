@@ -29,7 +29,7 @@ import { isMemoryBudgetOverflowError, type MemoryBudgetOverflowError } from "../
 import type { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
-import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
 import { compressionReportFromResult, ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { IntentRouter } from "./intent-router.js";
@@ -37,7 +37,7 @@ import { RunRecorder } from "./run-recorder.js";
 import type { RuntimeRouter } from "./runtime-router.js";
 import { summarizeAttachments } from "./runtime-router.js";
 import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
-import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
@@ -80,7 +80,7 @@ export type AgentLoopOptions = {
   runtimeRouter: RuntimeRouter;
   toolPlanRunner: ToolPlanRunner;
   providerTurnLoop: ProviderTurnLoop;
-  skillWorkflowExecutor: SkillWorkflowExecutor;
+  skillPlaybookRunner: SkillPlaybookRunner;
   nativeToolExecutor: NativeToolExecutor;
   responseLabel: string;
   intentRouter: IntentRouter;
@@ -172,7 +172,7 @@ export class AgentLoop {
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
   readonly #providerTurnLoop: ProviderTurnLoop;
-  readonly #skillWorkflowExecutor: SkillWorkflowExecutor;
+  readonly #skillPlaybookRunner: SkillPlaybookRunner;
   readonly #nativeToolExecutor: NativeToolExecutor;
   readonly #soul: string | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
@@ -208,7 +208,7 @@ export class AgentLoop {
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
     this.#providerTurnLoop = options.providerTurnLoop;
-    this.#skillWorkflowExecutor = options.skillWorkflowExecutor;
+    this.#skillPlaybookRunner = options.skillPlaybookRunner;
     this.#nativeToolExecutor = options.nativeToolExecutor;
     this.#soul = options.soul;
     this.#skillsIndex = options.skillsIndex ?? [];
@@ -530,7 +530,7 @@ export class AgentLoop {
     });
 
     if (selectedSkill !== undefined && !intent.confirmationRequired) {
-      await this.#runRecorder.recordWorkflowPlan(compileSkillWorkflowPlan(selectedSkill));
+      await this.#runRecorder.recordSkillPlaybookPlan(compileSkillPlaybook(selectedSkill));
     }
 
     const deterministicNativeTools = await this.#nativeToolExecutor.executeDeterministicNativeTools({
@@ -540,9 +540,9 @@ export class AgentLoop {
       signal: input.signal,
       onEvent: input.onEvent
     });
-    const useDeterministicSkillWorkflow = !this.#providerTurnLoop.canRunProvider();
-    const skillToolExecutions = useDeterministicSkillWorkflow
-      ? await this.#skillWorkflowExecutor.executeSkillWorkflow({
+    const useDeterministicSkillPlaybook = !this.#providerTurnLoop.canRunProvider();
+    const skillPlaybookToolExecutions = useDeterministicSkillPlaybook
+      ? await this.#skillPlaybookRunner.runSkillPlaybook({
       selectedSkill,
       intent,
       trustedWorkspace,
@@ -553,7 +553,7 @@ export class AgentLoop {
       : [];
     const toolExecutions = [
       ...deterministicNativeTools.executions,
-      ...skillToolExecutions
+      ...skillPlaybookToolExecutions
     ];
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,

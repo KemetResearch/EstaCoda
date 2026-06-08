@@ -26,7 +26,7 @@ import type { CompactResult, SessionCompressionService } from "../prompt/session
 import type { NativeToolExecutor } from "./native-tool-executor.js";
 import type { ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { RuntimeRouter } from "./runtime-router.js";
-import type { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import type { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
@@ -179,7 +179,7 @@ const securityPolicy: SecurityPolicy = {
 
 async function createAgentLoop(input: {
   canRunProvider: boolean;
-  executeSkillWorkflow: ReturnType<typeof vi.fn>;
+  runSkillPlaybook: ReturnType<typeof vi.fn>;
   sessionRecallService?: Pick<SessionRecallService, "recall">;
   failSessionRecallDecisionEvent?: boolean;
   failSessionEventKinds?: string[];
@@ -254,9 +254,9 @@ async function createAgentLoop(input: {
     }))
   } as unknown as ProviderTurnLoop;
 
-  const skillWorkflowExecutor = {
-    executeSkillWorkflow: input.executeSkillWorkflow
-  } as unknown as SkillWorkflowExecutor;
+  const skillPlaybookRunner = {
+    runSkillPlaybook: input.runSkillPlaybook
+  } as unknown as SkillPlaybookRunner;
 
   const nativeToolExecutor = {
     executeDeterministicNativeTools: vi.fn(async () => ({
@@ -270,7 +270,7 @@ async function createAgentLoop(input: {
     runtimeRouter,
     toolPlanRunner: {} as unknown as ToolPlanRunner,
     providerTurnLoop,
-    skillWorkflowExecutor,
+    skillPlaybookRunner,
     nativeToolExecutor,
     responseLabel: "Test",
     intentRouter: {} as any,
@@ -292,7 +292,7 @@ async function createAgentLoop(input: {
   return {
     loop,
     providerTurnLoop,
-    executeSkillWorkflow: input.executeSkillWorkflow,
+    runSkillPlaybook: input.runSkillPlaybook,
     sessionDb,
     sessionId,
     sessionRuntimeContext,
@@ -301,11 +301,11 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
-  it("runs deterministic skill workflow when ProviderTurnLoop cannot run provider", async () => {
-    const executeSkillWorkflow = vi.fn(async () => [execution]);
+  it("runs deterministic skill playbook when ProviderTurnLoop cannot run provider", async () => {
+    const runSkillPlaybook = vi.fn(async () => [execution]);
     const { loop, providerTurnLoop } = await createAgentLoop({
       canRunProvider: false,
-      executeSkillWorkflow
+      runSkillPlaybook
     });
 
     const response = await loop.handle({
@@ -315,16 +315,16 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
-    expect(executeSkillWorkflow).toHaveBeenCalledTimes(1);
+    expect(runSkillPlaybook).toHaveBeenCalledTimes(1);
     expect(response.toolExecutions).toHaveLength(1);
     expect(response.toolExecutions[0]?.tool.name).toBe("files.read");
   });
 
-  it("skips deterministic skill workflow when ProviderTurnLoop can run provider", async () => {
-    const executeSkillWorkflow = vi.fn(async () => [execution]);
+  it("skips deterministic skill playbook when ProviderTurnLoop can run provider", async () => {
+    const runSkillPlaybook = vi.fn(async () => [execution]);
     const { loop, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow
+      runSkillPlaybook
     });
 
     const response = await loop.handle({
@@ -334,14 +334,14 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
-    expect(executeSkillWorkflow).not.toHaveBeenCalled();
+    expect(runSkillPlaybook).not.toHaveBeenCalled();
     expect(response.toolExecutions).toHaveLength(0);
   });
 
   it("renders a dedicated message when a successful provider response is empty", async () => {
     const { loop, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("")
     });
 
@@ -361,7 +361,7 @@ describe("AgentLoop provider availability gating", () => {
   it("does not append a duplicate final agent message for an empty provider tool-call turn", async () => {
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderToolCallExecution("")
     });
     await sessionDb.appendMessage({
@@ -395,7 +395,7 @@ describe("AgentLoop provider availability gating", () => {
   it("persists final artifact summary text after an empty provider tool-call turn", async () => {
     const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderToolCallExecution("")
     });
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
@@ -442,7 +442,7 @@ describe("AgentLoop provider availability gating", () => {
   it("keeps existing empty no-tool provider response persistence", async () => {
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("")
     });
 
@@ -460,7 +460,7 @@ describe("AgentLoop provider availability gating", () => {
   it("renders a dedicated message when a successful provider response is whitespace-only", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("   \n\t")
     });
 
@@ -476,7 +476,7 @@ describe("AgentLoop provider availability gating", () => {
   it("passes through non-empty successful provider content unchanged", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("real answer")
     });
 
@@ -504,7 +504,7 @@ describe("AgentLoop provider availability gating", () => {
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution
     });
     const events: Array<{ kind: string; text?: string }> = [];
@@ -538,7 +538,7 @@ describe("AgentLoop provider availability gating", () => {
   it("keeps failed provider responses on the existing fallback path", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       providerExecution: failedProviderExecution()
     });
 
@@ -557,7 +557,7 @@ describe("AgentLoop provider availability gating", () => {
     const saveTrajectory = vi.fn(async () => undefined);
     const { loop, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       trajectoryStore: { saveTrajectory }
     });
 
@@ -587,7 +587,7 @@ describe("AgentLoop provider availability gating", () => {
     });
     const { loop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       trajectoryStore: { saveTrajectory }
     });
 
@@ -603,7 +603,7 @@ describe("AgentLoop provider availability gating", () => {
   });
 
   it("rotates session context before provider turn and appends final response to the child", async () => {
-    const executeSkillWorkflow = vi.fn(async () => []);
+    const runSkillPlaybook = vi.fn(async () => []);
     const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => {
       const childSessionId = `${input.sessionId}-child`;
       await sessionDb.createSession({
@@ -665,7 +665,7 @@ describe("AgentLoop provider availability gating", () => {
     });
     const { loop, providerTurnLoop, sessionDb, sessionId, sessionRuntimeContext } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow,
+      runSkillPlaybook,
       sessionCompressionService: { compactIfNeeded },
       compressionConfig: normalizeSessionCompressionConfig({
         enabled: true,
@@ -749,7 +749,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionCompressionService: { compactIfNeeded },
       compressionConfig: normalizeSessionCompressionConfig({
         enabled: true,
@@ -790,7 +790,7 @@ describe("AgentLoop provider availability gating", () => {
     const recall = vi.fn();
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall }
     });
 
@@ -818,7 +818,7 @@ describe("AgentLoop provider availability gating", () => {
     const recall = vi.fn();
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall },
       failSessionRecallDecisionEvent: true
     });
@@ -866,7 +866,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall }
     });
 
@@ -920,7 +920,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall },
       failSessionRecallDecisionEvent: true
     });
@@ -979,7 +979,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
     const { loop, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
-      executeSkillWorkflow: vi.fn(async () => []),
+      runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall }
     });
 
@@ -1004,7 +1004,7 @@ describe("AgentLoop provider availability gating", () => {
     const memoryProvider = new LocalMemoryProvider({ store, promotionStore });
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,
-      executeSkillWorkflow: vi.fn(async () => [execution]),
+      runSkillPlaybook: vi.fn(async () => [execution]),
       memoryProvider
     });
     await sessionDb.createSession({ id: "previous-preference-session", profileId: "default" });
@@ -1052,7 +1052,7 @@ describe("AgentLoop provider availability gating", () => {
     const memoryProvider = new LocalMemoryProvider({ store, promotionStore });
     const { loop, sessionDb } = await createAgentLoop({
       canRunProvider: false,
-      executeSkillWorkflow: vi.fn(async () => [execution]),
+      runSkillPlaybook: vi.fn(async () => [execution]),
       memoryProvider,
       failSessionEventKinds: ["memory-promotion-failed"]
     });
@@ -1090,7 +1090,7 @@ describe("AgentLoop provider availability gating", () => {
     };
     const { loop, sessionDb } = await createAgentLoop({
       canRunProvider: false,
-      executeSkillWorkflow: vi.fn(async () => [execution]),
+      runSkillPlaybook: vi.fn(async () => [execution]),
       memoryProvider
     });
     await sessionDb.createSession({ id: "previous-unexpected-session", profileId: "default" });
@@ -1121,7 +1121,7 @@ describe("AgentLoop provider availability gating", () => {
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,
-      executeSkillWorkflow: vi.fn(async () => [execution]),
+      runSkillPlaybook: vi.fn(async () => [execution]),
       memoryProvider
     });
     await sessionDb.createSession({ id: "previous-success-session", profileId: "default" });

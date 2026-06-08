@@ -1,14 +1,14 @@
 import type {
   LoadedSkill,
   SkillDefinition,
-  SkillWorkflowPlan,
-  SkillWorkflowPlanStep,
-  SkillWorkflowStep
+  CompiledSkillPlaybook,
+  CompiledSkillPlaybookStep,
+  SkillPlaybookStepSpec
 } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 
-export function compileSkillWorkflowPlan(skill: LoadedSkill | SkillDefinition): SkillWorkflowPlan {
-  const warnings = workflowWarnings(skill.workflow);
+export function compileSkillPlaybook(skill: LoadedSkill | SkillDefinition): CompiledSkillPlaybook {
+  const warnings = playbookWarnings(skill.workflow);
 
   return {
     skill: skill.name,
@@ -17,13 +17,13 @@ export function compileSkillWorkflowPlan(skill: LoadedSkill | SkillDefinition): 
   };
 }
 
-export function renderSkillWorkflowPlan(plan: SkillWorkflowPlan): string {
+export function renderSkillPlaybookPlan(plan: CompiledSkillPlaybook): string {
   return [
-    `Skill workflow plan: ${plan.skill}`,
+    `Skill playbook plan: ${plan.skill}`,
     ...(plan.warnings === undefined || plan.warnings.length === 0
       ? []
       : [
-          "Workflow warnings:",
+          "Playbook warnings:",
           ...plan.warnings.map((warning) => `- ${warning}`)
         ]),
     ...plan.steps.map((step, index) => [
@@ -38,7 +38,7 @@ export function renderSkillWorkflowPlan(plan: SkillWorkflowPlan): string {
   ].join("\n");
 }
 
-function compileStep(skill: LoadedSkill | SkillDefinition, step: SkillWorkflowStep): SkillWorkflowPlanStep {
+function compileStep(skill: LoadedSkill | SkillDefinition, step: SkillPlaybookStepSpec): CompiledSkillPlaybookStep {
   return {
     id: step.id,
     description: step.description,
@@ -52,12 +52,12 @@ function compileStep(skill: LoadedSkill | SkillDefinition, step: SkillWorkflowSt
   };
 }
 
-function preferredToolsets(skill: LoadedSkill | SkillDefinition, step: SkillWorkflowStep): ToolsetName[] {
+function preferredToolsets(skill: LoadedSkill | SkillDefinition, step: SkillPlaybookStepSpec): ToolsetName[] {
   const toolsets = step.toolsets ?? skill.requiredToolsets;
   return toolsets.length === 0 ? ["core"] : [...toolsets];
 }
 
-function workflowWarnings(steps: SkillWorkflowStep[]): string[] {
+function playbookWarnings(steps: SkillPlaybookStepSpec[]): string[] {
   const warnings: string[] = [];
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -81,7 +81,7 @@ function workflowWarnings(steps: SkillWorkflowStep[]): string[] {
   }
 
   for (const duplicate of [...duplicates].sort()) {
-    warnings.push(`Duplicate workflow step id "${duplicate}".`);
+    warnings.push(`Duplicate playbook step id "${duplicate}".`);
   }
 
   for (const cycle of fallbackCycles(fallbackGraph)) {

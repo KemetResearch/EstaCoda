@@ -9,9 +9,9 @@ import type { SessionDB, StructuredToolHistoryDiagnosticEvent } from "../contrac
 import type {
   LoadedSkill,
   SkillDefinition,
-  SkillWorkflowPlan,
-  SkillWorkflowPlanStep,
-  SkillWorkflowStep
+  CompiledSkillPlaybook,
+  CompiledSkillPlaybookStep,
+  SkillPlaybookStepSpec
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
@@ -61,16 +61,16 @@ export class RunRecorder {
     this.#memoryProvider = options.memoryProvider;
   }
 
-  async recordWorkflowStep(input: {
+  async recordSkillPlaybookStep(input: {
     skill: string;
-    step: SkillWorkflowStep | SkillWorkflowPlanStep;
+    step: SkillPlaybookStepSpec | CompiledSkillPlaybookStep;
     status: "tool-executed" | "no-tool" | "blocked" | "skipped";
     toolsets: ToolsetName[];
     tool?: string;
     reason?: string;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
-      kind: "skill-workflow-step",
+      kind: "skill-playbook-step",
       skill: input.skill,
       stepId: input.step.id,
       description: input.step.description,
@@ -79,7 +79,7 @@ export class RunRecorder {
       tool: input.tool,
       reason: input.reason
     });
-    this.#trajectoryRecorder.record("skill-workflow-step", {
+    this.#trajectoryRecorder.record("skill-playbook-step", {
       skill: input.skill,
       stepId: input.step.id,
       description: input.step.description,
@@ -90,12 +90,12 @@ export class RunRecorder {
     });
   }
 
-  async recordWorkflowPlan(plan: SkillWorkflowPlan): Promise<void> {
+  async recordSkillPlaybookPlan(plan: CompiledSkillPlaybook): Promise<void> {
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
-      kind: "skill-workflow-planned",
+      kind: "skill-playbook-planned",
       plan
     });
-    this.#trajectoryRecorder.record("skill-workflow-planned", {
+    this.#trajectoryRecorder.record("skill-playbook-planned", {
       plan
     });
   }
@@ -524,7 +524,7 @@ export class RunRecorder {
       outcome,
       sessionId: this.#currentSessionId(),
       promptSummary: truncate(stripInlineReasoning(input.userText), 240),
-      selectedWorkflowStep: input.selectedSkill.workflow[0]?.id,
+      selectedPlaybookStep: input.selectedSkill.workflow[0]?.id,
       toolExecutions: input.toolExecutions
     }).catch(() => undefined);
 

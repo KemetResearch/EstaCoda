@@ -11,7 +11,7 @@ export type FailureContext =
   | { kind: "cancellation"; reason: string }
   | { kind: "security-escalation"; from: string; to: string }
   | { kind: "loop-exhausted"; reason: string; iterations: number }
-  | { kind: "workflow-step"; skill: string; stepId: string; error: string }
+  | { kind: "skill-playbook-step"; skill: string; stepId: string; error: string }
   | { kind: "generic"; error: unknown; message: string };
 
 export type ClassifiedFailure = {
@@ -37,8 +37,8 @@ export function classifyFailure(context: FailureContext): ClassifiedFailure {
       return classifySecurityEscalation(context.from, context.to);
     case "loop-exhausted":
       return classifyLoopExhausted(context.reason, context.iterations);
-    case "workflow-step":
-      return classifyWorkflowStepFailure(context);
+    case "skill-playbook-step":
+      return classifySkillPlaybookStepFailure(context);
     case "generic":
       return classifyGenericFailure(context.error, context.message);
   }
@@ -255,15 +255,15 @@ function classifyLoopExhausted(reason: string, iterations: number): ClassifiedFa
   };
 }
 
-function classifyWorkflowStepFailure(context: {
+function classifySkillPlaybookStepFailure(context: {
   skill: string;
   stepId: string;
   error: string;
 }): ClassifiedFailure {
   return {
-    class: "workflow-step-error",
+    class: "skill-playbook-step-error",
     recoverable: true,
-    message: `Workflow step ${context.stepId} in skill ${context.skill} failed: ${context.error}`,
+    message: `Skill playbook step ${context.stepId} in skill ${context.skill} failed: ${context.error}`,
     context: { skill: context.skill, stepId: context.stepId, error: context.error }
   };
 }

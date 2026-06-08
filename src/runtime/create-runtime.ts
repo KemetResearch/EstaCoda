@@ -89,7 +89,7 @@ import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop } from "./provider-turn-loop.js";
-import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
@@ -1046,7 +1046,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   });
 
-  const skillWorkflowExecutor = new SkillWorkflowExecutor({
+  const skillPlaybookRunner = new SkillPlaybookRunner({
     toolExecutor,
     sessionId,
     sessionRuntimeContext,
@@ -1068,7 +1068,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }),
     toolPlanRunner,
     providerTurnLoop,
-    skillWorkflowExecutor,
+    skillPlaybookRunner,
     nativeToolExecutor,
     responseLabel: runtimeBranding.responseLabel,
     intentRouter,

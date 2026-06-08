@@ -7,7 +7,7 @@ export type FailureClass =
   | "tool-invalid-args"       // Tool arguments failed schema validation
   | "tool-timeout"            // Tool execution exceeded time limit
   | "plan-dependency-error"   // Tool plan dependency resolution failed
-  | "workflow-step-error"     // Skill workflow step failed
+  | "skill-playbook-step-error"     // Skill playbook step failed
   | "budget-exhausted"        // Token or cost budget exceeded
   | "security-escalation"     // Risk escalation aborted the run
   | "user-cancelled"          // User cancelled the run

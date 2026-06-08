@@ -65,7 +65,7 @@ export type SkillObservationRecord = {
   timestamp: string;
   type: SkillObservationType;
   promptSummary?: string;
-  selectedWorkflowStep?: string;
+  selectedPlaybookStep?: string;
   toolsAttempted: string[];
   outcome: "succeeded" | "failed" | "blocked" | "partial";
   lesson: string;
@@ -196,7 +196,7 @@ export class SkillEvolutionStore {
     outcome: SkillOutcome;
     sessionId?: string;
     promptSummary?: string;
-    selectedWorkflowStep?: string;
+    selectedPlaybookStep?: string;
     toolExecutions: ToolExecutionRecord[];
   }): Promise<SkillObservationRecord> {
     const now = this.#nowIso();
@@ -219,7 +219,7 @@ export class SkillEvolutionStore {
       timestamp: now,
       type: observationTypeForOutcome(input.outcome.status),
       promptSummary: sanitizeSkillObservationText(input.promptSummary),
-      selectedWorkflowStep: input.selectedWorkflowStep,
+      selectedPlaybookStep: input.selectedPlaybookStep,
       toolsAttempted: input.toolExecutions.map((execution) => execution.tool.name),
       outcome: input.outcome.status,
       lesson: sanitizeSkillObservationText(defaultLesson(input.outcome)) ?? "",
@@ -361,7 +361,7 @@ export class SkillEvolutionStore {
       timestamp: input.timestamp ?? this.#nowIso(),
       type: input.type,
       promptSummary: sanitizeSkillObservationText(input.promptSummary),
-      selectedWorkflowStep: input.selectedWorkflowStep,
+      selectedPlaybookStep: input.selectedPlaybookStep,
       toolsAttempted: input.toolsAttempted ?? [],
       outcome: input.outcome ?? outcomeForObservationType(input.type),
       lesson: sanitizeSkillObservationText(input.lesson) ?? "",

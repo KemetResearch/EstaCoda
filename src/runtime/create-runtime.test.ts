@@ -1913,7 +1913,7 @@ describe("createRuntime MCP trust gating", () => {
               "name",
               "outcome",
               "promptSummary",
-              "selectedWorkflowStep",
+              "selectedPlaybookStep",
               "toolsAttempted",
               "type",
             ],

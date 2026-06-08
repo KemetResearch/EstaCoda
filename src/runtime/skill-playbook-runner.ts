@@ -1,8 +1,8 @@
 import type { IntentRoute } from "../contracts/intent.js";
-import type { LoadedSkill, SkillDefinition, SkillWorkflowPlan, SkillWorkflowPlanStep, SkillWorkflowStep } from "../contracts/skill.js";
+import type { LoadedSkill, SkillDefinition, CompiledSkillPlaybook, CompiledSkillPlaybookStep, SkillPlaybookStepSpec } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
-import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -12,27 +12,27 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 
-export type SkillWorkflowExecutorOptions = {
+export type SkillPlaybookRunnerOptions = {
   toolExecutor: ToolExecutor;
   sessionId: string;
   sessionRuntimeContext?: SessionRuntimeContext;
   runRecorder: RunRecorder;
 };
 
-export class SkillWorkflowExecutor {
+export class SkillPlaybookRunner {
   readonly #toolExecutor: ToolExecutor;
   readonly #sessionId: string;
   readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #runRecorder: RunRecorder;
 
-  constructor(options: SkillWorkflowExecutorOptions) {
+  constructor(options: SkillPlaybookRunnerOptions) {
     this.#toolExecutor = options.toolExecutor;
     this.#sessionId = options.sessionId;
     this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#runRecorder = options.runRecorder;
   }
 
-  async executeSkillWorkflow(input: {
+  async runSkillPlaybook(input: {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     intent: IntentRoute;
     trustedWorkspace: boolean;
@@ -47,7 +47,7 @@ export class SkillWorkflowExecutor {
     const executions: ToolExecutionRecord[] = [];
     const previousResults: string[] = [];
     const usedTools = new Set<string>();
-    const plan = compileSkillWorkflowPlan(input.selectedSkill);
+    const plan = compileSkillPlaybook(input.selectedSkill);
     const stepMap = new Map(plan.steps.map((step, index) => [step.id, { step, index }]));
     const visited = new Set<string>();
     let stepIndex = 0;
@@ -63,7 +63,7 @@ export class SkillWorkflowExecutor {
       }
       visited.add(step.id);
       step.status = "running";
-      const execution = await this.#executeWorkflowStep({
+      const execution = await this.#runPlaybookStep({
         skill: input.selectedSkill,
         step,
         intent: input.intent,
@@ -76,7 +76,7 @@ export class SkillWorkflowExecutor {
 
       if (execution === undefined) {
         step.status = "failed";
-        step.reason = "No available tool for this workflow step yet.";
+        step.reason = "No available tool for this playbook step yet.";
         const fallbackIndex = nextFallbackIndex(plan, step, stepMap);
         if (fallbackIndex !== undefined) {
           step.status = "fallback-used";
@@ -122,9 +122,9 @@ export class SkillWorkflowExecutor {
     return executions;
   }
 
-  async #executeWorkflowStep(input: {
+  async #runPlaybookStep(input: {
     skill: LoadedSkill | SkillDefinition;
-    step: SkillWorkflowPlanStep;
+    step: CompiledSkillPlaybookStep;
     intent: IntentRoute;
     trustedWorkspace: boolean;
     previousResults: string[];
@@ -195,7 +195,7 @@ export class SkillWorkflowExecutor {
         });
       }
 
-      await this.#runRecorder.recordWorkflowStep({
+      await this.#runRecorder.recordSkillPlaybookStep({
         skill: input.skill.name,
         step: input.step,
         status: execution.decision === "allow" ? "tool-executed" : "blocked",
@@ -218,12 +218,12 @@ export class SkillWorkflowExecutor {
       return execution;
     }
 
-    await this.#runRecorder.recordWorkflowStep({
+    await this.#runRecorder.recordSkillPlaybookStep({
       skill: input.skill.name,
       step: input.step,
       status: "no-tool",
       toolsets,
-      reason: "No available tool for this workflow step yet."
+      reason: "No available tool for this playbook step yet."
     });
 
     return undefined;
@@ -235,7 +235,7 @@ export class SkillWorkflowExecutor {
 }
 
 function preferredToolForStep(
-  step: SkillWorkflowStep | SkillWorkflowPlanStep,
+  step: SkillPlaybookStepSpec | CompiledSkillPlaybookStep,
   toolset: ToolsetName
 ): string | undefined {
   if (step.id.includes("extract") && toolset === "web") {
@@ -250,7 +250,7 @@ function preferredToolForStep(
 }
 
 function firstAvailablePreferredTool(
-  step: SkillWorkflowStep | SkillWorkflowPlanStep,
+  step: SkillPlaybookStepSpec | CompiledSkillPlaybookStep,
   toolset: ToolsetName,
   usedTools: Set<string>
 ): string | undefined {
@@ -264,9 +264,9 @@ function firstAvailablePreferredTool(
 }
 
 function nextFallbackIndex(
-  plan: SkillWorkflowPlan,
-  step: SkillWorkflowPlanStep,
-  stepMap: Map<string, { step: SkillWorkflowPlanStep; index: number }>
+  plan: CompiledSkillPlaybook,
+  step: CompiledSkillPlaybookStep,
+  stepMap: Map<string, { step: CompiledSkillPlaybookStep; index: number }>
 ): number | undefined {
   for (const fallbackId of step.fallbackTo) {
     const fallback = stepMap.get(fallbackId);
