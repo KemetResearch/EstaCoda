@@ -11,12 +11,17 @@ import type {
   ProviderReasoningMetadata,
   ProviderUsage
 } from "../contracts/provider.js";
+import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS as DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS as DEFAULT_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
 import { classifyHttpError } from "./openai-compatible-provider.js";
 import {
   extractInlineReasoning,
   mergeReasoningParts,
   reasoningMetadataFromReasoning
 } from "./provider-reasoning.js";
+import { createTimeoutSignal } from "../utils/timeout-signal.js";
 
 export type OpenAIResponsesProviderOptions = {
   id: ProviderId;
@@ -26,6 +31,7 @@ export type OpenAIResponsesProviderOptions = {
   enableNetwork?: boolean;
   fetch?: FetchLike;
   timeoutMs?: number;
+  staleTimeoutMs?: number;
 };
 
 export type FetchLike = (url: string, init: {
@@ -89,7 +95,8 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
           model: request.model,
           preparedRequest,
           fetch: options.fetch ?? globalThis.fetch,
-          timeoutMs: options.timeoutMs ?? 60_000,
+          timeoutMs: completionOptions?.timeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+          staleTimeoutMs: completionOptions?.staleTimeoutMs ?? options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
           signal: completionOptions?.signal
         });
       }
@@ -229,17 +236,25 @@ export async function executeResponsesRequest(input: {
   preparedRequest: ReturnType<typeof buildResponsesRequest>;
   fetch: FetchLike;
   timeoutMs: number;
+  staleTimeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderResponse> {
-  const { signal, cleanup } = createTimeoutSignal(input.timeoutMs, input.signal);
+  const timeout = createTimeoutSignal({
+    timeoutMs: input.timeoutMs,
+    staleTimeoutMs: input.staleTimeoutMs,
+    timeoutMessage: formatProviderTotalTimeout(input.timeoutMs),
+    staleTimeoutMessage: formatProviderStaleTimeout(input.staleTimeoutMs),
+    parentSignal: input.signal
+  });
 
   try {
     const response = await input.fetch(input.preparedRequest.url, {
       method: "POST",
       headers: input.preparedRequest.headers,
       body: JSON.stringify(input.preparedRequest.body),
-      signal
+      signal: timeout.signal
     });
+    timeout.disableStale();
 
     if (!response.ok) {
       return {
@@ -267,10 +282,10 @@ export async function executeResponsesRequest(input: {
       content: error instanceof Error ? error.message : "Network request failed.",
       model: input.model,
       provider: input.provider,
-      errorClass: isAbortError(error) ? "timeout" : "network"
+      errorClass: timeout.classify(error) ?? "network"
     };
   } finally {
-    cleanup();
+    timeout.cleanup();
   }
 }
 
@@ -528,31 +543,24 @@ function classifyProviderError(code: string | undefined): string {
   return "unknown";
 }
 
-function createTimeoutSignal(timeoutMs: number, parentSignal: AbortSignal | undefined): {
-  signal: AbortSignal;
-  cleanup(): void;
-} {
-  const controller = new AbortController();
-  const abort = () => controller.abort(parentSignal?.reason);
-  const timeout = setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-
-  if (parentSignal?.aborted === true) {
-    abort();
-  } else {
-    parentSignal?.addEventListener("abort", abort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup() {
-      clearTimeout(timeout);
-      parentSignal?.removeEventListener("abort", abort);
-    }
-  };
+function formatProviderTotalTimeout(timeoutMs: number): string {
+  return `Provider request timed out after ${formatDuration(timeoutMs)}.`;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+function formatProviderStaleTimeout(timeoutMs: number): string {
+  return `No response from provider for ${formatDuration(timeoutMs)}.`;
+}
+
+function formatDuration(timeoutMs: number): string {
+  if (timeoutMs % 60_000 === 0) {
+    const minutes = timeoutMs / 60_000;
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  }
+  if (timeoutMs % 1_000 === 0) {
+    const seconds = timeoutMs / 1_000;
+    return seconds === 1 ? "1 second" : `${seconds} seconds`;
+  }
+  return `${timeoutMs}ms`;
 }
 
 async function safeErrorText(response: { json(): Promise<unknown>; text(): Promise<string> }): Promise<string> {

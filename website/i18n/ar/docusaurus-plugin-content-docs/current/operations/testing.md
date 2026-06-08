@@ -86,7 +86,7 @@ pnpm run smoke --fail-fast --json
 - مقارنة التدفق الذهبي
 - انتقالات حالة التغيير
 - رسم تبعية الكود: البحث الأمامي/العكسي/المتأثر، الملخص، إبطال الذاكرة المؤقتة
-- TaskFlow: انتقالات الحالة، والقفل، والهجرة، والذرية، ودورة حياة المحرك، واسترداد إعادة التشغيل، ولوحة تحكم المشغل، والضغط
+- Workflow: انتقالات الحالة، والقفل، والهجرة، والذرية، ودورة حياة المحرك، واسترداد إعادة التشغيل، ولوحة تحكم المشغل، والضغط
 
 ### ما لا تغطيه smoke
 
@@ -129,24 +129,24 @@ pnpm run smoke --fail-fast --json
 - `routing-metadata-proposal` — هيكل بيانات وصفية للتوجيه
 - `evolution-export-shape` — تصدير مجموعة البيانات يطابق المخطط
 
-**أساس TaskFlow (5):**
-- `taskflow-state-transitions` — انتقالات حالة التدفق والخطوة
-- `taskflow-locking` — اكتساب القفل، والإصدار، ونبضة القلب، واسترداد القديم
-- `taskflow-migration` — هجرة المخطط
-- `taskflow-atomicity` — الانتقالات الذرية وسلامة الجولة
-- `taskflow-engine-lifecycle` — دورة حياة محرك التدفق والخطوة
+**أساس Workflow (5):**
+- `workflow-run-state-transitions` — انتقالات حالة التدفق والخطوة
+- `workflow-locking` — اكتساب القفل، والإصدار، ونبضة القلب، واسترداد القديم
+- `workflow-migration` — هجرة المخطط
+- `workflow-store-atomicity` — الانتقالات الذرية وسلامة الجولة
+- `workflow-engine-lifecycle` — دورة حياة محرك Workflow والخطوة
 
-**محرك TaskFlow (1):**
-- `taskflow-restart-recovery` — استرداد إعادة التشغيل يعلم التدفقات القديمة منقطعة
+**محرك Workflow (1):**
+- `workflow-restart-recovery` — استرداد إعادة التشغيل يعلم تشغيلات Workflow القديمة منقطعة
 
-**لوحة تحكم المشغل (1):**
-- `operator-control-plane` — الموزع يوجه ويتحقق من أوامر الشرطة المائلة
+**تحكم أوامر Workflow (1):**
+- `workflow-command-control` — الموزع يوجه ويتحقق من أوامر الشرطة المائلة
 
-**الضغط (1):**
-- `flow-compaction` — يدوي، تلقائي، سلامة الحدود، الحفظ
+**ملخصات أحداث Workflow (1):**
+- `workflow-event-summary` — يدوي، تلقائي، سلامة الحدود، الحفظ
 
-**تكامل Track 5 (1):**
-- `track5-integration` — تكامل النظام: المحول، جسر CLI، توصيل وقت التشغيل
+**تكامل Workflow (1):**
+- `workflow-integration` — تكامل النظام: المحول، جسر CLI، توصيل وقت التشغيل
 
 ## أدوات CLI التشخيصية
 

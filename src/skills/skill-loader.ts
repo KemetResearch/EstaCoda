@@ -13,7 +13,7 @@ import type {
   SkillResourceKind,
   SkillSourceKind,
   SkillVisibilityRules,
-  SkillWorkflowStep
+  SkillPlaybookStepSpec
 } from "../contracts/skill.js";
 import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -214,6 +214,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
   }
 
   const definition = value as Partial<SkillDefinition> & {
+    workflow?: unknown;
     toolsets?: string[];
     tools?: string[];
     when_to_use?: string[];
@@ -248,6 +249,9 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     negativePatterns: legacyNegativePatterns,
     requiredToolsets
   });
+  if (definition.workflow !== undefined) {
+    throw new Error("Skill field workflow has been renamed to playbook; update SKILL.md to use playbook.");
+  }
 
   const normalized: SkillDefinition = {
     name: definition.name,
@@ -273,7 +277,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     visibility: inferredVisibility,
     inputs: definition.inputs,
     outputs: definition.outputs,
-    workflow: normalizeWorkflow(definition.workflow, {
+    playbook: normalizePlaybook(definition.playbook, {
       id: "run",
       description: definition.description,
       toolsets: requiredToolsets
@@ -440,13 +444,13 @@ function isNativeIntent(value: string): value is NativeIntent {
     value === "general";
 }
 
-function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWorkflowStep[] {
+function normalizePlaybook(value: unknown, fallback: SkillPlaybookStepSpec): SkillPlaybookStepSpec[] {
   if (value === undefined) {
     return [fallback];
   }
 
   if (!Array.isArray(value)) {
-    throw new Error("Skill field workflow must be an array of objects");
+    throw new Error("Skill field playbook must be an array of objects");
   }
 
   if (value.length === 0) {
@@ -455,15 +459,15 @@ function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWo
 
   return value.map((entry, index) => {
     if (!isRecord(entry)) {
-      throw new Error(`Skill workflow[${index}] must be an object`);
+      throw new Error(`Skill playbook[${index}] must be an object`);
     }
-    assertString(entry.id, `workflow[${index}].id`);
-    assertString(entry.description, `workflow[${index}].description`);
+    assertString(entry.id, `playbook[${index}].id`);
+    assertString(entry.description, `playbook[${index}].description`);
 
     return {
       id: entry.id,
       description: entry.description,
-      toolsets: toolsetArrayOrEmpty(entry.toolsets, `workflow[${index}].toolsets`),
+      toolsets: toolsetArrayOrEmpty(entry.toolsets, `playbook[${index}].toolsets`),
       preferredTool: firstNonEmptyString(entry.preferredTool, entry.preferred_tool),
       toolCandidates: stringArrayOrEmpty(entry.toolCandidates ?? entry.tool_candidates),
       fallbackTo: stringArrayOrEmpty(entry.fallbackTo ?? entry.fallback_to),
@@ -764,7 +768,7 @@ function collectIndentedArray(lines: string[], startIndex: number, parentIndent:
     }
 
     if (/^-\s*[A-Za-z0-9_-]+:(?:\s|$)/u.test(line)) {
-      throw new Error("YAML object arrays are not supported in skill frontmatter yet; use JSON frontmatter for workflow/evaluations.");
+      throw new Error("YAML object arrays are not supported in skill frontmatter yet; use JSON frontmatter for playbook/evaluations.");
     }
 
     values.push(stripYamlQuotes(line.slice(2).trim()));

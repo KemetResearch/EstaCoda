@@ -196,7 +196,8 @@ describe("createSessionRenderer — legacy command output stays English", () => 
       skillCount: 1,
       toolCount: 1,
       mcp: { active: 0, total: 0 },
-      taskflowActive: false,
+      workflowAvailable: false,
+      workflowRunActive: false,
       warnings: [],
     };
     const out = renderer.render(vm);

@@ -272,7 +272,8 @@ describe("PlainRenderer — renderStatus", () => {
       toolCount: 34,
       mcpActive: 2,
       mcpTotal: 3,
-      taskflowActive: true,
+      workflowAvailable: true,
+      workflowRunActive: true,
     });
     const out = renderStatus(vm);
     expect(out).toContain("EstaCoda is ready");
@@ -281,7 +282,7 @@ describe("PlainRenderer — renderStatus", () => {
     expect(out).toContain("skills: 12 (suggest)");
     expect(out).toContain("tools: 34");
     expect(out).toContain("mcp: 2/3");
-    expect(out).toContain("taskflow: active");
+    expect(out).toContain("workflow run: active");
     assertNoAnsi(out);
     assertAsciiSafe(out);
   });
@@ -295,7 +296,8 @@ describe("PlainRenderer — renderStatus", () => {
       toolCount: 0,
       mcpActive: 0,
       mcpTotal: 0,
-      taskflowActive: false,
+      workflowAvailable: false,
+      workflowRunActive: false,
     });
     const out = renderStatus(vm);
     expect(out).toContain("skills: 0");
@@ -311,7 +313,8 @@ describe("PlainRenderer — renderStatus", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      taskflowActive: false,
+      workflowAvailable: false,
+      workflowRunActive: false,
       warnings: [
         buildWarningErrorViewModel({ severity: "warn", title: "T", message: "M" }),
       ],
@@ -910,7 +913,8 @@ describe("PlainRenderer — renderPlain dispatcher", () => {
         toolCount: 1,
         mcpActive: 0,
         mcpTotal: 0,
-        taskflowActive: false,
+        workflowAvailable: false,
+      workflowRunActive: false,
       }),
       buildTableViewModel({ columns: [], rows: [] }),
       buildKeyValueBlockViewModel({ entries: [] }),
@@ -974,7 +978,8 @@ describe("PlainRenderer — deterministic output", () => {
       toolCount: 10,
       mcpActive: 1,
       mcpTotal: 2,
-      taskflowActive: true,
+      workflowAvailable: true,
+      workflowRunActive: true,
     });
     const a = renderPlain(vm);
     const b = renderPlain(vm);

@@ -1033,8 +1033,8 @@ describe("session-loop session compaction", () => {
     expect(text).toContain("Focus topic: billing topic");
   });
 
-  it("/compact stays separate from TaskFlow /flow compact", async () => {
-    let flowDispatched = false;
+  it("/compact stays separate from /workflow summarize", async () => {
+    let workflowDispatched = false;
     let compactCalled = false;
     const runtime = {
       ...fakeRuntime({
@@ -1049,11 +1049,11 @@ describe("session-loop session compaction", () => {
         compactCalled = true;
         return compactResult();
       },
-      taskflow: {
+      workflow: {
         dispatcher: {
           dispatch: async () => {
-            flowDispatched = true;
-            return { ok: true, message: "flow compacted" };
+            workflowDispatched = true;
+            return { ok: true, message: "workflow summarized" };
           }
         }
       }
@@ -1069,7 +1069,7 @@ describe("session-loop session compaction", () => {
     });
 
     expect(compactCalled).toBe(true);
-    expect(flowDispatched).toBe(false);
+    expect(workflowDispatched).toBe(false);
   });
 });
 

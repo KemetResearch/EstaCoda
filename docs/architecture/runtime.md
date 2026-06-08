@@ -21,7 +21,7 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | `runtimeRouter` | `RuntimeRouter` | Route intent + skill selection |
 | `toolPlanRunner` | `ToolPlanRunner` | Execute tool plans under policy |
 | `providerTurnLoop` | `ProviderTurnLoop` | Stream provider responses and extract tool calls |
-| `skillWorkflowExecutor` | `SkillWorkflowExecutor` | Execute skill workflow plans |
+| `skillPlaybookRunner` | `SkillPlaybookRunner` | Execute skill playbook plans |
 | `nativeToolExecutor` | `NativeToolExecutor` | Execute deterministic native intents |
 | `intentRouter` | `IntentRouter` | Classify native intents |
 | `securityPolicy` | `SecurityPolicy` | Policy for this session |
@@ -42,7 +42,7 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | Input normalization | `AgentLoop` | Attachments, references, preflight |
 | Intent routing | `RuntimeRouter` | Native intent + skill selection |
 | Security assessment | `AgentLoop` | Policy decision, risk escalation |
-| Skill workflow setup | `SkillWorkflowExecutor` | Compile workflow plan, load resources |
+| Skill playbook setup | `SkillPlaybookRunner` | Compile workflow plan, load resources |
 | Prompt assembly | `AgentLoop` | Layered prompt construction |
 | Provider loop | `ProviderTurnLoop` | Streaming, tool-call extraction, iteration |
 | Tool execution | `ToolPlanRunner` | Plan conversion, execution, result packets |
@@ -51,7 +51,7 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | Artifact collection | `AgentLoop` | Gather artifacts from tool results |
 | Response formatting | `AgentLoop` | Final text + progress + artifacts |
 
-> **Status:** v0.4 extracted provider loop, tool execution, skill workflows, and native intents. `AgentLoop` retains orchestration, prompt assembly, security gating, memory promotion, and response formatting.
+> **Status:** v0.4 extracted provider loop, tool execution, skill playbooks, and native intents. `AgentLoop` retains orchestration, prompt assembly, security gating, memory promotion, and response formatting.
 
 ### CLI Active-Turn Control Boundary
 
@@ -136,7 +136,7 @@ Gateway runtime construction receives the gateway-owned security policy and appr
 23. `RunRecorder` (extracted in v0.4)
 24. `ToolPlanRunner` (extracted in v0.4)
 25. `ProviderTurnLoop` (extracted in v0.4)
-26. `SkillWorkflowExecutor` (extracted in v0.4)
+26. `SkillPlaybookRunner` (extracted in v0.4)
 27. `NativeToolExecutor` (extracted in v0.4)
 28. `RuntimeRouter` (extracted in v0.4)
 29. `AgentLoop`
@@ -229,10 +229,10 @@ Operational failure modes to check before changing this area:
 **File:** `src/runtime/tool-plan-runner.ts`
 **Role:** Converts provider tool calls into executable plans, manages safe-tool concurrency, handles failure caps, and builds result packets for continuation. Previously embedded in `AgentLoop`.
 
-### SkillWorkflowExecutor
+### SkillPlaybookRunner
 
-**File:** `src/runtime/skill-workflow-executor.ts`
-**Role:** Executes skill workflow plans (deterministic and provider-backed), loads skill resources, and manages workflow state transitions. Previously embedded in `AgentLoop`.
+**File:** `src/runtime/skill-playbook-runner.ts`
+**Role:** Executes skill playbook plans (deterministic and provider-backed), loads skill resources, and manages workflow state transitions. Previously embedded in `AgentLoop`.
 
 ### NativeToolExecutor
 

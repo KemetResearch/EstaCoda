@@ -6,8 +6,8 @@ import { resolveProfileStateHome } from "./profile-home.js";
 import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
 import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
-import type { Flow } from "../taskflow/types.js";
+import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
+import type { WorkflowRun } from "../workflow/types.js";
 
 const tempDirs: string[] = [];
 
@@ -28,7 +28,7 @@ async function expectFileMissing(path: string): Promise<void> {
   await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 }
 
-function makeFlow(id: string, sessionId: string): Flow {
+function makeRun(id: string, sessionId: string): WorkflowRun {
   return {
     id,
     sessionId,
@@ -157,7 +157,7 @@ describe("profile runtime state paths", () => {
     await expectFileMissing(join(homeDir, ".estacoda", "channel-sessions.json"));
   });
 
-  it("taskflow state is filtered by the selected profile", async () => {
+  it("workflow state is filtered by the selected profile", async () => {
     const homeDir = await makeTempHome();
     await mkdir(join(homeDir, ".estacoda"), { recursive: true });
     const db = new SQLiteSessionDB({ path: join(homeDir, ".estacoda", "sessions.sqlite") });
@@ -165,18 +165,18 @@ describe("profile runtime state paths", () => {
     try {
       const alphaSession = await db.createSession({ id: "session-alpha", profileId: "alpha" });
       const betaSession = await db.createSession({ id: "session-beta", profileId: "beta" });
-      const alphaStore = new SQLiteTaskFlowStore({ db: db.db, profileId: "alpha" });
-      const betaStore = new SQLiteTaskFlowStore({ db: db.db, profileId: "beta" });
+      const alphaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "alpha" });
+      const betaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "beta" });
 
-      await alphaStore.createFlow(makeFlow("flow-alpha", alphaSession.id));
-      await betaStore.createFlow(makeFlow("flow-beta", betaSession.id));
+      await alphaStore.createWorkflowRun(makeRun("run-alpha", alphaSession.id));
+      await betaStore.createWorkflowRun(makeRun("run-beta", betaSession.id));
 
-      await expect(alphaStore.getFlow("flow-alpha")).resolves.toMatchObject({ id: "flow-alpha" });
-      await expect(alphaStore.getFlow("flow-beta")).resolves.toBeNull();
-      await expect(betaStore.getFlow("flow-beta")).resolves.toMatchObject({ id: "flow-beta" });
-      await expect(betaStore.getFlow("flow-alpha")).resolves.toBeNull();
-      await expect(alphaStore.listActiveFlows()).resolves.toEqual([expect.objectContaining({ id: "flow-alpha" })]);
-      await expect(betaStore.listActiveFlows()).resolves.toEqual([expect.objectContaining({ id: "flow-beta" })]);
+      await expect(alphaStore.getWorkflowRun("run-alpha")).resolves.toMatchObject({ id: "run-alpha" });
+      await expect(alphaStore.getWorkflowRun("run-beta")).resolves.toBeNull();
+      await expect(betaStore.getWorkflowRun("run-beta")).resolves.toMatchObject({ id: "run-beta" });
+      await expect(betaStore.getWorkflowRun("run-alpha")).resolves.toBeNull();
+      await expect(alphaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "run-alpha" })]);
+      await expect(betaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "run-beta" })]);
     } finally {
       db.close();
     }

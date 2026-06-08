@@ -319,7 +319,7 @@ describe("createRuntime provider turn budgets", () => {
 });
 
 const providerToolNameGroups = [
-  { providerName: "builtin", toolNames: ["workflow.plan", "trajectory.record"] },
+  { providerName: "builtin", toolNames: ["playbook.plan", "trajectory.record"] },
   { providerName: "python", toolNames: ["python.probe", "document.probe"] },
   {
     providerName: "web",
@@ -638,7 +638,7 @@ describe("createRuntime MCP trust gating", () => {
         [
           {
             "maxResultSizeChars": 4000,
-            "name": "workflow.plan",
+            "name": "playbook.plan",
             "orderIndex": 0,
             "providerKind": "static",
             "providerPhase": "pre-skill-visibility",
@@ -647,10 +647,10 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "firstStep",
               "intent",
+              "playbookStep",
               "previousResults",
               "skill",
               "stepDescription",
-              "workflowStep",
             ],
             "toolsets": [
               "core",
@@ -1913,7 +1913,7 @@ describe("createRuntime MCP trust gating", () => {
               "name",
               "outcome",
               "promptSummary",
-              "selectedWorkflowStep",
+              "selectedPlaybookStep",
               "toolsAttempted",
               "type",
             ],
@@ -2339,7 +2339,7 @@ describe("createRuntime MCP trust gating", () => {
       `);
       expect(tools.map((tool) => tool.name)).toMatchInlineSnapshot(`
         [
-          "workflow.plan",
+          "playbook.plan",
           "trajectory.record",
           "python.probe",
           "document.probe",

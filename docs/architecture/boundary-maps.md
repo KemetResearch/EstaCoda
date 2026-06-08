@@ -100,7 +100,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 │  ───────────────────────────────────────────────────────  │
 │  Events captured:                                          │
 │    - session-start, user-input, context-expanded           │
-│    - skill-selected, skill-workflow-planned                │
+│    - skill-selected, skill-playbook-planned                │
 │    - tool-plan, tool-call, tool-gated, tool-result         │
 │    - artifact-created, memory-write                        │
 │    - provider-completion, provider-continuation            │

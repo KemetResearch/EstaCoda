@@ -14,7 +14,7 @@ We value contributions in this order:
 2. Security hardening — shell command safety, path traversal prevention, workspace trust boundaries, secret redaction, approval logic.
 3. Reliability — better error handling, recovery from malformed provider responses, deterministic tool execution, clearer diagnostics.
 4. Cross-platform compatibility — macOS, Linux, WSL2, shell behavior across common terminals.
-5. Agent and skill workflow improvements — safer skill loading, better intent routing, better evaluation fixtures.
+5. Agent and skill playbook improvements — safer skill loading, better intent routing, better evaluation fixtures.
 6. Documentation — setup instructions, security explanations, architecture notes, troubleshooting examples.
 7. New features — narrow, justified, and linked to an existing gap or limitation.
 

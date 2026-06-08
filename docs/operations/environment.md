@@ -149,7 +149,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `MEMORY.md` | Profile learned facts |
 | `promotions.json` | Profile memory promotion metadata |
 | `skills/` | Profile-installed skills |
-| `cron/` | Profile cron/flow state |
+| `cron/` | Profile cron/workflow state |
 | `logs/` | Profile logs |
 | `gateway/` | Profile gateway state |
 | `channel-media/` | Profile channel attachments |

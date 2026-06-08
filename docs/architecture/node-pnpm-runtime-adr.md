@@ -40,7 +40,7 @@ The PR 0 baseline below is retained as historical evidence from before the migra
 
 EstaCoda is intended to be open sourced and adopted broadly across MacBooks, Windows machines, Ubuntu VPSes, Codespaces and devcontainers, Replit-like environments, university or corporate machines, and low-maintenance local setups. Node and pnpm are a more familiar and deployable public runtime contract than Bun as a foundational runtime.
 
-Storage reliability matters more than avoiding one native dependency. EstaCoda's SQLite layer backs sessions, cron history, TaskFlow, gateway/status behavior, and future memory. `better-sqlite3` is a native dependency and therefore carries install and packaging risk, but it better matches the current synchronous SQLite access pattern and avoids relying on `node:sqlite` for core state during MVP migration.
+Storage reliability matters more than avoiding one native dependency. EstaCoda's SQLite layer backs sessions, cron history, Workflow, gateway/status behavior, and future memory. `better-sqlite3` is a native dependency and therefore carries install and packaging risk, but it better matches the current synchronous SQLite access pattern and avoids relying on `node:sqlite` for core state during MVP migration.
 
 The SQLite adapter boundary must remain narrow so the project can switch drivers later without leaking driver-specific APIs into higher layers.
 

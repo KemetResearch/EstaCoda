@@ -121,7 +121,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.inspect",
-      description: "Inspect skill metadata, workflow, examples, and evaluations without loading extra files.",
+      description: "Inspect skill metadata, playbook, examples, and evaluations without loading extra files.",
       inputSchema: {
         type: "object",
         properties: {
@@ -155,7 +155,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.eval",
-      description: "Run lightweight skill eval gates for routing, workflow tool expectations, and degraded behavior metadata.",
+      description: "Run lightweight skill eval gates for routing, playbook tool expectations, and degraded behavior metadata.",
       inputSchema: {
         type: "object",
         properties: {
@@ -224,7 +224,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           type: { type: "string" },
           lesson: { type: "string" },
           promptSummary: { type: "string" },
-          selectedWorkflowStep: { type: "string" },
+          selectedPlaybookStep: { type: "string" },
           toolsAttempted: { type: "array", items: { type: "string" } },
           outcome: { type: "string" },
           candidateImprovement: { type: "string" }
@@ -241,7 +241,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type?: "success" | "failure" | "blocked" | "partial" | "note";
         lesson?: string;
         promptSummary?: string;
-        selectedWorkflowStep?: string;
+        selectedPlaybookStep?: string;
         toolsAttempted?: string[];
         outcome?: "succeeded" | "failed" | "blocked" | "partial";
         candidateImprovement?: string;
@@ -259,7 +259,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           type: input.type,
           lesson: input.lesson,
           promptSummary: input.promptSummary,
-          selectedWorkflowStep: input.selectedWorkflowStep,
+          selectedPlaybookStep: input.selectedPlaybookStep,
           toolsAttempted: input.toolsAttempted,
           outcome: input.outcome,
           candidateImprovement: input.candidateImprovement,
@@ -1234,7 +1234,7 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     requiredCredentialFiles: skill.requiredCredentialFiles,
     configFields: skill.configFields,
     visibility: skill.visibility,
-    workflow: skill.workflow,
+    playbook: skill.playbook,
     permissionExpectations: skill.permissionExpectations,
     examples: skill.examples,
     evaluations: skill.evaluations,
@@ -1266,7 +1266,7 @@ function defaultSkillDefinition(input: {
     whenToUse: input.whenToUse ?? [input.description],
     requiredToolsets: input.requiredToolsets ?? ["core"],
     optionalToolsets: [],
-    workflow: [
+    playbook: [
       {
         id: "run",
         description: input.description,

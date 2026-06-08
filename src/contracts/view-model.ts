@@ -24,7 +24,8 @@ export interface StatusViewModel {
     readonly active: number;
     readonly total: number;
   };
-  readonly taskflowActive: boolean;
+  readonly workflowAvailable: boolean;
+  readonly workflowRunActive: boolean;
   readonly warnings: readonly WarningErrorViewModel[];
   readonly sections?: readonly ViewModel[];
 }

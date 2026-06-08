@@ -12,7 +12,7 @@ import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntr
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
-import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { compileSkillPlaybook, renderSkillPlaybookPlan } from "../skills/skill-playbook-planner.js";
 import { inferMimeType } from "../tools/media-tools.js";
 import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -239,9 +239,9 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
     : truncate(input.selectedSkillInstructions, 4_000);
   const skillSetup = renderSkillSetup(input.selectedSkillSetup);
   const skillResources = renderSkillResources(input.selectedSkillResources);
-  const skillWorkflowPlan = input.selectedSkill === undefined
-    ? "No skill workflow plan was selected."
-    : renderSkillWorkflowPlan(compileSkillWorkflowPlan(input.selectedSkill));
+  const skillPlaybookPlan = input.selectedSkill === undefined
+    ? "No skill playbook plan was selected."
+    : renderSkillPlaybookPlan(compileSkillPlaybook(input.selectedSkill));
   const toolMenu = input.providerTools === undefined || input.providerTools.length === 0
     ? "No native provider tools were exposed for this route."
     : input.providerTools
@@ -367,7 +367,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       content: [
         `Skill instructions:\n${skillInstructions}`,
         "",
-        `Skill workflow plan:\n${skillWorkflowPlan}`
+        `Skill playbook plan:\n${skillPlaybookPlan}`
       ].join("\n"),
       truncated: input.selectedSkillInstructions !== undefined && input.selectedSkillInstructions.length > skillInstructions.length
     }),
@@ -471,7 +471,7 @@ function renderResponseGuidance(input: ProviderPromptInput): string {
   if (input.selectedSkill === undefined) {
     return [
       "Response guidance:",
-      "No specialized workflow was selected for this turn.",
+      "No specialized playbook was selected for this turn.",
       "Answer the user directly using the available context.",
       "Do not mention internal routing, discovery, or fallback handling."
     ].join("\n");
@@ -569,7 +569,7 @@ function renderSkillResources(resources: SkillResourceEntry[] | undefined): stri
     ...sections,
     "",
     "Resource handling:",
-    "- references: load targeted background files with skill.view when the workflow needs specific context.",
+    "- references: load targeted background files with skill.view when the playbook needs specific context.",
     "- templates: load the template with skill.view, adapt it, then write the finished output with file.write or file.replace.",
     "- scripts: inspect the script with skill.view before running it through terminal.run or execute_code under normal sandbox rules.",
     "- assets: use skill.view for metadata, then route the file through media/document/browser tools if content inspection is needed.",
@@ -611,7 +611,7 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
     : [
         `- skill_dir=${input.skillDirectory}`,
         "- Use skill_dir as the base path for skill-local references, templates, scripts, and assets when calling terminal.run or execute_code.",
-        "- Credential files marked present above are available at their exact resolved paths; use them by path if the skill workflow needs them, and never print their contents."
+        "- Credential files marked present above are available at their exact resolved paths; use them by path if the skill playbook needs them, and never print their contents."
       ];
 
   return [

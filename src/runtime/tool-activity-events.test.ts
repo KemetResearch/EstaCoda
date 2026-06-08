@@ -5,7 +5,7 @@ import type { ToolDefinition } from "../contracts/tool.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
-import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 
 const fileReadTool: ToolDefinition = {
@@ -23,7 +23,7 @@ function runRecorder() {
     recordToolPlan: vi.fn(),
     recordClassifiedFailure: vi.fn(),
     recordSecurityRiskEscalation: vi.fn(),
-    recordWorkflowStep: vi.fn(),
+    recordSkillPlaybookStep: vi.fn(),
   };
 }
 
@@ -39,7 +39,7 @@ function execution(overrides?: Partial<ToolExecutionRecord>): ToolExecutionRecor
   };
 }
 
-function intent(overrides?: Partial<Parameters<SkillWorkflowExecutor["executeSkillWorkflow"]>[0]["intent"]>): Parameters<SkillWorkflowExecutor["executeSkillWorkflow"]>[0]["intent"] {
+function intent(overrides?: Partial<Parameters<SkillPlaybookRunner["runSkillPlaybook"]>[0]["intent"]>): Parameters<SkillPlaybookRunner["runSkillPlaybook"]>[0]["intent"] {
   return {
     nativeIntent: "general",
     labels: ["test"],
@@ -193,9 +193,9 @@ describe("runtime tool activity events", () => {
     });
   });
 
-  it("forwards target summaries from skill workflow tools", async () => {
+  it("forwards target summaries from skill playbook tools", async () => {
     const events: RuntimeEvent[] = [];
-    const executor = new SkillWorkflowExecutor({
+    const executor = new SkillPlaybookRunner({
       toolExecutor: {
         executeTool: vi.fn().mockResolvedValue(execution()),
       } as never,
@@ -208,13 +208,13 @@ describe("runtime tool activity events", () => {
       version: "1.0.0",
       whenToUse: [],
       requiredToolsets: ["files"],
-      workflow: [{ id: "read", description: "Read a URL", preferredTool: "file.read" }],
+      playbook: [{ id: "read", description: "Read a URL", preferredTool: "file.read" }],
       permissionExpectations: [],
       examples: [],
       evaluations: [],
     };
 
-    await executor.executeSkillWorkflow({
+    await executor.runSkillPlaybook({
       selectedSkill: skill,
       intent: intent(),
       trustedWorkspace: true,
@@ -228,9 +228,9 @@ describe("runtime tool activity events", () => {
     expect(events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "file.read", targetSummary: "src/app.ts", ok: true }));
   });
 
-  it("settles skill workflow starts when preferred execution is unavailable", async () => {
+  it("settles skill playbook starts when preferred execution is unavailable", async () => {
     const events: RuntimeEvent[] = [];
-    const executor = new SkillWorkflowExecutor({
+    const executor = new SkillPlaybookRunner({
       toolExecutor: {
         executeTool: vi.fn().mockResolvedValue(undefined),
       } as never,
@@ -243,13 +243,13 @@ describe("runtime tool activity events", () => {
       version: "1.0.0",
       whenToUse: [],
       requiredToolsets: ["files"],
-      workflow: [{ id: "read", description: "Read a URL", preferredTool: "file.read" }],
+      playbook: [{ id: "read", description: "Read a URL", preferredTool: "file.read" }],
       permissionExpectations: [],
       examples: [],
       evaluations: [],
     };
 
-    await executor.executeSkillWorkflow({
+    await executor.runSkillPlaybook({
       selectedSkill: skill,
       intent: intent(),
       trustedWorkspace: true,

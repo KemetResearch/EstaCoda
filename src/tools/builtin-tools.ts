@@ -2,15 +2,15 @@ import type { RegisteredTool, StaticToolProvider } from "../contracts/tool.js";
 
 export const builtinTools: readonly RegisteredTool[] = [
   {
-    name: "workflow.plan",
-    description: "Create a concise execution plan for a selected skill workflow.",
+    name: "playbook.plan",
+    description: "Create a concise execution plan for a selected skill playbook.",
     inputSchema: {
       type: "object",
       properties: {
         skill: { type: "string" },
           intent: { type: "array", items: { type: "string" } },
           firstStep: { type: "string" },
-          workflowStep: { type: "string" },
+          playbookStep: { type: "string" },
           stepDescription: { type: "string" },
           previousResults: { type: "array", items: { type: "string" } }
         },
@@ -18,23 +18,23 @@ export const builtinTools: readonly RegisteredTool[] = [
     },
     riskClass: "read-only-local",
     toolsets: ["core", "research"],
-    progressLabel: "planning workflow",
+    progressLabel: "planning playbook",
     maxResultSizeChars: 4000,
     isAvailable: () => true,
     run: async (input: {
       skill?: string;
       intent?: string[];
       firstStep?: string;
-      workflowStep?: string;
+      playbookStep?: string;
       stepDescription?: string;
       previousResults?: string[];
     }) => ({
       ok: true,
       content: [
-        `Prepared workflow for ${input.skill ?? "selected skill"}.`,
+        `Prepared playbook for ${input.skill ?? "selected skill"}.`,
         input.intent === undefined ? undefined : `Intent: ${input.intent.join(", ")}`,
         input.firstStep === undefined ? undefined : `First step: ${input.firstStep}`,
-        input.workflowStep === undefined ? undefined : `Workflow step: ${input.workflowStep}`,
+        input.playbookStep === undefined ? undefined : `Playbook step: ${input.playbookStep}`,
         input.stepDescription === undefined ? undefined : `Step goal: ${input.stepDescription}`,
         input.previousResults === undefined || input.previousResults.length === 0
           ? undefined

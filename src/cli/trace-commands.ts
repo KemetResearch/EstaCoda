@@ -249,7 +249,7 @@ function summarizeEvent(event: TrajectoryEvent): string {
       return typeof d.tool === "string" ? d.tool : "?";
     case "skill-selected":
       return typeof d.skill === "string" ? d.skill : "?";
-    case "skill-workflow-planned": {
+    case "skill-playbook-planned": {
       const plan = isRecord(d.plan) ? d.plan : {};
       const steps = Array.isArray(plan.steps) ? plan.steps : [];
       return `${steps.length} steps`;

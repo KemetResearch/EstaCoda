@@ -45,7 +45,8 @@ describe("ViewModel builders", () => {
       toolCount: 34,
       mcpActive: 2,
       mcpTotal: 3,
-      taskflowActive: true,
+      workflowAvailable: true,
+      workflowRunActive: true,
       warnings: [
         buildWarningErrorViewModel({
           severity: "warn",
@@ -63,7 +64,7 @@ describe("ViewModel builders", () => {
     expect(vm.skillAutonomy).toBe("suggest");
     expect(vm.toolCount).toBe(34);
     expect(vm.mcp).toEqual({ active: 2, total: 3 });
-    expect(vm.taskflowActive).toBe(true);
+    expect(vm.workflowRunActive).toBe(true);
     expect(vm.warnings).toHaveLength(1);
     expect(vm.warnings[0].kind).toBe("warning");
     expect(vm.sections).toBeUndefined();
@@ -81,7 +82,8 @@ describe("ViewModel builders", () => {
       toolCount: 0,
       mcpActive: 0,
       mcpTotal: 0,
-      taskflowActive: false,
+      workflowAvailable: false,
+      workflowRunActive: false,
     });
 
     expect(vm.warnings).toEqual([]);
@@ -622,7 +624,8 @@ describe("ViewModel shape invariants", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      taskflowActive: false,
+      workflowAvailable: false,
+      workflowRunActive: false,
     });
     const table = buildTableViewModel({ columns: [], rows: [] });
     const kvBlock = buildKeyValueBlockViewModel({ entries: [] });
@@ -705,7 +708,8 @@ describe("ViewModel shape invariants", () => {
           toolCount: 1,
           mcpActive: 0,
           mcpTotal: 0,
-          taskflowActive: false,
+          workflowAvailable: false,
+          workflowRunActive: false,
         }),
         buildTableViewModel({ columns: [], rows: [] }),
         buildKeyValueBlockViewModel({ entries: [kv("k", "v")] }),

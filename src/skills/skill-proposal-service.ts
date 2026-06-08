@@ -441,7 +441,7 @@ export function classifyPatchRisk(patch: SkillPatchOperation): SkillPatchRiskLev
   if (/\b(required_credential_files|requiredcredentialfiles|required_environment_variables|requiredenvironmentvariables|permission_expectations|permissionexpectations|terminal\.run|execute_code|browser\.|web\.|external|credential|secret|token|api[_-]?key)\b/u.test(serialized)) {
     return "high";
   }
-  if (patch.type === "json_frontmatter_patch" && /\/(workflow|triggerpatterns|trigger_patterns|intentlabels|intent_labels|negativepatterns|negative_patterns|requiredtoolsets|required_toolsets|optionaltoolsets|optional_toolsets)\b/u.test(patch.path.toLowerCase())) {
+  if (patch.type === "json_frontmatter_patch" && /\/(playbook|workflow|triggerpatterns|trigger_patterns|intentlabels|intent_labels|negativepatterns|negative_patterns|requiredtoolsets|required_toolsets|optionaltoolsets|optional_toolsets)\b/u.test(patch.path.toLowerCase())) {
     return "medium";
   }
   return "low";
@@ -628,7 +628,7 @@ type SkillEvalCase = SkillEvaluation & {
   shouldNotUseToolsets?: string[];
   expected?: {
     selectedSkill?: string;
-    workflowStep?: string;
+    playbookStep?: string;
     mustAttempt?: string[];
     mustUseOneOf?: string[];
     mustNotUse?: string[];
@@ -662,9 +662,9 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
   const availableToolsets = new Set([
     ...skill.requiredToolsets,
     ...(skill.optionalToolsets ?? []),
-    ...skill.workflow.flatMap((step) => step.toolsets ?? [])
+    ...skill.playbook.flatMap((step) => step.toolsets ?? [])
   ]);
-  const declaredTools = new Set(skill.workflow.flatMap((step) => [
+  const declaredTools = new Set(skill.playbook.flatMap((step) => [
     step.preferredTool,
     ...(step.toolCandidates ?? [])
   ].filter(isNonEmptyString)));
@@ -677,13 +677,13 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
     for (const toolset of evaluation.shouldUseToolsets ?? []) {
       details[`uses_toolset:${toolset}`] = availableToolsets.has(toolset);
       if (!details[`uses_toolset:${toolset}`]) {
-        failures.push(`${label}: expected toolset ${toolset} is not declared by the skill workflow`);
+        failures.push(`${label}: expected toolset ${toolset} is not declared by the skill playbook`);
       }
     }
     for (const toolset of evaluation.shouldNotUseToolsets ?? []) {
       details[`avoids_toolset:${toolset}`] = !availableToolsets.has(toolset);
       if (!details[`avoids_toolset:${toolset}`]) {
-        failures.push(`${label}: forbidden toolset ${toolset} is still declared by the skill workflow`);
+        failures.push(`${label}: forbidden toolset ${toolset} is still declared by the skill playbook`);
       }
     }
     if (evaluation.shouldNotAskUserFirst === true) {
@@ -698,16 +698,16 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
     if (details.selectedSkill === false) {
       failures.push(`${label}: expected selectedSkill ${evaluation.expected?.selectedSkill}, got ${skill.name}`);
     }
-    if (evaluation.expected?.workflowStep !== undefined) {
-      details.workflowStep = skill.workflow.some((step) => step.id === evaluation.expected?.workflowStep);
+    if (evaluation.expected?.playbookStep !== undefined) {
+      details.playbookStep = skill.playbook.some((step) => step.id === evaluation.expected?.playbookStep);
     }
-    if (details.workflowStep === false) {
-      failures.push(`${label}: expected workflow step ${evaluation.expected?.workflowStep} is not declared`);
+    if (details.playbookStep === false) {
+      failures.push(`${label}: expected playbook step ${evaluation.expected?.playbookStep} is not declared`);
     }
     for (const tool of evaluation.expected?.mustAttempt ?? []) {
       details[`must_attempt:${tool}`] = declaredTools.has(tool);
       if (!details[`must_attempt:${tool}`]) {
-        failures.push(`${label}: expected tool candidate ${tool} is not declared by the workflow`);
+        failures.push(`${label}: expected tool candidate ${tool} is not declared by the playbook`);
       }
     }
     if ((evaluation.expected?.mustUseOneOf ?? []).length > 0) {
@@ -719,7 +719,7 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
     for (const tool of evaluation.expected?.mustNotUse ?? []) {
       details[`must_not_use:${tool}`] = !declaredTools.has(tool);
       if (!details[`must_not_use:${tool}`]) {
-        failures.push(`${label}: forbidden tool candidate ${tool} is declared by the workflow`);
+        failures.push(`${label}: forbidden tool candidate ${tool} is declared by the playbook`);
       }
     }
     if (evaluation.expected?.skillVisible === false) {
@@ -823,7 +823,7 @@ function normalizeEvalCase(value: unknown): SkillEvalCase {
     expected: isRecord(value.expected)
       ? {
           selectedSkill: firstNonEmptyString(value.expected.selectedSkill ?? value.expected.selected_skill),
-          workflowStep: firstNonEmptyString(value.expected.workflowStep ?? value.expected.workflow_step),
+          playbookStep: firstNonEmptyString(value.expected.playbookStep ?? value.expected.playbook_step),
           mustAttempt: stringArrayOrEmpty(value.expected.mustAttempt ?? value.expected.must_attempt),
           mustUseOneOf: stringArrayOrEmpty(value.expected.mustUseOneOf ?? value.expected.must_use_one_of),
           mustNotUse: stringArrayOrEmpty(value.expected.mustNotUse ?? value.expected.must_not_use),

@@ -300,10 +300,10 @@ function registerAll(): void {
     scope: "both",
   });
   commandRegistry.register({
-    name: "flow",
+    name: "workflow",
     aliases: [],
-    category: "TaskFlow",
-    description: "TaskFlow operator commands (status, pause, resume, steer, trace, etc.)",
+    category: "Workflow",
+    description: "Workflow operator commands (status, pause, resume, steer, trace, etc.)",
     visibility: "public",
     scope: "both",
   });

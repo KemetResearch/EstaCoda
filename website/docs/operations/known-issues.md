@@ -34,7 +34,7 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 | Session compression | `compression.enabled` and `compression.experimental` both `true` | Experimental-only. Disabled by default. |
 | Agent Evolution and autonomous local skill creation | `skills.autonomy` modes above `suggest` | Creates skills automatically from bounded workflow observations. |
 | Skill evolution/proposal/promotion workflows | `skill.propose_patch`, `skill.rollback` | Governed but not fully autonomous. Promotion runs eval gates. |
-| TaskFlow runtime integration | SQLite session DB required | Best-effort. Wires only when the session database is SQLite. |
+| Workflow runtime integration | SQLite session DB required | Best-effort. Wires only when the session database is SQLite. |
 | Local TTS | Deferred | No local TTS provider is implemented. |
 | Mistral TTS/STT | Deferred | Not implemented. |
 | Gateway auto-TTS | `voice.autoTts: true` | Per-reply and per-hour caps apply. |

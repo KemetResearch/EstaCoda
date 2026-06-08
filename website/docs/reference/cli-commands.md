@@ -264,34 +264,34 @@ Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
 ---
 
-## TaskFlow
+## Workflow
 
-Requires SQLite session persistence. In-memory session DB rejects TaskFlow commands.
+Requires SQLite session persistence. In-memory session DB rejects Workflow commands.
 
 ```bash
-estacoda flow list                      # active (non-terminal) flows
-estacoda flow show <flowId>
-estacoda flow status <flowId>
-estacoda flow trace <flowId> [limit]
-estacoda flow pause <flowId> [reason]
-estacoda flow resume <flowId>
-estacoda flow interrupt <flowId> [reason]
-estacoda flow cancel <flowId> [reason]
-estacoda flow steer <flowId> <instruction>
-estacoda flow approve <stepId>
-estacoda flow reject <stepId> [reason]
-estacoda flow retry <stepId>
-estacoda flow skip <stepId> [reason]
-estacoda flow checkpoint <flowId> <name>
-estacoda flow compact <flowId>
+estacoda workflow list                      # active (non-terminal) workflow runs
+estacoda workflow show <runId>
+estacoda workflow status <runId>
+estacoda workflow trace <runId> [limit]
+estacoda workflow pause <runId> [reason]
+estacoda workflow resume <runId>
+estacoda workflow interrupt <runId> [reason]
+estacoda workflow cancel <runId> [reason]
+estacoda workflow steer <runId> <instruction>
+estacoda workflow approve <stepId>
+estacoda workflow reject <stepId> [reason]
+estacoda workflow retry <stepId>
+estacoda workflow skip <stepId> [reason]
+estacoda workflow checkpoint <runId> <name>
+estacoda workflow summarize <runId>
 ```
 
-**State touched:** SQLite session DB (`flow_events`, `flow_steps` tables).
+**State touched:** SQLite session DB (`workflow_events`, `workflow_steps` tables).
 
 **Failure modes:**
 - Retry only works if `idempotent` or `safeToRetry` is true and under `maxRetries`.
 - Skip only works if the step has not started and `allowSkipIfSkippable` is true.
-- Steer is rejected for flows in terminal states.
+- Steer is rejected for workflow runs in terminal states.
 - Interrupt sends SIGTERM with 5s timeout to active processes, then transitions state.
 
 ---

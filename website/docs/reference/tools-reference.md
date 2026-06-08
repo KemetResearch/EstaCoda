@@ -37,7 +37,7 @@ Static tools that are always registered if their provider is loaded.
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `workflow.plan` | `read-only-local` | None |
+| `playbook.plan` | `read-only-local` | None |
 | `trajectory.record` | `read-only-local` | SQLite (trajectory events) |
 
 ### Workspace tools
@@ -317,7 +317,7 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 |------|------|---------------|
 | `skill.*` | `safe` | None (read-only inspection) |
 
-**Behavior:** Lists, inspects, and invokes skill workflows. Skill visibility depends on enabled packs and the current profile.
+**Behavior:** Lists, inspects, and invokes skill playbooks. Skill visibility depends on enabled packs and the current profile.
 
 ### Delegation tools
 

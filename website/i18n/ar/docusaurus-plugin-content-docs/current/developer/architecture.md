@@ -82,7 +82,7 @@ updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })
 3. سجل الأدوات
 4. سجلات المهارات (official، profile، external)
 5. تبعيات الموجه (prompt cache، context expander)
-6. مكونات وقت التشغيل المستخرجة (`RunRecorder`، `ToolPlanRunner`، `ProviderTurnLoop`، `SkillWorkflowExecutor`، `NativeToolExecutor`)
+6. مكونات وقت التشغيل المستخرجة (`RunRecorder`، `ToolPlanRunner`، `ProviderTurnLoop`، `SkillPlaybookRunner`، `NativeToolExecutor`)
 7. `AgentLoop`
 
 قواعد التكوين الرئيسية:
@@ -247,7 +247,7 @@ updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })
 | سياسة الأمان | `live-proven` | الوضع التكيفي مع تراجع المقيم الذكي. |
 | البوابة | `live-proven` | بوابة Telegram. |
 | Cron | `implemented` | جدولة الوظائف وتنفيذها. |
-| TaskFlow | `implemented` | تنفيذ متعدد الخطوات دائم. يُبرمج فقط مع SQLite. |
+| Workflow | `implemented` | تنفيذ متعدد الخطوات دائم. يُبرمج فقط مع SQLite. |
 | المتصفح (CDP المحلي) | `live-proven` | بروتوكول Chrome DevTools المحلي. |
 | المتصفح (سحابي) | `unsupported` | نماذج مسجّلة فقط. |
 | البحث على الويب | `unsupported` | نماذج مسجّلة فقط. مسار الاسترداد المحمي فقط. |

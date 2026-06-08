@@ -86,7 +86,7 @@ pnpm run smoke --fail-fast --json
 - Golden flow comparison
 - Change manifest state transitions
 - Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
-- TaskFlow: state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, operator control plane, compaction
+- Workflow: state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, command/control, event summaries
 
 ### What smoke does not cover
 
@@ -129,24 +129,24 @@ Smoke limitations are not product limitations. They are testing boundaries.
 - `routing-metadata-proposal` — Routing metadata manifest skeleton
 - `evolution-export-shape` — Export dataset matches schema
 
-**TaskFlow foundation (5):**
-- `taskflow-state-transitions` — Flow and step state transitions
-- `taskflow-locking` — Lock acquire, release, heartbeat, stale recovery
-- `taskflow-migration` — Schema migration
-- `taskflow-atomicity` — Atomic transitions and round-trip integrity
-- `taskflow-engine-lifecycle` — Engine flow and step lifecycle
+**Workflow foundation (5):**
+- `workflow-run-state-transitions` — Workflow run and step state transitions
+- `workflow-locking` — Lock acquire, release, heartbeat, stale recovery
+- `workflow-migration` — Schema migration
+- `workflow-store-atomicity` — Atomic transitions and round-trip integrity
+- `workflow-engine-lifecycle` — Engine workflow run and step lifecycle
 
-**TaskFlow engine (1):**
-- `taskflow-restart-recovery` — Restart recovery marks stale flows interrupted
+**Workflow engine (1):**
+- `workflow-restart-recovery` — Restart recovery marks stale workflow runs interrupted
 
 **Operator control plane (1):**
-- `operator-control-plane` — Dispatcher routes and validates slash commands
+- `workflow-command-control` — Dispatcher routes and validates slash commands
 
-**Compaction (1):**
-- `flow-compaction` — Manual, automatic, boundary safety, preservation
+**Workflow Event Summaries (1):**
+- `workflow-event-summary` — Manual, automatic, boundary safety, preservation
 
-**Track 5 integration (1):**
-- `track5-integration` — System integration: adapter, CLI bridge, runtime wiring
+**Workflow Integration (1):**
+- `workflow-integration` — System integration: adapter, CLI bridge, runtime wiring
 
 ## Diagnostic CLI tools
 

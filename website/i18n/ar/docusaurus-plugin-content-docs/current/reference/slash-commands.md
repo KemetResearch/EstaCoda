@@ -250,38 +250,38 @@ sidebar_position: 2
 
 ---
 
-## TaskFlow
+## Workflow
 
-يتطلب قاعدة بيانات جلسات SQLite. متاح عندما يكون TaskFlow مربوطاً.
+يتطلب قاعدة بيانات جلسات SQLite. متاح عندما يكون Workflow مربوطاً.
 
 ```bash
-/flow status [flowId]
-/flow pause <flowId> [reason]
-/flow resume <flowId>
-/flow interrupt <flowId> [reason]
-/flow cancel <flowId> [reason]
-/flow steer <flowId> <guidance>
-/flow approve <stepId>
-/flow reject <stepId> [reason]
-/flow retry <stepId>
-/flow skip <stepId> [reason]
-/flow checkpoint <flowId> <name>
-/flow trace [flowId] [limit]
-/flow compact <flowId>
-/flow set <flowId>
-/flow unset
+/workflow status [runId]
+/workflow pause <runId> [reason]
+/workflow resume <runId>
+/workflow interrupt <runId> [reason]
+/workflow cancel <runId> [reason]
+/workflow steer <runId> <guidance>
+/workflow approve <stepId>
+/workflow reject <stepId> [reason]
+/workflow retry <stepId>
+/workflow skip <stepId> [reason]
+/workflow checkpoint <runId> <name>
+/workflow trace [runId] [limit]
+/workflow summarize <runId>
+/workflow activate <runId>
+/workflow deactivate
 ```
 
-إذا تم حذف `flowId` في `status` و `trace`، يستخدم التدفق النشط.
+إذا تم حذف `runId` في `status` و `trace`، يستخدم تشغيل Workflow النشط.
 
-**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `flow_events`، `flow_steps`).
+**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `workflow_events`، `workflow_steps`).
 
 **السلوك:**
-- `/flow steer` يسجّل حدث `OperatorEvent` غير مستهلك. في الدور التالي للمحوّل، يُضاف التوجيه كبدئة لنص المستخدم. الأحداث تُعلّم مستهلكة وتظهر في `/flow trace`.
-- `/flow set` يربط الجلسة الحالية بتدفق. `/flow unset` يمسح الربط.
+- `/workflow steer` يسجّل حدث `OperatorEvent` غير مستهلك. في الدور التالي للمحوّل، يُضاف التوجيه كبدئة لنص المستخدم. الأحداث تُعلّم مستهلكة وتظهر في `/workflow trace`.
+- `/workflow activate` يربط الجلسة الحالية بتشغيل Workflow. `/workflow deactivate` يمسح الربط.
 
 **أنماط الفشل:**
-- يُرفض التوجيه للتدفقات في حالات نهائية.
+- يُرفض التوجيه لتشغيلات Workflow في حالات نهائية.
 - إعادة المحاولة تعمل فقط إذا كان `idempotent` أو `safeToRetry` صحيحاً وتحت `maxRetries`.
 - التخطي يعمل فقط إذا لم يبدأ الخطوة وكان `allowSkipIfSkippable` صحيحاً.
 

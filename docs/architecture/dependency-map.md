@@ -34,7 +34,7 @@ graph TD
         PTL["provider-turn-loop.ts<br/>617 lines"]
         TPR["tool-plan-runner.ts<br/>283 lines"]
         RR["run-recorder.ts<br/>524 lines"]
-        SWE["skill-workflow-executor.ts<br/>260 lines"]
+        SWE["skill-playbook-runner.ts<br/>260 lines"]
         NTE["native-tool-executor.ts<br/>82 lines"]
     end
 
@@ -46,7 +46,7 @@ graph TD
         SLEARN["skill-learning.ts<br/>497 lines"]
         SSYNC["skill-bundled-sync.ts<br/>417 lines"]
         SMUT["skill-mutation-policy.ts<br/>83 lines"]
-        SWPLAN["skill-workflow-planner.ts<br/>148 lines"]
+        SWPLAN["skill-playbook-planner.ts<br/>148 lines"]
         STELEM["skill-usage-telemetry.ts<br/>41 lines"]
         SPS["skill-proposal-service.ts<br/>933 lines"]
     end

@@ -82,7 +82,7 @@ sidebar_position: 2
 9. **بنية المهارات** — `SkillRegistry`، `SkillLearningManager`، `SkillEvolutionStore`
 10. **مدير التفويض**
 11. **منفذ المزود**
-12. **مكونات وقت التشغيل المستخرجة** — `RunRecorder`، `ToolPlanRunner`، `ProviderTurnLoop`، `SkillWorkflowExecutor`، `NativeToolExecutor`، `RuntimeRouter`
+12. **مكونات وقت التشغيل المستخرجة** — `RunRecorder`، `ToolPlanRunner`، `ProviderTurnLoop`، `SkillPlaybookRunner`، `NativeToolExecutor`، `RuntimeRouter`
 13. **AgentLoop** — دورة التنسيق
 
 أي تغيير في توقيع الباني ينتشر عبر هذا الملف. لا يوجد حاوية حقن تبعية أو حدود إضافية.

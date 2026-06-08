@@ -8,7 +8,7 @@ import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
-import type { SkillLifecycleState, SkillRouteTelemetry, SkillWorkflowPlan } from "./skill.js";
+import type { SkillLifecycleState, SkillRouteTelemetry, CompiledSkillPlaybook } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
 import type {
   ModelProfile,
@@ -202,11 +202,11 @@ export type SessionEvent =
       skill: string;
     }
   | {
-      kind: "skill-workflow-planned";
-      plan: SkillWorkflowPlan;
+      kind: "skill-playbook-planned";
+      plan: CompiledSkillPlaybook;
     }
   | {
-      kind: "skill-workflow-step";
+      kind: "skill-playbook-step";
       skill: string;
       stepId: string;
       description: string;

@@ -59,15 +59,15 @@ import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 
-// TaskFlow v0.8 imports
-import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
-import { FlowLockService } from "../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../taskflow/taskflow-engine.js";
-import { OperatorCommandDispatcher } from "../taskflow/operator-command-dispatcher.js";
-import { FlowProcessRegistry } from "../taskflow/flow-process-registry.js";
-import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/flow-compaction-service.js";
-import { FlowRestartRecovery } from "../taskflow/flow-restart-recovery.js";
-import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapter.js";
+// Workflow module v0.8 imports
+import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
+import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../workflow/workflow-engine.js";
+import { WorkflowCommandDispatcher } from "../workflow/workflow-command-dispatcher.js";
+import { WorkflowProcessRegistry } from "../workflow/workflow-process-registry.js";
+import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../workflow/workflow-event-summary-service.js";
+import { WorkflowRestartRecovery } from "../workflow/workflow-restart-recovery.js";
+import { WorkflowAgentLoopAdapter } from "../workflow/workflow-agent-loop-adapter.js";
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
@@ -89,7 +89,7 @@ import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop } from "./provider-turn-loop.js";
-import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
+import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
@@ -394,16 +394,16 @@ export type Runtime = {
   sessionId: string;
   consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
-  // TaskFlow v0.8 integration (available when SQLiteSessionDB is used)
-  taskflow?: {
-    engine: import("../taskflow/taskflow-engine.js").TaskFlowEngine;
-    store: import("../taskflow/taskflow-store.js").TaskFlowStore;
-    dispatcher: import("../taskflow/operator-command-dispatcher.js").OperatorCommandDispatcher;
-    processRegistry: import("../taskflow/flow-process-registry.js").FlowProcessRegistry;
-    compactionService: import("../taskflow/flow-compaction-service.js").FlowCompactionService;
-    adapter: import("../taskflow/taskflow-agent-loop-adapter.js").TaskFlowAgentLoopAdapter;
-    activeFlowId: string | null;
-    setActiveFlowId(flowId: string | null): void;
+  // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
+  workflow?: {
+    engine: import("../workflow/workflow-engine.js").WorkflowEngine;
+    store: import("../workflow/workflow-store.js").WorkflowStore;
+    dispatcher: import("../workflow/workflow-command-dispatcher.js").WorkflowCommandDispatcher;
+    processRegistry: import("../workflow/workflow-process-registry.js").WorkflowProcessRegistry;
+    compactionService: import("../workflow/workflow-event-summary-service.js").WorkflowEventSummaryService;
+    adapter: import("../workflow/workflow-agent-loop-adapter.js").WorkflowAgentLoopAdapter;
+    activeRunId: string | null;
+    setActiveRunId(runId: string | null): void;
     recoverFromRestart(): Promise<{
       interruptedFlows: number;
       recoveredLocks: number;
@@ -1046,7 +1046,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   });
 
-  const skillWorkflowExecutor = new SkillWorkflowExecutor({
+  const skillPlaybookRunner = new SkillPlaybookRunner({
     toolExecutor,
     sessionId,
     sessionRuntimeContext,
@@ -1068,7 +1068,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }),
     toolPlanRunner,
     providerTurnLoop,
-    skillWorkflowExecutor,
+    skillPlaybookRunner,
     nativeToolExecutor,
     responseLabel: runtimeBranding.responseLabel,
     intentRouter,
@@ -1101,35 +1101,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     agentProfile: options.agentProfile
   });
 
-  // ─── TaskFlow v0.8 Integration ───
-  let taskflow: Runtime["taskflow"] | undefined;
+  // ─── Workflow module v0.8 Integration ───
+  let workflow: Runtime["workflow"] | undefined;
 
-  // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
+  // Only wire the workflow module when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db, profileId });
-      const lockService = new FlowLockService({ store: taskflowStore });
-      const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
-      const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
-      const compactionService = new FlowCompactionService({
-        store: taskflowStore,
-        config: DEFAULT_COMPACTION_CONFIG
+      const workflowStore = new SQLiteWorkflowStore({ db: sessionDb.db, profileId });
+      const lockService = new WorkflowLockService({ store: workflowStore });
+      const workflowEngine = new WorkflowEngine({ store: workflowStore, lockService, ownerId: "runtime" });
+      const processRegistry = new WorkflowProcessRegistry({ store: workflowStore });
+      const compactionService = new WorkflowEventSummaryService({
+        store: workflowStore,
+        config: DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG
       });
-      const dispatcher = new OperatorCommandDispatcher({
-        engine: taskflowEngine,
-        store: taskflowStore,
+      const dispatcher = new WorkflowCommandDispatcher({
+        engine: workflowEngine,
+        store: workflowStore,
         processRegistry,
         compactionService
       });
-      const adapter = new TaskFlowAgentLoopAdapter({
+      const adapter = new WorkflowAgentLoopAdapter({
         agentLoop,
-        store: taskflowStore,
+        store: workflowStore,
         compactionService
       });
 
       // Run restart recovery on startup
-      const restartRecovery = new FlowRestartRecovery({
-        store: taskflowStore,
+      const restartRecovery = new WorkflowRestartRecovery({
+        store: workflowStore,
         lockService,
         now: () => new Date()
       });
@@ -1139,20 +1139,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // Non-critical diagnostic; do not write to stdout to avoid breaking CLI output contracts
         // eslint-disable-next-line no-console
         console.error(
-          `[TaskFlow] Restart recovery: ${recoveryResult.interrupted} flows interrupted, ${recoveryResult.staleLocksReleased} stale locks recovered.`
+          `[Workflow] Restart recovery: ${recoveryResult.interrupted} workflow runs interrupted, ${recoveryResult.staleLocksReleased} stale locks recovered.`
         );
       }
 
-      taskflow = {
-        engine: taskflowEngine,
-        store: taskflowStore,
+      workflow = {
+        engine: workflowEngine,
+        store: workflowStore,
         dispatcher,
         processRegistry,
         compactionService,
         adapter,
-        activeFlowId: null,
-        setActiveFlowId(flowId: string | null) {
-          this.activeFlowId = flowId;
+        activeRunId: null,
+        setActiveRunId(runId: string | null) {
+          this.activeRunId = runId;
         },
         async recoverFromRestart() {
           const result = await restartRecovery.recover();
@@ -1164,8 +1164,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       };
     }
   } catch {
-    // TaskFlow integration is best-effort for v0.8. Do not block runtime creation.
-    taskflow = undefined;
+    // Workflow module integration is best-effort for v0.8. Do not block runtime creation.
+    workflow = undefined;
   }
 
   return {
@@ -1227,14 +1227,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
-      // If an active TaskFlow is set, route through the adapter
-      if (taskflow?.activeFlowId) {
-        const flow = await taskflow.store.getFlow(taskflow.activeFlowId);
-        if (flow && flow.status === "running") {
-          const steps = await taskflow.store.listSteps(flow.id);
+      // If an active workflow run is set, route through the adapter
+      if (workflow?.activeRunId) {
+        const run = await workflow.store.getWorkflowRun(workflow.activeRunId);
+        if (run && run.status === "running") {
+          const steps = await workflow.store.listWorkflowSteps(run.id);
           const activeStep = steps.find((s) => s.status === "running");
-          const turnResult = await taskflow.adapter.runTurn({
-            flow,
+          const turnResult = await workflow.adapter.runTurn({
+            run,
             step: activeStep,
             text: input.text,
             channel: input.channel,
@@ -1366,7 +1366,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `tools: ${toolRegistry.list().length}`,
         `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
-        taskflow ? `taskflow: active (SQLite)` : undefined,
+        workflow ? `workflow: available (SQLite)` : undefined,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
     },
@@ -1381,7 +1381,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         toolCount: toolRegistry.list().length,
         mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
         mcpTotal: loadedMcpServers.length,
-        taskflowActive: taskflow !== undefined,
+        workflowAvailable: workflow !== undefined,
+        workflowRunActive: (workflow?.activeRunId ?? null) !== null,
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
@@ -1442,7 +1443,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         updateHint,
       });
     },
-    taskflow
+    workflow
   };
 }
 

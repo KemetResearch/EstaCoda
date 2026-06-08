@@ -47,7 +47,7 @@ describe("RuntimeRouter", () => {
       whenToUse: [],
       requiredToolsets: [],
       requiredCredentialFiles: ["~/credentials.json"],
-      workflow: [],
+      playbook: [],
       permissionExpectations: [],
       examples: [],
       evaluations: []
