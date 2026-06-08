@@ -55,6 +55,7 @@ export type WorkflowPlan = {
   name: string;
   description: string;
   steps: WorkflowPlanStep[];
+  metadata?: Record<string, unknown>;
 };
 
 export type WorkflowPlanStep = {
@@ -66,6 +67,7 @@ export type WorkflowPlanStep = {
   maxRetries?: number;
   idempotent?: boolean;
   onFailure?: "stop" | "retry" | "skip" | "escalate";
+  metadata?: Record<string, unknown>;
 };
 
 // ─── WorkflowStep ───
