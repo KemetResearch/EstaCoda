@@ -3,18 +3,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { SQLiteTaskFlowStore } from "./sqlite-taskflow-store.js";
+import { SQLiteWorkflowStore } from "./sqlite-workflow-store.js";
 import type { Flow, FlowEvent, FlowStep } from "./types.js";
 
-describe("SQLiteTaskFlowStore", () => {
+describe("SQLiteWorkflowStore", () => {
   let tmpDir: string;
   let sessionDb: SQLiteSessionDB;
-  let store: SQLiteTaskFlowStore;
+  let store: SQLiteWorkflowStore;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "estacoda-taskflow-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "estacoda-workflow-test-"));
     sessionDb = new SQLiteSessionDB({ path: join(tmpDir, "sessions.sqlite") });
-    store = new SQLiteTaskFlowStore({ db: sessionDb.db });
+    store = new SQLiteWorkflowStore({ db: sessionDb.db });
   });
 
   afterEach(() => {

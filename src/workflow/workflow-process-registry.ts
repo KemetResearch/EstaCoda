@@ -1,19 +1,19 @@
-// FlowProcessRegistry — thin service wrapper for active process tracking per flow/step
+// WorkflowProcessRegistry — thin service wrapper for active process tracking per flow/step
 // Track 2: Engine — process ownership and cleanup
 
 import type { FlowId, FlowProcess, StepId } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
+import type { WorkflowStore } from "./workflow-store.js";
 
-export type FlowProcessRegistryOptions = {
-  store: TaskFlowStore;
+export type WorkflowProcessRegistryOptions = {
+  store: WorkflowStore;
   now?: () => Date;
 };
 
-export class FlowProcessRegistry {
-  readonly #store: TaskFlowStore;
+export class WorkflowProcessRegistry {
+  readonly #store: WorkflowStore;
   readonly #now: () => Date;
 
-  constructor(options: FlowProcessRegistryOptions) {
+  constructor(options: WorkflowProcessRegistryOptions) {
     this.#store = options.store;
     this.#now = options.now ?? (() => new Date());
   }

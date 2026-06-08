@@ -1,13 +1,13 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../../taskflow/taskflow-engine.js";
-import { FlowProcessRegistry } from "../../taskflow/flow-process-registry.js";
-import { OperatorCommandDispatcher } from "../../taskflow/operator-command-dispatcher.js";
-import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../../taskflow/flow-compaction-service.js";
-import { FlowRestartRecovery } from "../../taskflow/flow-restart-recovery.js";
-import { TaskFlowAgentLoopAdapter } from "../../taskflow/taskflow-agent-loop-adapter.js";
-import { SQLiteTaskFlowStore } from "../../taskflow/sqlite-taskflow-store.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../../workflow/workflow-engine.js";
+import { WorkflowProcessRegistry } from "../../workflow/workflow-process-registry.js";
+import { WorkflowCommandDispatcher } from "../../workflow/workflow-command-dispatcher.js";
+import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../../workflow/workflow-event-summary-service.js";
+import { WorkflowRestartRecovery } from "../../workflow/workflow-restart-recovery.js";
+import { WorkflowAgentLoopAdapter } from "../../workflow/workflow-agent-loop-adapter.js";
+import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
 import { TrajectoryRecorder } from "../../trajectory/trajectory-recorder.js";
 import { assertTrue, assertEqual, assertContains, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
@@ -98,19 +98,19 @@ export const track5IntegrationCase: EvalCase = {
     const assertions = [];
 
     // ─── Shared stores ───
-    const store = new FakeTaskFlowStore({ now: makeNow() });
-    const lockService = new FlowLockService({ store, now: makeNow(), defaultLeaseMs: 30_000 });
-    const engine = new TaskFlowEngine({ store, lockService, ownerId: "worker-1", now: makeNow() });
-    const processRegistry = new FlowProcessRegistry({ store });
-    const compactionService = new FlowCompactionService({
+    const store = new FakeWorkflowStore({ now: makeNow() });
+    const lockService = new WorkflowLockService({ store, now: makeNow(), defaultLeaseMs: 30_000 });
+    const engine = new WorkflowEngine({ store, lockService, ownerId: "worker-1", now: makeNow() });
+    const processRegistry = new WorkflowProcessRegistry({ store });
+    const compactionService = new WorkflowEventSummaryService({
       store,
-      config: { ...DEFAULT_COMPACTION_CONFIG, enabled: false },
+      config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: false },
       now: makeNow()
     });
-    const dispatcher = new OperatorCommandDispatcher({ engine, store, processRegistry, compactionService });
+    const dispatcher = new WorkflowCommandDispatcher({ engine, store, processRegistry, compactionService });
 
     // ═════════════════════════════════════════════════════════════════
-    // 1. /flow slash bridge dispatches to OperatorCommandDispatcher
+    // 1. /flow slash bridge dispatches to WorkflowCommandDispatcher
     // ═════════════════════════════════════════════════════════════════
     {
       const flow = await engine.createFlow({
@@ -191,7 +191,7 @@ export const track5IntegrationCase: EvalCase = {
       assertions.push(assertTrue("steer-event-recorded", opEvents.some((e) => e.command === "/steer")));
 
       // Adapter consumes steer on next turn
-      const adapter = new TaskFlowAgentLoopAdapter({
+      const adapter = new WorkflowAgentLoopAdapter({
         agentLoop: makeFakeAgentLoop("traj-steer-001"),
         store,
         compactionService
@@ -229,7 +229,7 @@ export const track5IntegrationCase: EvalCase = {
         operator: "cli"
       });
 
-      const adapter = new TaskFlowAgentLoopAdapter({
+      const adapter = new WorkflowAgentLoopAdapter({
         agentLoop: makeFakeAgentLoop("traj-steer-002"),
         store,
         compactionService
@@ -265,7 +265,7 @@ export const track5IntegrationCase: EvalCase = {
         operator: "cli"
       });
 
-      const adapter = new TaskFlowAgentLoopAdapter({
+      const adapter = new WorkflowAgentLoopAdapter({
         agentLoop: makeFakeAgentLoop("traj-trace-001"),
         store,
         compactionService
@@ -282,7 +282,7 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 7. createRuntime wires TaskFlow when SQLiteSessionDB is used
+    // 7. createRuntime wires the workflow module when SQLiteSessionDB is used
     // ═════════════════════════════════════════════════════════════════
     {
       // We verify the structural wiring by checking that createRuntime's
@@ -327,9 +327,10 @@ export const track5IntegrationCase: EvalCase = {
 
       try {
         // Seed a running flow directly in the DB
-        const tfStore = new SQLiteTaskFlowStore({ db: sqliteDb.db });
-        const tfLock = new FlowLockService({ store: tfStore });
-        const tfEngine = new TaskFlowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
+        await sqliteDb.createSession({ id: "rec-session", profileId: "default" });
+        const tfStore = new SQLiteWorkflowStore({ db: sqliteDb.db, profileId: "default" });
+        const tfLock = new WorkflowLockService({ store: tfStore });
+        const tfEngine = new WorkflowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
 
         const flow = await tfEngine.createFlow({
           sessionId: "rec-session",
@@ -358,9 +359,9 @@ export const track5IntegrationCase: EvalCase = {
     // (covered in test 8 above, but we assert explicitly)
     // ═════════════════════════════════════════════════════════════════
     {
-      const recoveryStore = new FakeTaskFlowStore({ now: makeNow() });
-      const recoveryLock = new FlowLockService({ store: recoveryStore, now: makeNow() });
-      const recoveryEngine = new TaskFlowEngine({ store: recoveryStore, lockService: recoveryLock, ownerId: "worker", now: makeNow() });
+      const recoveryStore = new FakeWorkflowStore({ now: makeNow() });
+      const recoveryLock = new WorkflowLockService({ store: recoveryStore, now: makeNow() });
+      const recoveryEngine = new WorkflowEngine({ store: recoveryStore, lockService: recoveryLock, ownerId: "worker", now: makeNow() });
 
       const runningFlow = await recoveryEngine.createFlow({
         sessionId: "s9",
@@ -372,7 +373,7 @@ export const track5IntegrationCase: EvalCase = {
       await recoveryStore.updateStep({ ...step, status: "running" });
       await recoveryLock.acquire(runningFlow.id, "old-worker");
 
-      const recovery = new FlowRestartRecovery({ store: recoveryStore, lockService: recoveryLock, now: makeNow() });
+      const recovery = new WorkflowRestartRecovery({ store: recoveryStore, lockService: recoveryLock, now: makeNow() });
       const result = await recovery.recover();
 
       assertions.push(assertTrue("recovery-interrupted-running", result.interrupted >= 1));
@@ -384,9 +385,9 @@ export const track5IntegrationCase: EvalCase = {
     // 10. paused/waiting/interrupted flows are preserved after restart
     // ═════════════════════════════════════════════════════════════════
     {
-      const recoveryStore2 = new FakeTaskFlowStore({ now: makeNow() });
-      const recoveryLock2 = new FlowLockService({ store: recoveryStore2, now: makeNow() });
-      const recoveryEngine2 = new TaskFlowEngine({ store: recoveryStore2, lockService: recoveryLock2, ownerId: "worker", now: makeNow() });
+      const recoveryStore2 = new FakeWorkflowStore({ now: makeNow() });
+      const recoveryLock2 = new WorkflowLockService({ store: recoveryStore2, now: makeNow() });
+      const recoveryEngine2 = new WorkflowEngine({ store: recoveryStore2, lockService: recoveryLock2, ownerId: "worker", now: makeNow() });
 
       const pausedFlow = await recoveryEngine2.createFlow({
         sessionId: "s10-paused",
@@ -412,7 +413,7 @@ export const track5IntegrationCase: EvalCase = {
       await recoveryEngine2.startFlow(interruptedFlow.id);
       await recoveryEngine2.interruptFlow(interruptedFlow.id);
 
-      const recovery2 = new FlowRestartRecovery({ store: recoveryStore2, lockService: recoveryLock2, now: makeNow() });
+      const recovery2 = new WorkflowRestartRecovery({ store: recoveryStore2, lockService: recoveryLock2, now: makeNow() });
       await recovery2.recover();
 
       assertions.push(assertEqual("paused-preserved", (await recoveryStore2.getFlow(pausedFlow.id))?.status, "paused"));
@@ -424,17 +425,17 @@ export const track5IntegrationCase: EvalCase = {
     // 11. automatic compaction remains disabled by default
     // ═════════════════════════════════════════════════════════════════
     {
-      assertions.push(assertEqual("compaction-disabled-default", DEFAULT_COMPACTION_CONFIG.enabled, false));
+      assertions.push(assertEqual("compaction-disabled-default", DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG.enabled, false));
     }
 
     // ═════════════════════════════════════════════════════════════════
     // 12. automatic compaction triggers at safe boundary when enabled
     // ═════════════════════════════════════════════════════════════════
     {
-      const compactStore = new FakeTaskFlowStore({ now: makeNow() });
-      const compactLock = new FlowLockService({ store: compactStore, now: makeNow() });
-      const compactEngine = new TaskFlowEngine({ store: compactStore, lockService: compactLock, ownerId: "worker", now: makeNow() });
-      const compactService = new FlowCompactionService({
+      const compactStore = new FakeWorkflowStore({ now: makeNow() });
+      const compactLock = new WorkflowLockService({ store: compactStore, now: makeNow() });
+      const compactEngine = new WorkflowEngine({ store: compactStore, lockService: compactLock, ownerId: "worker", now: makeNow() });
+      const compactService = new WorkflowEventSummaryService({
         store: compactStore,
         config: { enabled: true, mode: "conservative" as const, eventThreshold: 3, minTurnsBeforeCompact: 1 },
         now: makeNow()
@@ -474,10 +475,10 @@ export const track5IntegrationCase: EvalCase = {
     // 13. automatic compaction does not trigger with active step/process/approval
     // ═════════════════════════════════════════════════════════════════
     {
-      const unsafeStore = new FakeTaskFlowStore({ now: makeNow() });
-      const unsafeLock = new FlowLockService({ store: unsafeStore, now: makeNow() });
-      const unsafeEngine = new TaskFlowEngine({ store: unsafeStore, lockService: unsafeLock, ownerId: "worker", now: makeNow() });
-      const unsafeService = new FlowCompactionService({
+      const unsafeStore = new FakeWorkflowStore({ now: makeNow() });
+      const unsafeLock = new WorkflowLockService({ store: unsafeStore, now: makeNow() });
+      const unsafeEngine = new WorkflowEngine({ store: unsafeStore, lockService: unsafeLock, ownerId: "worker", now: makeNow() });
+      const unsafeService = new WorkflowEventSummaryService({
         store: unsafeStore,
         config: { enabled: true, mode: "conservative" as const, eventThreshold: 2, minTurnsBeforeCompact: 1 },
         now: makeNow()
@@ -512,11 +513,11 @@ export const track5IntegrationCase: EvalCase = {
     // 14. process cleanup result appears in /status and /trace
     // ═════════════════════════════════════════════════════════════════
     {
-      const procStore = new FakeTaskFlowStore({ now: makeNow() });
-      const procLock = new FlowLockService({ store: procStore, now: makeNow() });
-      const procEngine = new TaskFlowEngine({ store: procStore, lockService: procLock, ownerId: "worker", now: makeNow() });
-      const procRegistry = new FlowProcessRegistry({ store: procStore });
-      const procDispatcher = new OperatorCommandDispatcher({ engine: procEngine, store: procStore, processRegistry: procRegistry, compactionService });
+      const procStore = new FakeWorkflowStore({ now: makeNow() });
+      const procLock = new WorkflowLockService({ store: procStore, now: makeNow() });
+      const procEngine = new WorkflowEngine({ store: procStore, lockService: procLock, ownerId: "worker", now: makeNow() });
+      const procRegistry = new WorkflowProcessRegistry({ store: procStore });
+      const procDispatcher = new WorkflowCommandDispatcher({ engine: procEngine, store: procStore, processRegistry: procRegistry, compactionService });
 
       const pFlow = await procEngine.createFlow({
         sessionId: "s14",
@@ -557,9 +558,9 @@ export const track5IntegrationCase: EvalCase = {
     // 15. run linkage is created by adapter using real run/trajectory evidence
     // ═════════════════════════════════════════════════════════════════
     {
-      const linkStore = new FakeTaskFlowStore({ now: makeNow() });
+      const linkStore = new FakeWorkflowStore({ now: makeNow() });
       const realTrajectoryId = "traj-real-evidence-001";
-      const linkAdapter = new TaskFlowAgentLoopAdapter({
+      const linkAdapter = new WorkflowAgentLoopAdapter({
         agentLoop: makeFakeAgentLoop(realTrajectoryId),
         store: linkStore,
         compactionService
@@ -622,8 +623,8 @@ export const track5IntegrationCase: EvalCase = {
     // 16. artifact linkage behavior is tested where available
     // ═════════════════════════════════════════════════════════════════
     {
-      const artStore = new FakeTaskFlowStore({ now: makeNow() });
-      const artAdapter = new TaskFlowAgentLoopAdapter({
+      const artStore = new FakeWorkflowStore({ now: makeNow() });
+      const artAdapter = new WorkflowAgentLoopAdapter({
         agentLoop: makeFakeAgentLoop("traj-art-001"),
         store: artStore,
         compactionService
@@ -676,40 +677,40 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 17. no TaskFlow-specific methods were added to TrajectoryRecorder
+    // 17. no workflow-specific methods were added to TrajectoryRecorder
     // ═════════════════════════════════════════════════════════════════
     {
       const recorder = new TrajectoryRecorder({ profileId: "p", sessionId: "s", modelId: "m" });
       const keys = Object.keys(recorder).concat(Object.getOwnPropertyNames(Object.getPrototypeOf(recorder)));
-      const taskflowMethods = keys.filter((k) =>
+      const workflowMethods = keys.filter((k) =>
         k.toLowerCase().includes("flow") ||
         k.toLowerCase().includes("steer") ||
         k.toLowerCase().includes("operator") ||
         k.toLowerCase().includes("checkpoint")
       );
-      assertions.push(assertEqual("trajectory-recorder-no-taskflow-methods", taskflowMethods.length, 0));
+      assertions.push(assertEqual("trajectory-recorder-no-taskflow-methods", workflowMethods.length, 0));
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 18. AgentLoop remains TaskFlow-agnostic except through adapter/runtime wiring
+    // 18. AgentLoop remains workflow-agnostic except through adapter/runtime wiring
     // ═════════════════════════════════════════════════════════════════
     {
-      // AgentLoop should not import anything from taskflow/
+      // AgentLoop should not import anything from workflow/
       // We verify structurally by checking that AgentLoop's public interface
-      // does not reference TaskFlow types.
+      // does not reference workflow types.
       const { AgentLoop: AL } = await import("../../runtime/agent-loop.js");
       const prototype = AL.prototype;
       const methodNames = Object.getOwnPropertyNames(prototype);
 
-      const taskflowMethods = methodNames.filter((m) =>
+      const workflowMethods = methodNames.filter((m) =>
         m.toLowerCase().includes("flow") ||
         m.toLowerCase().includes("steer") ||
         m.toLowerCase().includes("checkpoint") ||
         m.toLowerCase().includes("operator")
       );
-      assertions.push(assertEqual("agentloop-no-taskflow-methods", taskflowMethods.length, 0));
+      assertions.push(assertEqual("agentloop-no-taskflow-methods", workflowMethods.length, 0));
 
-      // The only TaskFlow-related thing should be trajectoryId getter (added minimally)
+      // The only workflow-related thing should be trajectoryId getter (added minimally)
       const hasTrajectoryId = methodNames.includes("trajectoryId") || "trajectoryId" in prototype;
       assertions.push(assertTrue("agentloop-has-trajectoryid-getter", hasTrajectoryId));
     }

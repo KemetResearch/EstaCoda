@@ -1,13 +1,13 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../../taskflow/taskflow-engine.js";
-import { FlowProcessRegistry } from "../../taskflow/flow-process-registry.js";
-import { OperatorCommandDispatcher } from "../../taskflow/operator-command-dispatcher.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../../workflow/workflow-engine.js";
+import { WorkflowProcessRegistry } from "../../workflow/workflow-process-registry.js";
+import { WorkflowCommandDispatcher } from "../../workflow/workflow-command-dispatcher.js";
 import {
-  FlowCompactionService,
-  DEFAULT_COMPACTION_CONFIG,
-} from "../../taskflow/flow-compaction-service.js";
+  WorkflowEventSummaryService,
+  DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG,
+} from "../../workflow/workflow-event-summary-service.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
 
@@ -36,31 +36,31 @@ export const flowCompactionCase: EvalCase = {
   id: "flow-compaction",
   name: "Flow-Safe Compaction: manual, automatic, boundary safety, preservation",
   description:
-    "Manual /compact rejected during active execution. Succeeds when paused, waiting, interrupted, or between steps. Auto-compact disabled by default. Records durable events. Preserves all TaskFlow truth.",
+    "Manual /compact rejected during active execution. Succeeds when paused, waiting, interrupted, or between steps. Auto-compact disabled by default. Records durable events. Preserves all durable flow truth.",
   tags: ["taskflow", "compaction", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
 
-    const store = new FakeTaskFlowStore({ now: makeNow() });
-    const lockService = new FlowLockService({
+    const store = new FakeWorkflowStore({ now: makeNow() });
+    const lockService = new WorkflowLockService({
       store,
       now: makeNow(),
       defaultLeaseMs: 30_000,
     });
-    const engine = new TaskFlowEngine({
+    const engine = new WorkflowEngine({
       store,
       lockService,
       ownerId: "worker-1",
       now: makeNow(),
     });
-    const processRegistry = new FlowProcessRegistry({ store });
-    const compactionService = new FlowCompactionService({
+    const processRegistry = new WorkflowProcessRegistry({ store });
+    const compactionService = new WorkflowEventSummaryService({
       store,
-      config: { ...DEFAULT_COMPACTION_CONFIG, enabled: false },
+      config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: false },
       now: makeNow(),
     });
-    const dispatcher = new OperatorCommandDispatcher({
+    const dispatcher = new WorkflowCommandDispatcher({
       engine,
       store,
       processRegistry,
@@ -247,9 +247,9 @@ export const flowCompactionCase: EvalCase = {
         });
       }
 
-      const enabledService = new FlowCompactionService({
+      const enabledService = new WorkflowEventSummaryService({
         store,
-        config: { ...DEFAULT_COMPACTION_CONFIG, enabled: true, eventThreshold: 50, minTurnsBeforeCompact: 1 },
+        config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: true, eventThreshold: 50, minTurnsBeforeCompact: 1 },
         now: makeNow(),
       });
       const autoResult = await enabledService.checkAndAutoCompact(flow.id);
@@ -281,9 +281,9 @@ export const flowCompactionCase: EvalCase = {
         });
       }
 
-      const enabledService = new FlowCompactionService({
+      const enabledService = new WorkflowEventSummaryService({
         store,
-        config: { ...DEFAULT_COMPACTION_CONFIG, enabled: true, eventThreshold: 50, minTurnsBeforeCompact: 1 },
+        config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: true, eventThreshold: 50, minTurnsBeforeCompact: 1 },
         now: makeNow(),
       });
       const autoResult = await enabledService.checkAndAutoCompact(flow.id);
@@ -305,9 +305,9 @@ export const flowCompactionCase: EvalCase = {
           timestamp: new Date(i * 1000).toISOString(),
         });
       }
-      const enabledService = new FlowCompactionService({
+      const enabledService = new WorkflowEventSummaryService({
         store,
-        config: { ...DEFAULT_COMPACTION_CONFIG, enabled: true, eventThreshold: 10, minTurnsBeforeCompact: 0 },
+        config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: true, eventThreshold: 10, minTurnsBeforeCompact: 0 },
         now: makeNow(),
       });
       const autoResult = await enabledService.checkAndAutoCompact(flow.id);

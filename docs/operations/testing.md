@@ -115,14 +115,14 @@ Run with `pnpm run eval:fixtures` or `pnpm run dev -- eval <fixture-id>`.
 - `taskflow-state-transitions` — Flow and step state transitions are validated correctly
 - `taskflow-locking` — Flow lock acquire, release, heartbeat, and stale recovery
 - `taskflow-migration` — v0.8 schema migration creates tables and sets version
-- `taskflow-atomicity` — SQLiteTaskFlowStore atomic transitions and round-trip integrity
-- `taskflow-engine-lifecycle` — TaskFlowEngine flow and step lifecycle methods
+- `taskflow-atomicity` — SQLiteWorkflowStore atomic transitions and round-trip integrity
+- `taskflow-engine-lifecycle` — WorkflowEngine flow and step lifecycle methods
 
 **TaskFlow engine (1):**
-- `taskflow-restart-recovery` — FlowRestartRecovery marks running flows/steps interrupted and releases stale locks
+- `taskflow-restart-recovery` — WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks
 
 **Operator control plane (1):**
-- `operator-control-plane` — OperatorCommandDispatcher routes and validates all slash commands
+- `operator-control-plane` — WorkflowCommandDispatcher routes and validates all slash commands
 
 **Compaction (1):**
 - `flow-compaction` — Flow-Safe Compaction: manual, automatic, boundary safety, preservation

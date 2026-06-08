@@ -1,13 +1,13 @@
-// FlowRestartRecovery — rehydrate active flows after process restart
+// WorkflowRestartRecovery — rehydrate active flows after process restart
 // Track 2: Engine — load active flows, mark running→interrupted, show stale warnings
 
 import type { Flow, FlowState } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
-import type { FlowLockService } from "./flow-lock-service.js";
+import type { WorkflowStore } from "./workflow-store.js";
+import type { WorkflowLockService } from "./workflow-lock-service.js";
 
-export type FlowRestartRecoveryOptions = {
-  store: TaskFlowStore;
-  lockService: FlowLockService;
+export type WorkflowRestartRecoveryOptions = {
+  store: WorkflowStore;
+  lockService: WorkflowLockService;
   now?: () => Date;
 };
 
@@ -28,12 +28,12 @@ export type RecoveryResult = {
  * 4. Recover stale locks (any lock whose lease expired while the process was down).
  * 5. Return warnings for operator visibility.
  */
-export class FlowRestartRecovery {
-  readonly #store: TaskFlowStore;
-  readonly #lockService: FlowLockService;
+export class WorkflowRestartRecovery {
+  readonly #store: WorkflowStore;
+  readonly #lockService: WorkflowLockService;
   readonly #now: () => Date;
 
-  constructor(options: FlowRestartRecoveryOptions) {
+  constructor(options: WorkflowRestartRecoveryOptions) {
     this.#store = options.store;
     this.#lockService = options.lockService;
     this.#now = options.now ?? (() => new Date());

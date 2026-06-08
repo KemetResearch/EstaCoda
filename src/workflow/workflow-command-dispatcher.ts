@@ -1,4 +1,4 @@
-// OperatorCommandDispatcher — routes operator slash commands to TaskFlowEngine
+// WorkflowCommandDispatcher — routes operator slash commands to WorkflowEngine
 // Track 3: Operator Control Plane — command dispatch, validation, result formatting
 
 import type {
@@ -9,10 +9,10 @@ import type {
   StepId,
   CompactSummary
 } from "./types.js";
-import type { TaskFlowEngine } from "./taskflow-engine.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
-import type { FlowProcessRegistry } from "./flow-process-registry.js";
-import type { FlowCompactionService } from "./flow-compaction-service.js";
+import type { WorkflowEngine } from "./workflow-engine.js";
+import type { WorkflowStore } from "./workflow-store.js";
+import type { WorkflowProcessRegistry } from "./workflow-process-registry.js";
+import type { WorkflowEventSummaryService } from "./workflow-event-summary-service.js";
 import { isFlowStateTerminal } from "./types.js";
 
 export type OperatorCommand =
@@ -55,13 +55,13 @@ export type TimelineEntry = {
   event: FlowEvent | OperatorEvent;
 };
 
-export class OperatorCommandDispatcher {
-  readonly #engine: TaskFlowEngine;
-  readonly #store: TaskFlowStore;
-  readonly #processRegistry: FlowProcessRegistry;
-  readonly #compactionService: FlowCompactionService;
+export class WorkflowCommandDispatcher {
+  readonly #engine: WorkflowEngine;
+  readonly #store: WorkflowStore;
+  readonly #processRegistry: WorkflowProcessRegistry;
+  readonly #compactionService: WorkflowEventSummaryService;
 
-  constructor(options: { engine: TaskFlowEngine; store: TaskFlowStore; processRegistry: FlowProcessRegistry; compactionService: FlowCompactionService }) {
+  constructor(options: { engine: WorkflowEngine; store: WorkflowStore; processRegistry: WorkflowProcessRegistry; compactionService: WorkflowEventSummaryService }) {
     this.#engine = options.engine;
     this.#store = options.store;
     this.#processRegistry = options.processRegistry;

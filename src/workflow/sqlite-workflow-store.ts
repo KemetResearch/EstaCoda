@@ -1,4 +1,4 @@
-// SQLite-backed TaskFlowStore implementation
+// SQLite-backed WorkflowStore implementation
 
 import type {
   Flow,
@@ -18,25 +18,25 @@ import type {
   RunId,
   EventId
 } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
+import type { WorkflowStore } from "./workflow-store.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export type SQLiteTaskFlowStoreOptions = {
+export type SQLiteWorkflowStoreOptions = {
   db: SQLiteDatabase;
   profileId?: string;
   now?: () => Date;
   id?: () => string;
 };
 
-export class SQLiteTaskFlowStore implements TaskFlowStore {
+export class SQLiteWorkflowStore implements WorkflowStore {
   readonly #db: SQLiteDatabase;
   readonly #profileId: string | undefined;
   readonly #now: () => Date;
   readonly #id: () => string;
 
-  constructor(options: SQLiteTaskFlowStoreOptions) {
+  constructor(options: SQLiteWorkflowStoreOptions) {
     this.#db = options.db;
     this.#profileId = options.profileId;
     this.#now = options.now ?? (() => new Date());
@@ -696,11 +696,11 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
 
   async atomicTransition<T>(
     _flowId: FlowId,
-    work: (tx: TaskFlowStore) => Promise<T>
+    work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T> {
     this.#db.exec("begin transaction");
     try {
-      const txStore = new SQLiteTaskFlowStore({
+      const txStore = new SQLiteWorkflowStore({
         db: this.#db,
         profileId: this.#profileId,
         now: this.#now,

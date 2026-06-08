@@ -1,6 +1,6 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
 import { SQLiteSessionDB } from "../../session/sqlite-session-db.js";
-import { SQLiteTaskFlowStore } from "../../taskflow/sqlite-taskflow-store.js";
+import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import { rmSync } from "node:fs";
 
@@ -49,7 +49,7 @@ export const taskflowMigrationCase: EvalCase = {
       assertions.push(assertTrue("idx_flow_locks_expires exists", indexes.includes("idx_flow_locks_expires")));
 
       // Store can write and read a flow
-      const store = new SQLiteTaskFlowStore({ db: sessionDb.db });
+      const store = new SQLiteWorkflowStore({ db: sessionDb.db });
       const flow = makeTestFlow("flow-1");
       await store.createFlow(flow);
       const retrieved = await store.getFlow("flow-1");

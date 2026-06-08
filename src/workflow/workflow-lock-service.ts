@@ -1,22 +1,22 @@
-// FlowLockService — lease-based distributed lock with heartbeat and stale recovery
+// WorkflowLockService — lease-based distributed lock with heartbeat and stale recovery
 
 import type { FlowId, FlowLock } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
+import type { WorkflowStore } from "./workflow-store.js";
 
-export type FlowLockServiceOptions = {
-  store: TaskFlowStore;
+export type WorkflowLockServiceOptions = {
+  store: WorkflowStore;
   now?: () => Date;
   defaultLeaseMs?: number;
   heartbeatIntervalMs?: number;
 };
 
-export class FlowLockService {
-  readonly #store: TaskFlowStore;
+export class WorkflowLockService {
+  readonly #store: WorkflowStore;
   readonly #now: () => Date;
   readonly #defaultLeaseMs: number;
   readonly #heartbeatIntervalMs: number;
 
-  constructor(options: FlowLockServiceOptions) {
+  constructor(options: WorkflowLockServiceOptions) {
     this.#store = options.store;
     this.#now = options.now ?? (() => new Date());
     this.#defaultLeaseMs = options.defaultLeaseMs ?? 30_000;

@@ -1,13 +1,13 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
 import { SQLiteSessionDB } from "../../session/sqlite-session-db.js";
-import { SQLiteTaskFlowStore } from "../../taskflow/sqlite-taskflow-store.js";
-import type { FlowEvent, OperatorEvent, Flow, FlowStep } from "../../taskflow/types.js";
+import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
+import type { FlowEvent, OperatorEvent, Flow, FlowStep } from "../../workflow/types.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import { rmSync } from "node:fs";
 
 export const taskflowAtomicityCase: EvalCase = {
   id: "taskflow-atomicity",
-  name: "SQLiteTaskFlowStore atomic transitions and round-trip integrity",
+  name: "SQLiteWorkflowStore atomic transitions and round-trip integrity",
   description: "Atomic transition writes flow+step+events in one transaction; rollback on error.",
   tags: ["taskflow", "atomicity", "sqlite", "deterministic"],
   run: async (): Promise<EvalResult> => {
@@ -17,7 +17,7 @@ export const taskflowAtomicityCase: EvalCase = {
 
     try {
       const sessionDb = new SQLiteSessionDB({ path: dbPath });
-      const store = new SQLiteTaskFlowStore({ db: sessionDb.db });
+      const store = new SQLiteWorkflowStore({ db: sessionDb.db });
 
       // Atomic transition: create flow + step + event together
       await store.atomicTransition("flow-1", async (tx) => {
@@ -86,7 +86,7 @@ export const taskflowAtomicityCase: EvalCase = {
       try { rmSync(dbPath); } catch { /* ignore */ }
     }
 
-    return buildResult("taskflow-atomicity", "SQLiteTaskFlowStore atomic transitions and round-trip integrity", assertions, Date.now() - startedAt);
+    return buildResult("taskflow-atomicity", "SQLiteWorkflowStore atomic transitions and round-trip integrity", assertions, Date.now() - startedAt);
   }
 };
 

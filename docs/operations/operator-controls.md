@@ -323,7 +323,7 @@ Steer is rejected for flows in terminal states.
 
 **Manual:** `/flow compact <flowId>` or `estacoda flow compact <flowId>` triggers compaction immediately if at a safe boundary.
 
-**Automatic:** Disabled by default. Enable by passing a custom `CompactionConfig` to `FlowCompactionService`:
+**Automatic:** Disabled by default. Enable by passing a custom `WorkflowEventSummaryConfig` to `WorkflowEventSummaryService`:
 
 ```typescript
 {

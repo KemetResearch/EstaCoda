@@ -1,6 +1,6 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 
 export const taskflowLockingCase: EvalCase = {
@@ -11,8 +11,8 @@ export const taskflowLockingCase: EvalCase = {
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const now = new Date("2024-01-01T00:00:00.000Z");
-    const store = new FakeTaskFlowStore({ now: () => now });
-    const lockService = new FlowLockService({
+    const store = new FakeWorkflowStore({ now: () => now });
+    const lockService = new WorkflowLockService({
       store,
       now: () => now,
       defaultLeaseMs: 1000,

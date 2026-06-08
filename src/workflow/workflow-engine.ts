@@ -1,4 +1,4 @@
-// TaskFlowEngine — core orchestrator for durable flow execution
+// WorkflowEngine — core orchestrator for durable flow execution
 // Track 2: Engine — flow/step lifecycle, pause/resume, interrupt, wait, retry, checkpoint
 
 import type {
@@ -28,15 +28,15 @@ import {
   defaultFailurePolicy,
   IllegalTransitionError
 } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
-import type { FlowLockService } from "./flow-lock-service.js";
+import type { WorkflowStore } from "./workflow-store.js";
+import type { WorkflowLockService } from "./workflow-lock-service.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 
-export type TaskFlowEngineOptions = {
-  store: TaskFlowStore;
-  lockService: FlowLockService;
+export type WorkflowEngineOptions = {
+  store: WorkflowStore;
+  lockService: WorkflowLockService;
   ownerId: string;
   now?: () => Date;
   id?: () => string;
@@ -57,14 +57,14 @@ export type StepCompletionResult =
   | { ok: true; flow: Flow; nextStep?: FlowStep }
   | { ok: false; error: string };
 
-export class TaskFlowEngine {
-  readonly #store: TaskFlowStore;
-  readonly #lockService: FlowLockService;
+export class WorkflowEngine {
+  readonly #store: WorkflowStore;
+  readonly #lockService: WorkflowLockService;
   readonly #ownerId: string;
   readonly #now: () => Date;
   readonly #id: () => string;
 
-  constructor(options: TaskFlowEngineOptions) {
+  constructor(options: WorkflowEngineOptions) {
     this.#store = options.store;
     this.#lockService = options.lockService;
     this.#ownerId = options.ownerId;
@@ -804,7 +804,7 @@ export class TaskFlowEngine {
     });
   }
 
-  async #transitionFlowInTx(tx: TaskFlowStore, flowId: FlowId, to: FlowState, options: { from: FlowState; reason?: string }): Promise<void> {
+  async #transitionFlowInTx(tx: WorkflowStore, flowId: FlowId, to: FlowState, options: { from: FlowState; reason?: string }): Promise<void> {
     validateFlowTransition(options.from, to);
     const flow = await tx.getFlow(flowId);
     if (!flow) throw new Error("Flow not found");
@@ -843,7 +843,7 @@ export class TaskFlowEngine {
     });
   }
 
-  async #transitionStepInTx(tx: TaskFlowStore, stepId: StepId, to: StepState, options: { from: StepState; reason?: string }): Promise<void> {
+  async #transitionStepInTx(tx: WorkflowStore, stepId: StepId, to: StepState, options: { from: StepState; reason?: string }): Promise<void> {
     validateStepTransition(options.from, to);
     const step = await tx.getStep(stepId);
     if (!step) throw new Error("Step not found");
@@ -878,14 +878,14 @@ export class TaskFlowEngine {
     await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, eventKind, { stepId, from: options.from, to, reason: options.reason }, stepId));
   }
 
-  async #cancelStepInTx(tx: TaskFlowStore, stepId: StepId, reason?: string): Promise<void> {
+  async #cancelStepInTx(tx: WorkflowStore, stepId: StepId, reason?: string): Promise<void> {
     const step = await tx.getStep(stepId);
     if (!step) return;
     if (isStepStateTerminal(step.status)) return;
     await this.#transitionStepInTx(tx, stepId, "cancelled", { from: step.status, reason });
   }
 
-  async #resolveWaitInTx(tx: TaskFlowStore, stepId: StepId): Promise<void> {
+  async #resolveWaitInTx(tx: WorkflowStore, stepId: StepId): Promise<void> {
     const step = await tx.getStep(stepId);
     if (!step) return;
     const fromStatus = step.status;

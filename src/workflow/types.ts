@@ -1,4 +1,4 @@
-// TaskFlow domain types for v0.8 Durable TaskFlow + Operator Control Plane
+// Workflow module domain types for v0.8 durable flow execution + operator control plane
 
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";

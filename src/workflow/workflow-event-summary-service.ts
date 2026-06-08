@@ -1,6 +1,6 @@
-// Flow-Safe Compaction service for v0.8
+// Flow-safe event summary service for v0.8
 // Manual /compact and configurable automatic compaction.
-// Only operates at safe boundaries. Never compacts durable TaskFlow truth.
+// Only operates at safe boundaries. Never compacts durable flow truth.
 
 import type {
   FlowId,
@@ -9,18 +9,18 @@ import type {
   OperatorEvent,
   FlowStep
 } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
+import type { WorkflowStore } from "./workflow-store.js";
 
-export type CompactionConfig = {
+export type WorkflowEventSummaryConfig = {
   enabled: boolean;
   mode: "conservative";
   eventThreshold: number;
   minTurnsBeforeCompact: number;
 };
 
-export type CompactionMode = "manual" | "automatic";
+export type WorkflowEventSummaryMode = "manual" | "automatic";
 
-export type CompactionResult = {
+export type WorkflowEventSummaryResult = {
   ok: boolean;
   summary?: CompactSummary;
   error?: string;
@@ -29,31 +29,31 @@ export type CompactionResult = {
   preservedSteps: number;
   preservedProcesses: number;
   preservedApprovals: number;
-  mode: CompactionMode;
+  mode: WorkflowEventSummaryMode;
   trigger: string;
 };
 
-export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
+export const DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG: WorkflowEventSummaryConfig = {
   enabled: false,
   mode: "conservative",
   eventThreshold: 50,
   minTurnsBeforeCompact: 3
 };
 
-export class FlowCompactionService {
-  readonly #store: TaskFlowStore;
-  readonly #config: CompactionConfig;
+export class WorkflowEventSummaryService {
+  readonly #store: WorkflowStore;
+  readonly #config: WorkflowEventSummaryConfig;
   readonly #now: () => Date;
   readonly #id: () => string;
 
   constructor(options: {
-    store: TaskFlowStore;
-    config?: CompactionConfig;
+    store: WorkflowStore;
+    config?: WorkflowEventSummaryConfig;
     now?: () => Date;
     id?: () => string;
   }) {
     this.#store = options.store;
-    this.#config = options.config ?? DEFAULT_COMPACTION_CONFIG;
+    this.#config = options.config ?? DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
   }
@@ -94,13 +94,13 @@ export class FlowCompactionService {
 
   // ─── Preview / dry-run ───
 
-  async preview(flowId: FlowId): Promise<CompactionResult> {
+  async preview(flowId: FlowId): Promise<WorkflowEventSummaryResult> {
     return this.#doCompact(flowId, "manual", "preview", /* persist */ false);
   }
 
   // ─── Manual compaction ───
 
-  async compact(flowId: FlowId, operator?: string): Promise<CompactionResult> {
+  async compact(flowId: FlowId, operator?: string): Promise<WorkflowEventSummaryResult> {
     const boundary = await this.canCompact(flowId);
     if (!boundary.ok) {
       return {
@@ -120,7 +120,7 @@ export class FlowCompactionService {
 
   // ─── Automatic compaction ───
 
-  async checkAndAutoCompact(flowId: FlowId): Promise<CompactionResult | null> {
+  async checkAndAutoCompact(flowId: FlowId): Promise<WorkflowEventSummaryResult | null> {
     if (!this.#config.enabled) {
       return null;
     }
@@ -149,10 +149,10 @@ export class FlowCompactionService {
 
   async #doCompact(
     flowId: FlowId,
-    mode: CompactionMode,
+    mode: WorkflowEventSummaryMode,
     trigger: string,
     persist: boolean
-  ): Promise<CompactionResult> {
+  ): Promise<WorkflowEventSummaryResult> {
     const flow = await this.#store.getFlow(flowId);
     if (!flow) {
       return {
@@ -194,7 +194,7 @@ export class FlowCompactionService {
     const processes = await this.#store.listProcesses(flowId);
     const approvals = await this.#store.listApprovalGates(flowId);
 
-    const result: CompactionResult = {
+    const result: WorkflowEventSummaryResult = {
       ok: true,
       summary,
       beforeEventCount: allEvents.length,

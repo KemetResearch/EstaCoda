@@ -6,8 +6,8 @@ import { resolveProfileStateHome } from "./profile-home.js";
 import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
 import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
-import type { Flow } from "../taskflow/types.js";
+import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
+import type { Flow } from "../workflow/types.js";
 
 const tempDirs: string[] = [];
 
@@ -157,7 +157,7 @@ describe("profile runtime state paths", () => {
     await expectFileMissing(join(homeDir, ".estacoda", "channel-sessions.json"));
   });
 
-  it("taskflow state is filtered by the selected profile", async () => {
+  it("workflow state is filtered by the selected profile", async () => {
     const homeDir = await makeTempHome();
     await mkdir(join(homeDir, ".estacoda"), { recursive: true });
     const db = new SQLiteSessionDB({ path: join(homeDir, ".estacoda", "sessions.sqlite") });
@@ -165,8 +165,8 @@ describe("profile runtime state paths", () => {
     try {
       const alphaSession = await db.createSession({ id: "session-alpha", profileId: "alpha" });
       const betaSession = await db.createSession({ id: "session-beta", profileId: "beta" });
-      const alphaStore = new SQLiteTaskFlowStore({ db: db.db, profileId: "alpha" });
-      const betaStore = new SQLiteTaskFlowStore({ db: db.db, profileId: "beta" });
+      const alphaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "alpha" });
+      const betaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "beta" });
 
       await alphaStore.createFlow(makeFlow("flow-alpha", alphaSession.id));
       await betaStore.createFlow(makeFlow("flow-beta", betaSession.id));

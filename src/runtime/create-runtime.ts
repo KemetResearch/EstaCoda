@@ -59,15 +59,15 @@ import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 
-// TaskFlow v0.8 imports
-import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
-import { FlowLockService } from "../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../taskflow/taskflow-engine.js";
-import { OperatorCommandDispatcher } from "../taskflow/operator-command-dispatcher.js";
-import { FlowProcessRegistry } from "../taskflow/flow-process-registry.js";
-import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/flow-compaction-service.js";
-import { FlowRestartRecovery } from "../taskflow/flow-restart-recovery.js";
-import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapter.js";
+// Workflow module v0.8 imports
+import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
+import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../workflow/workflow-engine.js";
+import { WorkflowCommandDispatcher } from "../workflow/workflow-command-dispatcher.js";
+import { WorkflowProcessRegistry } from "../workflow/workflow-process-registry.js";
+import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../workflow/workflow-event-summary-service.js";
+import { WorkflowRestartRecovery } from "../workflow/workflow-restart-recovery.js";
+import { WorkflowAgentLoopAdapter } from "../workflow/workflow-agent-loop-adapter.js";
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
@@ -394,14 +394,14 @@ export type Runtime = {
   sessionId: string;
   consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
-  // TaskFlow v0.8 integration (available when SQLiteSessionDB is used)
+  // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
   taskflow?: {
-    engine: import("../taskflow/taskflow-engine.js").TaskFlowEngine;
-    store: import("../taskflow/taskflow-store.js").TaskFlowStore;
-    dispatcher: import("../taskflow/operator-command-dispatcher.js").OperatorCommandDispatcher;
-    processRegistry: import("../taskflow/flow-process-registry.js").FlowProcessRegistry;
-    compactionService: import("../taskflow/flow-compaction-service.js").FlowCompactionService;
-    adapter: import("../taskflow/taskflow-agent-loop-adapter.js").TaskFlowAgentLoopAdapter;
+    engine: import("../workflow/workflow-engine.js").WorkflowEngine;
+    store: import("../workflow/workflow-store.js").WorkflowStore;
+    dispatcher: import("../workflow/workflow-command-dispatcher.js").WorkflowCommandDispatcher;
+    processRegistry: import("../workflow/workflow-process-registry.js").WorkflowProcessRegistry;
+    compactionService: import("../workflow/workflow-event-summary-service.js").WorkflowEventSummaryService;
+    adapter: import("../workflow/workflow-agent-loop-adapter.js").WorkflowAgentLoopAdapter;
     activeFlowId: string | null;
     setActiveFlowId(flowId: string | null): void;
     recoverFromRestart(): Promise<{
@@ -1101,35 +1101,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     agentProfile: options.agentProfile
   });
 
-  // ─── TaskFlow v0.8 Integration ───
+  // ─── Workflow module v0.8 Integration ───
   let taskflow: Runtime["taskflow"] | undefined;
 
-  // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
+  // Only wire the workflow module when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db, profileId });
-      const lockService = new FlowLockService({ store: taskflowStore });
-      const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
-      const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
-      const compactionService = new FlowCompactionService({
-        store: taskflowStore,
-        config: DEFAULT_COMPACTION_CONFIG
+      const workflowStore = new SQLiteWorkflowStore({ db: sessionDb.db, profileId });
+      const lockService = new WorkflowLockService({ store: workflowStore });
+      const workflowEngine = new WorkflowEngine({ store: workflowStore, lockService, ownerId: "runtime" });
+      const processRegistry = new WorkflowProcessRegistry({ store: workflowStore });
+      const compactionService = new WorkflowEventSummaryService({
+        store: workflowStore,
+        config: DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG
       });
-      const dispatcher = new OperatorCommandDispatcher({
-        engine: taskflowEngine,
-        store: taskflowStore,
+      const dispatcher = new WorkflowCommandDispatcher({
+        engine: workflowEngine,
+        store: workflowStore,
         processRegistry,
         compactionService
       });
-      const adapter = new TaskFlowAgentLoopAdapter({
+      const adapter = new WorkflowAgentLoopAdapter({
         agentLoop,
-        store: taskflowStore,
+        store: workflowStore,
         compactionService
       });
 
       // Run restart recovery on startup
-      const restartRecovery = new FlowRestartRecovery({
-        store: taskflowStore,
+      const restartRecovery = new WorkflowRestartRecovery({
+        store: workflowStore,
         lockService,
         now: () => new Date()
       });
@@ -1144,8 +1144,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
 
       taskflow = {
-        engine: taskflowEngine,
-        store: taskflowStore,
+        engine: workflowEngine,
+        store: workflowStore,
         dispatcher,
         processRegistry,
         compactionService,
@@ -1164,7 +1164,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       };
     }
   } catch {
-    // TaskFlow integration is best-effort for v0.8. Do not block runtime creation.
+    // Workflow module integration is best-effort for v0.8. Do not block runtime creation.
     taskflow = undefined;
   }
 
@@ -1227,7 +1227,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
-      // If an active TaskFlow is set, route through the adapter
+      // If an active flow is set, route through the adapter
       if (taskflow?.activeFlowId) {
         const flow = await taskflow.store.getFlow(taskflow.activeFlowId);
         if (flow && flow.status === "running") {

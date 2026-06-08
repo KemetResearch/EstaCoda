@@ -1,4 +1,4 @@
-// FakeTaskFlowStore — deterministic in-memory implementation for tests
+// FakeWorkflowStore — deterministic in-memory implementation for tests
 
 import type {
   Flow,
@@ -18,9 +18,9 @@ import type {
   RunId,
   EventId
 } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
+import type { WorkflowStore } from "./workflow-store.js";
 
-export class FakeTaskFlowStore implements TaskFlowStore {
+export class FakeWorkflowStore implements WorkflowStore {
   readonly flows = new Map<FlowId, Flow>();
   readonly steps = new Map<StepId, FlowStep>();
   readonly flowEvents: FlowEvent[] = [];
@@ -273,7 +273,7 @@ export class FakeTaskFlowStore implements TaskFlowStore {
 
   async atomicTransition<T>(
     flowId: FlowId,
-    work: (tx: TaskFlowStore) => Promise<T>
+    work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T> {
     // In-memory: no real transaction isolation, but we execute sequentially
     return work(this);

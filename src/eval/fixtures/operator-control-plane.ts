@@ -1,16 +1,16 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../../taskflow/taskflow-engine.js";
-import { FlowProcessRegistry } from "../../taskflow/flow-process-registry.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../../workflow/workflow-engine.js";
+import { WorkflowProcessRegistry } from "../../workflow/workflow-process-registry.js";
 import {
-  OperatorCommandDispatcher,
+  WorkflowCommandDispatcher,
   type OperatorCommand,
-} from "../../taskflow/operator-command-dispatcher.js";
+} from "../../workflow/workflow-command-dispatcher.js";
 import {
-  FlowCompactionService,
-  DEFAULT_COMPACTION_CONFIG,
-} from "../../taskflow/flow-compaction-service.js";
+  WorkflowEventSummaryService,
+  DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG,
+} from "../../workflow/workflow-event-summary-service.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
 
@@ -37,7 +37,7 @@ function makeNow(): () => Date {
 
 export const operatorControlPlaneCase: EvalCase = {
   id: "operator-control-plane",
-  name: "OperatorCommandDispatcher routes and validates all slash commands",
+  name: "WorkflowCommandDispatcher routes and validates all slash commands",
   description:
     "Covers /status, /pause, /resume, /interrupt, /cancel, /steer, /approve, /reject, /retry, /skip, /checkpoint, /trace.",
   tags: ["taskflow", "operator", "commands", "deterministic"],
@@ -45,25 +45,25 @@ export const operatorControlPlaneCase: EvalCase = {
     const startedAt = Date.now();
     const assertions = [];
 
-    const store = new FakeTaskFlowStore({ now: makeNow() });
-    const lockService = new FlowLockService({
+    const store = new FakeWorkflowStore({ now: makeNow() });
+    const lockService = new WorkflowLockService({
       store,
       now: makeNow(),
       defaultLeaseMs: 30_000,
     });
-    const engine = new TaskFlowEngine({
+    const engine = new WorkflowEngine({
       store,
       lockService,
       ownerId: "worker-1",
       now: makeNow(),
     });
-    const processRegistry = new FlowProcessRegistry({ store });
-    const compactionService = new FlowCompactionService({
+    const processRegistry = new WorkflowProcessRegistry({ store });
+    const compactionService = new WorkflowEventSummaryService({
       store,
-      config: { ...DEFAULT_COMPACTION_CONFIG, enabled: false },
+      config: { ...DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG, enabled: false },
       now: makeNow(),
     });
-    const dispatcher = new OperatorCommandDispatcher({
+    const dispatcher = new WorkflowCommandDispatcher({
       engine,
       store,
       processRegistry,
@@ -457,7 +457,7 @@ export const operatorControlPlaneCase: EvalCase = {
 
     return buildResult(
       "operator-control-plane",
-      "OperatorCommandDispatcher routes and validates all slash commands",
+      "WorkflowCommandDispatcher routes and validates all slash commands",
       assertions,
       Date.now() - startedAt
     );

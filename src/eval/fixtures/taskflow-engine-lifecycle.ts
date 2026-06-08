@@ -1,7 +1,7 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../../taskflow/taskflow-engine.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../../workflow/workflow-engine.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
 
@@ -30,16 +30,16 @@ function makeNow(): () => Date {
 
 export const taskflowEngineLifecycleCase: EvalCase = {
   id: "taskflow-engine-lifecycle",
-  name: "TaskFlowEngine flow and step lifecycle methods",
+  name: "WorkflowEngine flow and step lifecycle methods",
   description: "Covers create, start, complete, fail, cancel, pause, resume, interrupt, wait, retry, skip, checkpoint.",
   tags: ["taskflow", "engine", "lifecycle", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
 
-    const store = new FakeTaskFlowStore({ now: makeNow() });
-    const lockService = new FlowLockService({ store, now: makeNow(), defaultLeaseMs: 30_000 });
-    const engine = new TaskFlowEngine({ store, lockService, ownerId: "worker-1", now: makeNow() });
+    const store = new FakeWorkflowStore({ now: makeNow() });
+    const lockService = new WorkflowLockService({ store, now: makeNow(), defaultLeaseMs: 30_000 });
+    const engine = new WorkflowEngine({ store, lockService, ownerId: "worker-1", now: makeNow() });
 
     // ─── Create flow ───
     const flow = await engine.createFlow({
@@ -389,6 +389,6 @@ export const taskflowEngineLifecycleCase: EvalCase = {
     const flow12AfterReject = await store.getFlow(flow12.id);
     assertions.push(assertEqual("flow failed after reject", flow12AfterReject?.status, "failed"));
 
-    return buildResult("taskflow-engine-lifecycle", "TaskFlowEngine flow and step lifecycle methods", assertions, Date.now() - startedAt);
+    return buildResult("taskflow-engine-lifecycle", "WorkflowEngine flow and step lifecycle methods", assertions, Date.now() - startedAt);
   }
 };

@@ -6,7 +6,7 @@ import {
   IllegalTransitionError,
   defaultRetryPolicy,
   defaultFailurePolicy
-} from "../../taskflow/types.js";
+} from "../../workflow/types.js";
 import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
 
 export const taskflowStateTransitionsCase: EvalCase = {

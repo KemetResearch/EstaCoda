@@ -1,7 +1,7 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
-import { FakeTaskFlowStore } from "../../taskflow/fake-taskflow-store.js";
-import { FlowLockService } from "../../taskflow/flow-lock-service.js";
-import { FlowRestartRecovery } from "../../taskflow/flow-restart-recovery.js";
+import { FakeWorkflowStore } from "../../workflow/fake-workflow-store.js";
+import { WorkflowLockService } from "../../workflow/workflow-lock-service.js";
+import { WorkflowRestartRecovery } from "../../workflow/workflow-restart-recovery.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
 
@@ -20,7 +20,7 @@ function makeIntent(): IntentRoute {
 
 export const taskflowRestartRecoveryCase: EvalCase = {
   id: "taskflow-restart-recovery",
-  name: "FlowRestartRecovery marks running flows/steps interrupted and releases stale locks",
+  name: "WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks",
   description: "After restart: running→interrupted, paused/waiting preserved, stale locks recovered.",
   tags: ["taskflow", "restart", "recovery", "deterministic"],
   run: async (): Promise<EvalResult> => {
@@ -28,8 +28,8 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     const assertions = [];
 
     const now = new Date("2024-01-01T00:00:00Z");
-    const store = new FakeTaskFlowStore({ now: () => new Date(now) });
-    const lockService = new FlowLockService({ store, now: () => new Date(now), defaultLeaseMs: 30_000 });
+    const store = new FakeWorkflowStore({ now: () => new Date(now) });
+    const lockService = new WorkflowLockService({ store, now: () => new Date(now), defaultLeaseMs: 30_000 });
 
     // Create flows in different states by directly manipulating store
     const runningFlowId = "flow-running";
@@ -99,7 +99,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     // Advance time so locks are stale
     now.setMinutes(now.getMinutes() + 10);
 
-    const recovery = new FlowRestartRecovery({ store, lockService, now: () => new Date(now) });
+    const recovery = new WorkflowRestartRecovery({ store, lockService, now: () => new Date(now) });
     const result = await recovery.recover();
 
     assertions.push(assertEqual("recovered count", result.recovered, 3));
@@ -123,6 +123,6 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     assertions.push(assertTrue("flow-state-changed event", events.some((e) => e.kind === "flow-state-changed")));
     assertions.push(assertTrue("step-interrupted event", events.some((e) => e.kind === "step-interrupted")));
 
-    return buildResult("taskflow-restart-recovery", "FlowRestartRecovery marks running flows/steps interrupted and releases stale locks", assertions, Date.now() - startedAt);
+    return buildResult("taskflow-restart-recovery", "WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks", assertions, Date.now() - startedAt);
   }
 };

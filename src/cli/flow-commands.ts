@@ -3,12 +3,12 @@ import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
-import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
-import { FlowLockService } from "../taskflow/flow-lock-service.js";
-import { TaskFlowEngine } from "../taskflow/taskflow-engine.js";
-import { OperatorCommandDispatcher } from "../taskflow/operator-command-dispatcher.js";
-import { FlowProcessRegistry } from "../taskflow/flow-process-registry.js";
-import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/flow-compaction-service.js";
+import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
+import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
+import { WorkflowEngine } from "../workflow/workflow-engine.js";
+import { WorkflowCommandDispatcher } from "../workflow/workflow-command-dispatcher.js";
+import { WorkflowProcessRegistry } from "../workflow/workflow-process-registry.js";
+import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../workflow/workflow-event-summary-service.js";
 
 export async function flowCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
@@ -81,12 +81,12 @@ async function openFlowDb(options: CliOptions): Promise<{ db: SQLiteSessionDB; p
 }
 
 function createFlowServices(db: SQLiteSessionDB, profileId: string) {
-  const store = new SQLiteTaskFlowStore({ db: db.db, profileId });
-  const lockService = new FlowLockService({ store });
-  const engine = new TaskFlowEngine({ store, lockService, ownerId: "cli" });
-  const processRegistry = new FlowProcessRegistry({ store });
-  const compactionService = new FlowCompactionService({ store, config: DEFAULT_COMPACTION_CONFIG });
-  const dispatcher = new OperatorCommandDispatcher({ engine, store, processRegistry, compactionService });
+  const store = new SQLiteWorkflowStore({ db: db.db, profileId });
+  const lockService = new WorkflowLockService({ store });
+  const engine = new WorkflowEngine({ store, lockService, ownerId: "cli" });
+  const processRegistry = new WorkflowProcessRegistry({ store });
+  const compactionService = new WorkflowEventSummaryService({ store, config: DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG });
+  const dispatcher = new WorkflowCommandDispatcher({ engine, store, processRegistry, compactionService });
   return { store, engine, dispatcher };
 }
 

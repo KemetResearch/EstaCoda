@@ -1,4 +1,4 @@
-// TaskFlowStore interface — persistence contract for flow orchestration
+// WorkflowStore interface — persistence contract for flow orchestration
 
 import type {
   Flow,
@@ -26,7 +26,7 @@ export type AtomicTransitionResult = {
   error: string;
 };
 
-export interface TaskFlowStore {
+export interface WorkflowStore {
   // ─── Flow state ───
   createFlow(flow: Flow): Promise<void>;
   updateFlow(flow: Flow): Promise<void>;
@@ -94,6 +94,6 @@ export interface TaskFlowStore {
   // ─── Atomic transition ───
   atomicTransition<T>(
     flowId: FlowId,
-    work: (tx: TaskFlowStore) => Promise<T>
+    work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T>;
 }

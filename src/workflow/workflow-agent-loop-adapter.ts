@@ -1,15 +1,15 @@
-// TaskFlowAgentLoopAdapter — adapter layer between TaskFlowEngine and AgentLoop
+// WorkflowAgentLoopAdapter — adapter layer between WorkflowEngine and AgentLoop
 // Track 5: System Integration — steer consumption, run/artifact linkage, auto-compaction
 
 import type { AgentLoop, AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { Flow, FlowId, FlowStep, RunId } from "./types.js";
-import type { TaskFlowStore } from "./taskflow-store.js";
-import type { FlowCompactionService } from "./flow-compaction-service.js";
+import type { WorkflowStore } from "./workflow-store.js";
+import type { WorkflowEventSummaryService } from "./workflow-event-summary-service.js";
 
-export type TaskFlowAgentLoopAdapterOptions = {
+export type WorkflowAgentLoopAdapterOptions = {
   agentLoop: AgentLoop;
-  store: TaskFlowStore;
-  compactionService?: FlowCompactionService;
+  store: WorkflowStore;
+  compactionService?: WorkflowEventSummaryService;
 };
 
 export type FlowTurnInput = {
@@ -29,22 +29,22 @@ export type FlowTurnResult = {
 };
 
 /**
- * Adapter that sits between TaskFlowEngine and AgentLoop.
+ * Adapter that sits between WorkflowEngine and AgentLoop.
  *
  * Design (locked in ADR-0004):
- * - TaskFlow is above AgentLoop; AgentLoop remains TaskFlow-agnostic.
+ * - The workflow module is above AgentLoop; AgentLoop remains workflow-agnostic.
  * - The adapter passes an AbortSignal and records turn metadata.
  * - Steer guidance is loaded from unconsumed operator-steered events and passed
  *   explicitly as prefixed context. No hidden prompt mutation.
  * - Run and artifact linkage is recorded after each turn.
  * - Automatic compaction is checked at safe boundaries (between turns).
  */
-export class TaskFlowAgentLoopAdapter {
+export class WorkflowAgentLoopAdapter {
   readonly #agentLoop: AgentLoop;
-  readonly #store: TaskFlowStore;
-  readonly #compactionService?: FlowCompactionService;
+  readonly #store: WorkflowStore;
+  readonly #compactionService?: WorkflowEventSummaryService;
 
-  constructor(options: TaskFlowAgentLoopAdapterOptions) {
+  constructor(options: WorkflowAgentLoopAdapterOptions) {
     this.#agentLoop = options.agentLoop;
     this.#store = options.store;
     this.#compactionService = options.compactionService;

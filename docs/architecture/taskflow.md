@@ -15,7 +15,7 @@ TaskFlow is wired into `createRuntime` **only** when `sessionDb` is an `SQLiteSe
 
 ## Components
 
-### TaskFlowEngine
+### WorkflowEngine
 
 The state machine. Enforces legal transitions, manages flow/step lifecycles, and emits events.
 
@@ -30,23 +30,23 @@ Key methods:
 - `retryStep(stepId)` — create a retry step (only if idempotent/safeToRetry and under maxRetries).
 - `createCheckpoint(flowId, name)` — record a named checkpoint.
 
-### TaskFlowStore (SQLiteTaskFlowStore)
+### WorkflowStore (SQLiteWorkflowStore)
 
 Persistence layer. All tables use `create table if not exists` and are created via schema migration in `SQLiteSessionDB`.
 
-### FlowLockService
+### WorkflowLockService
 
 Prevents concurrent flow mutation. Locks have lease expiry; stale locks are recovered on startup.
 
-### FlowProcessRegistry
+### WorkflowProcessRegistry
 
 Tracks external processes (shell commands, browser sessions) linked to steps. On interrupt/cancel, running processes are terminated and results are recorded.
 
-### OperatorCommandDispatcher
+### WorkflowCommandDispatcher
 
 Routes slash commands to engine methods. Every dispatch validates preconditions and returns structured `CommandResult`. All operator actions append `OperatorEvent` records.
 
-### FlowCompactionService
+### WorkflowEventSummaryService
 
 Summarizes completed flow events into `CompactSummary` records. Never deletes original events. Only runs when:
 - no active processes,
@@ -55,7 +55,7 @@ Summarizes completed flow events into `CompactSummary` records. Never deletes or
 
 Default config: `enabled: false`. Must be explicitly enabled.
 
-### TaskFlowAgentLoopAdapter
+### WorkflowAgentLoopAdapter
 
 Bridges TaskFlow and AgentLoop. Responsibilities:
 - Load unconsumed steer events before each turn.
@@ -124,10 +124,10 @@ Runtime.handle()  <-- /flow commands set activeFlowId
 AgentLoop.handle()
     ^
     |
-TaskFlowAgentLoopAdapter.runTurn()  <-- only when activeFlowId is set
+WorkflowAgentLoopAdapter.runTurn()  <-- only when activeFlowId is set
     |
     v
-TaskFlowEngine + Store
+WorkflowEngine + Store
 ```
 
 When `rt.taskflow.activeFlowId` is set and the flow is running, the adapter wraps turns. When no active flow is set, AgentLoop runs normally.
@@ -135,7 +135,7 @@ When `rt.taskflow.activeFlowId` is set and the flow is running, the adapter wrap
 ## Restart Recovery
 
 On `createRuntime` with SQLite:
-1. `FlowRestartRecovery.recover()` marks `running` flows as `interrupted`.
+1. `WorkflowRestartRecovery.recover()` marks `running` flows as `interrupted`.
 2. Marks `running` steps as `interrupted`.
 3. Releases stale locks (expired lease).
 4. Results are visible via `rt.taskflow.recoverFromRestart()`.
