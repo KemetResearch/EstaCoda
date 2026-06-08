@@ -91,6 +91,7 @@ export function channelToolAction(
   if (tool.includes("workspace")) return "reading workspace";
   if (tool.includes("memory")) return "writing memory";
   if (tool.includes("trajectory")) return "recording trajectory";
+  if (tool.includes("playbook")) return "planning playbook";
   if (tool.includes("workflow")) return "planning workflow";
   if (tool.includes("terminal") || tool.includes("process")) return "running process";
   if (tool.includes("execute") || tool.includes("python")) return "executing code";

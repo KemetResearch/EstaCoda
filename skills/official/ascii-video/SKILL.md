@@ -27,7 +27,7 @@
   ],
   "requiredToolsets": ["media", "files", "shell-write"],
   "optionalToolsets": ["web", "browser", "research"],
-  "workflow": [
+  "playbook": [
     {
       "id": "clarify-brief",
       "description": "Confirm only the missing creative constraints: source/generative mode, duration, style, aspect ratio, and output target.",
@@ -46,7 +46,7 @@
       "id": "generate-assets",
       "description": "Create placeholder/generated visual inputs when source assets are unavailable or the user requested a generative piece.",
       "toolsets": ["files", "shell-write", "media"],
-      "successCriteria": ["the workflow has enough local assets to render"]
+      "successCriteria": ["the playbook has enough local assets to render"]
     },
     {
       "id": "render-video",

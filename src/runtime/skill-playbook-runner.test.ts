@@ -53,7 +53,7 @@ function skillWithSteps(count: number): SkillDefinition {
     version: "1.0.0",
     whenToUse: [],
     requiredToolsets: ["files"],
-    workflow: Array.from({ length: count }, (_, index) => ({
+    playbook: Array.from({ length: count }, (_, index) => ({
       id: `step-${index + 1}`,
       description: `Run step ${index + 1}`,
       preferredTool: `test.tool.${index + 1}`,

@@ -34,7 +34,7 @@
     "The user says they sent a file in chat and asks the agent to inspect it."
   ],
   "requiredToolsets": ["telegram", "media", "files"],
-  "workflow": [
+  "playbook": [
     {
       "id": "resolve-channel-media",
       "description": "Find and download the referenced channel attachment into local media storage.",

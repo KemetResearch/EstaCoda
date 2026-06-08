@@ -62,4 +62,63 @@ describe("loadSkillsFromDirectory", () => {
     expect(result.skills).toHaveLength(1);
     expect(result.skills[0].name).toBe("valid-skill");
   });
+
+  it("loads playbook frontmatter", async () => {
+    const root = await makeTempDir();
+    const skillDir = join(root, "playbook-skill");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        JSON.stringify({
+          name: "playbook-skill",
+          description: "A valid playbook skill",
+          version: "1.0.0",
+          category: "test",
+          playbook: [{ id: "read", description: "Read the input" }]
+        }),
+        "---",
+        "Do the thing."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await loadSkillsFromDirectory(root, {
+      sourceKind: "local",
+      sourceRoot: root
+    });
+    expect(result.errors).toHaveLength(0);
+    expect(result.skills[0].playbook[0]?.id).toBe("read");
+  });
+
+  it("rejects legacy workflow frontmatter", async () => {
+    const root = await makeTempDir();
+    const skillDir = join(root, "workflow-skill");
+    const legacyWorkflowField = "work" + "flow";
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        JSON.stringify({
+          name: "workflow-skill",
+          description: "A legacy workflow skill",
+          version: "1.0.0",
+          category: "test",
+          [legacyWorkflowField]: [{ id: "read", description: "Read the input" }]
+        }),
+        "---",
+        "Do the thing."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await loadSkillsFromDirectory(root, {
+      sourceKind: "local",
+      sourceRoot: root
+    });
+    expect(result.skills).toHaveLength(0);
+    expect(result.errors[0].message).toContain("workflow has been renamed to playbook");
+  });
 });

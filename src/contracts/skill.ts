@@ -131,7 +131,7 @@ export type SkillDefinition = {
   visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
-  workflow: SkillPlaybookStepSpec[];
+  playbook: SkillPlaybookStepSpec[];
   permissionExpectations: SkillPermissionExpectation[];
   examples: string[];
   evaluations: SkillEvaluation[];

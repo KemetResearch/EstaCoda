@@ -64,7 +64,7 @@ export function buildFallbackResponse(input: {
 
   const confirmationText = input.intent.confirmationRequired
     ? "I matched it, but this route needs confirmation before I persist changes."
-    : `I matched the ${input.selectedSkill.name} skill and can begin its workflow without asking first.`;
+    : `I matched the ${input.selectedSkill.name} skill and can begin its playbook without asking first.`;
 
   return {
     label: input.label,
@@ -90,7 +90,7 @@ export function buildFallbackResponse(input: {
         (execution) => `tool: ${execution.tool.name} (${execution.decision}${execution.result === undefined ? "" : `/${execution.result.ok ? "ok" : "error"}`})`
       ),
       ...renderArtifactProgress(input.artifacts),
-      `next: ${input.selectedSkill.workflow[0]?.description ?? "run skill workflow"}`
+      `next: ${input.selectedSkill.playbook[0]?.description ?? "run skill playbook"}`
     ]
   };
 }

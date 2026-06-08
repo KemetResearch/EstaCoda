@@ -167,11 +167,11 @@ export class DelegationManager {
     const records: ToolExecutionRecord[] = [];
 
     if (
-      isToolAllowed("workflow.plan", input.allowedTools) &&
+      isToolAllowed("playbook.plan", input.allowedTools) &&
       (input.allowedToolsets.includes("research") || input.allowedToolsets.includes("core"))
     ) {
       const execution = await this.#toolExecutor.executeTool({
-        tool: "workflow.plan",
+        tool: "playbook.plan",
         sessionId: input.childSessionId,
         trustedWorkspace: input.trustedWorkspace,
         input: {

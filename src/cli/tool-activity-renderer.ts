@@ -80,7 +80,7 @@ export function toolIcon(tool: string): string {
   if (tool.includes("memory")) return "💠";
   if (tool.includes("trajectory")) return "🩸";
   if (tool.includes("delegate")) return "⚔️";
-  if (tool.includes("workflow") || tool.includes("skill")) return "☥";
+  if (tool.includes("playbook") || tool.includes("workflow") || tool.includes("skill")) return "☥";
   if (tool.includes("config") || tool.includes("onboarding")) return "🔧";
   return "𓂀";
 }
@@ -99,6 +99,7 @@ function toolAction(tool: string, definition: ToolDefinition | undefined): strin
   if (tool.includes("workspace")) return "reading workspace";
   if (tool.includes("memory")) return "writing memory";
   if (tool.includes("trajectory")) return "recording trajectory";
+  if (tool.includes("playbook")) return "planning playbook";
   if (tool.includes("workflow")) return "planning workflow";
   if (tool.includes("terminal") || tool.includes("process")) return "running process";
   if (tool.includes("execute") || tool.includes("python")) return "executing code";

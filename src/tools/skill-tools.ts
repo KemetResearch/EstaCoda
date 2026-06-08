@@ -121,7 +121,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.inspect",
-      description: "Inspect skill metadata, workflow, examples, and evaluations without loading extra files.",
+      description: "Inspect skill metadata, playbook, examples, and evaluations without loading extra files.",
       inputSchema: {
         type: "object",
         properties: {
@@ -155,7 +155,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.eval",
-      description: "Run lightweight skill eval gates for routing, workflow tool expectations, and degraded behavior metadata.",
+      description: "Run lightweight skill eval gates for routing, playbook tool expectations, and degraded behavior metadata.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1234,7 +1234,7 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     requiredCredentialFiles: skill.requiredCredentialFiles,
     configFields: skill.configFields,
     visibility: skill.visibility,
-    workflow: skill.workflow,
+    playbook: skill.playbook,
     permissionExpectations: skill.permissionExpectations,
     examples: skill.examples,
     evaluations: skill.evaluations,
@@ -1266,7 +1266,7 @@ function defaultSkillDefinition(input: {
     whenToUse: input.whenToUse ?? [input.description],
     requiredToolsets: input.requiredToolsets ?? ["core"],
     optionalToolsets: [],
-    workflow: [
+    playbook: [
       {
         id: "run",
         description: input.description,

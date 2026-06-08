@@ -524,7 +524,7 @@ export class RunRecorder {
       outcome,
       sessionId: this.#currentSessionId(),
       promptSummary: truncate(stripInlineReasoning(input.userText), 240),
-      selectedPlaybookStep: input.selectedSkill.workflow[0]?.id,
+      selectedPlaybookStep: input.selectedSkill.playbook[0]?.id,
       toolExecutions: input.toolExecutions
     }).catch(() => undefined);
 

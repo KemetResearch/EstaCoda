@@ -8,11 +8,11 @@ import type {
 import type { ToolsetName } from "../contracts/tool.js";
 
 export function compileSkillPlaybook(skill: LoadedSkill | SkillDefinition): CompiledSkillPlaybook {
-  const warnings = playbookWarnings(skill.workflow);
+  const warnings = playbookWarnings(skill.playbook);
 
   return {
     skill: skill.name,
-    steps: skill.workflow.map((step) => compileStep(skill, step)),
+    steps: skill.playbook.map((step) => compileStep(skill, step)),
     ...(warnings.length === 0 ? {} : { warnings })
   };
 }

@@ -103,7 +103,7 @@ export function plainActivityKeyForTool(tool: string): ActivityLabelKey {
   ) {
     return "run_checks";
   }
-  if (tool === "skill.view" || tool === "workflow.plan" || tool === "skill.inspect") return "load_skill";
+  if (tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
   if (tool === "media.inspect" || tool === "media.extract-frame") return "inspect_media";
   if (tool === "vision.analyze") return "inspect_media";
   if (tool === "document.probe") return "process_attachment";
@@ -115,6 +115,6 @@ export function plainActivityKeyForTool(tool: string): ActivityLabelKey {
   if (tool.includes("write")) return "write_files";
   if (tool.includes("media")) return "inspect_media";
   if (tool.includes("web") || tool.includes("browser")) return "web_action";
-  if (tool.includes("skill") || tool.includes("workflow")) return "load_skill";
+  if (tool.includes("skill") || tool.includes("playbook") || tool.includes("workflow")) return "load_skill";
   return "inspect";
 }

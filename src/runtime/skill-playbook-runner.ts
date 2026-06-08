@@ -140,8 +140,8 @@ export class SkillPlaybookRunner {
         intent: input.intent.labels,
         text: input.text,
         url: extractFirstUrl(input.text),
-        firstStep: input.skill.workflow[0]?.description,
-        workflowStep: input.step.id,
+        firstStep: input.skill.playbook[0]?.description,
+        playbookStep: input.step.id,
         stepDescription: input.step.description,
         previousResults: input.previousResults.map((result) => truncate(result, 500))
       };

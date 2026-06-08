@@ -60,7 +60,7 @@ const selectedSkill: SkillDefinition = {
   version: "0.1.0",
   whenToUse: ["testing"],
   requiredToolsets: ["files"],
-  workflow: [
+  playbook: [
     {
       id: "read",
       description: "Read something",

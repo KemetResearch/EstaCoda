@@ -23,7 +23,7 @@
   ],
   "requiredToolsets": ["files", "research"],
   "optionalToolsets": ["web", "browser"],
-  "workflow": [
+  "playbook": [
     {
       "id": "extract-transcript",
       "description": "Try the fastest transcript/content extraction route.",

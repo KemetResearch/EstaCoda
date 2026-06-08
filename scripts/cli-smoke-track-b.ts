@@ -7,16 +7,18 @@ import { loadSkillsFromDirectory } from "../src/skills/skill-loader.js";
 import { SkillEvolutionStore } from "../src/skills/skill-evolution.js";
 import { ChangeManifestStore } from "../src/skills/change-manifest-store.js";
 import { SkillProposalService } from "../src/skills/skill-proposal-service.js";
+import { defaultProfileId, resolveProfileStateHome } from "../src/config/profile-home.js";
 
 const tmp = mkdtempSync(join(tmpdir(), "estacoda-cli-smoke-"));
-const localSkillsRoot = join(tmp, ".estacoda", "skills");
+const profilePaths = resolveProfileStateHome({ homeDir: tmp, profileId: defaultProfileId() });
+const localSkillsRoot = profilePaths.skillsPath;
 const skillDir = join(localSkillsRoot, "test-skill");
 mkdirSync(skillDir, { recursive: true });
 
 writeFileSync(
   join(skillDir, "SKILL.md"),
   `---
-{"name":"test-skill","version":"1.0.0","description":"CLI smoke skill","category":"test","requiredToolsets":["core"],"workflow":[{"id":"step1","description":"Do nothing"}],"evaluations":[]}
+{"name":"test-skill","version":"1.0.0","description":"CLI smoke skill","category":"test","requiredToolsets":["core"],"playbook":[{"id":"step1","description":"Do nothing"}],"evaluations":[]}
 ---
 # Test Skill
 No instructions.

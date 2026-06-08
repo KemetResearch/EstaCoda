@@ -96,7 +96,7 @@ export function toolEmoji(tool: string): string {
 }
 
 const CHANNEL_TOOL_EMOJI: Record<string, string> = {
-  "workflow.plan": "🜁",
+  "playbook.plan": "🜁",
   "trajectory.record": "🜃",
   "python.probe": "𓆙",
   "document.probe": "📄",
@@ -205,7 +205,7 @@ export function activityKeyForTool(tool: string): ActivityLabelKey {
   if (tool === "execute_code" || tool === "python.probe" || tool === "process.logs" || tool === "process.list") {
     return "run_checks";
   }
-  if (tool === "skill.view" || tool === "workflow.plan" || tool === "skill.inspect") return "load_skill";
+  if (tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
   if (tool === "media.inspect" || tool === "media.extract-frame") return "inspect_media";
   if (tool === "vision.analyze") return "inspect_media";
   if (tool === "document.probe") return "process_attachment";
@@ -216,6 +216,6 @@ export function activityKeyForTool(tool: string): ActivityLabelKey {
   if (tool.includes("write")) return "write_files";
   if (tool.includes("media")) return "inspect_media";
   if (tool.includes("web") || tool.includes("browser")) return "web_action";
-  if (tool.includes("skill") || tool.includes("workflow")) return "load_skill";
+  if (tool.includes("skill") || tool.includes("playbook") || tool.includes("workflow")) return "load_skill";
   return "inspect";
 }
