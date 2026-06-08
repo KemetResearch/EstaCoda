@@ -51,8 +51,8 @@ export const taskflowMigrationCase: EvalCase = {
       // Store can write and read a flow
       const store = new SQLiteWorkflowStore({ db: sessionDb.db });
       const flow = makeTestFlow("flow-1");
-      await store.createFlow(flow);
-      const retrieved = await store.getFlow("flow-1");
+      await store.createWorkflowRun(flow);
+      const retrieved = await store.getWorkflowRun("flow-1");
       assertions.push(assertTrue("flow round-trip", retrieved !== null));
       assertions.push(assertEqual("flow sessionId", retrieved?.sessionId, flow.sessionId));
       assertions.push(assertEqual("flow status", retrieved?.status, flow.status));

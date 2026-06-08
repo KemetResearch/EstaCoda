@@ -1,7 +1,7 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
 import { SQLiteSessionDB } from "../../session/sqlite-session-db.js";
 import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
-import type { FlowEvent, OperatorEvent, Flow, FlowStep } from "../../workflow/types.js";
+import type { WorkflowEvent, WorkflowOperatorEvent, WorkflowRun, WorkflowStep } from "../../workflow/types.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import { rmSync } from "node:fs";
 
@@ -21,15 +21,15 @@ export const taskflowAtomicityCase: EvalCase = {
 
       // Atomic transition: create flow + step + event together
       await store.atomicTransition("flow-1", async (tx) => {
-        await tx.createFlow(makeTestFlow("flow-1"));
-        await tx.createStep(makeTestStep("step-1", "flow-1", 0));
-        await tx.appendFlowEvent(makeTestEvent("evt-1", "flow-1", "step-1", "flow-created"));
+        await tx.createWorkflowRun(makeTestFlow("flow-1"));
+        await tx.createWorkflowStep(makeTestStep("step-1", "flow-1", 0));
+        await tx.appendWorkflowEvent(makeTestEvent("evt-1", "flow-1", "step-1", "flow-created"));
         return "committed";
       });
 
-      const flow = await store.getFlow("flow-1");
-      const step = await store.getStep("step-1");
-      const events = await store.listFlowEvents("flow-1");
+      const flow = await store.getWorkflowRun("flow-1");
+      const step = await store.getWorkflowStep("step-1");
+      const events = await store.listWorkflowEvents("flow-1");
 
       assertions.push(assertTrue("flow exists after atomic transition", flow !== null));
       assertions.push(assertTrue("step exists after atomic transition", step !== null));
@@ -39,8 +39,8 @@ export const taskflowAtomicityCase: EvalCase = {
       let threw = false;
       try {
         await store.atomicTransition("flow-2", async (tx) => {
-          await tx.createFlow(makeTestFlow("flow-2"));
-          await tx.createStep(makeTestStep("step-2", "flow-2", 0));
+          await tx.createWorkflowRun(makeTestFlow("flow-2"));
+          await tx.createWorkflowStep(makeTestStep("step-2", "flow-2", 0));
           throw new Error("simulated failure");
         });
       } catch {
@@ -49,21 +49,21 @@ export const taskflowAtomicityCase: EvalCase = {
       assertions.push(assertTrue("atomic transition throws on error", threw));
 
       // The adapter-backed transaction should roll back completely, so flow-2 should not exist.
-      const flow2 = await store.getFlow("flow-2");
+      const flow2 = await store.getWorkflowRun("flow-2");
       assertions.push(assertTrue("flow rolled back on atomic failure", flow2 === null));
 
       // Step update round-trip
       if (step) {
         const updatedStep = { ...step, status: "running" as const, startedAt: "2024-01-01T00:01:00.000Z", updatedAt: "2024-01-01T00:01:00.000Z" };
-        await store.updateStep(updatedStep);
-        const reloaded = await store.getStep("step-1");
+        await store.updateWorkflowStep(updatedStep);
+        const reloaded = await store.getWorkflowStep("step-1");
         assertions.push(assertEqual("step status updated", reloaded?.status, "running"));
         assertions.push(assertEqual("step startedAt updated", reloaded?.startedAt, "2024-01-01T00:01:00.000Z"));
       }
 
       // Operator event
-      await store.appendOperatorEvent(makeTestOpEvent("op-1", "flow-1", "step-1", "operator-paused"));
-      const opEvents = await store.listOperatorEvents("flow-1");
+      await store.appendWorkflowOperatorEvent(makeTestOpEvent("op-1", "flow-1", "step-1", "operator-paused"));
+      const opEvents = await store.listWorkflowOperatorEvents("flow-1");
       assertions.push(assertEqual("operator event appended", opEvents.length, 1));
 
       // Lock lifecycle
@@ -75,9 +75,9 @@ export const taskflowAtomicityCase: EvalCase = {
       const afterRelease = await store.getLock("flow-1");
       assertions.push(assertTrue("lock released", afterRelease === null));
 
-      // Checkpoint
-      await store.createCheckpoint(makeTestCheckpoint("cp-1", "flow-1"));
-      const cp = await store.getCheckpoint("cp-1");
+      // WorkflowCheckpoint
+      await store.createWorkflowCheckpoint(makeTestCheckpoint("cp-1", "flow-1"));
+      const cp = await store.getWorkflowCheckpoint("cp-1");
       assertions.push(assertTrue("checkpoint round-trip", cp !== null));
       assertions.push(assertEqual("checkpoint flowId", cp?.flowId, "flow-1"));
 
@@ -137,11 +137,11 @@ function makeTestStep(id: string, flowId: string, index: number) {
 }
 
 function makeTestEvent(id: string, flowId: string, stepId: string, kind: string) {
-  return { id, flowId, stepId, kind: kind as FlowEvent["kind"], data: { test: true }, timestamp: "2024-01-01T00:00:00.000Z" };
+  return { id, flowId, stepId, kind: kind as WorkflowEvent["kind"], data: { test: true }, timestamp: "2024-01-01T00:00:00.000Z" };
 }
 
 function makeTestOpEvent(id: string, flowId: string, stepId: string, kind: string) {
-  return { id, flowId, stepId, kind: kind as OperatorEvent["kind"], operator: "test", command: "/pause", effect: "paused", previousState: "running" as Flow["status"] | FlowStep["status"], newState: "paused" as Flow["status"] | FlowStep["status"], timestamp: "2024-01-01T00:00:00.000Z" };
+  return { id, flowId, stepId, kind: kind as WorkflowOperatorEvent["kind"], operator: "test", command: "/pause", effect: "paused", previousState: "running" as WorkflowRun["status"] | WorkflowStep["status"], newState: "paused" as WorkflowRun["status"] | WorkflowStep["status"], timestamp: "2024-01-01T00:00:00.000Z" };
 }
 
 function makeTestCheckpoint(id: string, flowId: string) {

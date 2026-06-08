@@ -113,12 +113,12 @@ export const track5IntegrationCase: EvalCase = {
     // 1. /flow slash bridge dispatches to WorkflowCommandDispatcher
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createFlow({
+      const flow = await engine.createWorkflowRun({
         sessionId: "session-1",
         intent: makeIntent(),
         plan: { name: "Bridge Plan", description: "Test", steps: [{ name: "B1", description: "B1" }] }
       });
-      await engine.startFlow(flow.id);
+      await engine.startWorkflowRun(flow.id);
 
       // Simulate what handleTaskFlowCommand does for /flow status
       const result = await dispatcher.dispatch({ command: "/status", flowId: flow.id });
@@ -132,7 +132,7 @@ export const track5IntegrationCase: EvalCase = {
     // 2. /flow set and /flow unset update activeFlowId correctly
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createFlow({
+      const flow = await engine.createWorkflowRun({
         sessionId: "session-2",
         intent: makeIntent(),
         plan: { name: "Active Plan", description: "Test", steps: [{ name: "A1", description: "A1" }] }
@@ -152,12 +152,12 @@ export const track5IntegrationCase: EvalCase = {
     // 3. /flow status works through the real session command bridge
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createFlow({
+      const flow = await engine.createWorkflowRun({
         sessionId: "session-3",
         intent: makeIntent(),
         plan: { name: "Status Plan", description: "Test", steps: [{ name: "S1", description: "S1" }] }
       });
-      await engine.startFlow(flow.id);
+      await engine.startWorkflowRun(flow.id);
 
       const result = await dispatcher.dispatch({ command: "/status", flowId: flow.id });
       assertions.push(assertTrue("flow-status-ok", result.ok));
@@ -171,12 +171,12 @@ export const track5IntegrationCase: EvalCase = {
     // 4. /steer records operator event and adapter consumes it on next turn
     // ═════════════════════════════════════════════════════════════════
     {
-      const steerFlow = await engine.createFlow({
+      const steerFlow = await engine.createWorkflowRun({
         sessionId: "session-4",
         intent: makeIntent(),
         plan: { name: "Steer Plan", description: "Test", steps: [{ name: "ST1", description: "ST1" }] }
       });
-      await engine.startFlow(steerFlow.id);
+      await engine.startWorkflowRun(steerFlow.id);
 
       // Dispatch /steer
       const steerResult = await dispatcher.dispatch({
@@ -187,7 +187,7 @@ export const track5IntegrationCase: EvalCase = {
       });
       assertions.push(assertTrue("steer-dispatch-ok", steerResult.ok));
 
-      const opEvents = await store.listOperatorEvents(steerFlow.id);
+      const opEvents = await store.listWorkflowOperatorEvents(steerFlow.id);
       assertions.push(assertTrue("steer-event-recorded", opEvents.some((e) => e.command === "/steer")));
 
       // Adapter consumes steer on next turn
@@ -197,8 +197,8 @@ export const track5IntegrationCase: EvalCase = {
         compactionService
       });
 
-      const flowObj = (await store.getFlow(steerFlow.id))!;
-      const stepObj = (await store.listSteps(steerFlow.id))[0];
+      const flowObj = (await store.getWorkflowRun(steerFlow.id))!;
+      const stepObj = (await store.listWorkflowSteps(steerFlow.id))[0];
 
       const turnResult = await adapter.runTurn({
         flow: flowObj,
@@ -215,12 +215,12 @@ export const track5IntegrationCase: EvalCase = {
     // 5. consumed steer event has consumedAt and consumedByStepId or consumedByRunId
     // ═════════════════════════════════════════════════════════════════
     {
-      const steerFlow2 = await engine.createFlow({
+      const steerFlow2 = await engine.createWorkflowRun({
         sessionId: "session-5",
         intent: makeIntent(),
         plan: { name: "Steer2 Plan", description: "Test", steps: [{ name: "ST2", description: "ST2" }] }
       });
-      await engine.startFlow(steerFlow2.id);
+      await engine.startWorkflowRun(steerFlow2.id);
 
       await dispatcher.dispatch({
         command: "/steer",
@@ -235,11 +235,11 @@ export const track5IntegrationCase: EvalCase = {
         compactionService
       });
 
-      const flowObj = (await store.getFlow(steerFlow2.id))!;
-      const stepObj = (await store.listSteps(steerFlow2.id))[0];
+      const flowObj = (await store.getWorkflowRun(steerFlow2.id))!;
+      const stepObj = (await store.listWorkflowSteps(steerFlow2.id))[0];
       await adapter.runTurn({ flow: flowObj, step: stepObj, text: "Run", channel: "cli" });
 
-      const opEventsAfter = await store.listOperatorEvents(steerFlow2.id);
+      const opEventsAfter = await store.listWorkflowOperatorEvents(steerFlow2.id);
       const consumedSteer = opEventsAfter.find((e) => e.command === "/steer" && e.consumedAt !== undefined);
       assertions.push(assertTrue("consumed-steer-has-consumedAt", consumedSteer !== undefined));
       if (consumedSteer) {
@@ -251,12 +251,12 @@ export const track5IntegrationCase: EvalCase = {
     // 6. consumed steer appears in /trace
     // ═════════════════════════════════════════════════════════════════
     {
-      const traceFlow = await engine.createFlow({
+      const traceFlow = await engine.createWorkflowRun({
         sessionId: "session-6",
         intent: makeIntent(),
         plan: { name: "Trace Plan", description: "Test", steps: [{ name: "TR1", description: "TR1" }] }
       });
-      await engine.startFlow(traceFlow.id);
+      await engine.startWorkflowRun(traceFlow.id);
 
       await dispatcher.dispatch({
         command: "/steer",
@@ -270,8 +270,8 @@ export const track5IntegrationCase: EvalCase = {
         store,
         compactionService
       });
-      const flowObj = (await store.getFlow(traceFlow.id))!;
-      const stepObj = (await store.listSteps(traceFlow.id))[0];
+      const flowObj = (await store.getWorkflowRun(traceFlow.id))!;
+      const stepObj = (await store.listWorkflowSteps(traceFlow.id))[0];
       await adapter.runTurn({ flow: flowObj, step: stepObj, text: "Run", channel: "cli" });
 
       const traceResult = await dispatcher.dispatch({ command: "/trace", flowId: traceFlow.id });
@@ -332,20 +332,20 @@ export const track5IntegrationCase: EvalCase = {
         const tfLock = new WorkflowLockService({ store: tfStore });
         const tfEngine = new WorkflowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
 
-        const flow = await tfEngine.createFlow({
+        const flow = await tfEngine.createWorkflowRun({
           sessionId: "rec-session",
           intent: makeIntent(),
           plan: { name: "Recovery Plan", description: "Test", steps: [{ name: "R1", description: "R1" }] }
         });
-        await tfEngine.startFlow(flow.id);
+        await tfEngine.startWorkflowRun(flow.id);
         await tfLock.acquire(flow.id, "old-worker");
 
         // Now createRuntime should run restart recovery
         const rt = await createRuntime({ ...minimalRuntimeOptions, sessionDb: sqliteDb });
         assertions.push(assertTrue("recovery-ran-on-startup", rt.taskflow !== undefined));
 
-        // Flow should be interrupted
-        const recoveredFlow = await tfStore.getFlow(flow.id);
+        // WorkflowRun should be interrupted
+        const recoveredFlow = await tfStore.getWorkflowRun(flow.id);
         assertions.push(assertEqual("running-flow-interrupted", recoveredFlow?.status, "interrupted"));
 
         await rt.dispose();
@@ -363,21 +363,21 @@ export const track5IntegrationCase: EvalCase = {
       const recoveryLock = new WorkflowLockService({ store: recoveryStore, now: makeNow() });
       const recoveryEngine = new WorkflowEngine({ store: recoveryStore, lockService: recoveryLock, ownerId: "worker", now: makeNow() });
 
-      const runningFlow = await recoveryEngine.createFlow({
+      const runningFlow = await recoveryEngine.createWorkflowRun({
         sessionId: "s9",
         intent: makeIntent(),
         plan: { name: "P9", description: "Test", steps: [{ name: "S9", description: "S9" }] }
       });
-      await recoveryEngine.startFlow(runningFlow.id);
-      const step = (await recoveryStore.listSteps(runningFlow.id))[0];
-      await recoveryStore.updateStep({ ...step, status: "running" });
+      await recoveryEngine.startWorkflowRun(runningFlow.id);
+      const step = (await recoveryStore.listWorkflowSteps(runningFlow.id))[0];
+      await recoveryStore.updateWorkflowStep({ ...step, status: "running" });
       await recoveryLock.acquire(runningFlow.id, "old-worker");
 
       const recovery = new WorkflowRestartRecovery({ store: recoveryStore, lockService: recoveryLock, now: makeNow() });
       const result = await recovery.recover();
 
       assertions.push(assertTrue("recovery-interrupted-running", result.interrupted >= 1));
-      const after = await recoveryStore.getFlow(runningFlow.id);
+      const after = await recoveryStore.getWorkflowRun(runningFlow.id);
       assertions.push(assertEqual("running-becomes-interrupted", after?.status, "interrupted"));
     }
 
@@ -389,36 +389,36 @@ export const track5IntegrationCase: EvalCase = {
       const recoveryLock2 = new WorkflowLockService({ store: recoveryStore2, now: makeNow() });
       const recoveryEngine2 = new WorkflowEngine({ store: recoveryStore2, lockService: recoveryLock2, ownerId: "worker", now: makeNow() });
 
-      const pausedFlow = await recoveryEngine2.createFlow({
+      const pausedFlow = await recoveryEngine2.createWorkflowRun({
         sessionId: "s10-paused",
         intent: makeIntent(),
         plan: { name: "P10a", description: "Test", steps: [{ name: "S10a", description: "S10a" }] }
       });
-      await recoveryEngine2.startFlow(pausedFlow.id);
-      await recoveryEngine2.applyPauseAtBoundary(pausedFlow.id);
+      await recoveryEngine2.startWorkflowRun(pausedFlow.id);
+      await recoveryEngine2.applyWorkflowPauseAtBoundary(pausedFlow.id);
 
-      const waitingFlow = await recoveryEngine2.createFlow({
+      const waitingFlow = await recoveryEngine2.createWorkflowRun({
         sessionId: "s10-waiting",
         intent: makeIntent(),
         plan: { name: "P10b", description: "Test", steps: [{ name: "S10b", description: "S10b" }] }
       });
-      await recoveryEngine2.startFlow(waitingFlow.id);
-      await recoveryEngine2.waitForInput((await recoveryStore2.listSteps(waitingFlow.id))[0].id, { kind: "user_input", description: "wait" });
+      await recoveryEngine2.startWorkflowRun(waitingFlow.id);
+      await recoveryEngine2.waitForInput((await recoveryStore2.listWorkflowSteps(waitingFlow.id))[0].id, { kind: "user_input", description: "wait" });
 
-      const interruptedFlow = await recoveryEngine2.createFlow({
+      const interruptedFlow = await recoveryEngine2.createWorkflowRun({
         sessionId: "s10-interrupted",
         intent: makeIntent(),
         plan: { name: "P10c", description: "Test", steps: [{ name: "S10c", description: "S10c" }] }
       });
-      await recoveryEngine2.startFlow(interruptedFlow.id);
-      await recoveryEngine2.interruptFlow(interruptedFlow.id);
+      await recoveryEngine2.startWorkflowRun(interruptedFlow.id);
+      await recoveryEngine2.interruptWorkflowRun(interruptedFlow.id);
 
       const recovery2 = new WorkflowRestartRecovery({ store: recoveryStore2, lockService: recoveryLock2, now: makeNow() });
       await recovery2.recover();
 
-      assertions.push(assertEqual("paused-preserved", (await recoveryStore2.getFlow(pausedFlow.id))?.status, "paused"));
-      assertions.push(assertEqual("waiting-preserved", (await recoveryStore2.getFlow(waitingFlow.id))?.status, "waiting"));
-      assertions.push(assertEqual("interrupted-preserved", (await recoveryStore2.getFlow(interruptedFlow.id))?.status, "interrupted"));
+      assertions.push(assertEqual("paused-preserved", (await recoveryStore2.getWorkflowRun(pausedFlow.id))?.status, "paused"));
+      assertions.push(assertEqual("waiting-preserved", (await recoveryStore2.getWorkflowRun(waitingFlow.id))?.status, "waiting"));
+      assertions.push(assertEqual("interrupted-preserved", (await recoveryStore2.getWorkflowRun(interruptedFlow.id))?.status, "interrupted"));
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -441,19 +441,19 @@ export const track5IntegrationCase: EvalCase = {
         now: makeNow()
       });
 
-      const cFlow = await compactEngine.createFlow({
+      const cFlow = await compactEngine.createWorkflowRun({
         sessionId: "s12",
         intent: makeIntent(),
         plan: { name: "P12", description: "Test", steps: [{ name: "S12", description: "S12" }] }
       });
-      await compactEngine.startFlow(cFlow.id);
+      await compactEngine.startWorkflowRun(cFlow.id);
       // Complete the step so the flow has no active steps/processes/approvals
-      const cStep = (await compactStore.listSteps(cFlow.id))[0];
-      await compactEngine.completeStep(cStep.id);
+      const cStep = (await compactStore.listWorkflowSteps(cFlow.id))[0];
+      await compactEngine.completeWorkflowStep(cStep.id);
 
       // Add 4 flow events (> eventThreshold=3)
       for (let i = 0; i < 4; i++) {
-        await compactStore.appendFlowEvent({
+        await compactStore.appendWorkflowEvent({
           id: crypto.randomUUID(),
           flowId: cFlow.id,
           kind: "flow-state-changed",
@@ -463,11 +463,11 @@ export const track5IntegrationCase: EvalCase = {
       }
 
       // Safe boundary check should trigger compaction
-      const before = (await compactStore.listFlowEvents(cFlow.id)).length;
+      const before = (await compactStore.listWorkflowEvents(cFlow.id)).length;
       await compactService.checkAndAutoCompact(cFlow.id);
-      const after = (await compactStore.listFlowEvents(cFlow.id)).length;
+      const after = (await compactStore.listWorkflowEvents(cFlow.id)).length;
       // Compaction should have run and reduced events (or created a summary)
-      const summaries = await compactStore.listCompactSummaries(cFlow.id);
+      const summaries = await compactStore.listWorkflowEventSummaries(cFlow.id);
       assertions.push(assertTrue("compaction-triggered-at-boundary", before > after || summaries.length > 0));
     }
 
@@ -484,16 +484,16 @@ export const track5IntegrationCase: EvalCase = {
         now: makeNow()
       });
 
-      const uFlow = await unsafeEngine.createFlow({
+      const uFlow = await unsafeEngine.createWorkflowRun({
         sessionId: "s13",
         intent: makeIntent(),
         plan: { name: "P13", description: "Test", steps: [{ name: "S13", description: "S13" }] }
       });
-      await unsafeEngine.startFlow(uFlow.id);
+      await unsafeEngine.startWorkflowRun(uFlow.id);
 
       // Add events but keep step running
       for (let i = 0; i < 5; i++) {
-        await unsafeStore.appendFlowEvent({
+        await unsafeStore.appendWorkflowEvent({
           id: crypto.randomUUID(),
           flowId: uFlow.id,
           kind: "flow-state-changed",
@@ -502,9 +502,9 @@ export const track5IntegrationCase: EvalCase = {
         });
       }
 
-      const beforeUnsafe = (await unsafeStore.listFlowEvents(uFlow.id)).length;
+      const beforeUnsafe = (await unsafeStore.listWorkflowEvents(uFlow.id)).length;
       await unsafeService.checkAndAutoCompact(uFlow.id);
-      const afterUnsafe = (await unsafeStore.listFlowEvents(uFlow.id)).length;
+      const afterUnsafe = (await unsafeStore.listWorkflowEvents(uFlow.id)).length;
       // Since step is running, compaction should NOT have run
       assertions.push(assertEqual("compaction-skipped-unsafe", beforeUnsafe, afterUnsafe));
     }
@@ -519,13 +519,13 @@ export const track5IntegrationCase: EvalCase = {
       const procRegistry = new WorkflowProcessRegistry({ store: procStore });
       const procDispatcher = new WorkflowCommandDispatcher({ engine: procEngine, store: procStore, processRegistry: procRegistry, compactionService });
 
-      const pFlow = await procEngine.createFlow({
+      const pFlow = await procEngine.createWorkflowRun({
         sessionId: "s14",
         intent: makeIntent(),
         plan: { name: "P14", description: "Test", steps: [{ name: "S14", description: "S14" }] }
       });
-      await procEngine.startFlow(pFlow.id);
-      const pStep = (await procStore.listSteps(pFlow.id))[0];
+      await procEngine.startWorkflowRun(pFlow.id);
+      const pStep = (await procStore.listWorkflowSteps(pFlow.id))[0];
 
       await procRegistry.register({
         id: "proc-1",
@@ -566,16 +566,16 @@ export const track5IntegrationCase: EvalCase = {
         compactionService
       });
 
-      const linkFlow = await engine.createFlow({
+      const linkFlow = await engine.createWorkflowRun({
         sessionId: "s15",
         intent: makeIntent(),
         plan: { name: "P15", description: "Test", steps: [{ name: "S15", description: "S15" }] }
       });
-      await engine.startFlow(linkFlow.id);
-      const linkStep = (await store.listSteps(linkFlow.id))[0];
+      await engine.startWorkflowRun(linkFlow.id);
+      const linkStep = (await store.listWorkflowSteps(linkFlow.id))[0];
 
       // We need the step in linkStore, not store
-      await linkStore.createFlow({
+      await linkStore.createWorkflowRun({
         id: linkFlow.id,
         sessionId: "s15",
         status: "running",
@@ -587,7 +587,7 @@ export const track5IntegrationCase: EvalCase = {
         retryCount: 0,
         metadata: {}
       });
-      await linkStore.createStep({
+      await linkStore.createWorkflowStep({
         id: linkStep.id,
         flowId: linkFlow.id,
         index: 0,
@@ -607,12 +607,12 @@ export const track5IntegrationCase: EvalCase = {
         updatedAt: new Date().toISOString()
       });
 
-      const linkFlowObj = (await linkStore.getFlow(linkFlow.id))!;
-      const linkStepObj = (await linkStore.listSteps(linkFlow.id))[0];
+      const linkFlowObj = (await linkStore.getWorkflowRun(linkFlow.id))!;
+      const linkStepObj = (await linkStore.listWorkflowSteps(linkFlow.id))[0];
 
       await linkAdapter.runTurn({ flow: linkFlowObj, step: linkStepObj, text: "Run", channel: "cli" });
 
-      const links = await linkStore.listRunLinks(linkFlow.id, linkStep.id);
+      const links = await linkStore.listWorkflowAgentRunLinks(linkFlow.id, linkStep.id);
       assertions.push(assertTrue("run-link-created", links.length > 0));
       if (links.length > 0) {
         assertions.push(assertEqual("run-link-uses-real-id", links[0].runId, realTrajectoryId));
@@ -632,7 +632,7 @@ export const track5IntegrationCase: EvalCase = {
 
       const artFlowId = "flow-art-001";
       const artStepId = "step-art-001";
-      await artStore.createFlow({
+      await artStore.createWorkflowRun({
         id: artFlowId,
         sessionId: "s16",
         status: "running",
@@ -644,7 +644,7 @@ export const track5IntegrationCase: EvalCase = {
         retryCount: 0,
         metadata: {}
       });
-      await artStore.createStep({
+      await artStore.createWorkflowStep({
         id: artStepId,
         flowId: artFlowId,
         index: 0,
@@ -664,12 +664,12 @@ export const track5IntegrationCase: EvalCase = {
         updatedAt: new Date().toISOString()
       });
 
-      const artFlowObj = (await artStore.getFlow(artFlowId))!;
-      const artStepObj = (await artStore.getStep(artStepId))!;
+      const artFlowObj = (await artStore.getWorkflowRun(artFlowId))!;
+      const artStepObj = (await artStore.getWorkflowStep(artStepId))!;
 
       await artAdapter.runTurn({ flow: artFlowObj, step: artStepObj, text: "Run", channel: "cli" });
 
-      const artifacts = await artStore.listArtifacts(artFlowId, artStepId);
+      const artifacts = await artStore.listWorkflowArtifactLinks(artFlowId, artStepId);
       assertions.push(assertTrue("artifact-link-created", artifacts.length > 0));
       if (artifacts.length > 0) {
         assertions.push(assertEqual("artifact-link-kind", artifacts[0].kind, "created"));

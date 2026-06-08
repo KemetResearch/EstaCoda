@@ -1,6 +1,6 @@
 // WorkflowLockService — lease-based distributed lock with heartbeat and stale recovery
 
-import type { FlowId, FlowLock } from "./types.js";
+import type { WorkflowRunId, WorkflowLock } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 
 export type WorkflowLockServiceOptions = {
@@ -31,19 +31,19 @@ export class WorkflowLockService {
     return this.#heartbeatIntervalMs;
   }
 
-  async acquire(flowId: FlowId, ownerId: string, leaseMs?: number): Promise<boolean> {
+  async acquire(flowId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<boolean> {
     return this.#store.acquireLock(flowId, ownerId, leaseMs ?? this.#defaultLeaseMs);
   }
 
-  async release(flowId: FlowId, ownerId: string): Promise<void> {
+  async release(flowId: WorkflowRunId, ownerId: string): Promise<void> {
     return this.#store.releaseLock(flowId, ownerId);
   }
 
-  async heartbeat(flowId: FlowId, ownerId: string, leaseMs?: number): Promise<void> {
+  async heartbeat(flowId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<void> {
     return this.#store.heartbeatLock(flowId, ownerId, leaseMs ?? this.#defaultLeaseMs);
   }
 
-  async get(flowId: FlowId): Promise<FlowLock | null> {
+  async get(flowId: WorkflowRunId): Promise<WorkflowLock | null> {
     return this.#store.getLock(flowId);
   }
 
@@ -52,7 +52,7 @@ export class WorkflowLockService {
     return this.#store.recoverStaleLocks(cutoff);
   }
 
-  isStale(lock: FlowLock, now?: Date): boolean {
+  isStale(lock: WorkflowLock, now?: Date): boolean {
     const t = now ?? this.#now();
     return lock.expiresAt < t.toISOString();
   }

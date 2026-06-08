@@ -2,40 +2,40 @@
 // Track 3: Operator Control Plane — command dispatch, validation, result formatting
 
 import type {
-  Flow,
-  FlowId,
-  FlowEvent,
-  OperatorEvent,
-  StepId,
-  CompactSummary
+  WorkflowRun,
+  WorkflowRunId,
+  WorkflowEvent,
+  WorkflowOperatorEvent,
+  WorkflowStepId,
+  WorkflowEventSummary
 } from "./types.js";
 import type { WorkflowEngine } from "./workflow-engine.js";
 import type { WorkflowStore } from "./workflow-store.js";
 import type { WorkflowProcessRegistry } from "./workflow-process-registry.js";
 import type { WorkflowEventSummaryService } from "./workflow-event-summary-service.js";
-import { isFlowStateTerminal } from "./types.js";
+import { isWorkflowRunStateTerminal } from "./types.js";
 
 export type OperatorCommand =
-  | { command: "/status"; flowId: FlowId }
-  | { command: "/pause"; flowId: FlowId; reason?: string; operator: string }
-  | { command: "/resume"; flowId: FlowId; operator: string }
-  | { command: "/interrupt"; flowId: FlowId; reason?: string; operator: string }
-  | { command: "/cancel"; flowId: FlowId; reason?: string; operator: string }
-  | { command: "/steer"; flowId: FlowId; guidance: string; operator: string }
-  | { command: "/approve"; stepId: StepId; operator: string; grantId?: string }
-  | { command: "/reject"; stepId: StepId; operator: string; reason?: string }
-  | { command: "/retry"; stepId: StepId; operator: string }
-  | { command: "/skip"; stepId: StepId; reason?: string; operator: string }
-  | { command: "/checkpoint"; flowId: FlowId; name: string; description?: string; operator: string }
-  | { command: "/compact"; flowId: FlowId; operator: string }
-  | { command: "/trace"; flowId: FlowId; limit?: number };
+  | { command: "/status"; flowId: WorkflowRunId }
+  | { command: "/pause"; flowId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/resume"; flowId: WorkflowRunId; operator: string }
+  | { command: "/interrupt"; flowId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/cancel"; flowId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/steer"; flowId: WorkflowRunId; guidance: string; operator: string }
+  | { command: "/approve"; stepId: WorkflowStepId; operator: string; grantId?: string }
+  | { command: "/reject"; stepId: WorkflowStepId; operator: string; reason?: string }
+  | { command: "/retry"; stepId: WorkflowStepId; operator: string }
+  | { command: "/skip"; stepId: WorkflowStepId; reason?: string; operator: string }
+  | { command: "/checkpoint"; flowId: WorkflowRunId; name: string; description?: string; operator: string }
+  | { command: "/compact"; flowId: WorkflowRunId; operator: string }
+  | { command: "/trace"; flowId: WorkflowRunId; limit?: number };
 
 export type CommandResult =
   | { ok: true; message: string; data?: Record<string, unknown> }
   | { ok: false; error: string };
 
-export type FlowStatusView = {
-  flowId: FlowId;
+export type WorkflowStatusView = {
+  flowId: WorkflowRunId;
   status: string;
   currentStepId?: string;
   currentStepName?: string;
@@ -49,10 +49,10 @@ export type FlowStatusView = {
   canCancel: boolean;
 };
 
-export type TimelineEntry = {
+export type WorkflowTimelineEntry = {
   timestamp: string;
   kind: "flow" | "operator";
-  event: FlowEvent | OperatorEvent;
+  event: WorkflowEvent | WorkflowOperatorEvent;
 };
 
 export class WorkflowCommandDispatcher {
@@ -103,19 +103,19 @@ export class WorkflowCommandDispatcher {
 
   // ─── /status ───
 
-  async #handleStatus(flowId: FlowId): Promise<CommandResult> {
-    const flow = await this.#store.getFlow(flowId);
+  async #handleStatus(flowId: WorkflowRunId): Promise<CommandResult> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) return { ok: false, error: "Flow not found" };
 
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     const currentStep = steps.find((s) => s.id === flow.currentStepId);
     const completedSteps = steps.filter((s) => s.status === "completed" || s.status === "skipped").length;
-    const pendingGates = await this.#store.listApprovalGates(flowId, { status: "pending" });
+    const pendingGates = await this.#store.listWorkflowApprovalGates(flowId, { status: "pending" });
 
     const createdAt = new Date(flow.createdAt).getTime();
     const elapsedMs = Date.now() - createdAt;
 
-    const view: FlowStatusView = {
+    const view: WorkflowStatusView = {
       flowId,
       status: flow.status,
       currentStepId: flow.currentStepId,
@@ -127,7 +127,7 @@ export class WorkflowCommandDispatcher {
       canPause: flow.status === "running",
       canResume: flow.status === "paused" || flow.status === "interrupted" || flow.status === "waiting",
       canInterrupt: flow.status === "running" || flow.status === "paused" || flow.status === "waiting",
-      canCancel: !isFlowStateTerminal(flow.status)
+      canCancel: !isWorkflowRunStateTerminal(flow.status)
     };
 
     return {
@@ -139,9 +139,9 @@ export class WorkflowCommandDispatcher {
 
   // ─── /pause ───
 
-  async #handlePause(flowId: FlowId, reason?: string, operator?: string): Promise<CommandResult> {
+  async #handlePause(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
-      await this.#engine.requestPause(flowId, reason, operator);
+      await this.#engine.requestWorkflowPause(flowId, reason, operator);
       return { ok: true, message: `Pause requested for flow ${flowId}. Will take effect at next safe boundary.` };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -150,9 +150,9 @@ export class WorkflowCommandDispatcher {
 
   // ─── /resume ───
 
-  async #handleResume(flowId: FlowId, operator: string): Promise<CommandResult> {
+  async #handleResume(flowId: WorkflowRunId, operator: string): Promise<CommandResult> {
     try {
-      const flow = await this.#engine.resumeFlow(flowId, operator);
+      const flow = await this.#engine.resumeWorkflowRun(flowId, operator);
       return { ok: true, message: `Flow ${flowId} resumed. Current state: ${flow.status}.` };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -161,7 +161,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── /interrupt ───
 
-  async #handleInterrupt(flowId: FlowId, reason?: string, operator?: string): Promise<CommandResult> {
+  async #handleInterrupt(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
       // Clean up active processes first, recording each attempt
       const processes = await this.#processRegistry.listByFlow(flowId);
@@ -178,7 +178,7 @@ export class WorkflowCommandDispatcher {
         for (const cr of cleanupResults) {
           const proc = processes.find((p) => p.id === cr.processId);
           if (!proc) continue;
-          await tx.appendFlowEvent({
+          await tx.appendWorkflowEvent({
             id: crypto.randomUUID(),
             flowId,
             stepId: proc.stepId,
@@ -195,7 +195,7 @@ export class WorkflowCommandDispatcher {
         }
       });
 
-      const flow = await this.#engine.interruptFlow(flowId, reason, operator);
+      const flow = await this.#engine.interruptWorkflowRun(flowId, reason, operator);
       const terminated = cleanupResults.filter((r) => r.ok).length;
       const failed = cleanupResults.filter((r) => !r.ok).length;
 
@@ -216,7 +216,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── /cancel ───
 
-  async #handleCancel(flowId: FlowId, reason?: string, operator?: string): Promise<CommandResult> {
+  async #handleCancel(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
       // Clean up active processes first, recording each attempt
       const processes = await this.#processRegistry.listByFlow(flowId);
@@ -233,7 +233,7 @@ export class WorkflowCommandDispatcher {
         for (const cr of cleanupResults) {
           const proc = processes.find((p) => p.id === cr.processId);
           if (!proc) continue;
-          await tx.appendFlowEvent({
+          await tx.appendWorkflowEvent({
             id: crypto.randomUUID(),
             flowId,
             stepId: proc.stepId,
@@ -250,7 +250,7 @@ export class WorkflowCommandDispatcher {
         }
       });
 
-      const flow = await this.#engine.cancelFlow(flowId, reason, operator);
+      const flow = await this.#engine.cancelWorkflowRun(flowId, reason, operator);
       const terminated = cleanupResults.filter((r) => r.ok).length;
       const failed = cleanupResults.filter((r) => !r.ok).length;
 
@@ -271,17 +271,17 @@ export class WorkflowCommandDispatcher {
 
   // ─── /steer ───
 
-  async #handleSteer(flowId: FlowId, guidance: string, operator: string): Promise<CommandResult> {
-    const flow = await this.#store.getFlow(flowId);
+  async #handleSteer(flowId: WorkflowRunId, guidance: string, operator: string): Promise<CommandResult> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) return { ok: false, error: "Flow not found" };
 
-    if (isFlowStateTerminal(flow.status)) {
+    if (isWorkflowRunStateTerminal(flow.status)) {
       return { ok: false, error: `Cannot steer a flow in terminal state ${flow.status}` };
     }
 
     // Record steer as operator event via atomic transition
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.appendOperatorEvent({
+      await tx.appendWorkflowOperatorEvent({
         id: crypto.randomUUID(),
         flowId,
         kind: "operator-steered",
@@ -300,7 +300,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── /approve ───
 
-  async #handleApprove(stepId: StepId, operator: string, grantId?: string): Promise<CommandResult> {
+  async #handleApprove(stepId: WorkflowStepId, operator: string, grantId?: string): Promise<CommandResult> {
     try {
       const step = await this.#engine.approveStep(stepId, operator, grantId);
       return { ok: true, message: `Step ${stepId} approved. Resumed execution.`, data: { stepStatus: step.status } };
@@ -311,7 +311,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── /reject ───
 
-  async #handleReject(stepId: StepId, operator: string, reason?: string): Promise<CommandResult> {
+  async #handleReject(stepId: WorkflowStepId, operator: string, reason?: string): Promise<CommandResult> {
     try {
       const step = await this.#engine.rejectStep(stepId, operator, reason);
       return { ok: true, message: `Step ${stepId} rejected. Status: ${step.status}.`, data: { stepStatus: step.status } };
@@ -322,9 +322,9 @@ export class WorkflowCommandDispatcher {
 
   // ─── /retry ───
 
-  async #handleRetry(stepId: StepId, operator: string): Promise<CommandResult> {
+  async #handleRetry(stepId: WorkflowStepId, operator: string): Promise<CommandResult> {
     try {
-      const step = await this.#engine.retryStep(stepId, operator);
+      const step = await this.#engine.retryWorkflowStep(stepId, operator);
       return { ok: true, message: `Retry step created for ${stepId}. Attempt ${step.attemptNumber}.`, data: { retryStepId: step.id } };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -333,9 +333,9 @@ export class WorkflowCommandDispatcher {
 
   // ─── /skip ───
 
-  async #handleSkip(stepId: StepId, reason?: string, operator?: string): Promise<CommandResult> {
+  async #handleSkip(stepId: WorkflowStepId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
-      const step = await this.#engine.skipStep(stepId, reason, operator);
+      const step = await this.#engine.skipWorkflowStep(stepId, reason, operator);
       return { ok: true, message: `Step ${stepId} skipped. Status: ${step.status}.`, data: { stepStatus: step.status } };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -344,9 +344,9 @@ export class WorkflowCommandDispatcher {
 
   // ─── /checkpoint ───
 
-  async #handleCheckpoint(flowId: FlowId, name: string, description?: string, operator?: string): Promise<CommandResult> {
+  async #handleCheckpoint(flowId: WorkflowRunId, name: string, description?: string, operator?: string): Promise<CommandResult> {
     try {
-      const checkpoint = await this.#engine.createCheckpoint(flowId, name, description, operator);
+      const checkpoint = await this.#engine.createWorkflowCheckpoint(flowId, name, description, operator);
       return { ok: true, message: `Checkpoint '${name}' created for flow ${flowId}.`, data: { checkpointId: checkpoint.id } };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -355,15 +355,15 @@ export class WorkflowCommandDispatcher {
 
   // ─── /trace ───
 
-  async #handleTrace(flowId: FlowId, limit?: number): Promise<CommandResult> {
-    const flow = await this.#store.getFlow(flowId);
+  async #handleTrace(flowId: WorkflowRunId, limit?: number): Promise<CommandResult> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) return { ok: false, error: "Flow not found" };
 
-    const flowEvents = await this.#store.listFlowEvents(flowId);
-    const opEvents = await this.#store.listOperatorEvents(flowId);
-    const compactSummaries = await this.#store.listCompactSummaries(flowId);
+    const flowEvents = await this.#store.listWorkflowEvents(flowId);
+    const opEvents = await this.#store.listWorkflowOperatorEvents(flowId);
+    const compactSummaries = await this.#store.listWorkflowEventSummaries(flowId);
 
-    const timeline: TimelineEntry[] = [
+    const timeline: WorkflowTimelineEntry[] = [
       ...flowEvents.map((e) => ({ timestamp: e.timestamp, kind: "flow" as const, event: e })),
       ...opEvents.map((e) => ({ timestamp: e.timestamp, kind: "operator" as const, event: e }))
     ];
@@ -381,7 +381,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── Formatters ───
 
-  #formatStatus(view: FlowStatusView): string {
+  #formatStatus(view: WorkflowStatusView): string {
     const lines = [
       `Flow: ${view.flowId}`,
       `Status: ${view.status}`,
@@ -409,7 +409,7 @@ export class WorkflowCommandDispatcher {
     return `${seconds}s`;
   }
 
-  #formatTimeline(timeline: TimelineEntry[], compactSummaries?: CompactSummary[]): string {
+  #formatTimeline(timeline: WorkflowTimelineEntry[], compactSummaries?: WorkflowEventSummary[]): string {
     if (timeline.length === 0 && (!compactSummaries || compactSummaries.length === 0)) return "No events recorded.";
     const lines = timeline
       .map((entry) => {
@@ -434,7 +434,7 @@ export class WorkflowCommandDispatcher {
 
   // ─── /compact ───
 
-  async #handleCompact(flowId: FlowId, operator: string): Promise<CommandResult> {
+  async #handleCompact(flowId: WorkflowRunId, operator: string): Promise<CommandResult> {
     try {
       const result = await this.#compactionService.compact(flowId, operator);
       if (!result.ok) {

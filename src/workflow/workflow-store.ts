@@ -1,20 +1,20 @@
 // WorkflowStore interface — persistence contract for flow orchestration
 
 import type {
-  Flow,
-  FlowId,
-  FlowStep,
-  StepId,
-  FlowEvent,
-  OperatorEvent,
-  Checkpoint,
-  CheckpointId,
-  ApprovalGate,
-  ArtifactLink,
-  RunLink,
-  FlowProcess,
-  FlowLock,
-  CompactSummary,
+  WorkflowRun,
+  WorkflowRunId,
+  WorkflowStep,
+  WorkflowStepId,
+  WorkflowEvent,
+  WorkflowOperatorEvent,
+  WorkflowCheckpoint,
+  WorkflowCheckpointId,
+  WorkflowApprovalGate,
+  WorkflowArtifactLink,
+  WorkflowAgentRunLink,
+  WorkflowProcess,
+  WorkflowLock,
+  WorkflowEventSummary,
   RunId,
   EventId
 } from "./types.js";
@@ -27,65 +27,65 @@ export type AtomicTransitionResult = {
 };
 
 export interface WorkflowStore {
-  // ─── Flow state ───
-  createFlow(flow: Flow): Promise<void>;
-  updateFlow(flow: Flow): Promise<void>;
-  getFlow(id: FlowId): Promise<Flow | null>;
-  listFlows(sessionId?: string): Promise<Flow[]>;
-  listActiveFlows(): Promise<Flow[]>;
+  // ─── WorkflowRun state ───
+  createWorkflowRun(flow: WorkflowRun): Promise<void>;
+  updateWorkflowRun(flow: WorkflowRun): Promise<void>;
+  getWorkflowRun(id: WorkflowRunId): Promise<WorkflowRun | null>;
+  listWorkflowRuns(sessionId?: string): Promise<WorkflowRun[]>;
+  listActiveWorkflowRuns(): Promise<WorkflowRun[]>;
 
   // ─── Step state ───
-  createStep(step: FlowStep): Promise<void>;
-  updateStep(step: FlowStep): Promise<void>;
-  getStep(id: StepId): Promise<FlowStep | null>;
-  listSteps(flowId: FlowId): Promise<FlowStep[]>;
+  createWorkflowStep(step: WorkflowStep): Promise<void>;
+  updateWorkflowStep(step: WorkflowStep): Promise<void>;
+  getWorkflowStep(id: WorkflowStepId): Promise<WorkflowStep | null>;
+  listWorkflowSteps(flowId: WorkflowRunId): Promise<WorkflowStep[]>;
 
   // ─── Events ───
-  appendFlowEvent(event: FlowEvent): Promise<void>;
-  appendOperatorEvent(event: OperatorEvent): Promise<void>;
-  listFlowEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<FlowEvent[]>;
-  listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<OperatorEvent[]>;
+  appendWorkflowEvent(event: WorkflowEvent): Promise<void>;
+  appendWorkflowOperatorEvent(event: WorkflowOperatorEvent): Promise<void>;
+  listWorkflowEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowEvent[]>;
+  listWorkflowOperatorEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowOperatorEvent[]>;
 
   // ─── Linkage ───
-  linkArtifact(link: ArtifactLink): Promise<void>;
-  listArtifacts(flowId: FlowId, stepId?: StepId): Promise<ArtifactLink[]>;
-  linkRun(link: RunLink): Promise<void>;
-  listRunLinks(flowId: FlowId, stepId?: StepId): Promise<RunLink[]>;
+  linkWorkflowArtifact(link: WorkflowArtifactLink): Promise<void>;
+  listWorkflowArtifactLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowArtifactLink[]>;
+  linkWorkflowAgentRun(link: WorkflowAgentRunLink): Promise<void>;
+  listWorkflowAgentRunLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowAgentRunLink[]>;
 
   // ─── Checkpoints ───
-  createCheckpoint(checkpoint: Checkpoint): Promise<void>;
-  getCheckpoint(id: CheckpointId): Promise<Checkpoint | null>;
-  listCheckpoints(flowId: FlowId): Promise<Checkpoint[]>;
+  createWorkflowCheckpoint(checkpoint: WorkflowCheckpoint): Promise<void>;
+  getWorkflowCheckpoint(id: WorkflowCheckpointId): Promise<WorkflowCheckpoint | null>;
+  listWorkflowCheckpoints(flowId: WorkflowRunId): Promise<WorkflowCheckpoint[]>;
 
   // ─── Approval gates ───
-  createApprovalGate(gate: ApprovalGate): Promise<void>;
-  updateApprovalGate(gate: ApprovalGate): Promise<void>;
-  getApprovalGate(id: string): Promise<ApprovalGate | null>;
-  listApprovalGates(flowId: FlowId, options?: { stepId?: StepId; status?: string }): Promise<ApprovalGate[]>;
+  createWorkflowApprovalGate(gate: WorkflowApprovalGate): Promise<void>;
+  updateWorkflowApprovalGate(gate: WorkflowApprovalGate): Promise<void>;
+  getWorkflowApprovalGate(id: string): Promise<WorkflowApprovalGate | null>;
+  listWorkflowApprovalGates(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; status?: string }): Promise<WorkflowApprovalGate[]>;
 
   // ─── Locks ───
-  acquireLock(flowId: FlowId, ownerId: string, leaseMs: number): Promise<boolean>;
-  releaseLock(flowId: FlowId, ownerId: string): Promise<void>;
-  heartbeatLock(flowId: FlowId, ownerId: string, leaseMs: number): Promise<void>;
-  getLock(flowId: FlowId): Promise<FlowLock | null>;
+  acquireLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<boolean>;
+  releaseLock(flowId: WorkflowRunId, ownerId: string): Promise<void>;
+  heartbeatLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<void>;
+  getLock(flowId: WorkflowRunId): Promise<WorkflowLock | null>;
   recoverStaleLocks(before: string): Promise<number>;
 
   // ─── Process registry ───
-  registerProcess(process: FlowProcess): Promise<void>;
-  updateProcess(process: FlowProcess): Promise<void>;
-  getProcess(id: string): Promise<FlowProcess | null>;
-  listProcesses(flowId: FlowId, stepId?: StepId): Promise<FlowProcess[]>;
+  registerWorkflowProcess(process: WorkflowProcess): Promise<void>;
+  updateWorkflowProcess(process: WorkflowProcess): Promise<void>;
+  getWorkflowProcess(id: string): Promise<WorkflowProcess | null>;
+  listWorkflowProcesses(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]>;
 
   // ─── Compact summaries ───
-  saveCompactSummary(summary: CompactSummary): Promise<void>;
-  listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]>;
+  saveWorkflowEventSummary(summary: WorkflowEventSummary): Promise<void>;
+  listWorkflowEventSummaries(flowId: WorkflowRunId): Promise<WorkflowEventSummary[]>;
 
   // ─── Steer consumption ───
-  listUnconsumedSteerEvents(flowId: FlowId): Promise<OperatorEvent[]>;
+  listUnconsumedSteerEvents(flowId: WorkflowRunId): Promise<WorkflowOperatorEvent[]>;
   markSteerConsumed(
     eventId: EventId,
     consumption: {
-      consumedByStepId?: StepId;
+      consumedByStepId?: WorkflowStepId;
       consumedByRunId?: RunId;
       consumedByFlowEventId?: EventId;
     }
@@ -93,7 +93,7 @@ export interface WorkflowStore {
 
   // ─── Atomic transition ───
   atomicTransition<T>(
-    flowId: FlowId,
+    flowId: WorkflowRunId,
     work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T>;
 }

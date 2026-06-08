@@ -2,27 +2,27 @@
 // Track 2: Engine — flow/step lifecycle, pause/resume, interrupt, wait, retry, checkpoint
 
 import type {
-  Flow,
-  FlowId,
-  FlowPlan,
-  FlowPlanStep,
-  FlowState,
-  FlowStep,
-  StepId,
-  StepState,
-  FlowEvent,
-  OperatorEvent,
-  Checkpoint,
-  CheckpointSnapshot,
-  ApprovalGate,
+  WorkflowRun,
+  WorkflowRunId,
+  WorkflowPlan,
+  WorkflowPlanStep,
+  WorkflowRunState,
+  WorkflowStep,
+  WorkflowStepId,
+  WorkflowStepState,
+  WorkflowEvent,
+  WorkflowOperatorEvent,
+  WorkflowCheckpoint,
+  WorkflowCheckpointSnapshot,
+  WorkflowApprovalGate,
   WaitReason,
-  FlowProcess
+  WorkflowProcess
 } from "./types.js";
 import {
-  validateFlowTransition,
-  validateStepTransition,
-  isFlowStateTerminal,
-  isStepStateTerminal,
+  validateWorkflowRunTransition,
+  validateWorkflowStepTransition,
+  isWorkflowRunStateTerminal,
+  isWorkflowStepStateTerminal,
   isRetryAllowed,
   defaultRetryPolicy,
   defaultFailurePolicy,
@@ -42,19 +42,19 @@ export type WorkflowEngineOptions = {
   id?: () => string;
 };
 
-export type CreateFlowInput = {
+export type CreateWorkflowRunInput = {
   sessionId: string;
   intent: IntentRoute;
-  plan: FlowPlan;
+  plan: WorkflowPlan;
   selectedSkill?: string;
 };
 
-export type StartFlowResult =
-  | { ok: true; flow: Flow }
+export type StartWorkflowRunResult =
+  | { ok: true; flow: WorkflowRun }
   | { ok: false; error: string };
 
-export type StepCompletionResult =
-  | { ok: true; flow: Flow; nextStep?: FlowStep }
+export type WorkflowStepCompletionResult =
+  | { ok: true; flow: WorkflowRun; nextStep?: WorkflowStep }
   | { ok: false; error: string };
 
 export class WorkflowEngine {
@@ -72,11 +72,11 @@ export class WorkflowEngine {
     this.#id = options.id ?? (() => crypto.randomUUID());
   }
 
-  // ─── Flow lifecycle ───
+  // ─── WorkflowRun lifecycle ───
 
-  async createFlow(input: CreateFlowInput): Promise<Flow> {
+  async createWorkflowRun(input: CreateWorkflowRunInput): Promise<WorkflowRun> {
     const now = this.#now().toISOString();
-    const flow: Flow = {
+    const flow: WorkflowRun = {
       id: this.#id(),
       sessionId: input.sessionId,
       status: "pending",
@@ -91,8 +91,8 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flow.id, async (tx) => {
-      await tx.createFlow(flow);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flow.id, "flow-created", { planName: input.plan.name }));
+      await tx.createWorkflowRun(flow);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flow.id, "flow-created", { planName: input.plan.name }));
     });
 
     // Create steps from plan
@@ -101,18 +101,18 @@ export class WorkflowEngine {
     }
 
     // Update step count
-    const updatedFlow = await this.#store.getFlow(flow.id);
+    const updatedFlow = await this.#store.getWorkflowRun(flow.id);
     if (updatedFlow) {
       updatedFlow.stepCount = input.plan.steps.length;
       updatedFlow.updatedAt = this.#now().toISOString();
-      await this.#store.updateFlow(updatedFlow);
+      await this.#store.updateWorkflowRun(updatedFlow);
     }
 
-    return (await this.#store.getFlow(flow.id)) ?? flow;
+    return (await this.#store.getWorkflowRun(flow.id)) ?? flow;
   }
 
-  async startFlow(flowId: FlowId): Promise<StartFlowResult> {
-    const flow = await this.#store.getFlow(flowId);
+  async startWorkflowRun(flowId: WorkflowRunId): Promise<StartWorkflowRunResult> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) return { ok: false, error: "Flow not found" };
     if (flow.status !== "pending") return { ok: false, error: `Cannot start flow in state ${flow.status}` };
 
@@ -122,99 +122,99 @@ export class WorkflowEngine {
     try {
       await this.#transitionFlow(flowId, "running", { from: "pending" });
 
-      const steps = await this.#store.listSteps(flowId);
+      const steps = await this.#store.listWorkflowSteps(flowId);
       if (steps.length === 0) {
         await this.#transitionFlow(flowId, "completed", { from: "running" });
-        const completedFlow = await this.#store.getFlow(flowId);
+        const completedFlow = await this.#store.getWorkflowRun(flowId);
         return { ok: true, flow: completedFlow! };
       }
 
       const firstStep = steps[0];
       await this.#transitionStep(firstStep.id, "running", { from: "pending" });
 
-      const updatedFlow = await this.#store.getFlow(flowId);
+      const updatedFlow = await this.#store.getWorkflowRun(flowId);
       if (updatedFlow) {
         updatedFlow.currentStepId = firstStep.id;
         updatedFlow.updatedAt = this.#now().toISOString();
-        await this.#store.updateFlow(updatedFlow);
+        await this.#store.updateWorkflowRun(updatedFlow);
       }
 
-      return { ok: true, flow: (await this.#store.getFlow(flowId))! };
+      return { ok: true, flow: (await this.#store.getWorkflowRun(flowId))! };
     } catch (error) {
       await this.#lockService.release(flowId, this.#ownerId);
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  async completeFlow(flowId: FlowId): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async completeWorkflowRun(flowId: WorkflowRunId): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    await this.#transitionFlow(flowId, "completed", { from: flow.status as FlowState });
+    await this.#transitionFlow(flowId, "completed", { from: flow.status as WorkflowRunState });
     await this.#lockService.release(flowId, this.#ownerId);
 
-    const updated = await this.#store.getFlow(flowId);
+    const updated = await this.#store.getWorkflowRun(flowId);
     return updated!;
   }
 
-  async failFlow(flowId: FlowId, reason?: string): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async failWorkflowRun(flowId: WorkflowRunId, reason?: string): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    await this.#transitionFlow(flowId, "failed", { from: flow.status as FlowState, reason });
+    await this.#transitionFlow(flowId, "failed", { from: flow.status as WorkflowRunState, reason });
     await this.#lockService.release(flowId, this.#ownerId);
 
-    const updated = await this.#store.getFlow(flowId);
+    const updated = await this.#store.getWorkflowRun(flowId);
     return updated!;
   }
 
-  async cancelFlow(flowId: FlowId, reason?: string, operator?: string): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async cancelWorkflowRun(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    if (isFlowStateTerminal(flow.status)) {
+    if (isWorkflowRunStateTerminal(flow.status)) {
       return flow;
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       // Cancel all active steps
-      const steps = await tx.listSteps(flowId);
+      const steps = await tx.listWorkflowSteps(flowId);
       for (const step of steps) {
-        if (!isStepStateTerminal(step.status)) {
+        if (!isWorkflowStepStateTerminal(step.status)) {
           await this.#cancelStepInTx(tx, step.id, reason);
         }
       }
 
-      await this.#transitionFlowInTx(tx, flowId, "cancelled", { from: flow.status as FlowState, reason });
+      await this.#transitionFlowInTx(tx, flowId, "cancelled", { from: flow.status as WorkflowRunState, reason });
 
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-cancelled", operator, "/cancel", "Flow cancelled", flow.status, "cancelled", { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-cancelled", operator, "/cancel", "Flow cancelled", flow.status, "cancelled", { reason }));
       }
     });
 
     await this.#lockService.release(flowId, this.#ownerId);
 
-    const updated = await this.#store.getFlow(flowId);
+    const updated = await this.#store.getWorkflowRun(flowId);
     return updated!;
   }
 
   // ─── Step lifecycle ───
 
-  async createStep(flowId: FlowId, name: string, description: string, options?: {
+  async createWorkflowStep(flowId: WorkflowRunId, name: string, description: string, options?: {
     requiresApproval?: boolean;
     skippable?: boolean;
     maxRetries?: number;
     idempotent?: boolean;
     onFailure?: "stop" | "retry" | "skip" | "escalate";
-  }): Promise<FlowStep> {
-    const flow = await this.#store.getFlow(flowId);
+  }): Promise<WorkflowStep> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     const index = steps.length;
 
     const now = this.#now().toISOString();
-    const step: FlowStep = {
+    const step: WorkflowStep = {
       id: this.#id(),
       flowId,
       index,
@@ -239,25 +239,25 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.createStep(step);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-created", { stepId: step.id, stepName: name, stepIndex: index }, step.id));
+      await tx.createWorkflowStep(step);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "step-created", { stepId: step.id, stepName: name, stepIndex: index }, step.id));
     });
 
     return step;
   }
 
-  async startStep(stepId: StepId): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async startWorkflowStep(stepId: WorkflowStepId): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     await this.#transitionStep(stepId, "running", { from: step.status });
 
-    const updated = await this.#store.getStep(stepId);
+    const updated = await this.#store.getWorkflowStep(stepId);
     return updated!;
   }
 
-  async completeStep(stepId: StepId): Promise<StepCompletionResult> {
-    const step = await this.#store.getStep(stepId);
+  async completeWorkflowStep(stepId: WorkflowStepId): Promise<WorkflowStepCompletionResult> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) return { ok: false, error: "Step not found" };
 
     const flowId = step.flowId;
@@ -265,7 +265,7 @@ export class WorkflowEngine {
     await this.#transitionStep(stepId, "completed", { from: step.status });
 
     // Advance to next step or complete flow
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     const currentIndex = steps.findIndex((s) => s.id === stepId);
     let nextStep = steps[currentIndex + 1];
 
@@ -278,30 +278,30 @@ export class WorkflowEngine {
 
     if (nextStep && nextStep.status === "pending") {
       await this.#transitionStep(nextStep.id, "running", { from: "pending" });
-      const flow = await this.#store.getFlow(flowId);
+      const flow = await this.#store.getWorkflowRun(flowId);
       if (flow) {
         flow.currentStepId = nextStep.id;
         flow.updatedAt = this.#now().toISOString();
-        await this.#store.updateFlow(flow);
+        await this.#store.updateWorkflowRun(flow);
       }
-      return { ok: true, flow: (await this.#store.getFlow(flowId))!, nextStep: (await this.#store.getStep(nextStep.id))! };
+      return { ok: true, flow: (await this.#store.getWorkflowRun(flowId))!, nextStep: (await this.#store.getWorkflowStep(nextStep.id))! };
     }
 
     // No more pending steps — check if flow should complete
-    const allTerminal = steps.every((s) => isStepStateTerminal(s.status));
+    const allTerminal = steps.every((s) => isWorkflowStepStateTerminal(s.status));
     if (allTerminal) {
-      const flow = await this.#store.getFlow(flowId);
-      if (flow && !isFlowStateTerminal(flow.status)) {
-        await this.#transitionFlow(flowId, "completed", { from: flow.status as FlowState });
+      const flow = await this.#store.getWorkflowRun(flowId);
+      if (flow && !isWorkflowRunStateTerminal(flow.status)) {
+        await this.#transitionFlow(flowId, "completed", { from: flow.status as WorkflowRunState });
         await this.#lockService.release(flowId, this.#ownerId);
       }
     }
 
-    return { ok: true, flow: (await this.#store.getFlow(flowId))! };
+    return { ok: true, flow: (await this.#store.getWorkflowRun(flowId))! };
   }
 
-  async failStep(stepId: StepId, error?: string): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async failWorkflowStep(stepId: WorkflowStepId, error?: string): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     const flowId = step.flowId;
@@ -310,23 +310,23 @@ export class WorkflowEngine {
       await this.#transitionStepInTx(tx, stepId, "failed", { from: step.status, reason: error });
 
       // Apply failure policy
-      const updatedStep = await tx.getStep(stepId);
+      const updatedStep = await tx.getWorkflowStep(stepId);
       if (updatedStep) {
         if (updatedStep.failurePolicy.defaultAction === "stop") {
-          const flow = await tx.getFlow(flowId);
-          if (flow && !isFlowStateTerminal(flow.status)) {
-            await this.#transitionFlowInTx(tx, flowId, "failed", { from: flow.status as FlowState, reason: `Step ${updatedStep.name} failed: ${error ?? "unknown error"}` });
+          const flow = await tx.getWorkflowRun(flowId);
+          if (flow && !isWorkflowRunStateTerminal(flow.status)) {
+            await this.#transitionFlowInTx(tx, flowId, "failed", { from: flow.status as WorkflowRunState, reason: `Step ${updatedStep.name} failed: ${error ?? "unknown error"}` });
           }
         }
       }
     });
 
-    const updated = await this.#store.getStep(stepId);
+    const updated = await this.#store.getWorkflowStep(stepId);
     return updated!;
   }
 
-  async skipStep(stepId: StepId, reason?: string, operator?: string): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async skipWorkflowStep(stepId: WorkflowStepId, reason?: string, operator?: string): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     if (!step.failurePolicy.allowSkipIfSkippable) {
@@ -344,41 +344,41 @@ export class WorkflowEngine {
     await this.#store.atomicTransition(flowId, async (tx) => {
       await this.#transitionStepInTx(tx, stepId, "skipped", { from: step.status, reason });
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-skipped", operator, "/skip", "Step skipped", step.status, "skipped", { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, stepId, "operator-skipped", operator, "/skip", "Step skipped", step.status, "skipped", { reason }));
       }
     });
 
     // Advance flow after skip
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     const currentIndex = steps.findIndex((s) => s.id === stepId);
     const nextStep = steps[currentIndex + 1];
 
     if (nextStep && nextStep.status === "pending") {
       await this.#transitionStep(nextStep.id, "running", { from: "pending" });
-      const flow = await this.#store.getFlow(flowId);
+      const flow = await this.#store.getWorkflowRun(flowId);
       if (flow) {
         flow.currentStepId = nextStep.id;
         flow.updatedAt = this.#now().toISOString();
-        await this.#store.updateFlow(flow);
+        await this.#store.updateWorkflowRun(flow);
       }
     } else {
-      const allTerminal = steps.every((s) => isStepStateTerminal(s.status));
+      const allTerminal = steps.every((s) => isWorkflowStepStateTerminal(s.status));
       if (allTerminal) {
-        const flow = await this.#store.getFlow(flowId);
-        if (flow && !isFlowStateTerminal(flow.status)) {
-          await this.#transitionFlow(flowId, "completed", { from: flow.status as FlowState });
+        const flow = await this.#store.getWorkflowRun(flowId);
+        if (flow && !isWorkflowRunStateTerminal(flow.status)) {
+          await this.#transitionFlow(flowId, "completed", { from: flow.status as WorkflowRunState });
           await this.#lockService.release(flowId, this.#ownerId);
         }
       }
     }
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
   // ─── Pause / resume ───
 
-  async requestPause(flowId: FlowId, reason?: string, operator?: string): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async requestWorkflowPause(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     if (flow.status !== "running") {
@@ -386,41 +386,41 @@ export class WorkflowEngine {
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      const f = await tx.getFlow(flowId);
+      const f = await tx.getWorkflowRun(flowId);
       if (!f) return;
       f.pauseRequestedAt = this.#now().toISOString();
       f.pauseReason = reason;
       f.updatedAt = this.#now().toISOString();
-      await tx.updateFlow(f);
+      await tx.updateWorkflowRun(f);
 
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "pause-requested", { reason }));
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "pause-requested", { reason }));
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-pause-requested", operator, "/pause", "Pause requested", flow.status, flow.status, { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-pause-requested", operator, "/pause", "Pause requested", flow.status, flow.status, { reason }));
       }
     });
 
-    return (await this.#store.getFlow(flowId))!;
+    return (await this.#store.getWorkflowRun(flowId))!;
   }
 
-  async applyPauseAtBoundary(flowId: FlowId): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async applyWorkflowPauseAtBoundary(flowId: WorkflowRunId): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     await this.#transitionFlow(flowId, "paused", { from: "running", reason: flow.pauseReason ?? "Paused at safe boundary" });
 
     // Pause current step too
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     for (const step of steps) {
       if (step.status === "running") {
         await this.#transitionStep(step.id, "paused", { from: "running" });
       }
     }
 
-    return (await this.#store.getFlow(flowId))!;
+    return (await this.#store.getWorkflowRun(flowId))!;
   }
 
-  async resumeFlow(flowId: FlowId, operator?: string): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async resumeWorkflowRun(flowId: WorkflowRunId, operator?: string): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     if (flow.status !== "paused" && flow.status !== "interrupted" && flow.status !== "waiting") {
@@ -428,32 +428,32 @@ export class WorkflowEngine {
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await this.#transitionFlowInTx(tx, flowId, "running", { from: flow.status as FlowState });
+      await this.#transitionFlowInTx(tx, flowId, "running", { from: flow.status as WorkflowRunState });
 
       // Resume current step if paused
-      const steps = await tx.listSteps(flowId);
+      const steps = await tx.listWorkflowSteps(flowId);
       for (const step of steps) {
         if (step.status === "paused") {
           step.status = "running";
           step.resumedAt = this.#now().toISOString();
           step.updatedAt = this.#now().toISOString();
-          await tx.updateStep(step);
-          await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-started", { stepId: step.id, resumed: true }, step.id));
+          await tx.updateWorkflowStep(step);
+          await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "step-started", { stepId: step.id, resumed: true }, step.id));
         }
       }
 
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-resumed", operator, "/resume", "Flow resumed", flow.status, "running"));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-resumed", operator, "/resume", "Flow resumed", flow.status, "running"));
       }
     });
 
-    return (await this.#store.getFlow(flowId))!;
+    return (await this.#store.getWorkflowRun(flowId))!;
   }
 
   // ─── Interrupt ───
 
-  async interruptFlow(flowId: FlowId, reason?: string, operator?: string): Promise<Flow> {
-    const flow = await this.#store.getFlow(flowId);
+  async interruptWorkflowRun(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     if (flow.status !== "running" && flow.status !== "paused" && flow.status !== "waiting") {
@@ -462,33 +462,33 @@ export class WorkflowEngine {
 
     await this.#store.atomicTransition(flowId, async (tx) => {
       // Interrupt active steps
-      const steps = await tx.listSteps(flowId);
+      const steps = await tx.listWorkflowSteps(flowId);
       for (const step of steps) {
         if (step.status === "running" || step.status === "paused" || step.status === "waiting_for_approval" || step.status === "waiting_for_input") {
           await this.#transitionStepInTx(tx, step.id, "interrupted", { from: step.status, reason });
         }
       }
 
-      await this.#transitionFlowInTx(tx, flowId, "interrupted", { from: flow.status as FlowState, reason });
+      await this.#transitionFlowInTx(tx, flowId, "interrupted", { from: flow.status as WorkflowRunState, reason });
 
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-interrupted", operator, "/interrupt", "Flow interrupted", flow.status, "interrupted", { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-interrupted", operator, "/interrupt", "Flow interrupted", flow.status, "interrupted", { reason }));
       }
     });
 
-    return (await this.#store.getFlow(flowId))!;
+    return (await this.#store.getWorkflowRun(flowId))!;
   }
 
   // ─── Wait ───
 
-  async waitForApproval(stepId: StepId, gate: Omit<ApprovalGate, "id" | "stepId" | "flowId" | "requestedAt" | "status">): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async waitForApproval(stepId: WorkflowStepId, gate: Omit<WorkflowApprovalGate, "id" | "stepId" | "flowId" | "requestedAt" | "status">): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     const flowId = step.flowId;
     const now = this.#now().toISOString();
 
-    const fullGate: ApprovalGate = {
+    const fullGate: WorkflowApprovalGate = {
       id: this.#id(),
       stepId,
       flowId,
@@ -498,42 +498,42 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.createApprovalGate(fullGate);
+      await tx.createWorkflowApprovalGate(fullGate);
       await this.#transitionStepInTx(tx, stepId, "waiting_for_approval", { from: step.status });
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-requested", { stepId, gateId: fullGate.id }, stepId));
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "approval-requested", { stepId, gateId: fullGate.id }, stepId));
     });
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
-  async waitForInput(stepId: StepId, waitReason: WaitReason): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async waitForInput(stepId: WorkflowStepId, waitReason: WaitReason): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     const flowId = step.flowId;
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      const s = await tx.getStep(stepId);
+      const s = await tx.getWorkflowStep(stepId);
       if (!s) return;
       s.status = "waiting_for_input";
       s.waitReason = waitReason;
       s.waitStartedAt = this.#now().toISOString();
       s.updatedAt = this.#now().toISOString();
-      await tx.updateStep(s);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-started", { stepId, kind: waitReason.kind, description: waitReason.description }, stepId));
+      await tx.updateWorkflowStep(s);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "wait-started", { stepId, kind: waitReason.kind, description: waitReason.description }, stepId));
     });
 
     // Transition flow to waiting
-    const flow = await this.#store.getFlow(flowId);
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (flow && flow.status === "running") {
       await this.#transitionFlow(flowId, "waiting", { from: "running" });
     }
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
-  async resolveWait(stepId: StepId): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async resolveWait(stepId: WorkflowStepId): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     if (step.status !== "waiting_for_input" && step.status !== "waiting_for_approval") {
@@ -543,32 +543,32 @@ export class WorkflowEngine {
     const flowId = step.flowId;
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      const s = await tx.getStep(stepId);
+      const s = await tx.getWorkflowStep(stepId);
       if (!s) return;
       const fromStatus = s.status;
       s.status = "running";
       s.waitReason = undefined;
       s.waitEndedAt = this.#now().toISOString();
       s.updatedAt = this.#now().toISOString();
-      await tx.updateStep(s);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
+      await tx.updateWorkflowStep(s);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
 
       // If flow was waiting, resume it
-      const flow = await tx.getFlow(flowId);
+      const flow = await tx.getWorkflowRun(flowId);
       if (flow && flow.status === "waiting") {
         await this.#transitionFlowInTx(tx, flowId, "running", { from: "waiting" });
       }
     });
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
-  async approveStep(stepId: StepId, operator: string, grantId?: string): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async approveStep(stepId: WorkflowStepId, operator: string, grantId?: string): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     const flowId = step.flowId;
-    const gates = await this.#store.listApprovalGates(flowId, { stepId, status: "pending" });
+    const gates = await this.#store.listWorkflowApprovalGates(flowId, { stepId, status: "pending" });
     if (gates.length === 0) throw new Error("No pending approval gate found for step");
 
     const gate = gates[0];
@@ -579,21 +579,21 @@ export class WorkflowEngine {
       gate.resolvedAt = now;
       gate.resolvedBy = operator;
       gate.controllerGrantId = grantId;
-      await tx.updateApprovalGate(gate);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-granted", { stepId, gateId: gate.id, operator }, stepId));
-      await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-approved", operator, "/approve", "Approval granted", "waiting_for_approval", "running", { gateId: gate.id }));
+      await tx.updateWorkflowApprovalGate(gate);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "approval-granted", { stepId, gateId: gate.id, operator }, stepId));
+      await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, stepId, "operator-approved", operator, "/approve", "Approval granted", "waiting_for_approval", "running", { gateId: gate.id }));
       await this.#resolveWaitInTx(tx, stepId);
     });
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
-  async rejectStep(stepId: StepId, operator: string, rejectionReason?: string): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async rejectStep(stepId: WorkflowStepId, operator: string, rejectionReason?: string): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     const flowId = step.flowId;
-    const gates = await this.#store.listApprovalGates(flowId, { stepId, status: "pending" });
+    const gates = await this.#store.listWorkflowApprovalGates(flowId, { stepId, status: "pending" });
     if (gates.length === 0) throw new Error("No pending approval gate found for step");
 
     const gate = gates[0];
@@ -603,35 +603,35 @@ export class WorkflowEngine {
       gate.status = "rejected";
       gate.resolvedAt = now;
       gate.resolvedBy = operator;
-      await tx.updateApprovalGate(gate);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "approval-denied", { stepId, gateId: gate.id, operator, reason: rejectionReason }, stepId));
-      await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-rejected", operator, "/reject", "Approval denied", "waiting_for_approval", "failed", { gateId: gate.id, reason: rejectionReason }));
+      await tx.updateWorkflowApprovalGate(gate);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "approval-denied", { stepId, gateId: gate.id, operator, reason: rejectionReason }, stepId));
+      await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, stepId, "operator-rejected", operator, "/reject", "Approval denied", "waiting_for_approval", "failed", { gateId: gate.id, reason: rejectionReason }));
 
       // Apply failure policy
-      const updatedStep = await tx.getStep(stepId);
+      const updatedStep = await tx.getWorkflowStep(stepId);
       if (updatedStep) {
         updatedStep.status = "failed";
         updatedStep.failedAt = now;
         updatedStep.updatedAt = now;
-        await tx.updateStep(updatedStep);
-        await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-failed", { stepId, reason: rejectionReason ?? "Approval denied by operator" }, stepId));
+        await tx.updateWorkflowStep(updatedStep);
+        await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "step-failed", { stepId, reason: rejectionReason ?? "Approval denied by operator" }, stepId));
 
         if (updatedStep.failurePolicy.defaultAction === "stop") {
-          const flow = await tx.getFlow(flowId);
-          if (flow && !isFlowStateTerminal(flow.status)) {
-            await this.#transitionFlowInTx(tx, flowId, "failed", { from: flow.status as FlowState, reason: `Step ${updatedStep.name} rejected` });
+          const flow = await tx.getWorkflowRun(flowId);
+          if (flow && !isWorkflowRunStateTerminal(flow.status)) {
+            await this.#transitionFlowInTx(tx, flowId, "failed", { from: flow.status as WorkflowRunState, reason: `Step ${updatedStep.name} rejected` });
           }
         }
       }
     });
 
-    return (await this.#store.getStep(stepId))!;
+    return (await this.#store.getWorkflowStep(stepId))!;
   }
 
   // ─── Retry ───
 
-  async retryStep(stepId: StepId, operator?: string): Promise<FlowStep> {
-    const step = await this.#store.getStep(stepId);
+  async retryWorkflowStep(stepId: WorkflowStepId, operator?: string): Promise<WorkflowStep> {
+    const step = await this.#store.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     if (!isRetryAllowed(step)) {
@@ -643,11 +643,11 @@ export class WorkflowEngine {
     }
 
     const flowId = step.flowId;
-    const flow = await this.#store.getFlow(flowId);
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     const now = this.#now().toISOString();
-    const retryStep: FlowStep = {
+    const retryWorkflowStep: WorkflowStep = {
       id: this.#id(),
       flowId,
       index: step.index,
@@ -669,45 +669,45 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.createStep(retryStep);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "step-retried", { originalStepId: stepId, retryStepId: retryStep.id, attempt: retryStep.attemptNumber }, stepId));
+      await tx.createWorkflowStep(retryWorkflowStep);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "step-retried", { originalStepId: stepId, retryStepId: retryWorkflowStep.id, attempt: retryWorkflowStep.attemptNumber }, stepId));
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, stepId, "operator-retried", operator, "/retry", "Step retried", "failed", "pending", { retryStepId: retryStep.id }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, stepId, "operator-retried", operator, "/retry", "Step retried", "failed", "pending", { retryStepId: retryWorkflowStep.id }));
       }
 
       // Update flow retry count
-      const f = await tx.getFlow(flowId);
+      const f = await tx.getWorkflowRun(flowId);
       if (f) {
         f.retryCount = (f.retryCount ?? 0) + 1;
         f.updatedAt = now;
-        await tx.updateFlow(f);
+        await tx.updateWorkflowRun(f);
       }
     });
 
     // Start the retry step immediately
-    await this.#transitionStep(retryStep.id, "running", { from: "pending" });
+    await this.#transitionStep(retryWorkflowStep.id, "running", { from: "pending" });
 
     // Update flow current step
-    const updatedFlow = await this.#store.getFlow(flowId);
+    const updatedFlow = await this.#store.getWorkflowRun(flowId);
     if (updatedFlow) {
-      updatedFlow.currentStepId = retryStep.id;
+      updatedFlow.currentStepId = retryWorkflowStep.id;
       updatedFlow.updatedAt = now;
-      await this.#store.updateFlow(updatedFlow);
+      await this.#store.updateWorkflowRun(updatedFlow);
     }
 
-    return (await this.#store.getStep(retryStep.id))!;
+    return (await this.#store.getWorkflowStep(retryWorkflowStep.id))!;
   }
 
-  // ─── Checkpoint ───
+  // ─── WorkflowCheckpoint ───
 
-  async createCheckpoint(flowId: FlowId, name: string, description?: string, operator?: string): Promise<Checkpoint> {
-    const flow = await this.#store.getFlow(flowId);
+  async createWorkflowCheckpoint(flowId: WorkflowRunId, name: string, description?: string, operator?: string): Promise<WorkflowCheckpoint> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    const steps = await this.#store.listSteps(flowId);
-    const stepStates: Record<StepId, StepState> = {};
-    const waitReasons: Record<StepId, WaitReason> = {};
-    const retryCounts: Record<StepId, number> = {};
+    const steps = await this.#store.listWorkflowSteps(flowId);
+    const stepStates: Record<WorkflowStepId, WorkflowStepState> = {};
+    const waitReasons: Record<WorkflowStepId, WaitReason> = {};
+    const retryCounts: Record<WorkflowStepId, number> = {};
     const pendingApprovals: string[] = [];
 
     for (const step of steps) {
@@ -716,12 +716,12 @@ export class WorkflowEngine {
       retryCounts[step.id] = step.retryCount;
     }
 
-    const gates = await this.#store.listApprovalGates(flowId, { status: "pending" });
+    const gates = await this.#store.listWorkflowApprovalGates(flowId, { status: "pending" });
     for (const gate of gates) {
       pendingApprovals.push(gate.id);
     }
 
-    const snapshot: CheckpointSnapshot = {
+    const snapshot: WorkflowCheckpointSnapshot = {
       flowState: flow.status,
       currentStepId: flow.currentStepId,
       stepStates,
@@ -731,7 +731,7 @@ export class WorkflowEngine {
       retryCounts
     };
 
-    const checkpoint: Checkpoint = {
+    const checkpoint: WorkflowCheckpoint = {
       id: this.#id(),
       flowId,
       stepId: flow.currentStepId,
@@ -743,17 +743,17 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.createCheckpoint(checkpoint);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "checkpoint-created", { checkpointId: checkpoint.id, name }, flow.currentStepId));
+      await tx.createWorkflowCheckpoint(checkpoint);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "checkpoint-created", { checkpointId: checkpoint.id, name }, flow.currentStepId));
       if (operator) {
-        await tx.appendOperatorEvent(this.#makeOperatorEvent(flowId, undefined, "operator-checkpointed", operator, "/checkpoint", "Checkpoint created", flow.status, flow.status, { checkpointId: checkpoint.id, name }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-checkpointed", operator, "/checkpoint", "Checkpoint created", flow.status, flow.status, { checkpointId: checkpoint.id, name }));
       }
 
-      const f = await tx.getFlow(flowId);
+      const f = await tx.getWorkflowRun(flowId);
       if (f) {
         f.checkpointCount = (f.checkpointCount ?? 0) + 1;
         f.updatedAt = this.#now().toISOString();
-        await tx.updateFlow(f);
+        await tx.updateWorkflowRun(f);
       }
     });
 
@@ -762,11 +762,11 @@ export class WorkflowEngine {
 
   // ─── Process registry helpers ───
 
-  async registerProcess(flowId: FlowId, stepId: StepId, process: Omit<FlowProcess, "id" | "flowId" | "stepId" | "startedAt">): Promise<FlowProcess> {
-    const flow = await this.#store.getFlow(flowId);
+  async registerWorkflowProcess(flowId: WorkflowRunId, stepId: WorkflowStepId, process: Omit<WorkflowProcess, "id" | "flowId" | "stepId" | "startedAt">): Promise<WorkflowProcess> {
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
-    const fullProcess: FlowProcess = {
+    const fullProcess: WorkflowProcess = {
       id: this.#id(),
       flowId,
       stepId,
@@ -775,21 +775,21 @@ export class WorkflowEngine {
     };
 
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.registerProcess(fullProcess);
-      await tx.appendFlowEvent(this.#makeFlowEvent(flowId, "process-registered", { stepId, processId: fullProcess.id, processType: process.processType }, stepId));
+      await tx.registerWorkflowProcess(fullProcess);
+      await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, "process-registered", { stepId, processId: fullProcess.id, processType: process.processType }, stepId));
     });
 
     return fullProcess;
   }
 
-  async updateProcess(process: FlowProcess): Promise<void> {
-    await this.#store.updateProcess(process);
+  async updateWorkflowProcess(process: WorkflowProcess): Promise<void> {
+    await this.#store.updateWorkflowProcess(process);
   }
 
   // ─── Internal helpers ───
 
-  async #createStepFromPlan(flowId: FlowId, planStep: FlowPlanStep, index: number): Promise<FlowStep> {
-    return this.createStep(flowId, planStep.name, planStep.description, {
+  async #createStepFromPlan(flowId: WorkflowRunId, planStep: WorkflowPlanStep, index: number): Promise<WorkflowStep> {
+    return this.createWorkflowStep(flowId, planStep.name, planStep.description, {
       requiresApproval: planStep.requiresApproval,
       skippable: planStep.skippable,
       maxRetries: planStep.maxRetries,
@@ -798,15 +798,15 @@ export class WorkflowEngine {
     });
   }
 
-  async #transitionFlow(flowId: FlowId, to: FlowState, options: { from: FlowState; reason?: string }): Promise<void> {
+  async #transitionFlow(flowId: WorkflowRunId, to: WorkflowRunState, options: { from: WorkflowRunState; reason?: string }): Promise<void> {
     await this.#store.atomicTransition(flowId, async (tx) => {
       await this.#transitionFlowInTx(tx, flowId, to, options);
     });
   }
 
-  async #transitionFlowInTx(tx: WorkflowStore, flowId: FlowId, to: FlowState, options: { from: FlowState; reason?: string }): Promise<void> {
-    validateFlowTransition(options.from, to);
-    const flow = await tx.getFlow(flowId);
+  async #transitionFlowInTx(tx: WorkflowStore, flowId: WorkflowRunId, to: WorkflowRunState, options: { from: WorkflowRunState; reason?: string }): Promise<void> {
+    validateWorkflowRunTransition(options.from, to);
+    const flow = await tx.getWorkflowRun(flowId);
     if (!flow) throw new Error("Flow not found");
 
     // Double-check current state hasn't changed
@@ -828,24 +828,24 @@ export class WorkflowEngine {
       flow.operatorSummary = options.reason;
     }
 
-    await tx.updateFlow(flow);
+    await tx.updateWorkflowRun(flow);
 
     const eventKind = to === "completed" ? "flow-completed"
       : to === "cancelled" ? "flow-cancelled"
       : to === "failed" ? "flow-failed"
       : "flow-state-changed";
-    await tx.appendFlowEvent(this.#makeFlowEvent(flowId, eventKind, { from: options.from, to, reason: options.reason }));
+    await tx.appendWorkflowEvent(this.#makeWorkflowEvent(flowId, eventKind, { from: options.from, to, reason: options.reason }));
   }
 
-  async #transitionStep(stepId: StepId, to: StepState, options: { from: StepState; reason?: string }): Promise<void> {
-    await this.#store.atomicTransition((await this.#store.getStep(stepId))!.flowId, async (tx) => {
+  async #transitionStep(stepId: WorkflowStepId, to: WorkflowStepState, options: { from: WorkflowStepState; reason?: string }): Promise<void> {
+    await this.#store.atomicTransition((await this.#store.getWorkflowStep(stepId))!.flowId, async (tx) => {
       await this.#transitionStepInTx(tx, stepId, to, options);
     });
   }
 
-  async #transitionStepInTx(tx: WorkflowStore, stepId: StepId, to: StepState, options: { from: StepState; reason?: string }): Promise<void> {
-    validateStepTransition(options.from, to);
-    const step = await tx.getStep(stepId);
+  async #transitionStepInTx(tx: WorkflowStore, stepId: WorkflowStepId, to: WorkflowStepState, options: { from: WorkflowStepState; reason?: string }): Promise<void> {
+    validateWorkflowStepTransition(options.from, to);
+    const step = await tx.getWorkflowStep(stepId);
     if (!step) throw new Error("Step not found");
 
     if (step.status !== options.from) {
@@ -867,7 +867,7 @@ export class WorkflowEngine {
     if (to === "interrupted") step.interruptReason = options.reason;
     if (to === "skipped") step.skipReason = options.reason;
 
-    await tx.updateStep(step);
+    await tx.updateWorkflowStep(step);
 
     const eventKind = to === "completed" ? "step-completed"
       : to === "failed" ? "step-failed"
@@ -875,34 +875,34 @@ export class WorkflowEngine {
       : to === "interrupted" ? "step-interrupted"
       : to === "skipped" ? "step-skipped"
       : "step-started";
-    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, eventKind, { stepId, from: options.from, to, reason: options.reason }, stepId));
+    await tx.appendWorkflowEvent(this.#makeWorkflowEvent(step.flowId, eventKind, { stepId, from: options.from, to, reason: options.reason }, stepId));
   }
 
-  async #cancelStepInTx(tx: WorkflowStore, stepId: StepId, reason?: string): Promise<void> {
-    const step = await tx.getStep(stepId);
+  async #cancelStepInTx(tx: WorkflowStore, stepId: WorkflowStepId, reason?: string): Promise<void> {
+    const step = await tx.getWorkflowStep(stepId);
     if (!step) return;
-    if (isStepStateTerminal(step.status)) return;
+    if (isWorkflowStepStateTerminal(step.status)) return;
     await this.#transitionStepInTx(tx, stepId, "cancelled", { from: step.status, reason });
   }
 
-  async #resolveWaitInTx(tx: WorkflowStore, stepId: StepId): Promise<void> {
-    const step = await tx.getStep(stepId);
+  async #resolveWaitInTx(tx: WorkflowStore, stepId: WorkflowStepId): Promise<void> {
+    const step = await tx.getWorkflowStep(stepId);
     if (!step) return;
     const fromStatus = step.status;
     step.status = "running";
     step.waitReason = undefined;
     step.waitEndedAt = this.#now().toISOString();
     step.updatedAt = this.#now().toISOString();
-    await tx.updateStep(step);
-    await tx.appendFlowEvent(this.#makeFlowEvent(step.flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
+    await tx.updateWorkflowStep(step);
+    await tx.appendWorkflowEvent(this.#makeWorkflowEvent(step.flowId, "wait-ended", { stepId, previousStatus: fromStatus }, stepId));
 
-    const flow = await tx.getFlow(step.flowId);
+    const flow = await tx.getWorkflowRun(step.flowId);
     if (flow && flow.status === "waiting") {
       await this.#transitionFlowInTx(tx, flow.id, "running", { from: "waiting" });
     }
   }
 
-  #makeFlowEvent(flowId: FlowId, kind: FlowEvent["kind"], data?: Record<string, unknown>, stepId?: StepId): FlowEvent {
+  #makeWorkflowEvent(flowId: WorkflowRunId, kind: WorkflowEvent["kind"], data?: Record<string, unknown>, stepId?: WorkflowStepId): WorkflowEvent {
     return {
       id: this.#id(),
       flowId,
@@ -913,17 +913,17 @@ export class WorkflowEngine {
     };
   }
 
-  #makeOperatorEvent(
-    flowId: FlowId,
-    stepId: StepId | undefined,
-    kind: OperatorEvent["kind"],
+  #makeWorkflowOperatorEvent(
+    flowId: WorkflowRunId,
+    stepId: WorkflowStepId | undefined,
+    kind: WorkflowOperatorEvent["kind"],
     operator: string,
     command: string,
     effect: string,
-    previousState: FlowState | StepState,
-    newState: FlowState | StepState,
+    previousState: WorkflowRunState | WorkflowStepState,
+    newState: WorkflowRunState | WorkflowStepState,
     metadata?: Record<string, unknown>
-  ): OperatorEvent {
+  ): WorkflowOperatorEvent {
     return {
       id: this.#id(),
       flowId,

@@ -1229,9 +1229,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
       // If an active flow is set, route through the adapter
       if (taskflow?.activeFlowId) {
-        const flow = await taskflow.store.getFlow(taskflow.activeFlowId);
+        const flow = await taskflow.store.getWorkflowRun(taskflow.activeFlowId);
         if (flow && flow.status === "running") {
-          const steps = await taskflow.store.listSteps(flow.id);
+          const steps = await taskflow.store.listWorkflowSteps(flow.id);
           const activeStep = steps.find((s) => s.status === "running");
           const turnResult = await taskflow.adapter.runTurn({
             flow,

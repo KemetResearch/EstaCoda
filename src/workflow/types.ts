@@ -6,15 +6,15 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 
 // ─── Identity ───
 
-export type FlowId = string;
-export type StepId = string;
+export type WorkflowRunId = string;
+export type WorkflowStepId = string;
 export type RunId = string;
 export type EventId = string;
-export type CheckpointId = string;
+export type WorkflowCheckpointId = string;
 
-// ─── Flow ───
+// ─── WorkflowRun ───
 
-export type FlowState =
+export type WorkflowRunState =
   | "pending"
   | "running"
   | "paused"
@@ -24,13 +24,13 @@ export type FlowState =
   | "cancelled"
   | "failed";
 
-export type Flow = {
-  id: FlowId;
+export type WorkflowRun = {
+  id: WorkflowRunId;
   sessionId: string;
-  status: FlowState;
+  status: WorkflowRunState;
   intent: IntentRoute;
   selectedSkill?: string;
-  currentStepId?: StepId;
+  currentStepId?: WorkflowStepId;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -49,15 +49,15 @@ export type Flow = {
   metadata: Record<string, unknown>;
 };
 
-// ─── FlowPlan (ad-hoc, no template in v0.8) ───
+// ─── WorkflowPlan (ad-hoc, no template in v0.8) ───
 
-export type FlowPlan = {
+export type WorkflowPlan = {
   name: string;
   description: string;
-  steps: FlowPlanStep[];
+  steps: WorkflowPlanStep[];
 };
 
-export type FlowPlanStep = {
+export type WorkflowPlanStep = {
   name: string;
   description: string;
   toolset?: string;
@@ -68,9 +68,9 @@ export type FlowPlanStep = {
   onFailure?: "stop" | "retry" | "skip" | "escalate";
 };
 
-// ─── FlowStep ───
+// ─── WorkflowStep ───
 
-export type StepState =
+export type WorkflowStepState =
   | "pending"
   | "running"
   | "paused"
@@ -82,11 +82,11 @@ export type StepState =
   | "cancelled"
   | "interrupted";
 
-export type FlowStep = {
-  id: StepId;
-  flowId: FlowId;
+export type WorkflowStep = {
+  id: WorkflowStepId;
+  flowId: WorkflowRunId;
   index: number;
-  status: StepState;
+  status: WorkflowStepState;
   name: string;
   description: string;
   toolPlans: ToolCallPlan[];
@@ -101,7 +101,7 @@ export type FlowStep = {
   pauseReason?: string;
   interruptReason?: string;
   skipReason?: string;
-  retryOfStepId?: StepId;
+  retryOfStepId?: WorkflowStepId;
   attemptNumber: number;
   startedAt?: string;
   completedAt?: string;
@@ -163,9 +163,9 @@ export type WaitReason = {
   condition?: string;
 };
 
-// ─── FlowEvent ───
+// ─── WorkflowEvent ───
 
-export type FlowEventKind =
+export type WorkflowEventKind =
   | "flow-created"
   | "flow-started"
   | "flow-state-changed"
@@ -196,18 +196,18 @@ export type FlowEventKind =
   | "process-orphaned"
   | "run-link-unavailable";
 
-export type FlowEvent = {
+export type WorkflowEvent = {
   id: EventId;
-  flowId: FlowId;
-  stepId?: StepId;
-  kind: FlowEventKind;
+  flowId: WorkflowRunId;
+  stepId?: WorkflowStepId;
+  kind: WorkflowEventKind;
   data: Record<string, unknown>;
   timestamp: string;
 };
 
-// ─── OperatorEvent ───
+// ─── WorkflowOperatorEvent ───
 
-export type OperatorEventKind =
+export type WorkflowOperatorEventKind =
   | "operator-paused"
   | "operator-pause-requested"
   | "operator-resumed"
@@ -221,34 +221,34 @@ export type OperatorEventKind =
   | "operator-skipped"
   | "operator-checkpointed";
 
-export type OperatorEvent = {
+export type WorkflowOperatorEvent = {
   id: EventId;
-  flowId: FlowId;
-  stepId?: StepId;
-  kind: OperatorEventKind;
+  flowId: WorkflowRunId;
+  stepId?: WorkflowStepId;
+  kind: WorkflowOperatorEventKind;
   operator: string;
   command: string;
   effect: string;
-  previousState: FlowState | StepState;
-  newState: FlowState | StepState;
+  previousState: WorkflowRunState | WorkflowStepState;
+  newState: WorkflowRunState | WorkflowStepState;
   metadata?: Record<string, unknown>;
   timestamp: string;
   // Steer consumption tracking (Track 5)
   consumedAt?: string;
-  consumedByStepId?: StepId;
+  consumedByStepId?: WorkflowStepId;
   consumedByRunId?: RunId;
   consumedByFlowEventId?: EventId;
 };
 
-// ─── ApprovalGate ───
+// ─── WorkflowApprovalGate ───
 
-export type ApprovalGateStatus = "pending" | "approved" | "rejected";
+export type WorkflowApprovalGateStatus = "pending" | "approved" | "rejected";
 
-export type ApprovalGate = {
+export type WorkflowApprovalGate = {
   id: string;
-  stepId: StepId;
-  flowId: FlowId;
-  status: ApprovalGateStatus;
+  stepId: WorkflowStepId;
+  flowId: WorkflowRunId;
+  status: WorkflowApprovalGateStatus;
   requestedAt: string;
   resolvedAt?: string;
   resolvedBy?: string;
@@ -263,53 +263,53 @@ export type ApprovalGate = {
   deterministicRule?: string;
 };
 
-// ─── Checkpoint ───
+// ─── WorkflowCheckpoint ───
 
-export type Checkpoint = {
-  id: CheckpointId;
-  flowId: FlowId;
-  stepId?: StepId;
+export type WorkflowCheckpoint = {
+  id: WorkflowCheckpointId;
+  flowId: WorkflowRunId;
+  stepId?: WorkflowStepId;
   name: string;
   description?: string;
-  snapshot: CheckpointSnapshot;
+  snapshot: WorkflowCheckpointSnapshot;
   createdAt: string;
   createdBy: string;
 };
 
-export type CheckpointSnapshot = {
-  flowState: FlowState;
-  currentStepId?: StepId;
-  stepStates: Record<StepId, StepState>;
+export type WorkflowCheckpointSnapshot = {
+  flowState: WorkflowRunState;
+  currentStepId?: WorkflowStepId;
+  stepStates: Record<WorkflowStepId, WorkflowStepState>;
   pendingApprovals: string[];
-  waitReasons: Record<StepId, WaitReason>;
-  operatorEvents: OperatorEvent[];
-  retryCounts: Record<StepId, number>;
+  waitReasons: Record<WorkflowStepId, WaitReason>;
+  operatorEvents: WorkflowOperatorEvent[];
+  retryCounts: Record<WorkflowStepId, number>;
 };
 
-// ─── ArtifactLink / RunLink ───
+// ─── WorkflowArtifactLink / WorkflowAgentRunLink ───
 
-export type ArtifactLink = {
+export type WorkflowArtifactLink = {
   artifactId: string;
-  stepId: StepId;
-  flowId: FlowId;
+  stepId: WorkflowStepId;
+  flowId: WorkflowRunId;
   kind: "created" | "modified" | "referenced";
   linkedAt: string;
 };
 
-export type RunLink = {
+export type WorkflowAgentRunLink = {
   runId: RunId;
-  stepId: StepId;
-  flowId: FlowId;
+  stepId: WorkflowStepId;
+  flowId: WorkflowRunId;
   turnIndex: number;
   linkedAt: string;
 };
 
-// ─── FlowProcess ───
+// ─── WorkflowProcess ───
 
-export type FlowProcess = {
+export type WorkflowProcess = {
   id: string;
-  flowId: FlowId;
-  stepId: StepId;
+  flowId: WorkflowRunId;
+  stepId: WorkflowStepId;
   processManagerId: string;
   processType: "terminal" | "process" | "browser";
   commandSummary?: string;
@@ -318,21 +318,21 @@ export type FlowProcess = {
   status: "running" | "exited" | "orphaned" | "unknown";
 };
 
-// ─── FlowLock ───
+// ─── WorkflowLock ───
 
-export type FlowLock = {
-  flowId: FlowId;
+export type WorkflowLock = {
+  flowId: WorkflowRunId;
   ownerId: string;
   lockedAt: string;
   heartbeatAt: string;
   expiresAt: string;
 };
 
-// ─── CompactSummary ───
+// ─── WorkflowEventSummary ───
 
-export type CompactSummary = {
+export type WorkflowEventSummary = {
   id: string;
-  flowId: FlowId;
+  flowId: WorkflowRunId;
   compactedRange: { fromEventId: string; toEventId: string };
   turnSummaries: string[];
   toolOutcomeSummaries: string[];
@@ -342,7 +342,7 @@ export type CompactSummary = {
 
 // ─── Transition validation ───
 
-const LEGAL_FLOW_TRANSITIONS: Record<FlowState, FlowState[]> = {
+const LEGAL_FLOW_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[]> = {
   pending: ["running", "cancelled", "failed"],
   running: ["paused", "interrupted", "cancelled", "waiting", "completed", "failed"],
   paused: ["running", "interrupted", "cancelled"],
@@ -353,7 +353,7 @@ const LEGAL_FLOW_TRANSITIONS: Record<FlowState, FlowState[]> = {
   failed: []
 };
 
-const LEGAL_STEP_TRANSITIONS: Record<StepState, StepState[]> = {
+const LEGAL_STEP_TRANSITIONS: Record<WorkflowStepState, WorkflowStepState[]> = {
   pending: ["running", "cancelled", "skipped", "failed"],
   running: ["paused", "interrupted", "cancelled", "waiting_for_approval", "waiting_for_input", "completed", "failed"],
   paused: ["running", "interrupted", "cancelled"],
@@ -377,29 +377,29 @@ export class IllegalTransitionError extends Error {
   }
 }
 
-export function validateFlowTransition(from: FlowState, to: FlowState): void {
+export function validateWorkflowRunTransition(from: WorkflowRunState, to: WorkflowRunState): void {
   if (!LEGAL_FLOW_TRANSITIONS[from].includes(to)) {
     throw new IllegalTransitionError("flow", from, to);
   }
 }
 
-export function validateStepTransition(from: StepState, to: StepState): void {
+export function validateWorkflowStepTransition(from: WorkflowStepState, to: WorkflowStepState): void {
   if (!LEGAL_STEP_TRANSITIONS[from].includes(to)) {
     throw new IllegalTransitionError("step", from, to);
   }
 }
 
-export function isFlowStateTerminal(status: FlowState): boolean {
+export function isWorkflowRunStateTerminal(status: WorkflowRunState): boolean {
   return status === "completed" || status === "cancelled" || status === "failed";
 }
 
-export function isStepStateTerminal(status: StepState): boolean {
+export function isWorkflowStepStateTerminal(status: WorkflowStepState): boolean {
   return status === "completed" || status === "failed" || status === "skipped" || status === "cancelled";
 }
 
 // ─── Retry eligibility ───
 
-export function isRetryAllowed(step: Pick<FlowStep, "idempotent" | "safeToRetry">): boolean {
+export function isRetryAllowed(step: Pick<WorkflowStep, "idempotent" | "safeToRetry">): boolean {
   // Conservative v0.8 rule:
   // Allowed only if idempotent=true OR safeToRetry=true
   // Rejected if either is false/unknown and the other is not explicitly true

@@ -36,7 +36,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     const pausedFlowId = "flow-paused";
     const waitingFlowId = "flow-waiting";
 
-    await store.createFlow({
+    await store.createWorkflowRun({
       id: runningFlowId,
       sessionId: "session-1",
       status: "running",
@@ -48,7 +48,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
       retryCount: 0,
       metadata: {}
     });
-    await store.createStep({
+    await store.createWorkflowStep({
       id: "step-running",
       flowId: runningFlowId,
       index: 0,
@@ -69,7 +69,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     });
     await lockService.acquire(runningFlowId, "old-worker");
 
-    await store.createFlow({
+    await store.createWorkflowRun({
       id: pausedFlowId,
       sessionId: "session-2",
       status: "paused",
@@ -83,7 +83,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     });
     await lockService.acquire(pausedFlowId, "old-worker");
 
-    await store.createFlow({
+    await store.createWorkflowRun({
       id: waitingFlowId,
       sessionId: "session-3",
       status: "waiting",
@@ -107,19 +107,19 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     assertions.push(assertEqual("stale locks released", result.staleLocksReleased, 2));
     assertions.push(assertTrue("has restart warning", result.warnings.some((w) => w.includes("interrupted"))));
 
-    const runningFlowAfter = await store.getFlow(runningFlowId);
+    const runningFlowAfter = await store.getWorkflowRun(runningFlowId);
     assertions.push(assertEqual("running flow interrupted", runningFlowAfter?.status, "interrupted"));
 
-    const runningStepAfter = await store.getStep("step-running");
+    const runningStepAfter = await store.getWorkflowStep("step-running");
     assertions.push(assertEqual("running step interrupted", runningStepAfter?.status, "interrupted"));
 
-    const pausedFlowAfter = await store.getFlow(pausedFlowId);
+    const pausedFlowAfter = await store.getWorkflowRun(pausedFlowId);
     assertions.push(assertEqual("paused flow preserved", pausedFlowAfter?.status, "paused"));
 
-    const waitingFlowAfter = await store.getFlow(waitingFlowId);
+    const waitingFlowAfter = await store.getWorkflowRun(waitingFlowId);
     assertions.push(assertEqual("waiting flow preserved", waitingFlowAfter?.status, "waiting"));
 
-    const events = await store.listFlowEvents(runningFlowId);
+    const events = await store.listWorkflowEvents(runningFlowId);
     assertions.push(assertTrue("flow-state-changed event", events.some((e) => e.kind === "flow-state-changed")));
     assertions.push(assertTrue("step-interrupted event", events.some((e) => e.kind === "step-interrupted")));
 

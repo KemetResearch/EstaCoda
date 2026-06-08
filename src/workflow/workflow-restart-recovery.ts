@@ -1,7 +1,7 @@
 // WorkflowRestartRecovery — rehydrate active flows after process restart
 // Track 2: Engine — load active flows, mark running→interrupted, show stale warnings
 
-import type { Flow, FlowState } from "./types.js";
+import type { WorkflowRun, WorkflowRunState } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 import type { WorkflowLockService } from "./workflow-lock-service.js";
 
@@ -41,12 +41,12 @@ export class WorkflowRestartRecovery {
 
   async recover(): Promise<RecoveryResult> {
     const warnings: string[] = [];
-    const activeFlows = await this.#store.listActiveFlows();
+    const activeFlows = await this.#store.listActiveWorkflowRuns();
     let interrupted = 0;
 
     for (const flow of activeFlows) {
       if (flow.status === "running") {
-        await this.#interruptFlowAndSteps(flow);
+        await this.#interruptWorkflowRunAndSteps(flow);
         interrupted++;
         warnings.push(`Flow ${flow.id} (${flow.intent?.nativeIntent ?? "unknown intent"}) was interrupted due to restart.`);
       } else if (flow.status === "paused" || flow.status === "waiting") {
@@ -67,8 +67,8 @@ export class WorkflowRestartRecovery {
     };
   }
 
-  async #interruptFlowAndSteps(flow: Flow): Promise<void> {
-    const steps = await this.#store.listSteps(flow.id);
+  async #interruptWorkflowRunAndSteps(flow: WorkflowRun): Promise<void> {
+    const steps = await this.#store.listWorkflowSteps(flow.id);
 
     await this.#store.atomicTransition(flow.id, async (tx) => {
       for (const step of steps) {
@@ -77,8 +77,8 @@ export class WorkflowRestartRecovery {
           step.status = "interrupted";
           step.interruptReason = "Process restarted while step was active";
           step.updatedAt = this.#now().toISOString();
-          await tx.updateStep(step);
-          await tx.appendFlowEvent({
+          await tx.updateWorkflowStep(step);
+          await tx.appendWorkflowEvent({
             id: crypto.randomUUID(),
             flowId: flow.id,
             stepId: step.id,
@@ -93,8 +93,8 @@ export class WorkflowRestartRecovery {
       flow.status = "interrupted";
       flow.interruptReason = "Process restarted while flow was running";
       flow.updatedAt = this.#now().toISOString();
-      await tx.updateFlow(flow);
-      await tx.appendFlowEvent({
+      await tx.updateWorkflowRun(flow);
+      await tx.appendWorkflowEvent({
         id: crypto.randomUUID(),
         flowId: flow.id,
         kind: "flow-state-changed",

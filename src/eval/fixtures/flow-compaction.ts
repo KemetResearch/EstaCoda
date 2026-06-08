@@ -34,7 +34,7 @@ function makeNow(): () => Date {
 
 export const flowCompactionCase: EvalCase = {
   id: "flow-compaction",
-  name: "Flow-Safe Compaction: manual, automatic, boundary safety, preservation",
+  name: "WorkflowRun-Safe Compaction: manual, automatic, boundary safety, preservation",
   description:
     "Manual /compact rejected during active execution. Succeeds when paused, waiting, interrupted, or between steps. Auto-compact disabled by default. Records durable events. Preserves all durable flow truth.",
   tags: ["taskflow", "compaction", "deterministic"],
@@ -69,7 +69,7 @@ export const flowCompactionCase: EvalCase = {
 
     // ─── Helper to build a flow with some completed steps ───
     async function buildTestFlow() {
-      const flow = await engine.createFlow({
+      const flow = await engine.createWorkflowRun({
         sessionId: "session-1",
         intent: makeIntent(),
         plan: {
@@ -82,7 +82,7 @@ export const flowCompactionCase: EvalCase = {
           ],
         },
       });
-      await engine.startFlow(flow.id);
+      await engine.startWorkflowRun(flow.id);
       return flow;
     }
 
@@ -107,8 +107,8 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.requestPause(flow.id, "test pause");
-      await engine.applyPauseAtBoundary(flow.id);
+      await engine.requestWorkflowPause(flow.id, "test pause");
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
 
       const r = await dispatcher.dispatch({
         command: "/compact",
@@ -117,13 +117,13 @@ export const flowCompactionCase: EvalCase = {
       });
       assertions.push(assertTrue("compact-paused-ok", r.ok));
       if (r.ok) {
-        const summaries = await store.listCompactSummaries(flow.id);
+        const summaries = await store.listWorkflowEventSummaries(flow.id);
         assertions.push(assertEqual("compact-paused-summary-exists", summaries.length, 1));
-        const flowEvents = await store.listFlowEvents(flow.id, { kind: "compacted" });
+        const flowEvents = await store.listWorkflowEvents(flow.id, { kind: "compacted" });
         assertions.push(assertEqual("compact-paused-event-exists", flowEvents.length, 1));
-        const opEvents = await store.listOperatorEvents(flow.id, { kind: "operator-compacted" });
+        const opEvents = await store.listWorkflowOperatorEvents(flow.id, { kind: "operator-compacted" });
         assertions.push(assertEqual("compact-paused-op-event-exists", opEvents.length, 1));
-        const updatedFlow = await store.getFlow(flow.id);
+        const updatedFlow = await store.getWorkflowRun(flow.id);
         assertions.push(assertTrue("compact-paused-compactedAt-set", !!updatedFlow?.compactedAt));
       }
     }
@@ -133,7 +133,7 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const stepA = (await store.listSteps(flow.id)).find((s) => s.name === "Step A")!;
+      const stepA = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step A")!;
       await engine.waitForInput(stepA.id, {
         kind: "user_input",
         description: "waiting for input",
@@ -151,7 +151,7 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.interruptFlow(flow.id, "test interrupt");
+      await engine.interruptWorkflowRun(flow.id, "test interrupt");
       const r = await dispatcher.dispatch({
         command: "/compact",
         flowId: flow.id,
@@ -165,9 +165,9 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const steps = await store.listSteps(flow.id);
+      const steps = await store.listWorkflowSteps(flow.id);
       for (const step of steps) {
-        await engine.completeStep(step.id);
+        await engine.completeWorkflowStep(step.id);
       }
       const r = await dispatcher.dispatch({
         command: "/compact",
@@ -176,7 +176,7 @@ export const flowCompactionCase: EvalCase = {
       });
       assertions.push(assertTrue("compact-between-steps-ok", r.ok));
       if (r.ok) {
-        const summaries = await store.listCompactSummaries(flow.id);
+        const summaries = await store.listWorkflowEventSummaries(flow.id);
         assertions.push(assertTrue("compact-between-steps-has-summaries", summaries.length > 0));
         // Verify turn summaries were generated from completed steps
         const latest = summaries[0];
@@ -189,9 +189,9 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const stepA = (await store.listSteps(flow.id)).find((s) => s.name === "Step A")!;
+      const stepA = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step A")!;
       // Register a running process
-      await store.registerProcess({
+      await store.registerWorkflowProcess({
         id: "proc-1",
         flowId: flow.id,
         stepId: stepA.id,
@@ -217,9 +217,9 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const steps = await store.listSteps(flow.id);
+      const steps = await store.listWorkflowSteps(flow.id);
       for (const step of steps) {
-        await engine.completeStep(step.id);
+        await engine.completeWorkflowStep(step.id);
       }
       // Default config has enabled=false
       const autoResult = await compactionService.checkAndAutoCompact(flow.id);
@@ -231,14 +231,14 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const steps = await store.listSteps(flow.id);
+      const steps = await store.listWorkflowSteps(flow.id);
       for (const step of steps) {
-        await engine.completeStep(step.id);
+        await engine.completeWorkflowStep(step.id);
       }
 
       // Seed many flow events to exceed threshold
       for (let i = 0; i < 55; i++) {
-        await store.appendFlowEvent({
+        await store.appendWorkflowEvent({
           id: `ev-${i}`,
           flowId: flow.id,
           kind: "step-started",
@@ -265,14 +265,14 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const steps = await store.listSteps(flow.id);
+      const steps = await store.listWorkflowSteps(flow.id);
       for (const step of steps) {
-        await engine.completeStep(step.id);
+        await engine.completeWorkflowStep(step.id);
       }
 
       // Only 5 events — below threshold
       for (let i = 0; i < 5; i++) {
-        await store.appendFlowEvent({
+        await store.appendWorkflowEvent({
           id: `low-ev-${i}`,
           flowId: flow.id,
           kind: "step-started",
@@ -295,9 +295,9 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      // Flow is running; auto-compact should not trigger even with threshold exceeded
+      // WorkflowRun is running; auto-compact should not trigger even with threshold exceeded
       for (let i = 0; i < 55; i++) {
-        await store.appendFlowEvent({
+        await store.appendWorkflowEvent({
           id: `unsafe-ev-${i}`,
           flowId: flow.id,
           kind: "step-started",
@@ -319,11 +319,11 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.requestPause(flow.id, "test");
-      await engine.applyPauseAtBoundary(flow.id);
-      const before = await store.getFlow(flow.id);
+      await engine.requestWorkflowPause(flow.id, "test");
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
+      const before = await store.getWorkflowRun(flow.id);
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-6" });
-      const after = await store.getFlow(flow.id);
+      const after = await store.getWorkflowRun(flow.id);
       assertions.push(assertEqual("preserve-flow-status", after?.status, before?.status));
       assertions.push(assertEqual("preserve-flow-id", after?.id, before?.id));
       assertions.push(assertEqual("preserve-session-id", after?.sessionId, before?.sessionId));
@@ -334,11 +334,11 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.requestPause(flow.id, "test");
-      await engine.applyPauseAtBoundary(flow.id);
-      const beforeSteps = await store.listSteps(flow.id);
+      await engine.requestWorkflowPause(flow.id, "test");
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
+      const beforeSteps = await store.listWorkflowSteps(flow.id);
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-7" });
-      const afterSteps = await store.listSteps(flow.id);
+      const afterSteps = await store.listWorkflowSteps(flow.id);
       assertions.push(assertEqual("preserve-step-count", afterSteps.length, beforeSteps.length));
       for (let i = 0; i < beforeSteps.length; i++) {
         assertions.push(assertEqual(`preserve-step-status-${i}`, afterSteps[i].status, beforeSteps[i].status));
@@ -350,8 +350,8 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const stepC = (await store.listSteps(flow.id)).find((s) => s.name === "Step C")!;
-      await store.createApprovalGate({
+      const stepC = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step C")!;
+      await store.createWorkflowApprovalGate({
         id: "gate-1",
         stepId: stepC.id,
         flowId: flow.id,
@@ -361,11 +361,11 @@ export const flowCompactionCase: EvalCase = {
         riskClass: "read-only-local",
         toolExecutorDecision: "allow",
       });
-      await engine.requestPause(flow.id, "test");
-      await engine.applyPauseAtBoundary(flow.id);
-      const beforeGates = await store.listApprovalGates(flow.id);
+      await engine.requestWorkflowPause(flow.id, "test");
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
+      const beforeGates = await store.listWorkflowApprovalGates(flow.id);
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-8" });
-      const afterGates = await store.listApprovalGates(flow.id);
+      const afterGates = await store.listWorkflowApprovalGates(flow.id);
       assertions.push(assertEqual("preserve-approval-count", afterGates.length, beforeGates.length));
       assertions.push(assertEqual("preserve-approval-status", afterGates[0].status, beforeGates[0].status));
     }
@@ -375,7 +375,7 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await store.appendOperatorEvent({
+      await store.appendWorkflowOperatorEvent({
         id: "op-ev-1",
         flowId: flow.id,
         kind: "operator-paused",
@@ -386,11 +386,11 @@ export const flowCompactionCase: EvalCase = {
         newState: "paused",
         timestamp: new Date().toISOString(),
       });
-      await engine.requestPause(flow.id, "test");
-      await engine.applyPauseAtBoundary(flow.id);
-      const beforeOpEvents = await store.listOperatorEvents(flow.id);
+      await engine.requestWorkflowPause(flow.id, "test");
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
+      const beforeOpEvents = await store.listWorkflowOperatorEvents(flow.id);
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-9" });
-      const afterOpEvents = await store.listOperatorEvents(flow.id);
+      const afterOpEvents = await store.listWorkflowOperatorEvents(flow.id);
       // Operator events should be preserved (new compaction event added)
       assertions.push(assertTrue("preserve-operator-events", afterOpEvents.length >= beforeOpEvents.length));
     }
@@ -400,13 +400,13 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      const stepA = (await store.listSteps(flow.id)).find((s) => s.name === "Step A")!;
-      await engine.failStep(stepA.id, "simulated failure");
-      const beforeSteps = await store.listSteps(flow.id);
+      const stepA = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step A")!;
+      await engine.failWorkflowStep(stepA.id, "simulated failure");
+      const beforeSteps = await store.listWorkflowSteps(flow.id);
       const failedStep = beforeSteps.find((s) => s.id === stepA.id)!;
       assertions.push(assertEqual("pre-compact-failed", failedStep.status, "failed"));
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-10" });
-      const afterSteps = await store.listSteps(flow.id);
+      const afterSteps = await store.listWorkflowSteps(flow.id);
       const afterFailedStep = afterSteps.find((s) => s.id === stepA.id)!;
       assertions.push(assertEqual("preserve-failure-state", afterFailedStep.status, "failed"));
     }
@@ -416,13 +416,13 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.interruptFlow(flow.id, "test");
+      await engine.interruptWorkflowRun(flow.id, "test");
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-11" });
-      const flowEvents = await store.listFlowEvents(flow.id, { kind: "compacted" });
+      const flowEvents = await store.listWorkflowEvents(flow.id, { kind: "compacted" });
       assertions.push(assertEqual("durable-compact-event", flowEvents.length, 1));
-      const opEvents = await store.listOperatorEvents(flow.id, { kind: "operator-compacted" });
+      const opEvents = await store.listWorkflowOperatorEvents(flow.id, { kind: "operator-compacted" });
       assertions.push(assertEqual("durable-op-compact-event", opEvents.length, 1));
-      const summaries = await store.listCompactSummaries(flow.id);
+      const summaries = await store.listWorkflowEventSummaries(flow.id);
       assertions.push(assertEqual("durable-summary-record", summaries.length, 1));
     }
 
@@ -431,7 +431,7 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.interruptFlow(flow.id, "test");
+      await engine.interruptWorkflowRun(flow.id, "test");
       await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-12" });
       const traceResult = await dispatcher.dispatch({ command: "/trace", flowId: flow.id });
       assertions.push(assertTrue("trace-ok", traceResult.ok));
@@ -449,17 +449,17 @@ export const flowCompactionCase: EvalCase = {
     // ═══════════════════════════════════════════════════════════════════
     {
       const flow = await buildTestFlow();
-      await engine.interruptFlow(flow.id, "test");
-      const before = await store.getFlow(flow.id);
+      await engine.interruptWorkflowRun(flow.id, "test");
+      const before = await store.getWorkflowRun(flow.id);
       // Compaction on a non-existent flow should fail cleanly
       const badResult = await compactionService.compact("no-such-flow", "op-13");
       assertions.push(assertTrue("failure-ok-false", !badResult.ok));
       assertions.push(assertTrue("failure-has-error", !!badResult.error));
       // Existing flow state untouched
-      const after = await store.getFlow(flow.id);
+      const after = await store.getWorkflowRun(flow.id);
       assertions.push(assertEqual("failure-no-corrupt-status", after?.status, before?.status));
     }
 
-    return buildResult("flow-compaction", "Flow-Safe Compaction: manual, automatic, boundary safety, preservation", assertions, startedAt);
+    return buildResult("flow-compaction", "WorkflowRun-Safe Compaction: manual, automatic, boundary safety, preservation", assertions, startedAt);
   },
 };

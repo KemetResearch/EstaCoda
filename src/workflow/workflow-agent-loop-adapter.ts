@@ -2,7 +2,7 @@
 // Track 5: System Integration — steer consumption, run/artifact linkage, auto-compaction
 
 import type { AgentLoop, AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
-import type { Flow, FlowId, FlowStep, RunId } from "./types.js";
+import type { WorkflowRun, WorkflowRunId, WorkflowStep, RunId } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 import type { WorkflowEventSummaryService } from "./workflow-event-summary-service.js";
 
@@ -12,18 +12,18 @@ export type WorkflowAgentLoopAdapterOptions = {
   compactionService?: WorkflowEventSummaryService;
 };
 
-export type FlowTurnInput = {
-  flow: Flow;
-  step?: FlowStep;
+export type WorkflowTurnInput = {
+  flow: WorkflowRun;
+  step?: WorkflowStep;
   text: string;
   channel: AgentLoopInput["channel"];
   signal?: AbortSignal;
   onEvent?: AgentLoopInput["onEvent"];
 };
 
-export type FlowTurnResult = {
+export type WorkflowTurnResult = {
   response: AgentLoopResponse;
-  flowId: FlowId;
+  flowId: WorkflowRunId;
   stepId?: string;
   steerGuidance?: string[];
 };
@@ -62,7 +62,7 @@ export class WorkflowAgentLoopAdapter {
    * 6. Records artifact links to the store.
    * 7. Checks automatic compaction at the safe boundary.
    */
-  async runTurn(input: FlowTurnInput): Promise<FlowTurnResult> {
+  async runTurn(input: WorkflowTurnInput): Promise<WorkflowTurnResult> {
     const flowId = input.flow.id;
     const stepId = input.step?.id;
 
@@ -99,8 +99,8 @@ export class WorkflowAgentLoopAdapter {
 
     // 6. Record run linkage using real trajectory id
     if (stepId && realRunId) {
-      const existingLinks = await this.#store.listRunLinks(flowId, stepId);
-      await this.#store.linkRun({
+      const existingLinks = await this.#store.listWorkflowAgentRunLinks(flowId, stepId);
+      await this.#store.linkWorkflowAgentRun({
         runId: realRunId,
         stepId,
         flowId,
@@ -109,7 +109,7 @@ export class WorkflowAgentLoopAdapter {
       });
     } else if (stepId && !realRunId) {
       // Real id unavailable: record explicit flow_event explaining why
-      await this.#store.appendFlowEvent({
+      await this.#store.appendWorkflowEvent({
         id: crypto.randomUUID(),
         flowId,
         stepId,
@@ -122,7 +122,7 @@ export class WorkflowAgentLoopAdapter {
     // 7. Record artifact linkage
     for (const artifact of response.artifacts) {
       if (stepId) {
-        await this.#store.linkArtifact({
+        await this.#store.linkWorkflowArtifact({
           artifactId: artifact.id,
           stepId,
           flowId,

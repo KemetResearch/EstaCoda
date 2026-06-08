@@ -113,7 +113,7 @@ function flowHelp(): string {
 
 async function flowList(db: SQLiteSessionDB, profileId: string): Promise<CliCommandResult> {
   const { store } = createFlowServices(db, profileId);
-  const flows = await store.listActiveFlows();
+  const flows = await store.listActiveWorkflowRuns();
 
   if (flows.length === 0) {
     return { handled: true, exitCode: 0, output: "No flows found." };
@@ -139,12 +139,12 @@ async function flowShow(db: SQLiteSessionDB, profileId: string, args: string[]):
   }
 
   const { store } = createFlowServices(db, profileId);
-  const flow = await store.getFlow(flowId);
+  const flow = await store.getWorkflowRun(flowId);
   if (!flow) {
     return { handled: true, exitCode: 1, output: `Flow not found: ${flowId}` };
   }
 
-  const steps = await store.listSteps(flowId);
+  const steps = await store.listWorkflowSteps(flowId);
   const lines = [
     `Flow: ${flow.id}`,
     `Status: ${flow.status}`,

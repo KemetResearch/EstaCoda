@@ -71,7 +71,7 @@ export const operatorControlPlaneCase: EvalCase = {
     });
 
     // ─── Create and start a flow ───
-    const flow = await engine.createFlow({
+    const flow = await engine.createWorkflowRun({
       sessionId: "session-1",
       intent: makeIntent(),
       plan: {
@@ -84,9 +84,9 @@ export const operatorControlPlaneCase: EvalCase = {
         ],
       },
     });
-    await engine.startFlow(flow.id);
+    await engine.startWorkflowRun(flow.id);
 
-    const stepA = (await store.listSteps(flow.id)).find((s) => s.name === "Step A")!;
+    const stepA = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step A")!;
 
     // ═════════════════════════════════════════════════════════════════
     // Track 3.1  /status
@@ -126,7 +126,7 @@ export const operatorControlPlaneCase: EvalCase = {
         operator: "op-1",
       });
       assertions.push(assertTrue("pause-ok", r.ok));
-      const pausedReq = await store.getFlow(flow.id);
+      const pausedReq = await store.getWorkflowRun(flow.id);
       assertions.push(assertTrue("pause-requestedAt-set", !!pausedReq?.pauseRequestedAt));
     }
 
@@ -135,7 +135,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // ═════════════════════════════════════════════════════════════════
     {
       // First apply pause so flow is in paused state
-      await engine.applyPauseAtBoundary(flow.id);
+      await engine.applyWorkflowPauseAtBoundary(flow.id);
 
       const r = await dispatcher.dispatch({
         command: "/resume",
@@ -143,7 +143,7 @@ export const operatorControlPlaneCase: EvalCase = {
         operator: "op-1",
       });
       assertions.push(assertTrue("resume-ok", r.ok));
-      const resumed = await store.getFlow(flow.id);
+      const resumed = await store.getWorkflowRun(flow.id);
       assertions.push(assertEqual("resume-status", resumed?.status, "running"));
     }
 
@@ -158,13 +158,13 @@ export const operatorControlPlaneCase: EvalCase = {
         operator: "op-1",
       });
       assertions.push(assertTrue("steer-ok", r.ok));
-      const opEvents = await store.listOperatorEvents(flow.id);
+      const opEvents = await store.listWorkflowOperatorEvents(flow.id);
       assertions.push(assertTrue("steer-event-recorded", opEvents.some((e) => e.command === "/steer")));
     }
 
     // steer on terminal flow fails
     {
-      await engine.cancelFlow(flow.id);
+      await engine.cancelWorkflowRun(flow.id);
       const r = await dispatcher.dispatch({
         command: "/steer",
         flowId: flow.id,
@@ -174,7 +174,7 @@ export const operatorControlPlaneCase: EvalCase = {
       assertions.push(assertTrue("steer-terminal-fails", !r.ok));
 
       // restore flow for subsequent tests
-      const newFlow = await engine.createFlow({
+      const newFlow = await engine.createWorkflowRun({
         sessionId: "session-2",
         intent: makeIntent(),
         plan: {
@@ -186,7 +186,7 @@ export const operatorControlPlaneCase: EvalCase = {
           ],
         },
       });
-      await engine.startFlow(newFlow.id);
+      await engine.startWorkflowRun(newFlow.id);
       (flow as any).id = newFlow.id; // reuse flow var for remaining tests
     }
 
@@ -195,7 +195,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // ═════════════════════════════════════════════════════════════════
     {
       // Create a new flow and start it so step 1 is running; step 2 remains pending
-      const skipFlow = await engine.createFlow({
+      const skipFlow = await engine.createWorkflowRun({
         sessionId: "session-skip",
         intent: makeIntent(),
         plan: {
@@ -207,8 +207,8 @@ export const operatorControlPlaneCase: EvalCase = {
           ],
         },
       });
-      await engine.startFlow(skipFlow.id);
-      const stepS2 = (await store.listSteps(skipFlow.id)).find((s) => s.name === "Step S2")!;
+      await engine.startWorkflowRun(skipFlow.id);
+      const stepS2 = (await store.listWorkflowSteps(skipFlow.id)).find((s) => s.name === "Step S2")!;
 
       const r = await dispatcher.dispatch({
         command: "/skip",
@@ -217,7 +217,7 @@ export const operatorControlPlaneCase: EvalCase = {
         operator: "op-1",
       });
       assertions.push(assertTrue("skip-ok", r.ok));
-      const skipped = await store.getStep(stepS2.id);
+      const skipped = await store.getWorkflowStep(stepS2.id);
       assertions.push(assertEqual("skip-status", skipped?.status, "skipped"));
     }
 
@@ -225,10 +225,10 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.6  /approve
     // ═════════════════════════════════════════════════════════════════
     {
-      const steps2 = await store.listSteps(flow.id);
+      const steps2 = await store.listWorkflowSteps(flow.id);
       const stepY = steps2.find((s) => s.name === "Step Y")!;
       // Manually set gate to pending
-      await store.createApprovalGate({
+      await store.createWorkflowApprovalGate({
         id: crypto.randomUUID(),
         stepId: stepY.id,
         flowId: flow.id,
@@ -238,9 +238,9 @@ export const operatorControlPlaneCase: EvalCase = {
         riskClass: "read-only-local",
         toolExecutorDecision: "ask",
       });
-      await store.updateStep({ ...stepY, status: "waiting_for_approval" });
+      await store.updateWorkflowStep({ ...stepY, status: "waiting_for_approval" });
       await store.atomicTransition(flow.id, async (tx) => {
-        await tx.appendFlowEvent({
+        await tx.appendWorkflowEvent({
           id: crypto.randomUUID(),
           flowId: flow.id,
           kind: "approval-requested",
@@ -266,7 +266,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.7  /reject
     // ═════════════════════════════════════════════════════════════════
     {
-      const newFlow = await engine.createFlow({
+      const newFlow = await engine.createWorkflowRun({
         sessionId: "session-3",
         intent: makeIntent(),
         plan: {
@@ -277,10 +277,10 @@ export const operatorControlPlaneCase: EvalCase = {
           ],
         },
       });
-      await engine.startFlow(newFlow.id);
-      const stepZ = (await store.listSteps(newFlow.id)).find((s) => s.name === "Step Z")!;
+      await engine.startWorkflowRun(newFlow.id);
+      const stepZ = (await store.listWorkflowSteps(newFlow.id)).find((s) => s.name === "Step Z")!;
 
-      await store.createApprovalGate({
+      await store.createWorkflowApprovalGate({
         id: crypto.randomUUID(),
         stepId: stepZ.id,
         flowId: newFlow.id,
@@ -290,7 +290,7 @@ export const operatorControlPlaneCase: EvalCase = {
         riskClass: "read-only-local",
         toolExecutorDecision: "ask",
       });
-      await store.updateStep({ ...stepZ, status: "waiting_for_approval" });
+      await store.updateWorkflowStep({ ...stepZ, status: "waiting_for_approval" });
 
       const r = await dispatcher.dispatch({
         command: "/reject",
@@ -308,7 +308,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.8  /retry
     // ═════════════════════════════════════════════════════════════════
     {
-      const newFlow = await engine.createFlow({
+      const newFlow = await engine.createWorkflowRun({
         sessionId: "session-4",
         intent: makeIntent(),
         plan: {
@@ -319,9 +319,9 @@ export const operatorControlPlaneCase: EvalCase = {
           ],
         },
       });
-      await engine.startFlow(newFlow.id);
-      const stepR = (await store.listSteps(newFlow.id)).find((s) => s.name === "Step R")!;
-      await engine.failStep(stepR.id, "transient error");
+      await engine.startWorkflowRun(newFlow.id);
+      const stepR = (await store.listWorkflowSteps(newFlow.id)).find((s) => s.name === "Step R")!;
+      await engine.failWorkflowStep(stepR.id, "transient error");
 
       const r = await dispatcher.dispatch({
         command: "/retry",
@@ -331,8 +331,8 @@ export const operatorControlPlaneCase: EvalCase = {
       assertions.push(assertTrue("retry-ok", r.ok));
       if (r.ok) {
         assertions.push(assertTrue("retry-stepId", !!(r.data as any)?.retryStepId));
-        const retryStep = await store.getStep((r.data as any)?.retryStepId);
-        assertions.push(assertEqual("retry-attempt", retryStep?.attemptNumber, 2));
+        const retryWorkflowStep = await store.getWorkflowStep((r.data as any)?.retryStepId);
+        assertions.push(assertEqual("retry-attempt", retryWorkflowStep?.attemptNumber, 2));
       }
     }
 
@@ -350,7 +350,7 @@ export const operatorControlPlaneCase: EvalCase = {
       if (r.ok) {
         assertions.push(assertTrue("checkpoint-id", !!(r.data as any)?.checkpointId));
       }
-      const checkpoints = await store.listCheckpoints(flow.id);
+      const checkpoints = await store.listWorkflowCheckpoints(flow.id);
       assertions.push(assertTrue("checkpoint-saved", checkpoints.length > 0));
     }
 
@@ -382,7 +382,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.11 /cancel
     // ═════════════════════════════════════════════════════════════════
     {
-      const cancelFlow = await engine.createFlow({
+      const cancelWorkflowRun = await engine.createWorkflowRun({
         sessionId: "session-5",
         intent: makeIntent(),
         plan: {
@@ -391,15 +391,15 @@ export const operatorControlPlaneCase: EvalCase = {
           steps: [{ name: "Step C1", description: "C1 step" }],
         },
       });
-      await engine.startFlow(cancelFlow.id);
+      await engine.startWorkflowRun(cancelWorkflowRun.id);
 
       const r = await dispatcher.dispatch({
         command: "/cancel",
-        flowId: cancelFlow.id,
+        flowId: cancelWorkflowRun.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("cancel-ok", r.ok));
-      const cancelled = await store.getFlow(cancelFlow.id);
+      const cancelled = await store.getWorkflowRun(cancelWorkflowRun.id);
       assertions.push(assertEqual("cancel-status", cancelled?.status, "cancelled"));
     }
 
@@ -407,7 +407,7 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.12 /interrupt
     // ═════════════════════════════════════════════════════════════════
     {
-      const intFlow = await engine.createFlow({
+      const intFlow = await engine.createWorkflowRun({
         sessionId: "session-6",
         intent: makeIntent(),
         plan: {
@@ -416,13 +416,13 @@ export const operatorControlPlaneCase: EvalCase = {
           steps: [{ name: "Step I1", description: "I1 step" }],
         },
       });
-      await engine.startFlow(intFlow.id);
+      await engine.startWorkflowRun(intFlow.id);
 
       // Register a fake running process
       await processRegistry.register({
         id: crypto.randomUUID(),
         flowId: intFlow.id,
-        stepId: (await store.listSteps(intFlow.id))[0].id,
+        stepId: (await store.listWorkflowSteps(intFlow.id))[0].id,
         processManagerId: "pm-1",
         processType: "process",
         status: "running",
@@ -436,11 +436,11 @@ export const operatorControlPlaneCase: EvalCase = {
       });
       assertions.push(assertTrue("interrupt-ok", r.ok));
       if (r.ok) {
-        const interrupted = await store.getFlow(intFlow.id);
+        const interrupted = await store.getWorkflowRun(intFlow.id);
         assertions.push(assertEqual("interrupt-status", interrupted?.status, "interrupted"));
         assertions.push(assertEqual("interrupt-procs", (r.data as any)?.terminatedProcesses, 1));
         // Verify cleanup audit events were recorded
-        const flowEvents = await store.listFlowEvents(intFlow.id);
+        const flowEvents = await store.listWorkflowEvents(intFlow.id);
         const cleanupEvents = flowEvents.filter((e) => e.data?.reason === "interrupt-cleanup");
         assertions.push(assertTrue("interrupt-cleanup-events", cleanupEvents.length > 0));
         assertions.push(assertTrue("interrupt-cleanup-success", cleanupEvents.every((e) => e.data?.success === true)));

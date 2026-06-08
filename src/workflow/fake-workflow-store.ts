@@ -1,99 +1,99 @@
 // FakeWorkflowStore — deterministic in-memory implementation for tests
 
 import type {
-  Flow,
-  FlowId,
-  FlowStep,
-  StepId,
-  FlowEvent,
-  OperatorEvent,
-  Checkpoint,
-  CheckpointId,
-  ApprovalGate,
-  ArtifactLink,
-  RunLink,
-  FlowProcess,
-  FlowLock,
-  CompactSummary,
+  WorkflowRun,
+  WorkflowRunId,
+  WorkflowStep,
+  WorkflowStepId,
+  WorkflowEvent,
+  WorkflowOperatorEvent,
+  WorkflowCheckpoint,
+  WorkflowCheckpointId,
+  WorkflowApprovalGate,
+  WorkflowArtifactLink,
+  WorkflowAgentRunLink,
+  WorkflowProcess,
+  WorkflowLock,
+  WorkflowEventSummary,
   RunId,
   EventId
 } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 
 export class FakeWorkflowStore implements WorkflowStore {
-  readonly flows = new Map<FlowId, Flow>();
-  readonly steps = new Map<StepId, FlowStep>();
-  readonly flowEvents: FlowEvent[] = [];
-  readonly operatorEvents: OperatorEvent[] = [];
-  readonly artifacts: ArtifactLink[] = [];
-  readonly runLinks: RunLink[] = [];
-  readonly checkpoints: Checkpoint[] = [];
-  readonly approvalGates: ApprovalGate[] = [];
-  readonly locks = new Map<FlowId, FlowLock>();
-  readonly processes: FlowProcess[] = [];
-  readonly compactSummaries: CompactSummary[] = [];
+  readonly flows = new Map<WorkflowRunId, WorkflowRun>();
+  readonly steps = new Map<WorkflowStepId, WorkflowStep>();
+  readonly flowEvents: WorkflowEvent[] = [];
+  readonly operatorEvents: WorkflowOperatorEvent[] = [];
+  readonly artifacts: WorkflowArtifactLink[] = [];
+  readonly runLinks: WorkflowAgentRunLink[] = [];
+  readonly checkpoints: WorkflowCheckpoint[] = [];
+  readonly approvalGates: WorkflowApprovalGate[] = [];
+  readonly locks = new Map<WorkflowRunId, WorkflowLock>();
+  readonly processes: WorkflowProcess[] = [];
+  readonly compactSummaries: WorkflowEventSummary[] = [];
   readonly #now: () => Date;
 
   constructor(options?: { now?: () => Date }) {
     this.#now = options?.now ?? (() => new Date());
   }
 
-  async createFlow(flow: Flow): Promise<void> {
+  async createWorkflowRun(flow: WorkflowRun): Promise<void> {
     this.flows.set(flow.id, structuredClone(flow));
   }
 
-  async updateFlow(flow: Flow): Promise<void> {
+  async updateWorkflowRun(flow: WorkflowRun): Promise<void> {
     this.flows.set(flow.id, structuredClone(flow));
   }
 
-  async getFlow(id: FlowId): Promise<Flow | null> {
+  async getWorkflowRun(id: WorkflowRunId): Promise<WorkflowRun | null> {
     const f = this.flows.get(id);
     return f ? structuredClone(f) : null;
   }
 
-  async listFlows(sessionId?: string): Promise<Flow[]> {
+  async listWorkflowRuns(sessionId?: string): Promise<WorkflowRun[]> {
     const all = Array.from(this.flows.values());
     const filtered = sessionId ? all.filter((f) => f.sessionId === sessionId) : all;
     return filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((f) => structuredClone(f));
   }
 
-  async listActiveFlows(): Promise<Flow[]> {
-    const activeStatuses = new Set<Flow["status"]>(["pending", "running", "paused", "waiting", "interrupted"]);
+  async listActiveWorkflowRuns(): Promise<WorkflowRun[]> {
+    const activeStatuses = new Set<WorkflowRun["status"]>(["pending", "running", "paused", "waiting", "interrupted"]);
     return Array.from(this.flows.values())
       .filter((f) => activeStatuses.has(f.status))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((f) => structuredClone(f));
   }
 
-  async createStep(step: FlowStep): Promise<void> {
+  async createWorkflowStep(step: WorkflowStep): Promise<void> {
     this.steps.set(step.id, structuredClone(step));
   }
 
-  async updateStep(step: FlowStep): Promise<void> {
+  async updateWorkflowStep(step: WorkflowStep): Promise<void> {
     this.steps.set(step.id, structuredClone(step));
   }
 
-  async getStep(id: StepId): Promise<FlowStep | null> {
+  async getWorkflowStep(id: WorkflowStepId): Promise<WorkflowStep | null> {
     const s = this.steps.get(id);
     return s ? structuredClone(s) : null;
   }
 
-  async listSteps(flowId: FlowId): Promise<FlowStep[]> {
+  async listWorkflowSteps(flowId: WorkflowRunId): Promise<WorkflowStep[]> {
     return Array.from(this.steps.values())
       .filter((s) => s.flowId === flowId)
       .sort((a, b) => a.index - b.index || a.createdAt.localeCompare(b.createdAt))
       .map((s) => structuredClone(s));
   }
 
-  async appendFlowEvent(event: FlowEvent): Promise<void> {
+  async appendWorkflowEvent(event: WorkflowEvent): Promise<void> {
     this.flowEvents.push(structuredClone(event));
   }
 
-  async appendOperatorEvent(event: OperatorEvent): Promise<void> {
+  async appendWorkflowOperatorEvent(event: WorkflowOperatorEvent): Promise<void> {
     this.operatorEvents.push(structuredClone(event));
   }
 
-  async listFlowEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<FlowEvent[]> {
+  async listWorkflowEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowEvent[]> {
     let result = this.flowEvents.filter((e) => e.flowId === flowId);
     if (options?.stepId) result = result.filter((e) => e.stepId === options.stepId);
     if (options?.kind) result = result.filter((e) => e.kind === options.kind);
@@ -102,7 +102,7 @@ export class FakeWorkflowStore implements WorkflowStore {
     return result.map((e) => structuredClone(e));
   }
 
-  async listOperatorEvents(flowId: FlowId, options?: { stepId?: StepId; kind?: string; limit?: number }): Promise<OperatorEvent[]> {
+  async listWorkflowOperatorEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowOperatorEvent[]> {
     let result = this.operatorEvents.filter((e) => e.flowId === flowId);
     if (options?.stepId) result = result.filter((e) => e.stepId === options.stepId);
     if (options?.kind) result = result.filter((e) => e.kind === options.kind);
@@ -111,64 +111,64 @@ export class FakeWorkflowStore implements WorkflowStore {
     return result.map((e) => structuredClone(e));
   }
 
-  async linkArtifact(link: ArtifactLink): Promise<void> {
+  async linkWorkflowArtifact(link: WorkflowArtifactLink): Promise<void> {
     this.artifacts.push(structuredClone(link));
   }
 
-  async listArtifacts(flowId: FlowId, stepId?: StepId): Promise<ArtifactLink[]> {
+  async listWorkflowArtifactLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowArtifactLink[]> {
     let result = this.artifacts.filter((a) => a.flowId === flowId);
     if (stepId) result = result.filter((a) => a.stepId === stepId);
     return result.sort((a, b) => b.linkedAt.localeCompare(a.linkedAt)).map((a) => structuredClone(a));
   }
 
-  async linkRun(link: RunLink): Promise<void> {
+  async linkWorkflowAgentRun(link: WorkflowAgentRunLink): Promise<void> {
     this.runLinks.push(structuredClone(link));
   }
 
-  async listRunLinks(flowId: FlowId, stepId?: StepId): Promise<RunLink[]> {
+  async listWorkflowAgentRunLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowAgentRunLink[]> {
     let result = this.runLinks.filter((r) => r.flowId === flowId);
     if (stepId) result = result.filter((r) => r.stepId === stepId);
     return result.sort((a, b) => b.linkedAt.localeCompare(a.linkedAt)).map((r) => structuredClone(r));
   }
 
-  async createCheckpoint(checkpoint: Checkpoint): Promise<void> {
+  async createWorkflowCheckpoint(checkpoint: WorkflowCheckpoint): Promise<void> {
     this.checkpoints.push(structuredClone(checkpoint));
   }
 
-  async getCheckpoint(id: CheckpointId): Promise<Checkpoint | null> {
+  async getWorkflowCheckpoint(id: WorkflowCheckpointId): Promise<WorkflowCheckpoint | null> {
     const c = this.checkpoints.find((c) => c.id === id);
     return c ? structuredClone(c) : null;
   }
 
-  async listCheckpoints(flowId: FlowId): Promise<Checkpoint[]> {
+  async listWorkflowCheckpoints(flowId: WorkflowRunId): Promise<WorkflowCheckpoint[]> {
     return this.checkpoints
       .filter((c) => c.flowId === flowId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((c) => structuredClone(c));
   }
 
-  async createApprovalGate(gate: ApprovalGate): Promise<void> {
+  async createWorkflowApprovalGate(gate: WorkflowApprovalGate): Promise<void> {
     this.approvalGates.push(structuredClone(gate));
   }
 
-  async updateApprovalGate(gate: ApprovalGate): Promise<void> {
+  async updateWorkflowApprovalGate(gate: WorkflowApprovalGate): Promise<void> {
     const idx = this.approvalGates.findIndex((g) => g.id === gate.id);
     if (idx >= 0) this.approvalGates[idx] = structuredClone(gate);
   }
 
-  async getApprovalGate(id: string): Promise<ApprovalGate | null> {
+  async getWorkflowApprovalGate(id: string): Promise<WorkflowApprovalGate | null> {
     const g = this.approvalGates.find((g) => g.id === id);
     return g ? structuredClone(g) : null;
   }
 
-  async listApprovalGates(flowId: FlowId, options?: { stepId?: StepId; status?: string }): Promise<ApprovalGate[]> {
+  async listWorkflowApprovalGates(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; status?: string }): Promise<WorkflowApprovalGate[]> {
     let result = this.approvalGates.filter((g) => g.flowId === flowId);
     if (options?.stepId) result = result.filter((g) => g.stepId === options.stepId);
     if (options?.status) result = result.filter((g) => g.status === options.status);
     return result.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).map((g) => structuredClone(g));
   }
 
-  async acquireLock(flowId: FlowId, ownerId: string, leaseMs: number): Promise<boolean> {
+  async acquireLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<boolean> {
     const now = this.#now().toISOString();
     const existing = this.locks.get(flowId);
     const expires = new Date(this.#now().getTime() + leaseMs).toISOString();
@@ -186,14 +186,14 @@ export class FakeWorkflowStore implements WorkflowStore {
     return false;
   }
 
-  async releaseLock(flowId: FlowId, ownerId: string): Promise<void> {
+  async releaseLock(flowId: WorkflowRunId, ownerId: string): Promise<void> {
     const existing = this.locks.get(flowId);
     if (existing && existing.ownerId === ownerId) {
       this.locks.delete(flowId);
     }
   }
 
-  async heartbeatLock(flowId: FlowId, ownerId: string, leaseMs: number): Promise<void> {
+  async heartbeatLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<void> {
     const existing = this.locks.get(flowId);
     if (existing && existing.ownerId === ownerId) {
       const now = this.#now().toISOString();
@@ -202,7 +202,7 @@ export class FakeWorkflowStore implements WorkflowStore {
     }
   }
 
-  async getLock(flowId: FlowId): Promise<FlowLock | null> {
+  async getLock(flowId: WorkflowRunId): Promise<WorkflowLock | null> {
     const lock = this.locks.get(flowId);
     return lock ? structuredClone(lock) : null;
   }
@@ -218,38 +218,38 @@ export class FakeWorkflowStore implements WorkflowStore {
     return count;
   }
 
-  async registerProcess(process: FlowProcess): Promise<void> {
+  async registerWorkflowProcess(process: WorkflowProcess): Promise<void> {
     this.processes.push(structuredClone(process));
   }
 
-  async updateProcess(process: FlowProcess): Promise<void> {
+  async updateWorkflowProcess(process: WorkflowProcess): Promise<void> {
     const idx = this.processes.findIndex((p) => p.id === process.id);
     if (idx >= 0) this.processes[idx] = structuredClone(process);
   }
 
-  async getProcess(id: string): Promise<FlowProcess | null> {
+  async getWorkflowProcess(id: string): Promise<WorkflowProcess | null> {
     const p = this.processes.find((p) => p.id === id);
     return p ? structuredClone(p) : null;
   }
 
-  async listProcesses(flowId: FlowId, stepId?: StepId): Promise<FlowProcess[]> {
+  async listWorkflowProcesses(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
     let result = this.processes.filter((p) => p.flowId === flowId);
     if (stepId) result = result.filter((p) => p.stepId === stepId);
     return result.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((p) => structuredClone(p));
   }
 
-  async saveCompactSummary(summary: CompactSummary): Promise<void> {
+  async saveWorkflowEventSummary(summary: WorkflowEventSummary): Promise<void> {
     this.compactSummaries.push(structuredClone(summary));
   }
 
-  async listCompactSummaries(flowId: FlowId): Promise<CompactSummary[]> {
+  async listWorkflowEventSummaries(flowId: WorkflowRunId): Promise<WorkflowEventSummary[]> {
     return this.compactSummaries
       .filter((c) => c.flowId === flowId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((c) => structuredClone(c));
   }
 
-  async listUnconsumedSteerEvents(flowId: FlowId): Promise<OperatorEvent[]> {
+  async listUnconsumedSteerEvents(flowId: WorkflowRunId): Promise<WorkflowOperatorEvent[]> {
     return this.operatorEvents
       .filter((e) => e.flowId === flowId && e.kind === "operator-steered" && e.consumedAt === undefined)
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -258,7 +258,7 @@ export class FakeWorkflowStore implements WorkflowStore {
 
   async markSteerConsumed(
     eventId: string,
-    consumption: { consumedByStepId?: StepId; consumedByRunId?: RunId; consumedByFlowEventId?: EventId }
+    consumption: { consumedByStepId?: WorkflowStepId; consumedByRunId?: RunId; consumedByFlowEventId?: EventId }
   ): Promise<void> {
     const idx = this.operatorEvents.findIndex((e) => e.id === eventId);
     if (idx >= 0) {
@@ -272,7 +272,7 @@ export class FakeWorkflowStore implements WorkflowStore {
   }
 
   async atomicTransition<T>(
-    flowId: FlowId,
+    flowId: WorkflowRunId,
     work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T> {
     // In-memory: no real transaction isolation, but we execute sequentially

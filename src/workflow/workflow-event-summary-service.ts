@@ -1,13 +1,13 @@
-// Flow-safe event summary service for v0.8
+// WorkflowRun-safe event summary service for v0.8
 // Manual /compact and configurable automatic compaction.
 // Only operates at safe boundaries. Never compacts durable flow truth.
 
 import type {
-  FlowId,
-  CompactSummary,
-  FlowEvent,
-  OperatorEvent,
-  FlowStep
+  WorkflowRunId,
+  WorkflowEventSummary,
+  WorkflowEvent,
+  WorkflowOperatorEvent,
+  WorkflowStep
 } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 
@@ -22,7 +22,7 @@ export type WorkflowEventSummaryMode = "manual" | "automatic";
 
 export type WorkflowEventSummaryResult = {
   ok: boolean;
-  summary?: CompactSummary;
+  summary?: WorkflowEventSummary;
   error?: string;
   beforeEventCount: number;
   afterEventCount: number;
@@ -60,23 +60,23 @@ export class WorkflowEventSummaryService {
 
   // ─── Safe boundary detection ───
 
-  async canCompact(flowId: FlowId): Promise<{
+  async canCompact(flowId: WorkflowRunId): Promise<{
     ok: boolean;
     reason?: string;
-    activeSteps: FlowStep[];
+    activeSteps: WorkflowStep[];
     activeProcesses: number;
     pendingApprovals: number;
   }> {
-    const flow = await this.#store.getFlow(flowId);
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) {
       return { ok: false, reason: "Flow not found", activeSteps: [], activeProcesses: 0, pendingApprovals: 0 };
     }
 
-    const steps = await this.#store.listSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
     const activeSteps = steps.filter((s) => s.status === "running");
-    const processes = await this.#store.listProcesses(flowId);
+    const processes = await this.#store.listWorkflowProcesses(flowId);
     const activeProcesses = processes.filter((p) => p.status === "running").length;
-    const approvals = await this.#store.listApprovalGates(flowId, { status: "pending" });
+    const approvals = await this.#store.listWorkflowApprovalGates(flowId, { status: "pending" });
     const pendingApprovals = approvals.length;
 
     if (activeProcesses > 0) {
@@ -94,13 +94,13 @@ export class WorkflowEventSummaryService {
 
   // ─── Preview / dry-run ───
 
-  async preview(flowId: FlowId): Promise<WorkflowEventSummaryResult> {
+  async preview(flowId: WorkflowRunId): Promise<WorkflowEventSummaryResult> {
     return this.#doCompact(flowId, "manual", "preview", /* persist */ false);
   }
 
   // ─── Manual compaction ───
 
-  async compact(flowId: FlowId, operator?: string): Promise<WorkflowEventSummaryResult> {
+  async compact(flowId: WorkflowRunId, operator?: string): Promise<WorkflowEventSummaryResult> {
     const boundary = await this.canCompact(flowId);
     if (!boundary.ok) {
       return {
@@ -120,7 +120,7 @@ export class WorkflowEventSummaryService {
 
   // ─── Automatic compaction ───
 
-  async checkAndAutoCompact(flowId: FlowId): Promise<WorkflowEventSummaryResult | null> {
+  async checkAndAutoCompact(flowId: WorkflowRunId): Promise<WorkflowEventSummaryResult | null> {
     if (!this.#config.enabled) {
       return null;
     }
@@ -130,12 +130,12 @@ export class WorkflowEventSummaryService {
       return null;
     }
 
-    const events = await this.#store.listFlowEvents(flowId);
+    const events = await this.#store.listWorkflowEvents(flowId);
     if (events.length < this.#config.eventThreshold) {
       return null;
     }
 
-    const completedSteps = (await this.#store.listSteps(flowId)).filter(
+    const completedSteps = (await this.#store.listWorkflowSteps(flowId)).filter(
       (s) => s.status === "completed" || s.status === "skipped" || s.status === "failed" || s.status === "cancelled"
     );
     if (completedSteps.length < this.#config.minTurnsBeforeCompact) {
@@ -148,12 +148,12 @@ export class WorkflowEventSummaryService {
   // ─── Core compaction logic ───
 
   async #doCompact(
-    flowId: FlowId,
+    flowId: WorkflowRunId,
     mode: WorkflowEventSummaryMode,
     trigger: string,
     persist: boolean
   ): Promise<WorkflowEventSummaryResult> {
-    const flow = await this.#store.getFlow(flowId);
+    const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) {
       return {
         ok: false,
@@ -168,8 +168,8 @@ export class WorkflowEventSummaryService {
       };
     }
 
-    const allEvents = await this.#store.listFlowEvents(flowId);
-    const allOperatorEvents = await this.#store.listOperatorEvents(flowId);
+    const allEvents = await this.#store.listWorkflowEvents(flowId);
+    const allOperatorEvents = await this.#store.listWorkflowOperatorEvents(flowId);
 
     // Durable events are never deleted; we summarize them.
     // For v0.8, deterministic summarization from existing flow events.
@@ -177,7 +177,7 @@ export class WorkflowEventSummaryService {
     const toolOutcomeSummaries = this.#summarizeToolOutcomes(allEvents);
     const operatorActionSummaries = this.#summarizeOperatorActions(allOperatorEvents);
 
-    const summary: CompactSummary = {
+    const summary: WorkflowEventSummary = {
       id: this.#id(),
       flowId,
       compactedRange: {
@@ -190,9 +190,9 @@ export class WorkflowEventSummaryService {
       createdAt: this.#now().toISOString()
     };
 
-    const steps = await this.#store.listSteps(flowId);
-    const processes = await this.#store.listProcesses(flowId);
-    const approvals = await this.#store.listApprovalGates(flowId);
+    const steps = await this.#store.listWorkflowSteps(flowId);
+    const processes = await this.#store.listWorkflowProcesses(flowId);
+    const approvals = await this.#store.listWorkflowApprovalGates(flowId);
 
     const result: WorkflowEventSummaryResult = {
       ok: true,
@@ -212,10 +212,10 @@ export class WorkflowEventSummaryService {
 
     // Persist via atomic transition
     await this.#store.atomicTransition(flowId, async (tx) => {
-      await tx.saveCompactSummary(summary);
+      await tx.saveWorkflowEventSummary(summary);
 
       // Record compaction flow event
-      await tx.appendFlowEvent({
+      await tx.appendWorkflowEvent({
         id: this.#id(),
         flowId,
         kind: "compacted",
@@ -232,7 +232,7 @@ export class WorkflowEventSummaryService {
       });
 
       // Record operator-compacted event
-      await tx.appendOperatorEvent({
+      await tx.appendWorkflowOperatorEvent({
         id: this.#id(),
         flowId,
         kind: "operator-compacted",
@@ -254,7 +254,7 @@ export class WorkflowEventSummaryService {
 
       // Update flow compactedAt
       const updatedFlow = { ...flow, compactedAt: this.#now().toISOString() };
-      await tx.updateFlow(updatedFlow);
+      await tx.updateWorkflowRun(updatedFlow);
     });
 
     return result;
@@ -262,9 +262,9 @@ export class WorkflowEventSummaryService {
 
   // ─── Deterministic summarizers (v0.8) ───
 
-  #summarizeTurns(events: FlowEvent[]): string[] {
+  #summarizeTurns(events: WorkflowEvent[]): string[] {
     const summaries: string[] = [];
-    const started = new Map<string, FlowEvent>();
+    const started = new Map<string, WorkflowEvent>();
 
     // Process in chronological order (ascending timestamp)
     const chronological = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -291,9 +291,9 @@ export class WorkflowEventSummaryService {
     return summaries;
   }
 
-  #summarizeToolOutcomes(events: FlowEvent[]): string[] {
+  #summarizeToolOutcomes(events: WorkflowEvent[]): string[] {
     const summaries: string[] = [];
-    const registered = new Map<string, FlowEvent>();
+    const registered = new Map<string, WorkflowEvent>();
 
     const chronological = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -311,7 +311,7 @@ export class WorkflowEventSummaryService {
     return summaries;
   }
 
-  #summarizeOperatorActions(events: OperatorEvent[]): string[] {
+  #summarizeOperatorActions(events: WorkflowOperatorEvent[]): string[] {
     const chronological = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     return chronological.map((ev) => {
       return `Operator ${ev.operator} executed ${ev.command} (${ev.effect}).`;

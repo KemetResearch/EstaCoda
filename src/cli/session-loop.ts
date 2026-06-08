@@ -2133,7 +2133,7 @@ async function handleTaskFlowCommand(input: {
     case "set": {
       const flowId = rest[0];
       if (flowId === undefined) return "Usage: /flow set <flowId>";
-      const flow = await taskflow.store.getFlow(flowId);
+      const flow = await taskflow.store.getWorkflowRun(flowId);
       if (flow === null) return `Flow not found: ${flowId}`;
       taskflow.setActiveFlowId(flowId);
       return `Active flow set to ${flowId} (status: ${flow.status}).`;

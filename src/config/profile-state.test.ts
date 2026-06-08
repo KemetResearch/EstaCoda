@@ -7,7 +7,7 @@ import { PersistentChannelSessionStore } from "../channels/channel-session-store
 import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
-import type { Flow } from "../workflow/types.js";
+import type { WorkflowRun } from "../workflow/types.js";
 
 const tempDirs: string[] = [];
 
@@ -28,7 +28,7 @@ async function expectFileMissing(path: string): Promise<void> {
   await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 }
 
-function makeFlow(id: string, sessionId: string): Flow {
+function makeFlow(id: string, sessionId: string): WorkflowRun {
   return {
     id,
     sessionId,
@@ -168,15 +168,15 @@ describe("profile runtime state paths", () => {
       const alphaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "alpha" });
       const betaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "beta" });
 
-      await alphaStore.createFlow(makeFlow("flow-alpha", alphaSession.id));
-      await betaStore.createFlow(makeFlow("flow-beta", betaSession.id));
+      await alphaStore.createWorkflowRun(makeFlow("flow-alpha", alphaSession.id));
+      await betaStore.createWorkflowRun(makeFlow("flow-beta", betaSession.id));
 
-      await expect(alphaStore.getFlow("flow-alpha")).resolves.toMatchObject({ id: "flow-alpha" });
-      await expect(alphaStore.getFlow("flow-beta")).resolves.toBeNull();
-      await expect(betaStore.getFlow("flow-beta")).resolves.toMatchObject({ id: "flow-beta" });
-      await expect(betaStore.getFlow("flow-alpha")).resolves.toBeNull();
-      await expect(alphaStore.listActiveFlows()).resolves.toEqual([expect.objectContaining({ id: "flow-alpha" })]);
-      await expect(betaStore.listActiveFlows()).resolves.toEqual([expect.objectContaining({ id: "flow-beta" })]);
+      await expect(alphaStore.getWorkflowRun("flow-alpha")).resolves.toMatchObject({ id: "flow-alpha" });
+      await expect(alphaStore.getWorkflowRun("flow-beta")).resolves.toBeNull();
+      await expect(betaStore.getWorkflowRun("flow-beta")).resolves.toMatchObject({ id: "flow-beta" });
+      await expect(betaStore.getWorkflowRun("flow-alpha")).resolves.toBeNull();
+      await expect(alphaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "flow-alpha" })]);
+      await expect(betaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "flow-beta" })]);
     } finally {
       db.close();
     }

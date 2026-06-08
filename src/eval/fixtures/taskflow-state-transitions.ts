@@ -1,7 +1,7 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
 import {
-  validateFlowTransition,
-  validateStepTransition,
+  validateWorkflowRunTransition,
+  validateWorkflowStepTransition,
   isRetryAllowed,
   IllegalTransitionError,
   defaultRetryPolicy,
@@ -11,7 +11,7 @@ import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
 
 export const taskflowStateTransitionsCase: EvalCase = {
   id: "taskflow-state-transitions",
-  name: "Flow and step state transitions are validated correctly",
+  name: "WorkflowRun and step state transitions are validated correctly",
   description: "Legal transitions succeed; illegal transitions throw IllegalTransitionError.",
   tags: ["taskflow", "state-machine", "deterministic"],
   run: async (): Promise<EvalResult> => {
@@ -19,25 +19,25 @@ export const taskflowStateTransitionsCase: EvalCase = {
     const assertions = [];
 
     // Legal flow transitions
-    assertions.push(assertEqual("pending→running", (() => { try { validateFlowTransition("pending", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("running→paused", (() => { try { validateFlowTransition("running", "paused"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("running→completed", (() => { try { validateFlowTransition("running", "completed"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("paused→running", (() => { try { validateFlowTransition("paused", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("pending→running", (() => { try { validateWorkflowRunTransition("pending", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("running→paused", (() => { try { validateWorkflowRunTransition("running", "paused"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("running→completed", (() => { try { validateWorkflowRunTransition("running", "completed"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("paused→running", (() => { try { validateWorkflowRunTransition("paused", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
 
     // Illegal flow transitions
-    assertions.push(assertEqual("completed→running throws", (() => { try { validateFlowTransition("completed", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
-    assertions.push(assertEqual("failed→pending throws", (() => { try { validateFlowTransition("failed", "pending"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
-    assertions.push(assertEqual("cancelled→running throws", (() => { try { validateFlowTransition("cancelled", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
+    assertions.push(assertEqual("completed→running throws", (() => { try { validateWorkflowRunTransition("completed", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
+    assertions.push(assertEqual("failed→pending throws", (() => { try { validateWorkflowRunTransition("failed", "pending"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
+    assertions.push(assertEqual("cancelled→running throws", (() => { try { validateWorkflowRunTransition("cancelled", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
 
     // Legal step transitions
-    assertions.push(assertEqual("step pending→running", (() => { try { validateStepTransition("pending", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("step running→completed", (() => { try { validateStepTransition("running", "completed"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("step running→waiting_for_approval", (() => { try { validateStepTransition("running", "waiting_for_approval"); return "ok"; } catch { return "err"; } })(), "ok"));
-    assertions.push(assertEqual("step paused→running", (() => { try { validateStepTransition("paused", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("step pending→running", (() => { try { validateWorkflowStepTransition("pending", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("step running→completed", (() => { try { validateWorkflowStepTransition("running", "completed"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("step running→waiting_for_approval", (() => { try { validateWorkflowStepTransition("running", "waiting_for_approval"); return "ok"; } catch { return "err"; } })(), "ok"));
+    assertions.push(assertEqual("step paused→running", (() => { try { validateWorkflowStepTransition("paused", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
 
     // Illegal step transitions
-    assertions.push(assertEqual("step completed→running throws", (() => { try { validateStepTransition("completed", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
-    assertions.push(assertEqual("step failed→pending throws", (() => { try { validateStepTransition("failed", "pending"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
+    assertions.push(assertEqual("step completed→running throws", (() => { try { validateWorkflowStepTransition("completed", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
+    assertions.push(assertEqual("step failed→pending throws", (() => { try { validateWorkflowStepTransition("failed", "pending"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
 
     // Retry eligibility (conservative v0.8 rule)
     assertions.push(assertTrue("retry allowed when idempotent=true", isRetryAllowed({ idempotent: true, safeToRetry: false })));
@@ -52,6 +52,6 @@ export const taskflowStateTransitionsCase: EvalCase = {
     assertions.push(assertEqual("defaultRetryPolicy maxAttempts", defaultRetryPolicy().maxAttempts, 1));
     assertions.push(assertEqual("defaultFailurePolicy defaultAction", defaultFailurePolicy().defaultAction, "stop"));
 
-    return buildResult("taskflow-state-transitions", "Flow and step state transitions are validated correctly", assertions, Date.now() - startedAt);
+    return buildResult("taskflow-state-transitions", "WorkflowRun and step state transitions are validated correctly", assertions, Date.now() - startedAt);
   }
 };

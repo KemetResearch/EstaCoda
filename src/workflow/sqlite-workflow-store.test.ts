@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteWorkflowStore } from "./sqlite-workflow-store.js";
-import type { Flow, FlowEvent, FlowStep } from "./types.js";
+import type { WorkflowRun, WorkflowEvent, WorkflowStep } from "./types.js";
 
 describe("SQLiteWorkflowStore", () => {
   let tmpDir: string;
@@ -24,31 +24,31 @@ describe("SQLiteWorkflowStore", () => {
 
   it("commits atomic transitions through the internal SQLite adapter", async () => {
     await store.atomicTransition("flow-1", async (tx) => {
-      await tx.createFlow(makeFlow("flow-1"));
-      await tx.createStep(makeStep("step-1", "flow-1"));
-      await tx.appendFlowEvent(makeEvent("event-1", "flow-1", "step-1"));
+      await tx.createWorkflowRun(makeFlow("flow-1"));
+      await tx.createWorkflowStep(makeStep("step-1", "flow-1"));
+      await tx.appendWorkflowEvent(makeEvent("event-1", "flow-1", "step-1"));
     });
 
-    await expect(store.getFlow("flow-1")).resolves.toMatchObject({ id: "flow-1" });
-    await expect(store.getStep("step-1")).resolves.toMatchObject({ id: "step-1" });
-    await expect(store.listFlowEvents("flow-1")).resolves.toHaveLength(1);
+    await expect(store.getWorkflowRun("flow-1")).resolves.toMatchObject({ id: "flow-1" });
+    await expect(store.getWorkflowStep("step-1")).resolves.toMatchObject({ id: "step-1" });
+    await expect(store.listWorkflowEvents("flow-1")).resolves.toHaveLength(1);
   });
 
   it("rolls back failed atomic transitions through the internal SQLite adapter", async () => {
     await expect(
       store.atomicTransition("flow-2", async (tx) => {
-        await tx.createFlow(makeFlow("flow-2"));
-        await tx.createStep(makeStep("step-2", "flow-2"));
+        await tx.createWorkflowRun(makeFlow("flow-2"));
+        await tx.createWorkflowStep(makeStep("step-2", "flow-2"));
         throw new Error("simulated failure");
       })
     ).rejects.toThrow("simulated failure");
 
-    await expect(store.getFlow("flow-2")).resolves.toBeNull();
-    await expect(store.getStep("step-2")).resolves.toBeNull();
+    await expect(store.getWorkflowRun("flow-2")).resolves.toBeNull();
+    await expect(store.getWorkflowStep("step-2")).resolves.toBeNull();
   });
 });
 
-function makeFlow(id: string): Flow {
+function makeFlow(id: string): WorkflowRun {
   return {
     id,
     sessionId: "session-1",
@@ -72,7 +72,7 @@ function makeFlow(id: string): Flow {
   };
 }
 
-function makeStep(id: string, flowId: string): FlowStep {
+function makeStep(id: string, flowId: string): WorkflowStep {
   return {
     id,
     flowId,
@@ -105,7 +105,7 @@ function makeStep(id: string, flowId: string): FlowStep {
   };
 }
 
-function makeEvent(id: string, flowId: string, stepId: string): FlowEvent {
+function makeEvent(id: string, flowId: string, stepId: string): WorkflowEvent {
   return {
     id,
     flowId,
