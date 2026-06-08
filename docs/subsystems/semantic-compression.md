@@ -5,7 +5,7 @@ description: "Runtime semantic session compression gates, surfaces, fallback, an
 
 # Semantic Session Compression
 
-Semantic session compression shortens older session history when a conversation grows too large. It is separate from Memory File Compaction and TaskFlow compaction.
+Semantic session compression shortens older session history when a conversation grows too large. It is separate from Memory File Compaction and Workflow event summaries.
 
 ## Status
 
@@ -63,7 +63,7 @@ Manual session compaction is available through:
 - `estacoda sessions compact <session-id> [--topic <topic>]`
 - gateway `/compact [topic]`
 
-Manual compaction uses `SessionCompressionService.compactNow()` and intentionally bypasses the threshold. It is still the same semantic session compression path, not TaskFlow compaction.
+Manual compaction uses `SessionCompressionService.compactNow()` and intentionally bypasses the threshold. It is still the same semantic session compression path, not Workflow event summaries.
 
 Surface behavior differs by whether the caller can adopt a rotated child session:
 
@@ -213,9 +213,9 @@ Memory File Compaction:
 - never compacts `SOUL.md` or `AGENTS.md`
 - does not create session child lineage
 
-TaskFlow compaction:
+Workflow event summaries:
 
-- belongs to TaskFlow state and `/flow compact <flowId>`
+- belongs to Workflow state and `/workflow summarize <runId>`
 - is not invoked by semantic session compression or `/compact`
 - does not use semantic session lineage
 
@@ -242,4 +242,4 @@ This subsystem still does not provide:
 - evolution integration
 - session recall changes
 - memory-file compaction changes
-- TaskFlow compaction changes
+- Workflow event summary changes

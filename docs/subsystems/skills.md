@@ -16,7 +16,7 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 | `src/skills/skill-tools.ts` | 2,292 | Agent-facing skill CRUD tools |
 | `src/skills/skill-evolution.ts` | ~666 | Propose, review, approve, reject, promote patches |
 | `src/skills/skill-learning.ts` | ~240 | Observe workflows and create project skills |
-| `src/skills/skill-workflow-planner.ts` | ~140 | Compile skill workflow plans |
+| `src/skills/skill-playbook-planner.ts` | ~140 | Compile skill playbook plans |
 | `src/skills/skill-usage-telemetry.ts` | ~120 | Usage tracking and route telemetry |
 | `src/skills/skill-bundled-sync.ts` | ~100 | Sync bundled official skills |
 | `src/skills/skill-visibility.ts` | ~80 | Runtime visibility filtering |
@@ -140,6 +140,6 @@ Key types in `src/contracts/skill.ts`:
 - `SkillDefinition`
 - `LoadedSkill`
 - `SkillCatalogEntry`
-- `SkillWorkflowPlan`
-- `SkillWorkflowPlanStep`
+- `CompiledSkillPlaybook`
+- `CompiledSkillPlaybookStep`
 - `SkillOutcome`

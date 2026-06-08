@@ -1227,14 +1227,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
-      // If an active flow is set, route through the adapter
+      // If an active workflow run is set, route through the adapter
       if (workflow?.activeRunId) {
-        const flow = await workflow.store.getWorkflowRun(workflow.activeRunId);
-        if (flow && flow.status === "running") {
-          const steps = await workflow.store.listWorkflowSteps(flow.id);
+        const run = await workflow.store.getWorkflowRun(workflow.activeRunId);
+        if (run && run.status === "running") {
+          const steps = await workflow.store.listWorkflowSteps(run.id);
           const activeStep = steps.find((s) => s.status === "running");
           const turnResult = await workflow.adapter.runTurn({
-            flow,
+            run,
             step: activeStep,
             text: input.text,
             channel: input.channel,

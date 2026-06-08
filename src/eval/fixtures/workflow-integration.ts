@@ -88,11 +88,11 @@ function makeFakeAgentLoop(trajectoryId?: string): AgentLoop {
   } as unknown as AgentLoop;
 }
 
-export const track5IntegrationCase: EvalCase = {
-  id: "track5-integration",
-  name: "Track 5 System Integration — adapter, CLI bridge, runtime wiring, compaction, linkage",
-  description: "Covers all 18 Track 5 integration acceptance criteria.",
-  tags: ["taskflow", "integration", "track5", "deterministic"],
+export const workflowIntegrationCase: EvalCase = {
+  id: "workflow-integration",
+  name: "Workflow Integration — adapter, CLI bridge, runtime wiring, event summaries, linkage",
+  description: "Covers workflow integration acceptance criteria.",
+  tags: ["workflow", "integration", "workflow-integration", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
@@ -113,18 +113,18 @@ export const track5IntegrationCase: EvalCase = {
     // 1. /workflow slash bridge dispatches to WorkflowCommandDispatcher
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createWorkflowRun({
+      const run = await engine.createWorkflowRun({
         sessionId: "session-1",
         intent: makeIntent(),
         plan: { name: "Bridge Plan", description: "Test", steps: [{ name: "B1", description: "B1" }] }
       });
-      await engine.startWorkflowRun(flow.id);
+      await engine.startWorkflowRun(run.id);
 
-      // Simulate what handleWorkflowCommand does for /workflow status
-      const result = await dispatcher.dispatch({ command: "/status", runId: flow.id });
+      // Simulate what handleWorkflowCommand does for /workflow run status
+      const result = await dispatcher.dispatch({ command: "/status", runId: run.id });
       assertions.push(assertTrue("slash-bridge-dispatches", result.ok));
       if (result.ok) {
-        assertions.push(assertContains("slash-bridge-message", result.message, flow.id));
+        assertions.push(assertContains("slash-bridge-message", result.message, run.id));
       }
     }
 
@@ -132,7 +132,7 @@ export const track5IntegrationCase: EvalCase = {
     // 2. /workflow activate and /workflow deactivate update activeRunId correctly
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createWorkflowRun({
+      const run = await engine.createWorkflowRun({
         sessionId: "session-2",
         intent: makeIntent(),
         plan: { name: "Active Plan", description: "Test", steps: [{ name: "A1", description: "A1" }] }
@@ -140,8 +140,8 @@ export const track5IntegrationCase: EvalCase = {
       const mockWorkflow = { activeRunId: null as string | null, setActiveRunId(id: string | null) { this.activeRunId = id; } };
 
       // Simulate /workflow activate
-      mockWorkflow.setActiveRunId(flow.id);
-      assertions.push(assertEqual("workflow-activate-active-run", mockWorkflow.activeRunId, flow.id));
+      mockWorkflow.setActiveRunId(run.id);
+      assertions.push(assertEqual("workflow-activate-active-run", mockWorkflow.activeRunId, run.id));
 
       // Simulate /workflow deactivate
       mockWorkflow.setActiveRunId(null);
@@ -149,21 +149,21 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 3. /workflow status works through the real session command bridge
+    // 3. /workflow run status works through the real session command bridge
     // ═════════════════════════════════════════════════════════════════
     {
-      const flow = await engine.createWorkflowRun({
+      const run = await engine.createWorkflowRun({
         sessionId: "session-3",
         intent: makeIntent(),
         plan: { name: "Status Plan", description: "Test", steps: [{ name: "S1", description: "S1" }] }
       });
-      await engine.startWorkflowRun(flow.id);
+      await engine.startWorkflowRun(run.id);
 
-      const result = await dispatcher.dispatch({ command: "/status", runId: flow.id });
-      assertions.push(assertTrue("flow-status-ok", result.ok));
+      const result = await dispatcher.dispatch({ command: "/status", runId: run.id });
+      assertions.push(assertTrue("workflow-status-ok", result.ok));
       if (result.ok) {
-        assertions.push(assertContains("workflow-status-has-runId", result.message, flow.id));
-        assertions.push(assertContains("flow-status-has-state", result.message, "running"));
+        assertions.push(assertContains("workflow-status-has-runId", result.message, run.id));
+        assertions.push(assertContains("workflow-status-has-state", result.message, "running"));
       }
     }
 
@@ -201,7 +201,7 @@ export const track5IntegrationCase: EvalCase = {
       const stepObj = (await store.listWorkflowSteps(steerFlow.id))[0];
 
       const turnResult = await adapter.runTurn({
-        flow: flowObj,
+        run: flowObj,
         step: stepObj,
         text: "Run step",
         channel: "cli"
@@ -237,7 +237,7 @@ export const track5IntegrationCase: EvalCase = {
 
       const flowObj = (await store.getWorkflowRun(steerFlow2.id))!;
       const stepObj = (await store.listWorkflowSteps(steerFlow2.id))[0];
-      await adapter.runTurn({ flow: flowObj, step: stepObj, text: "Run", channel: "cli" });
+      await adapter.runTurn({ run: flowObj, step: stepObj, text: "Run", channel: "cli" });
 
       const opEventsAfter = await store.listWorkflowOperatorEvents(steerFlow2.id);
       const consumedSteer = opEventsAfter.find((e) => e.command === "/steer" && e.consumedAt !== undefined);
@@ -272,7 +272,7 @@ export const track5IntegrationCase: EvalCase = {
       });
       const flowObj = (await store.getWorkflowRun(traceFlow.id))!;
       const stepObj = (await store.listWorkflowSteps(traceFlow.id))[0];
-      await adapter.runTurn({ flow: flowObj, step: stepObj, text: "Run", channel: "cli" });
+      await adapter.runTurn({ run: flowObj, step: stepObj, text: "Run", channel: "cli" });
 
       const traceResult = await dispatcher.dispatch({ command: "/trace", runId: traceFlow.id });
       assertions.push(assertTrue("trace-ok", traceResult.ok));
@@ -305,7 +305,7 @@ export const track5IntegrationCase: EvalCase = {
           assertions.push(assertTrue("workflow-has-store", rt.workflow.store !== undefined));
           assertions.push(assertTrue("workflow-has-dispatcher", rt.workflow.dispatcher !== undefined));
           assertions.push(assertTrue("workflow-has-processRegistry", rt.workflow.processRegistry !== undefined));
-          assertions.push(assertTrue("workflow-has-compactionService", rt.workflow.compactionService !== undefined));
+          assertions.push(assertTrue("workflow-has-eventSummaryService", rt.workflow.compactionService !== undefined));
           assertions.push(assertTrue("workflow-has-adapter", rt.workflow.adapter !== undefined));
         }
         await rt.dispose();
@@ -318,7 +318,7 @@ export const track5IntegrationCase: EvalCase = {
     // 8. restart recovery runs during runtime startup
     // ═════════════════════════════════════════════════════════════════
     {
-      // Create a fresh SQLite DB, seed a running flow, then create a runtime
+      // Create a fresh SQLite DB, seed a running workflow run, then create a runtime
       const { createRuntime } = await import("../../runtime/create-runtime.js");
       const { SQLiteSessionDB: SQLiteSessionDBClass } = await import("../../session/sqlite-session-db.js");
 
@@ -326,27 +326,27 @@ export const track5IntegrationCase: EvalCase = {
       const sqliteDb = new SQLiteSessionDBClass({ path: dbPath });
 
       try {
-        // Seed a running flow directly in the DB
+        // Seed a running workflow run directly in the DB
         await sqliteDb.createSession({ id: "rec-session", profileId: "default" });
         const tfStore = new SQLiteWorkflowStore({ db: sqliteDb.db, profileId: "default" });
         const tfLock = new WorkflowLockService({ store: tfStore });
         const tfEngine = new WorkflowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
 
-        const flow = await tfEngine.createWorkflowRun({
+        const run = await tfEngine.createWorkflowRun({
           sessionId: "rec-session",
           intent: makeIntent(),
           plan: { name: "Recovery Plan", description: "Test", steps: [{ name: "R1", description: "R1" }] }
         });
-        await tfEngine.startWorkflowRun(flow.id);
-        await tfLock.acquire(flow.id, "old-worker");
+        await tfEngine.startWorkflowRun(run.id);
+        await tfLock.acquire(run.id, "old-worker");
 
         // Now createRuntime should run restart recovery
         const rt = await createRuntime({ ...minimalRuntimeOptions, sessionDb: sqliteDb });
         assertions.push(assertTrue("recovery-ran-on-startup", rt.workflow !== undefined));
 
         // WorkflowRun should be interrupted
-        const recoveredFlow = await tfStore.getWorkflowRun(flow.id);
-        assertions.push(assertEqual("running-flow-interrupted", recoveredFlow?.status, "interrupted"));
+        const recoveredFlow = await tfStore.getWorkflowRun(run.id);
+        assertions.push(assertEqual("running-workflow-run-interrupted", recoveredFlow?.status, "interrupted"));
 
         await rt.dispose();
       } finally {
@@ -355,7 +355,7 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 9. running flow becomes interrupted after restart recovery
+    // 9. running workflow run becomes interrupted after restart recovery
     // (covered in test 8 above, but we assert explicitly)
     // ═════════════════════════════════════════════════════════════════
     {
@@ -382,7 +382,7 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 10. paused/waiting/interrupted flows are preserved after restart
+    // 10. paused/waiting/interrupted workflow runs are preserved after restart
     // ═════════════════════════════════════════════════════════════════
     {
       const recoveryStore2 = new FakeWorkflowStore({ now: makeNow() });
@@ -422,14 +422,14 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 11. automatic compaction remains disabled by default
+    // 11. automatic workflow event summary remains disabled by default
     // ═════════════════════════════════════════════════════════════════
     {
-      assertions.push(assertEqual("compaction-disabled-default", DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG.enabled, false));
+      assertions.push(assertEqual("event-summary-disabled-default", DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG.enabled, false));
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 12. automatic compaction triggers at safe boundary when enabled
+    // 12. automatic workflow event summary triggers at safe boundary when enabled
     // ═════════════════════════════════════════════════════════════════
     {
       const compactStore = new FakeWorkflowStore({ now: makeNow() });
@@ -447,15 +447,15 @@ export const track5IntegrationCase: EvalCase = {
         plan: { name: "P12", description: "Test", steps: [{ name: "S12", description: "S12" }] }
       });
       await compactEngine.startWorkflowRun(cFlow.id);
-      // Complete the step so the flow has no active steps/processes/approvals
+      // Complete the step so the workflow run has no active steps/processes/approvals
       const cStep = (await compactStore.listWorkflowSteps(cFlow.id))[0];
       await compactEngine.completeWorkflowStep(cStep.id);
 
-      // Add 4 flow events (> eventThreshold=3)
+      // Add 4 workflow events (> eventThreshold=3)
       for (let i = 0; i < 4; i++) {
         await compactStore.appendWorkflowEvent({
           id: crypto.randomUUID(),
-          flowId: cFlow.id,
+          runId: cFlow.id,
           kind: "flow-state-changed",
           timestamp: new Date().toISOString(),
           data: { seq: i }
@@ -466,13 +466,13 @@ export const track5IntegrationCase: EvalCase = {
       const before = (await compactStore.listWorkflowEvents(cFlow.id)).length;
       await compactService.checkAndAutoCompact(cFlow.id);
       const after = (await compactStore.listWorkflowEvents(cFlow.id)).length;
-      // Compaction should have run and reduced events (or created a summary)
+      // Event summary should have run and reduced events (or created a summary)
       const summaries = await compactStore.listWorkflowEventSummaries(cFlow.id);
-      assertions.push(assertTrue("compaction-triggered-at-boundary", before > after || summaries.length > 0));
+      assertions.push(assertTrue("event-summary-triggered-at-boundary", before > after || summaries.length > 0));
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 13. automatic compaction does not trigger with active step/process/approval
+    // 13. automatic workflow event summary does not trigger with active step/process/approval
     // ═════════════════════════════════════════════════════════════════
     {
       const unsafeStore = new FakeWorkflowStore({ now: makeNow() });
@@ -495,7 +495,7 @@ export const track5IntegrationCase: EvalCase = {
       for (let i = 0; i < 5; i++) {
         await unsafeStore.appendWorkflowEvent({
           id: crypto.randomUUID(),
-          flowId: uFlow.id,
+          runId: uFlow.id,
           kind: "flow-state-changed",
           timestamp: new Date().toISOString(),
           data: { seq: i }
@@ -505,8 +505,8 @@ export const track5IntegrationCase: EvalCase = {
       const beforeUnsafe = (await unsafeStore.listWorkflowEvents(uFlow.id)).length;
       await unsafeService.checkAndAutoCompact(uFlow.id);
       const afterUnsafe = (await unsafeStore.listWorkflowEvents(uFlow.id)).length;
-      // Since step is running, compaction should NOT have run
-      assertions.push(assertEqual("compaction-skipped-unsafe", beforeUnsafe, afterUnsafe));
+      // Since step is running, event summary should NOT have run
+      assertions.push(assertEqual("event-summary-skipped-unsafe", beforeUnsafe, afterUnsafe));
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -529,7 +529,7 @@ export const track5IntegrationCase: EvalCase = {
 
       await procRegistry.register({
         id: "proc-1",
-        flowId: pFlow.id,
+        runId: pFlow.id,
         stepId: pStep.id,
         processManagerId: "pm-1",
         processType: "terminal",
@@ -589,7 +589,7 @@ export const track5IntegrationCase: EvalCase = {
       });
       await linkStore.createWorkflowStep({
         id: linkStep.id,
-        flowId: linkFlow.id,
+        runId: linkFlow.id,
         index: 0,
         status: "running",
         name: "S15",
@@ -610,12 +610,12 @@ export const track5IntegrationCase: EvalCase = {
       const linkFlowObj = (await linkStore.getWorkflowRun(linkFlow.id))!;
       const linkStepObj = (await linkStore.listWorkflowSteps(linkFlow.id))[0];
 
-      await linkAdapter.runTurn({ flow: linkFlowObj, step: linkStepObj, text: "Run", channel: "cli" });
+      await linkAdapter.runTurn({ run: linkFlowObj, step: linkStepObj, text: "Run", channel: "cli" });
 
       const links = await linkStore.listWorkflowAgentRunLinks(linkFlow.id, linkStep.id);
       assertions.push(assertTrue("run-link-created", links.length > 0));
       if (links.length > 0) {
-        assertions.push(assertEqual("run-link-uses-real-id", links[0].runId, realTrajectoryId));
+        assertions.push(assertEqual("run-link-uses-real-id", links[0].agentRunId, realTrajectoryId));
       }
     }
 
@@ -630,10 +630,10 @@ export const track5IntegrationCase: EvalCase = {
         compactionService
       });
 
-      const artFlowId = "flow-art-001";
+      const artRunId = "run-art-001";
       const artStepId = "step-art-001";
       await artStore.createWorkflowRun({
-        id: artFlowId,
+        id: artRunId,
         sessionId: "s16",
         status: "running",
         intent: makeIntent(),
@@ -646,7 +646,7 @@ export const track5IntegrationCase: EvalCase = {
       });
       await artStore.createWorkflowStep({
         id: artStepId,
-        flowId: artFlowId,
+        runId: artRunId,
         index: 0,
         status: "running",
         name: "S16",
@@ -664,12 +664,12 @@ export const track5IntegrationCase: EvalCase = {
         updatedAt: new Date().toISOString()
       });
 
-      const artFlowObj = (await artStore.getWorkflowRun(artFlowId))!;
+      const artRunObj = (await artStore.getWorkflowRun(artRunId))!;
       const artStepObj = (await artStore.getWorkflowStep(artStepId))!;
 
-      await artAdapter.runTurn({ flow: artFlowObj, step: artStepObj, text: "Run", channel: "cli" });
+      await artAdapter.runTurn({ run: artRunObj, step: artStepObj, text: "Run", channel: "cli" });
 
-      const artifacts = await artStore.listWorkflowArtifactLinks(artFlowId, artStepId);
+      const artifacts = await artStore.listWorkflowArtifactLinks(artRunId, artStepId);
       assertions.push(assertTrue("artifact-link-created", artifacts.length > 0));
       if (artifacts.length > 0) {
         assertions.push(assertEqual("artifact-link-kind", artifacts[0].kind, "created"));
@@ -683,12 +683,12 @@ export const track5IntegrationCase: EvalCase = {
       const recorder = new TrajectoryRecorder({ profileId: "p", sessionId: "s", modelId: "m" });
       const keys = Object.keys(recorder).concat(Object.getOwnPropertyNames(Object.getPrototypeOf(recorder)));
       const workflowMethods = keys.filter((k) =>
-        k.toLowerCase().includes("flow") ||
+        k.toLowerCase().includes("run") ||
         k.toLowerCase().includes("steer") ||
         k.toLowerCase().includes("operator") ||
         k.toLowerCase().includes("checkpoint")
       );
-      assertions.push(assertEqual("trajectory-recorder-no-taskflow-methods", workflowMethods.length, 0));
+      assertions.push(assertEqual("trajectory-recorder-no-workflow-methods", workflowMethods.length, 0));
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -703,12 +703,12 @@ export const track5IntegrationCase: EvalCase = {
       const methodNames = Object.getOwnPropertyNames(prototype);
 
       const workflowMethods = methodNames.filter((m) =>
-        m.toLowerCase().includes("flow") ||
+        m.toLowerCase().includes("run") ||
         m.toLowerCase().includes("steer") ||
         m.toLowerCase().includes("checkpoint") ||
         m.toLowerCase().includes("operator")
       );
-      assertions.push(assertEqual("agentloop-no-taskflow-methods", workflowMethods.length, 0));
+      assertions.push(assertEqual("agentloop-no-workflow-methods", workflowMethods.length, 0));
 
       // The only workflow-related thing should be trajectoryId getter (added minimally)
       const hasTrajectoryId = methodNames.includes("trajectoryId") || "trajectoryId" in prototype;
@@ -716,8 +716,8 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     return buildResult(
-      "track5-integration",
-      "Track 5 System Integration — adapter, CLI bridge, runtime wiring, compaction, linkage",
+      "workflow-integration",
+      "Workflow Integration — adapter, CLI bridge, runtime wiring, event summaries, linkage",
       assertions,
       Date.now() - startedAt
     );

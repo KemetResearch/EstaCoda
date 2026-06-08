@@ -79,7 +79,7 @@ pnpm run smoke --fail-fast --json
 - Change manifest state transitions
 - Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
 - **Evolution:** manifest creation, proposal bridge, user-correction capture, tool-description/routing-metadata skeletons, export shape
-- **TaskFlow:** state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, operator control plane, compaction, runtime integration
+- **Workflow:** state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, command/control, event summaries, runtime integration
 
 ### Eval Fixtures
 
@@ -111,24 +111,24 @@ Run with `pnpm run eval:fixtures` or `pnpm run dev -- eval <fixture-id>`.
 - `routing-metadata-proposal` — Routing metadata proposal manifest can be created and inspected
 - `evolution-export-shape` — Evolution export dataset matches OptimizationDataset schema
 
-**TaskFlow foundation (5):**
-- `taskflow-state-transitions` — Flow and step state transitions are validated correctly
-- `taskflow-locking` — Flow lock acquire, release, heartbeat, and stale recovery
-- `taskflow-migration` — v0.8 schema migration creates tables and sets version
-- `taskflow-atomicity` — SQLiteWorkflowStore atomic transitions and round-trip integrity
-- `taskflow-engine-lifecycle` — WorkflowEngine flow and step lifecycle methods
+**Workflow foundation (5):**
+- `workflow-run-state-transitions` — Workflow run and step state transitions are validated correctly
+- `workflow-locking` — Workflow run lock acquire, release, heartbeat, and stale recovery
+- `workflow-migration` — v0.8 schema migration creates tables and sets version
+- `workflow-store-atomicity` — SQLiteWorkflowStore atomic transitions and round-trip integrity
+- `workflow-engine-lifecycle` — WorkflowEngine workflow run and step lifecycle methods
 
-**TaskFlow engine (1):**
-- `taskflow-restart-recovery` — WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks
+**Workflow engine (1):**
+- `workflow-restart-recovery` — WorkflowRestartRecovery marks running workflow runs and steps interrupted and releases stale locks
 
 **Operator control plane (1):**
-- `operator-control-plane` — WorkflowCommandDispatcher routes and validates all slash commands
+- `workflow-command-control` — WorkflowCommandDispatcher routes and validates all slash commands
 
-**Compaction (1):**
-- `flow-compaction` — Flow-Safe Compaction: manual, automatic, boundary safety, preservation
+**Workflow Event Summaries (1):**
+- `workflow-event-summary` — Workflow event summaries: manual, automatic, boundary safety, preservation
 
-**Track 5 integration (1):**
-- `track5-integration` — Track 5 System Integration: adapter, CLI bridge, runtime wiring, compaction, linkage
+**Workflow Integration (1):**
+- `workflow-integration` — Workflow integration: adapter, CLI bridge, runtime wiring, event summaries, linkage
 
 ### What Smoke Does Not Cover
 

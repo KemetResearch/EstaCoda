@@ -31,7 +31,7 @@ Construction order:
 3. Tool registry
 4. Skill registries (official → personal → project → external)
 5. Prompt dependencies (prompt cache, context expander)
-6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillWorkflowExecutor`, `NativeToolExecutor`)
+6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`)
 7. `AgentLoop`
 
 Key composition rules:
@@ -52,7 +52,7 @@ Key composition rules:
 | `src/runtime/provider-turn-loop.ts` | Provider streaming loop | ~585 | `live-proven` |
 | `src/runtime/tool-plan-runner.ts` | Tool plan execution | ~420 | `live-proven` |
 | `src/runtime/run-recorder.ts` | Run recording and trajectory | ~200 | `smoke-tested` |
-| `src/runtime/skill-workflow-executor.ts` | Skill workflow execution | ~267 | `live-proven` |
+| `src/runtime/skill-playbook-runner.ts` | Skill playbook execution | ~267 | `live-proven` |
 | `src/runtime/native-tool-executor.ts` | Deterministic native intent execution | ~150 | `smoke-tested` |
 | `src/runtime/intent-router.ts` | Native intent classification | 175 | `smoke-tested` |
 
@@ -72,7 +72,7 @@ Key composition rules:
 10. Rotate to the compacted child session before provider prompt assembly when auto-compression preserves the transcript
 11. **Delegate provider prompt assembly and turn loop to `ProviderTurnLoop`**
 12. **Delegate tool execution to `ToolPlanRunner`**
-13. **Delegate skill workflow execution to `SkillWorkflowExecutor`**
+13. **Delegate skill playbook execution to `SkillPlaybookRunner`**
 14. **Delegate deterministic native execution to `NativeToolExecutor`**
 15. Persist results, outcomes, artifacts
 16. Return text/progress/artifacts
@@ -418,7 +418,7 @@ The primary end-to-end path:
 
 ## Current Architectural Weak Spots
 
-1. **AgentLoop monolith** — Was 2,714 lines, now 809 lines. Core orchestration remains but provider loop, tool execution, skill workflows, and native intents are extracted. Remaining coupling: prompt assembly, memory context injection, cross-component coordination.
+1. **AgentLoop monolith** — Was 2,714 lines, now 809 lines. Core orchestration remains but provider loop, tool execution, skill playbooks, and native intents are extracted. Remaining coupling: prompt assembly, memory context injection, cross-component coordination.
 2. **create-runtime.ts god factory** — 901 lines, 69 imports, 36 constructor calls, no DI boundary. Assessment in `docs/planning/v0.4-builder-assessment.md` recommends deferring a builder pattern.
 3. **Trajectory/Artifact skeletons** — 97 and 56 lines, in-memory only.
 4. **Native SQLite distribution** — `better-sqlite3` provides stable synchronous SQLite semantics behind the internal adapter, but native bindings require install and packaging validation on supported platforms.

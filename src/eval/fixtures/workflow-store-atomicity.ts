@@ -5,11 +5,11 @@ import type { WorkflowEvent, WorkflowOperatorEvent, WorkflowRun, WorkflowStep } 
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import { rmSync } from "node:fs";
 
-export const taskflowAtomicityCase: EvalCase = {
-  id: "taskflow-atomicity",
+export const workflowStoreAtomicityCase: EvalCase = {
+  id: "workflow-store-atomicity",
   name: "SQLiteWorkflowStore atomic transitions and round-trip integrity",
-  description: "Atomic transition writes flow+step+events in one transaction; rollback on error.",
-  tags: ["taskflow", "atomicity", "sqlite", "deterministic"],
+  description: "Atomic transition writes workflow run+step+events in one transaction; rollback on error.",
+  tags: ["workflow", "atomicity", "sqlite", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const dbPath = `/tmp/estacoda-eval-atomicity-${Date.now()}.db`;
@@ -19,28 +19,28 @@ export const taskflowAtomicityCase: EvalCase = {
       const sessionDb = new SQLiteSessionDB({ path: dbPath });
       const store = new SQLiteWorkflowStore({ db: sessionDb.db });
 
-      // Atomic transition: create flow + step + event together
-      await store.atomicTransition("flow-1", async (tx) => {
-        await tx.createWorkflowRun(makeTestFlow("flow-1"));
-        await tx.createWorkflowStep(makeTestStep("step-1", "flow-1", 0));
-        await tx.appendWorkflowEvent(makeTestEvent("evt-1", "flow-1", "step-1", "flow-created"));
+      // Atomic transition: create workflow run + step + event together
+      await store.atomicTransition("run-1", async (tx) => {
+        await tx.createWorkflowRun(makeTestRun("run-1"));
+        await tx.createWorkflowStep(makeTestStep("step-1", "run-1", 0));
+        await tx.appendWorkflowEvent(makeTestEvent("evt-1", "run-1", "step-1", "flow-created"));
         return "committed";
       });
 
-      const flow = await store.getWorkflowRun("flow-1");
+      const run = await store.getWorkflowRun("run-1");
       const step = await store.getWorkflowStep("step-1");
-      const events = await store.listWorkflowEvents("flow-1");
+      const events = await store.listWorkflowEvents("run-1");
 
-      assertions.push(assertTrue("flow exists after atomic transition", flow !== null));
+      assertions.push(assertTrue("workflow run exists after atomic transition", run !== null));
       assertions.push(assertTrue("step exists after atomic transition", step !== null));
       assertions.push(assertEqual("events count after atomic transition", events.length, 1));
 
       // Atomic transition with error should roll back
       let threw = false;
       try {
-        await store.atomicTransition("flow-2", async (tx) => {
-          await tx.createWorkflowRun(makeTestFlow("flow-2"));
-          await tx.createWorkflowStep(makeTestStep("step-2", "flow-2", 0));
+        await store.atomicTransition("run-2", async (tx) => {
+          await tx.createWorkflowRun(makeTestRun("run-2"));
+          await tx.createWorkflowStep(makeTestStep("step-2", "run-2", 0));
           throw new Error("simulated failure");
         });
       } catch {
@@ -48,9 +48,9 @@ export const taskflowAtomicityCase: EvalCase = {
       }
       assertions.push(assertTrue("atomic transition throws on error", threw));
 
-      // The adapter-backed transaction should roll back completely, so flow-2 should not exist.
-      const flow2 = await store.getWorkflowRun("flow-2");
-      assertions.push(assertTrue("flow rolled back on atomic failure", flow2 === null));
+      // The adapter-backed transaction should roll back completely, so workflow run run-2 should not exist.
+      const flow2 = await store.getWorkflowRun("run-2");
+      assertions.push(assertTrue("workflow run rolled back on atomic failure", flow2 === null));
 
       // Step update round-trip
       if (step) {
@@ -62,35 +62,35 @@ export const taskflowAtomicityCase: EvalCase = {
       }
 
       // Operator event
-      await store.appendWorkflowOperatorEvent(makeTestOpEvent("op-1", "flow-1", "step-1", "operator-paused"));
-      const opEvents = await store.listWorkflowOperatorEvents("flow-1");
+      await store.appendWorkflowOperatorEvent(makeTestOpEvent("op-1", "run-1", "step-1", "operator-paused"));
+      const opEvents = await store.listWorkflowOperatorEvents("run-1");
       assertions.push(assertEqual("operator event appended", opEvents.length, 1));
 
       // Lock lifecycle
-      const acquired = await store.acquireLock("flow-1", "worker-1", 5000);
+      const acquired = await store.acquireLock("run-1", "worker-1", 5000);
       assertions.push(assertTrue("lock acquired", acquired));
-      const lock = await store.getLock("flow-1");
+      const lock = await store.getLock("run-1");
       assertions.push(assertEqual("lock owner", lock?.ownerId, "worker-1"));
-      await store.releaseLock("flow-1", "worker-1");
-      const afterRelease = await store.getLock("flow-1");
+      await store.releaseLock("run-1", "worker-1");
+      const afterRelease = await store.getLock("run-1");
       assertions.push(assertTrue("lock released", afterRelease === null));
 
       // WorkflowCheckpoint
-      await store.createWorkflowCheckpoint(makeTestCheckpoint("cp-1", "flow-1"));
+      await store.createWorkflowCheckpoint(makeTestCheckpoint("cp-1", "run-1"));
       const cp = await store.getWorkflowCheckpoint("cp-1");
       assertions.push(assertTrue("checkpoint round-trip", cp !== null));
-      assertions.push(assertEqual("checkpoint flowId", cp?.flowId, "flow-1"));
+      assertions.push(assertEqual("checkpoint workflow run id", cp?.runId, "run-1"));
 
       sessionDb.close();
     } finally {
       try { rmSync(dbPath); } catch { /* ignore */ }
     }
 
-    return buildResult("taskflow-atomicity", "SQLiteWorkflowStore atomic transitions and round-trip integrity", assertions, Date.now() - startedAt);
+    return buildResult("workflow-store-atomicity", "SQLiteWorkflowStore atomic transitions and round-trip integrity", assertions, Date.now() - startedAt);
   }
 };
 
-function makeTestFlow(id: string) {
+function makeTestRun(id: string) {
   return {
     id,
     sessionId: "session-1",
@@ -114,10 +114,10 @@ function makeTestFlow(id: string) {
   };
 }
 
-function makeTestStep(id: string, flowId: string, index: number) {
+function makeTestStep(id: string, runId: string, index: number) {
   return {
     id,
-    flowId,
+    runId,
     index,
     status: "pending" as const,
     name: `step-${index}`,
@@ -136,25 +136,25 @@ function makeTestStep(id: string, flowId: string, index: number) {
   };
 }
 
-function makeTestEvent(id: string, flowId: string, stepId: string, kind: string) {
-  return { id, flowId, stepId, kind: kind as WorkflowEvent["kind"], data: { test: true }, timestamp: "2024-01-01T00:00:00.000Z" };
+function makeTestEvent(id: string, runId: string, stepId: string, kind: string) {
+  return { id, runId, stepId, kind: kind as WorkflowEvent["kind"], data: { test: true }, timestamp: "2024-01-01T00:00:00.000Z" };
 }
 
-function makeTestOpEvent(id: string, flowId: string, stepId: string, kind: string) {
-  return { id, flowId, stepId, kind: kind as WorkflowOperatorEvent["kind"], operator: "test", command: "/pause", effect: "paused", previousState: "running" as WorkflowRun["status"] | WorkflowStep["status"], newState: "paused" as WorkflowRun["status"] | WorkflowStep["status"], timestamp: "2024-01-01T00:00:00.000Z" };
+function makeTestOpEvent(id: string, runId: string, stepId: string, kind: string) {
+  return { id, runId, stepId, kind: kind as WorkflowOperatorEvent["kind"], operator: "test", command: "/pause", effect: "paused", previousState: "running" as WorkflowRun["status"] | WorkflowStep["status"], newState: "paused" as WorkflowRun["status"] | WorkflowStep["status"], timestamp: "2024-01-01T00:00:00.000Z" };
 }
 
-function makeTestCheckpoint(id: string, flowId: string) {
+function makeTestCheckpoint(id: string, runId: string) {
   return {
     id,
-    flowId,
+    runId,
     name: "test-cp",
     snapshot: {
-      flowState: "pending" as const,
+      runState: "pending" as const,
       stepStates: {},
       pendingApprovals: [],
       waitReasons: {},
-      operatorEvents: [],
+      workflowOperatorEvents: [],
       retryCounts: {}
     },
     createdAt: "2024-01-01T00:00:00.000Z",

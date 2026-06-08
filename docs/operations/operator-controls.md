@@ -1,52 +1,52 @@
 ---
 title: "Operator Controls"
-description: "Slash commands and CLI commands for controlling TaskFlow, gateway, cron, sessions, and channels."
+description: "Slash commands and CLI commands for controlling Workflow, gateway, cron, sessions, and channels."
 ---
 
 # Operator Controls
 
-## TaskFlow Commands
+## Workflow Commands
 
 ### In-Session Slash Commands
 
-Available when TaskFlow is wired (requires SQLite session persistence):
+Available when Workflow is wired (requires SQLite session persistence):
 
-- `/flow status [flowId]` — Show flow status, progress, pending approvals, elapsed time, and available actions.
-- `/flow pause <flowId> [reason]` — Request pause at next safe boundary.
-- `/flow resume <flowId>` — Resume a paused, interrupted, or waiting flow.
-- `/flow interrupt <flowId> [reason]` — Interrupt immediately; terminates active processes.
-- `/flow cancel <flowId> [reason]` — Cancel flow; terminal state.
-- `/flow steer <flowId> <guidance>` — Inject operator guidance for next turn.
-- `/flow approve <stepId>` — Approve a pending approval gate.
-- `/flow reject <stepId> [reason]` — Reject a pending approval gate.
-- `/flow retry <stepId>` — Retry a failed step (if idempotent or safeToRetry).
-- `/flow skip <stepId> [reason]` — Skip a pending skippable step.
-- `/flow checkpoint <flowId> <name>` — Create a named checkpoint.
-- `/flow trace [flowId] [limit]` — Show event timeline.
-- `/flow compact <flowId>` — Run manual compaction.
-- `/flow set <flowId>` — Set active flow for this session.
-- `/flow unset` — Clear active flow.
+- `/workflow status [runId]` — Show workflow status, progress, pending approvals, elapsed time, and available actions.
+- `/workflow pause <runId> [reason]` — Request pause at next safe boundary.
+- `/workflow resume <runId>` — Resume a paused, interrupted, or waiting workflow run.
+- `/workflow interrupt <runId> [reason]` — Interrupt immediately; terminates active processes.
+- `/workflow cancel <runId> [reason]` — Cancel a workflow run; terminal state.
+- `/workflow steer <runId> <guidance>` — Inject operator guidance for next turn.
+- `/workflow approve <stepId>` — Approve a pending approval gate.
+- `/workflow reject <stepId> [reason]` — Reject a pending approval gate.
+- `/workflow retry <stepId>` — Retry a failed step (if idempotent or safeToRetry).
+- `/workflow skip <stepId> [reason]` — Skip a pending skippable step.
+- `/workflow checkpoint <runId> <name>` — Create a named checkpoint.
+- `/workflow trace [runId] [limit]` — Show event timeline.
+- `/workflow summarize <runId>` — Summarize workflow events.
+- `/workflow activate <runId>` — Activate a workflow run for this session.
+- `/workflow deactivate` — Clear the active workflow run.
 
-If `flowId` is omitted for `status` and `trace`, the active flow is used.
+If `runId` is omitted for `status` and `trace`, the active workflow run is used.
 
 ### Top-Level CLI Commands
 
 ```bash
-estacoda flow list                          # List active flows
-estacoda flow show <flowId>                 # Show flow details and steps
-estacoda flow status <flowId>               # Show formatted status
-estacoda flow trace <flowId> [limit]        # Show event trace
-estacoda flow pause <flowId> [reason]       # Request pause
-estacoda flow resume <flowId>               # Resume flow
-estacoda flow interrupt <flowId> [reason]   # Interrupt flow
-estacoda flow cancel <flowId> [reason]      # Cancel flow
-estacoda flow steer <flowId> <instruction>  # Inject guidance
-estacoda flow approve <stepId>              # Approve gate
-estacoda flow reject <stepId> [reason]      # Reject gate
-estacoda flow retry <stepId>                # Retry step
-estacoda flow skip <stepId> [reason]        # Skip step
-estacoda flow checkpoint <flowId> <name>    # Create checkpoint
-estacoda flow compact <flowId>              # Compact events
+estacoda workflow list                          # List active workflow runs
+estacoda workflow show <runId>                 # Show workflow run details and steps
+estacoda workflow status <runId>               # Show formatted status
+estacoda workflow trace <runId> [limit]        # Show event trace
+estacoda workflow pause <runId> [reason]       # Request pause
+estacoda workflow resume <runId>               # Resume workflow run
+estacoda workflow interrupt <runId> [reason]   # Interrupt workflow run
+estacoda workflow cancel <runId> [reason]      # Cancel workflow run
+estacoda workflow steer <runId> <instruction>  # Inject guidance
+estacoda workflow approve <stepId>              # Approve gate
+estacoda workflow reject <stepId> [reason]      # Reject gate
+estacoda workflow retry <stepId>                # Retry step
+estacoda workflow skip <stepId> [reason]        # Skip step
+estacoda workflow checkpoint <runId> <name>    # Create checkpoint
+estacoda workflow summarize <runId>            # Summarize workflow events
 ```
 
 ## Gateway Operator Commands
@@ -281,7 +281,7 @@ Sessions are **separate by default**. A CLI session and a channel session for th
 
 `sessions recall` is bounded historical recall. It is profile-scoped, workspace-scoped when workspace metadata is available, and labeled as untrusted context. It uses auxiliary `session_search` summarization when configured and deterministic snippets as fallback.
 
-`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from TaskFlow compaction and Memory File Compaction. The top-level CLI command is non-rotating in this implementation; it does not adopt a compacted child session.
+`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from Workflow event summaries and Memory File Compaction. The top-level CLI command is non-rotating in this implementation; it does not adopt a compacted child session.
 
 ## Channel Slash Commands
 
@@ -301,7 +301,7 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 
 ## /steer Semantics
 
-`/steer` and `/flow steer` record an `OperatorEvent` with `kind: "operator-steered"`. The event is **unconsumed** until the adapter processes the next turn.
+`/steer` and `/workflow steer` record an `OperatorEvent` with `kind: "operator-steered"`. The event is **unconsumed** until the adapter processes the next turn.
 
 On the next adapter turn:
 1. All unconsumed steer events are loaded.
@@ -315,13 +315,13 @@ On the next adapter turn:
    <original user text>
    ```
 3. Events are marked `consumedAt`, `consumedByStepId`, `consumedByRunId`.
-4. Consumption is visible in `/flow trace`.
+4. Consumption is visible in `/workflow trace`.
 
-Steer is rejected for flows in terminal states.
+Steer is rejected for workflow runs in terminal states.
 
-## TaskFlow /flow compact and Automatic TaskFlow Compaction
+## Workflow /workflow summarize and Automatic Workflow Event Summaries
 
-**Manual:** `/flow compact <flowId>` or `estacoda flow compact <flowId>` triggers compaction immediately if at a safe boundary.
+**Manual:** `/workflow summarize <runId>` or `estacoda workflow summarize <runId>` summarizes workflow events immediately if at a safe boundary.
 
 **Automatic:** Disabled by default. Enable by passing a custom `WorkflowEventSummaryConfig` to `WorkflowEventSummaryService`:
 
@@ -334,16 +334,16 @@ Steer is rejected for flows in terminal states.
 }
 ```
 
-Auto-compaction checks the boundary at the end of each adapter turn. It only runs when:
+Automatic workflow event summaries check the boundary at the end of each adapter turn. They only run when:
 - no active processes,
 - no active steps,
 - no pending approvals,
 - event count ≥ threshold,
 - completed steps ≥ minTurnsBeforeCompact.
 
-Compaction creates a `CompactSummary` and appends `compacted` / `operator-compacted` events. Original events are preserved.
+Workflow event summaries create a `WorkflowEventSummary` and append `compacted` / `operator-compacted` events. Original events are preserved.
 
-TaskFlow compaction is unrelated to bare `/compact`. Bare `/compact [topic]` is semantic session compression for the current in-session context; `/flow compact <flowId>` and `estacoda flow compact <flowId>` compact TaskFlow events.
+Workflow event summaries are unrelated to bare `/compact`. Bare `/compact [topic]` is semantic session compression for the current in-session context; `/workflow summarize <runId>` and `estacoda workflow summarize <runId>` summarize Workflow events.
 
 Gateway `/compact [topic]` preserves the parent transcript when compaction succeeds by creating a compacted child session and switching the channel pointer to that child. Interactive CLI `/compact [topic]` remains non-rotating until the CLI grows equivalent child-session adoption.
 
@@ -359,12 +359,12 @@ Memory File Compaction uses the auxiliary `memory_compaction` route, scans gener
 ## Process Ownership
 
 On `/interrupt` and `/cancel`, the dispatcher:
-1. Lists active processes for the flow.
+1. Lists active processes for the workflow run.
 2. Sends `SIGTERM` with 5s timeout to each.
 3. Records `process-exited` or `process-orphaned` events.
-4. Then transitions the flow state.
+4. Then transitions the workflow run state.
 
-Process cleanup results are visible in `/flow status` and `/flow trace`.
+Process cleanup results are visible in `/workflow status` and `/workflow trace`.
 
 ## Approval Gates
 
@@ -376,7 +376,7 @@ Approval gates are created by the security layer when a tool call requires expli
 - `toolExecutorDecision`: `approve` | `reject` | `ask`
 - `deterministicRule`: which rule triggered the gate
 
-`/flow approve` and `/flow reject` resolve gates and emit `OperatorEvent` records.
+`/workflow approve` and `/workflow reject` resolve gates and emit `OperatorEvent` records.
 
 ## Busy Policy Configuration
 

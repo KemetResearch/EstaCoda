@@ -1,4 +1,4 @@
-// Workflow module domain types for v0.8 durable flow execution + operator control plane
+// Workflow module domain types for v0.8 durable workflow run execution and operator control
 
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -84,7 +84,7 @@ export type WorkflowStepState =
 
 export type WorkflowStep = {
   id: WorkflowStepId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   index: number;
   status: WorkflowStepState;
   name: string;
@@ -198,7 +198,7 @@ export type WorkflowEventKind =
 
 export type WorkflowEvent = {
   id: EventId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   stepId?: WorkflowStepId;
   kind: WorkflowEventKind;
   data: Record<string, unknown>;
@@ -223,7 +223,7 @@ export type WorkflowOperatorEventKind =
 
 export type WorkflowOperatorEvent = {
   id: EventId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   stepId?: WorkflowStepId;
   kind: WorkflowOperatorEventKind;
   operator: string;
@@ -233,11 +233,11 @@ export type WorkflowOperatorEvent = {
   newState: WorkflowRunState | WorkflowStepState;
   metadata?: Record<string, unknown>;
   timestamp: string;
-  // Steer consumption tracking (Track 5)
+  // Steer consumption tracking for workflow integration
   consumedAt?: string;
   consumedByStepId?: WorkflowStepId;
   consumedByRunId?: RunId;
-  consumedByFlowEventId?: EventId;
+  consumedByWorkflowEventId?: EventId;
 };
 
 // ─── WorkflowApprovalGate ───
@@ -247,7 +247,7 @@ export type WorkflowApprovalGateStatus = "pending" | "approved" | "rejected";
 export type WorkflowApprovalGate = {
   id: string;
   stepId: WorkflowStepId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   status: WorkflowApprovalGateStatus;
   requestedAt: string;
   resolvedAt?: string;
@@ -267,7 +267,7 @@ export type WorkflowApprovalGate = {
 
 export type WorkflowCheckpoint = {
   id: WorkflowCheckpointId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   stepId?: WorkflowStepId;
   name: string;
   description?: string;
@@ -277,12 +277,12 @@ export type WorkflowCheckpoint = {
 };
 
 export type WorkflowCheckpointSnapshot = {
-  flowState: WorkflowRunState;
+  runState: WorkflowRunState;
   currentStepId?: WorkflowStepId;
   stepStates: Record<WorkflowStepId, WorkflowStepState>;
   pendingApprovals: string[];
   waitReasons: Record<WorkflowStepId, WaitReason>;
-  operatorEvents: WorkflowOperatorEvent[];
+  workflowOperatorEvents: WorkflowOperatorEvent[];
   retryCounts: Record<WorkflowStepId, number>;
 };
 
@@ -291,15 +291,15 @@ export type WorkflowCheckpointSnapshot = {
 export type WorkflowArtifactLink = {
   artifactId: string;
   stepId: WorkflowStepId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   kind: "created" | "modified" | "referenced";
   linkedAt: string;
 };
 
 export type WorkflowAgentRunLink = {
-  runId: RunId;
+  agentRunId: RunId;
   stepId: WorkflowStepId;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   turnIndex: number;
   linkedAt: string;
 };
@@ -308,7 +308,7 @@ export type WorkflowAgentRunLink = {
 
 export type WorkflowProcess = {
   id: string;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   stepId: WorkflowStepId;
   processManagerId: string;
   processType: "terminal" | "process" | "browser";
@@ -321,7 +321,7 @@ export type WorkflowProcess = {
 // ─── WorkflowLock ───
 
 export type WorkflowLock = {
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   ownerId: string;
   lockedAt: string;
   heartbeatAt: string;
@@ -332,7 +332,7 @@ export type WorkflowLock = {
 
 export type WorkflowEventSummary = {
   id: string;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   compactedRange: { fromEventId: string; toEventId: string };
   turnSummaries: string[];
   toolOutcomeSummaries: string[];
@@ -342,7 +342,7 @@ export type WorkflowEventSummary = {
 
 // ─── Transition validation ───
 
-const LEGAL_FLOW_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[]> = {
+const LEGAL_WORKFLOW_RUN_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[]> = {
   pending: ["running", "cancelled", "failed"],
   running: ["paused", "interrupted", "cancelled", "waiting", "completed", "failed"],
   paused: ["running", "interrupted", "cancelled"],
@@ -368,7 +368,7 @@ const LEGAL_STEP_TRANSITIONS: Record<WorkflowStepState, WorkflowStepState[]> = {
 
 export class IllegalTransitionError extends Error {
   constructor(
-    public readonly entity: "flow" | "step",
+    public readonly entity: "workflow run" | "step",
     public readonly from: string,
     public readonly to: string
   ) {
@@ -378,8 +378,8 @@ export class IllegalTransitionError extends Error {
 }
 
 export function validateWorkflowRunTransition(from: WorkflowRunState, to: WorkflowRunState): void {
-  if (!LEGAL_FLOW_TRANSITIONS[from].includes(to)) {
-    throw new IllegalTransitionError("flow", from, to);
+  if (!LEGAL_WORKFLOW_RUN_TRANSITIONS[from].includes(to)) {
+    throw new IllegalTransitionError("workflow run", from, to);
   }
 }
 

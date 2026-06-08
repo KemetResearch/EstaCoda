@@ -28,7 +28,7 @@ async function expectFileMissing(path: string): Promise<void> {
   await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 }
 
-function makeFlow(id: string, sessionId: string): WorkflowRun {
+function makeRun(id: string, sessionId: string): WorkflowRun {
   return {
     id,
     sessionId,
@@ -168,15 +168,15 @@ describe("profile runtime state paths", () => {
       const alphaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "alpha" });
       const betaStore = new SQLiteWorkflowStore({ db: db.db, profileId: "beta" });
 
-      await alphaStore.createWorkflowRun(makeFlow("flow-alpha", alphaSession.id));
-      await betaStore.createWorkflowRun(makeFlow("flow-beta", betaSession.id));
+      await alphaStore.createWorkflowRun(makeRun("run-alpha", alphaSession.id));
+      await betaStore.createWorkflowRun(makeRun("run-beta", betaSession.id));
 
-      await expect(alphaStore.getWorkflowRun("flow-alpha")).resolves.toMatchObject({ id: "flow-alpha" });
-      await expect(alphaStore.getWorkflowRun("flow-beta")).resolves.toBeNull();
-      await expect(betaStore.getWorkflowRun("flow-beta")).resolves.toMatchObject({ id: "flow-beta" });
-      await expect(betaStore.getWorkflowRun("flow-alpha")).resolves.toBeNull();
-      await expect(alphaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "flow-alpha" })]);
-      await expect(betaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "flow-beta" })]);
+      await expect(alphaStore.getWorkflowRun("run-alpha")).resolves.toMatchObject({ id: "run-alpha" });
+      await expect(alphaStore.getWorkflowRun("run-beta")).resolves.toBeNull();
+      await expect(betaStore.getWorkflowRun("run-beta")).resolves.toMatchObject({ id: "run-beta" });
+      await expect(betaStore.getWorkflowRun("run-alpha")).resolves.toBeNull();
+      await expect(alphaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "run-alpha" })]);
+      await expect(betaStore.listActiveWorkflowRuns()).resolves.toEqual([expect.objectContaining({ id: "run-beta" })]);
     } finally {
       db.close();
     }

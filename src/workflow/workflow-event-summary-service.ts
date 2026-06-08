@@ -1,6 +1,6 @@
 // WorkflowRun-safe event summary service for v0.8
 // Manual summary and configurable automatic summaries.
-// Only operates at safe boundaries. Never compacts durable flow truth.
+// Only operates at safe boundaries. Never compacts durable workflow run truth.
 
 import type {
   WorkflowRunId,
@@ -60,23 +60,23 @@ export class WorkflowEventSummaryService {
 
   // ─── Safe boundary detection ───
 
-  async canCompact(flowId: WorkflowRunId): Promise<{
+  async canCompact(runId: WorkflowRunId): Promise<{
     ok: boolean;
     reason?: string;
     activeSteps: WorkflowStep[];
     activeProcesses: number;
     pendingApprovals: number;
   }> {
-    const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) {
+    const run = await this.#store.getWorkflowRun(runId);
+    if (!run) {
       return { ok: false, reason: "Workflow run not found", activeSteps: [], activeProcesses: 0, pendingApprovals: 0 };
     }
 
-    const steps = await this.#store.listWorkflowSteps(flowId);
+    const steps = await this.#store.listWorkflowSteps(runId);
     const activeSteps = steps.filter((s) => s.status === "running");
-    const processes = await this.#store.listWorkflowProcesses(flowId);
+    const processes = await this.#store.listWorkflowProcesses(runId);
     const activeProcesses = processes.filter((p) => p.status === "running").length;
-    const approvals = await this.#store.listWorkflowApprovalGates(flowId, { status: "pending" });
+    const approvals = await this.#store.listWorkflowApprovalGates(runId, { status: "pending" });
     const pendingApprovals = approvals.length;
 
     if (activeProcesses > 0) {
@@ -94,14 +94,14 @@ export class WorkflowEventSummaryService {
 
   // ─── Preview / dry-run ───
 
-  async preview(flowId: WorkflowRunId): Promise<WorkflowEventSummaryResult> {
-    return this.#doCompact(flowId, "manual", "preview", /* persist */ false);
+  async preview(runId: WorkflowRunId): Promise<WorkflowEventSummaryResult> {
+    return this.#doCompact(runId, "manual", "preview", /* persist */ false);
   }
 
   // ─── Manual compaction ───
 
-  async compact(flowId: WorkflowRunId, operator?: string): Promise<WorkflowEventSummaryResult> {
-    const boundary = await this.canCompact(flowId);
+  async compact(runId: WorkflowRunId, operator?: string): Promise<WorkflowEventSummaryResult> {
+    const boundary = await this.canCompact(runId);
     if (!boundary.ok) {
       return {
         ok: false,
@@ -115,46 +115,46 @@ export class WorkflowEventSummaryService {
         trigger: `summarize by ${operator ?? "unknown"}`
       };
     }
-    return this.#doCompact(flowId, "manual", `summarize by ${operator ?? "unknown"}`, /* persist */ true);
+    return this.#doCompact(runId, "manual", `summarize by ${operator ?? "unknown"}`, /* persist */ true);
   }
 
   // ─── Automatic compaction ───
 
-  async checkAndAutoCompact(flowId: WorkflowRunId): Promise<WorkflowEventSummaryResult | null> {
+  async checkAndAutoCompact(runId: WorkflowRunId): Promise<WorkflowEventSummaryResult | null> {
     if (!this.#config.enabled) {
       return null;
     }
 
-    const boundary = await this.canCompact(flowId);
+    const boundary = await this.canCompact(runId);
     if (!boundary.ok) {
       return null;
     }
 
-    const events = await this.#store.listWorkflowEvents(flowId);
+    const events = await this.#store.listWorkflowEvents(runId);
     if (events.length < this.#config.eventThreshold) {
       return null;
     }
 
-    const completedSteps = (await this.#store.listWorkflowSteps(flowId)).filter(
+    const completedSteps = (await this.#store.listWorkflowSteps(runId)).filter(
       (s) => s.status === "completed" || s.status === "skipped" || s.status === "failed" || s.status === "cancelled"
     );
     if (completedSteps.length < this.#config.minTurnsBeforeCompact) {
       return null;
     }
 
-    return this.#doCompact(flowId, "automatic", `threshold exceeded (${events.length} events)`, /* persist */ true);
+    return this.#doCompact(runId, "automatic", `threshold exceeded (${events.length} events)`, /* persist */ true);
   }
 
   // ─── Core compaction logic ───
 
   async #doCompact(
-    flowId: WorkflowRunId,
+    runId: WorkflowRunId,
     mode: WorkflowEventSummaryMode,
     trigger: string,
     persist: boolean
   ): Promise<WorkflowEventSummaryResult> {
-    const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) {
+    const run = await this.#store.getWorkflowRun(runId);
+    if (!run) {
       return {
         ok: false,
         error: "Workflow run not found",
@@ -168,18 +168,18 @@ export class WorkflowEventSummaryService {
       };
     }
 
-    const allEvents = await this.#store.listWorkflowEvents(flowId);
-    const allOperatorEvents = await this.#store.listWorkflowOperatorEvents(flowId);
+    const allEvents = await this.#store.listWorkflowEvents(runId);
+    const allOperatorEvents = await this.#store.listWorkflowOperatorEvents(runId);
 
     // Durable events are never deleted; we summarize them.
-    // For v0.8, deterministic summarization from existing flow events.
+    // For v0.8, deterministic summarization from existing run events.
     const turnSummaries = this.#summarizeTurns(allEvents);
     const toolOutcomeSummaries = this.#summarizeToolOutcomes(allEvents);
     const operatorActionSummaries = this.#summarizeOperatorActions(allOperatorEvents);
 
     const summary: WorkflowEventSummary = {
       id: this.#id(),
-      flowId,
+      runId,
       compactedRange: {
         fromEventId: allEvents.length > 0 ? allEvents[allEvents.length - 1].id : this.#id(),
         toEventId: allEvents.length > 0 ? allEvents[0].id : this.#id()
@@ -190,9 +190,9 @@ export class WorkflowEventSummaryService {
       createdAt: this.#now().toISOString()
     };
 
-    const steps = await this.#store.listWorkflowSteps(flowId);
-    const processes = await this.#store.listWorkflowProcesses(flowId);
-    const approvals = await this.#store.listWorkflowApprovalGates(flowId);
+    const steps = await this.#store.listWorkflowSteps(runId);
+    const processes = await this.#store.listWorkflowProcesses(runId);
+    const approvals = await this.#store.listWorkflowApprovalGates(runId);
 
     const result: WorkflowEventSummaryResult = {
       ok: true,
@@ -211,13 +211,13 @@ export class WorkflowEventSummaryService {
     }
 
     // Persist via atomic transition
-    await this.#store.atomicTransition(flowId, async (tx) => {
+    await this.#store.atomicTransition(runId, async (tx) => {
       await tx.saveWorkflowEventSummary(summary);
 
-      // Record compaction flow event
+      // Record compaction run event
       await tx.appendWorkflowEvent({
         id: this.#id(),
-        flowId,
+        runId,
         kind: "compacted",
         data: {
           compactSummaryId: summary.id,
@@ -234,13 +234,13 @@ export class WorkflowEventSummaryService {
       // Record operator-compacted event
       await tx.appendWorkflowOperatorEvent({
         id: this.#id(),
-        flowId,
+        runId,
         kind: "operator-compacted",
         operator: mode === "manual" ? (trigger.replace("summarize by ", "")) : "system",
         command: "/compact",
         effect: "compacted",
-        previousState: flow.status,
-        newState: flow.status,
+        previousState: run.status,
+        newState: run.status,
         metadata: {
           compactSummaryId: summary.id,
           mode,
@@ -252,8 +252,8 @@ export class WorkflowEventSummaryService {
         timestamp: this.#now().toISOString()
       });
 
-      // Update flow compactedAt
-      const updatedFlow = { ...flow, compactedAt: this.#now().toISOString() };
+      // Update run compactedAt
+      const updatedFlow = { ...run, compactedAt: this.#now().toISOString() };
       await tx.updateWorkflowRun(updatedFlow);
     });
 

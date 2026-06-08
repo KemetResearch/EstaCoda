@@ -1,34 +1,34 @@
 ---
-title: "TaskFlow"
+title: "Workflow"
 description: "Durable multi-step execution, state machine, and runtime integration."
 ---
 
-# TaskFlow Architecture
+# Workflow Architecture
 
 ## Purpose
 
-TaskFlow provides durable, observable, operator-controllable multi-step execution for agent sessions. A flow represents a high-level objective (e.g., "refactor the auth module"). Steps represent discrete actions within that flow. State is persisted to SQLite so work survives process restarts.
+Workflow provides durable, observable, operator-controllable multi-step execution for agent sessions. A workflow run represents a high-level objective, for example "refactor the auth module." Steps represent discrete actions within that run. State is persisted to SQLite so work survives process restarts.
 
-## When TaskFlow is active
+## When Workflow is active
 
-TaskFlow is wired into `createRuntime` **only** when `sessionDb` is an `SQLiteSessionDB`. In-memory sessions do not support TaskFlow.
+Workflow is wired into `createRuntime` **only** when `sessionDb` is an `SQLiteSessionDB`. In-memory sessions do not support Workflow.
 
 ## Components
 
 ### WorkflowEngine
 
-The state machine. Enforces legal transitions, manages flow/step lifecycles, and emits events.
+The state machine. Enforces legal transitions, manages workflow run and step lifecycles, and emits events.
 
 Key methods:
-- `createFlow(sessionId, intent)` — creates a flow in `pending` state.
-- `startFlow(flowId)` — transitions to `running`.
-- `requestPause(flowId, reason)` — requests pause at next safe boundary.
-- `resumeFlow(flowId)` — transitions `paused`/`interrupted`/`waiting` → `running`.
-- `interruptFlow(flowId, reason)` — immediate interrupt with process cleanup.
-- `cancelFlow(flowId, reason)` — terminal cancel with process cleanup.
+- `createWorkflowRun(sessionId, intent)` — creates a workflow run in `pending` state.
+- `startWorkflowRun(runId)` — transitions to `running`.
+- `requestWorkflowPause(runId, reason)` — requests pause at next safe boundary.
+- `resumeWorkflowRun(runId)` — transitions `paused`/`interrupted`/`waiting` to `running`.
+- `interruptWorkflowRun(runId, reason)` — immediate interrupt with process cleanup.
+- `cancelWorkflowRun(runId, reason)` — terminal cancel with process cleanup.
 - `skipStep(stepId, reason)` — skip a pending step (only if not started and skippable).
 - `retryStep(stepId)` — create a retry step (only if idempotent/safeToRetry and under maxRetries).
-- `createCheckpoint(flowId, name)` — record a named checkpoint.
+- `createWorkflowCheckpoint(runId, name)` — record a named checkpoint.
 
 ### WorkflowStore (SQLiteWorkflowStore)
 
@@ -36,7 +36,7 @@ Persistence layer. All tables use `create table if not exists` and are created v
 
 ### WorkflowLockService
 
-Prevents concurrent flow mutation. Locks have lease expiry; stale locks are recovered on startup.
+Prevents concurrent workflow run mutation. Locks have lease expiry; stale locks are recovered on startup.
 
 ### WorkflowProcessRegistry
 
@@ -48,7 +48,7 @@ Routes slash commands to engine methods. Every dispatch validates preconditions 
 
 ### WorkflowEventSummaryService
 
-Summarizes completed flow events into `CompactSummary` records. Never deletes original events. Only runs when:
+Summarizes completed workflow events into `WorkflowEventSummary` records. Never deletes original events. Only runs when:
 - no active processes,
 - no active steps,
 - no pending approvals.
@@ -57,17 +57,17 @@ Default config: `enabled: false`. Must be explicitly enabled.
 
 ### WorkflowAgentLoopAdapter
 
-Bridges TaskFlow and AgentLoop. Responsibilities:
+Bridges Workflow and AgentLoop. Responsibilities:
 - Load unconsumed steer events before each turn.
 - Prefix steer guidance explicitly (auditable, not hidden).
 - Execute turn through AgentLoop.handle().
 - Mark steer events consumed with real `trajectoryId` linkage.
 - Record artifact and run links.
-- Check auto-compaction at safe boundary.
+- Check automatic workflow event summaries at safe boundary.
 
 ## Data Model
 
-### Flow
+### WorkflowRun
 
 - `id`, `sessionId`, `status`
 - `intent`: the original objective (JSON)
@@ -77,9 +77,10 @@ Bridges TaskFlow and AgentLoop. Responsibilities:
 - `checkpointCount`, `stepCount`, `retryCount`
 - `compactedAt`
 
-### FlowStep
 
-- `id`, `flowId`, `index`, `status`, `name`, `description`
+### WorkflowStep
+
+- `id`, `runId`, `index`, `status`, `name`, `description`
 - `toolPlans`, `executions`
 - `retryPolicy`, `retryCount`, `maxRetries`
 - `idempotent`, `safeToRetry`
@@ -87,26 +88,26 @@ Bridges TaskFlow and AgentLoop. Responsibilities:
 - `retryOfStepId`, `attemptNumber`
 - Timestamps: `startedAt`, `completedAt`, `failedAt`, `cancelledAt`, `pausedAt`, `resumedAt`
 
-### FlowEvent
+### WorkflowEvent
 
-- `id`, `flowId`, `stepId`, `kind`, `data`, `timestamp`
+- `id`, `runId`, `stepId`, `kind`, `data`, `timestamp`
 
 Kinds include: `step-started`, `step-completed`, `step-failed`, `step-skipped`, `step-retried`, `pause-requested`, `process-registered`, `process-exited`, `process-orphaned`, `compacted`.
 
 ### OperatorEvent
 
-- `id`, `flowId`, `stepId`, `kind`, `operator`, `command`, `effect`
+- `id`, `runId`, `stepId`, `kind`, `operator`, `command`, `effect`
 - `previousState`, `newState`
 - `metadata`, `timestamp`
 - `consumedAt`, `consumedByStepId`, `consumedByRunId` — set when steer is consumed by adapter
 
 ### Checkpoint
 
-- `id`, `flowId`, `stepId`, `name`, `description`, `snapshot` (JSON), `createdAt`, `createdBy`
+- `id`, `runId`, `stepId`, `name`, `description`, `snapshot` (JSON), `createdAt`, `createdBy`
 
 ### ApprovalGate
 
-- `id`, `stepId`, `flowId`, `status`
+- `id`, `stepId`, `runId`, `status`
 - `requestedAt`, `resolvedAt`, `resolvedBy`
 - `reason`, `riskClass`
 - `toolName`, `targetKey`, `targetSummary`, `scope`
@@ -118,32 +119,32 @@ Kinds include: `step-started`, `step-completed`, `step-failed`, `step-skipped`, 
 Session Loop
     |
     v
-Runtime.handle()  <-- /flow commands set activeFlowId
+Runtime.handle()  <-- /workflow commands set activeRunId
     |
     v
 AgentLoop.handle()
     ^
     |
-WorkflowAgentLoopAdapter.runTurn()  <-- only when activeFlowId is set
+WorkflowAgentLoopAdapter.runTurn()  <-- only when activeRunId is set
     |
     v
 WorkflowEngine + Store
 ```
 
-When `rt.taskflow.activeFlowId` is set and the flow is running, the adapter wraps turns. When no active flow is set, AgentLoop runs normally.
+When `rt.workflow.activeRunId` is set and the workflow run is running, the adapter wraps turns. When no active workflow run is set, AgentLoop runs normally.
 
 ## Restart Recovery
 
 On `createRuntime` with SQLite:
-1. `WorkflowRestartRecovery.recover()` marks `running` flows as `interrupted`.
+1. `WorkflowRestartRecovery.recover()` marks `running` workflow runs as `interrupted`.
 2. Marks `running` steps as `interrupted`.
 3. Releases stale locks (expired lease).
-4. Results are visible via `rt.taskflow.recoverFromRestart()`.
+4. Results are visible via `rt.workflow.recoverFromRestart()`.
 
 ## Known Limitations
 
 - Checkpoints are recorded but not restorable in v0.8.
-- Flows are scoped to a single session; no cross-session resumption.
+- Workflow runs are scoped to a single session; no cross-session resumption.
 - Lock service is single-process SQLite only.
-- Auto-compaction is disabled by default.
+- Automatic workflow event summaries are disabled by default.
 - No automatic retry without operator `/retry`.

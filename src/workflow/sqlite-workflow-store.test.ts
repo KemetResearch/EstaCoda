@@ -51,32 +51,32 @@ describe("SQLiteWorkflowStore", () => {
   });
 
   it("commits atomic transitions through the internal SQLite adapter", async () => {
-    await store.atomicTransition("flow-1", async (tx) => {
-      await tx.createWorkflowRun(makeFlow("flow-1"));
-      await tx.createWorkflowStep(makeStep("step-1", "flow-1"));
-      await tx.appendWorkflowEvent(makeEvent("event-1", "flow-1", "step-1"));
+    await store.atomicTransition("run-1", async (tx) => {
+      await tx.createWorkflowRun(makeRun("run-1"));
+      await tx.createWorkflowStep(makeStep("step-1", "run-1"));
+      await tx.appendWorkflowEvent(makeEvent("event-1", "run-1", "step-1"));
     });
 
-    await expect(store.getWorkflowRun("flow-1")).resolves.toMatchObject({ id: "flow-1" });
+    await expect(store.getWorkflowRun("run-1")).resolves.toMatchObject({ id: "run-1" });
     await expect(store.getWorkflowStep("step-1")).resolves.toMatchObject({ id: "step-1" });
-    await expect(store.listWorkflowEvents("flow-1")).resolves.toHaveLength(1);
+    await expect(store.listWorkflowEvents("run-1")).resolves.toHaveLength(1);
   });
 
   it("rolls back failed atomic transitions through the internal SQLite adapter", async () => {
     await expect(
-      store.atomicTransition("flow-2", async (tx) => {
-        await tx.createWorkflowRun(makeFlow("flow-2"));
-        await tx.createWorkflowStep(makeStep("step-2", "flow-2"));
+      store.atomicTransition("run-2", async (tx) => {
+        await tx.createWorkflowRun(makeRun("run-2"));
+        await tx.createWorkflowStep(makeStep("step-2", "run-2"));
         throw new Error("simulated failure");
       })
     ).rejects.toThrow("simulated failure");
 
-    await expect(store.getWorkflowRun("flow-2")).resolves.toBeNull();
+    await expect(store.getWorkflowRun("run-2")).resolves.toBeNull();
     await expect(store.getWorkflowStep("step-2")).resolves.toBeNull();
   });
 });
 
-function makeFlow(id: string): WorkflowRun {
+function makeRun(id: string): WorkflowRun {
   return {
     id,
     sessionId: "session-1",
@@ -100,10 +100,10 @@ function makeFlow(id: string): WorkflowRun {
   };
 }
 
-function makeStep(id: string, flowId: string): WorkflowStep {
+function makeStep(id: string, runId: string): WorkflowStep {
   return {
     id,
-    flowId,
+    runId,
     index: 0,
     status: "pending",
     name: "test step",
@@ -133,10 +133,10 @@ function makeStep(id: string, flowId: string): WorkflowStep {
   };
 }
 
-function makeEvent(id: string, flowId: string, stepId: string): WorkflowEvent {
+function makeEvent(id: string, runId: string, stepId: string): WorkflowEvent {
   return {
     id,
-    flowId,
+    runId,
     stepId,
     kind: "flow-created",
     data: { test: true },
@@ -185,21 +185,28 @@ const LEGACY_WORKFLOW_INDEXES = [
   "idx_approval_gates_step",
   "idx_flow_processes_flow",
   "idx_flow_locks_expires",
-  "idx_compact_summaries_flow"
+  "idx_compact_summaries_flow",
+  "idx_workflow_steps_flow",
+  "idx_workflow_events_flow",
+  "idx_workflow_operator_events_flow",
+  "idx_workflow_checkpoints_flow",
+  "idx_workflow_approval_gates_flow",
+  "idx_workflow_processes_flow",
+  "idx_workflow_event_summaries_flow"
 ];
 
 const WORKFLOW_INDEXES = [
   "idx_workflow_runs_session",
   "idx_workflow_runs_status",
-  "idx_workflow_steps_flow",
+  "idx_workflow_steps_run",
   "idx_workflow_steps_status",
-  "idx_workflow_events_flow",
+  "idx_workflow_events_run",
   "idx_workflow_events_step",
-  "idx_workflow_operator_events_flow",
-  "idx_workflow_checkpoints_flow",
-  "idx_workflow_approval_gates_flow",
+  "idx_workflow_operator_events_run",
+  "idx_workflow_checkpoints_run",
+  "idx_workflow_approval_gates_run",
   "idx_workflow_approval_gates_step",
-  "idx_workflow_processes_flow",
+  "idx_workflow_processes_run",
   "idx_workflow_locks_expires",
-  "idx_workflow_event_summaries_flow"
+  "idx_workflow_event_summaries_run"
 ];

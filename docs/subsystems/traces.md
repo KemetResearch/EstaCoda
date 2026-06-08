@@ -31,7 +31,7 @@ The contract defines 32 event kinds:
 |----------|--------|
 | Session | `session-start`, `session-end` |
 | Input | `user-input`, `context-expanded` |
-| Skills | `skill-selected`, `skill-workflow-planned`, `skill-workflow-step`, `skill-route-usage`, `skill-route-telemetry`, `skill-lifecycle-changed` |
+| Skills | `skill-selected`, `skill-playbook-planned`, `skill-playbook-step`, `skill-route-usage`, `skill-route-telemetry`, `skill-lifecycle-changed` |
 | Tools | `tool-plan`, `tool-call`, `tool-gated`, `tool-result` |
 | Provider | `provider-completion`, `provider-continuation`, `provider-iteration`, `provider-budget-exhausted` |
 | Memory | `memory-write`, `memory-conclusion` |
@@ -113,7 +113,7 @@ Default policy (applied unless `--raw`):
 | `tool-invalid-args` | Schema validation failed |
 | `tool-timeout` | Execution exceeded limit |
 | `plan-dependency-error` | Dependency resolution failed |
-| `workflow-step-error` | Skill workflow step failed |
+| `workflow-step-error` | Skill playbook step failed |
 | `budget-exhausted` | Token/wall-clock/tool-call budget |
 | `security-escalation` | Risk escalation aborted run |
 | `user-cancelled` | Agent cancelled by user |

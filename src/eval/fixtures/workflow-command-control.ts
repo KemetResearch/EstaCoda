@@ -35,12 +35,12 @@ function makeNow(): () => Date {
   };
 }
 
-export const operatorControlPlaneCase: EvalCase = {
-  id: "operator-control-plane",
+export const workflowCommandControlCase: EvalCase = {
+  id: "workflow-command-control",
   name: "WorkflowCommandDispatcher routes and validates all slash commands",
   description:
     "Covers /status, /pause, /resume, /interrupt, /cancel, /steer, /approve, /reject, /retry, /skip, /checkpoint, /trace.",
-  tags: ["taskflow", "operator", "commands", "deterministic"],
+  tags: ["workflow", "operator", "commands", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
@@ -70,8 +70,8 @@ export const operatorControlPlaneCase: EvalCase = {
       compactionService,
     });
 
-    // ─── Create and start a flow ───
-    const flow = await engine.createWorkflowRun({
+    // ─── Create and start a workflow run ───
+    const run = await engine.createWorkflowRun({
       sessionId: "session-1",
       intent: makeIntent(),
       plan: {
@@ -84,9 +84,9 @@ export const operatorControlPlaneCase: EvalCase = {
         ],
       },
     });
-    await engine.startWorkflowRun(flow.id);
+    await engine.startWorkflowRun(run.id);
 
-    const stepA = (await store.listWorkflowSteps(flow.id)).find((s) => s.name === "Step A")!;
+    const stepA = (await store.listWorkflowSteps(run.id)).find((s) => s.name === "Step A")!;
 
     // ═════════════════════════════════════════════════════════════════
     // Track 3.1  /status
@@ -94,20 +94,20 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/status",
-        runId: flow.id,
+        runId: run.id,
       });
       assertions.push(assertTrue("status-ok", r.ok));
       if (r.ok) {
-        assertions.push(assertEqual("status-runId", (r.data as any)?.view?.runId, flow.id));
+        assertions.push(assertEqual("status-runId", (r.data as any)?.view?.runId, run.id));
         assertions.push(assertTrue("status-canPause", (r.data as any)?.view?.canPause));
       }
     }
 
-    // status for non-existent flow
+    // status for non-existent workflow run
     {
       const r = await dispatcher.dispatch({
         command: "/status",
-        runId: "no-such-flow",
+        runId: "no-such-run",
       });
       assertions.push(assertTrue("status-notfound-fails", !r.ok));
       if (!r.ok) {
@@ -121,12 +121,12 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/pause",
-        runId: flow.id,
+        runId: run.id,
         reason: "maintenance",
         operator: "op-1",
       });
       assertions.push(assertTrue("pause-ok", r.ok));
-      const pausedReq = await store.getWorkflowRun(flow.id);
+      const pausedReq = await store.getWorkflowRun(run.id);
       assertions.push(assertTrue("pause-requestedAt-set", !!pausedReq?.pauseRequestedAt));
     }
 
@@ -134,16 +134,16 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.3  /resume
     // ═════════════════════════════════════════════════════════════════
     {
-      // First apply pause so flow is in paused state
-      await engine.applyWorkflowPauseAtBoundary(flow.id);
+      // First apply pause so workflow run is in paused state
+      await engine.applyWorkflowPauseAtBoundary(run.id);
 
       const r = await dispatcher.dispatch({
         command: "/resume",
-        runId: flow.id,
+        runId: run.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("resume-ok", r.ok));
-      const resumed = await store.getWorkflowRun(flow.id);
+      const resumed = await store.getWorkflowRun(run.id);
       assertions.push(assertEqual("resume-status", resumed?.status, "running"));
     }
 
@@ -153,27 +153,27 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/steer",
-        runId: flow.id,
+        runId: run.id,
         guidance: "Switch to plan B",
         operator: "op-1",
       });
       assertions.push(assertTrue("steer-ok", r.ok));
-      const opEvents = await store.listWorkflowOperatorEvents(flow.id);
+      const opEvents = await store.listWorkflowOperatorEvents(run.id);
       assertions.push(assertTrue("steer-event-recorded", opEvents.some((e) => e.command === "/steer")));
     }
 
-    // steer on terminal flow fails
+    // steer on terminal workflow run fails
     {
-      await engine.cancelWorkflowRun(flow.id);
+      await engine.cancelWorkflowRun(run.id);
       const r = await dispatcher.dispatch({
         command: "/steer",
-        runId: flow.id,
+        runId: run.id,
         guidance: "Should fail",
         operator: "op-1",
       });
       assertions.push(assertTrue("steer-terminal-fails", !r.ok));
 
-      // restore flow for subsequent tests
+      // restore workflow run for subsequent tests
       const newFlow = await engine.createWorkflowRun({
         sessionId: "session-2",
         intent: makeIntent(),
@@ -187,14 +187,14 @@ export const operatorControlPlaneCase: EvalCase = {
         },
       });
       await engine.startWorkflowRun(newFlow.id);
-      (flow as any).id = newFlow.id; // reuse flow var for remaining tests
+      (run as any).id = newFlow.id; // reuse workflow run var for remaining tests
     }
 
     // ═════════════════════════════════════════════════════════════════
     // Track 3.5  /skip
     // ═════════════════════════════════════════════════════════════════
     {
-      // Create a new flow and start it so step 1 is running; step 2 remains pending
+      // Create a new workflow run and start it so step 1 is running; step 2 remains pending
       const skipFlow = await engine.createWorkflowRun({
         sessionId: "session-skip",
         intent: makeIntent(),
@@ -225,13 +225,13 @@ export const operatorControlPlaneCase: EvalCase = {
     // Track 3.6  /approve
     // ═════════════════════════════════════════════════════════════════
     {
-      const steps2 = await store.listWorkflowSteps(flow.id);
+      const steps2 = await store.listWorkflowSteps(run.id);
       const stepY = steps2.find((s) => s.name === "Step Y")!;
       // Manually set gate to pending
       await store.createWorkflowApprovalGate({
         id: crypto.randomUUID(),
         stepId: stepY.id,
-        flowId: flow.id,
+        runId: run.id,
         status: "pending",
         requestedAt: new Date().toISOString(),
         reason: "Awaiting operator approval",
@@ -239,10 +239,10 @@ export const operatorControlPlaneCase: EvalCase = {
         toolExecutorDecision: "ask",
       });
       await store.updateWorkflowStep({ ...stepY, status: "waiting_for_approval" });
-      await store.atomicTransition(flow.id, async (tx) => {
+      await store.atomicTransition(run.id, async (tx) => {
         await tx.appendWorkflowEvent({
           id: crypto.randomUUID(),
-          flowId: flow.id,
+          runId: run.id,
           kind: "approval-requested",
           stepId: stepY.id,
           data: {},
@@ -283,7 +283,7 @@ export const operatorControlPlaneCase: EvalCase = {
       await store.createWorkflowApprovalGate({
         id: crypto.randomUUID(),
         stepId: stepZ.id,
-        flowId: newFlow.id,
+        runId: newFlow.id,
         status: "pending",
         requestedAt: new Date().toISOString(),
         reason: "Awaiting operator approval",
@@ -342,7 +342,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/checkpoint",
-        runId: flow.id,
+        runId: run.id,
         name: "mid-flight",
         operator: "op-1",
       });
@@ -350,7 +350,7 @@ export const operatorControlPlaneCase: EvalCase = {
       if (r.ok) {
         assertions.push(assertTrue("checkpoint-id", !!(r.data as any)?.checkpointId));
       }
-      const checkpoints = await store.listWorkflowCheckpoints(flow.id);
+      const checkpoints = await store.listWorkflowCheckpoints(run.id);
       assertions.push(assertTrue("checkpoint-saved", checkpoints.length > 0));
     }
 
@@ -360,7 +360,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/trace",
-        runId: flow.id,
+        runId: run.id,
         limit: 10,
       });
       assertions.push(assertTrue("trace-ok", r.ok));
@@ -369,11 +369,11 @@ export const operatorControlPlaneCase: EvalCase = {
       }
     }
 
-    // trace on non-existent flow fails
+    // trace on non-existent workflow run fails
     {
       const r = await dispatcher.dispatch({
         command: "/trace",
-        runId: "no-such-flow",
+        runId: "no-such-run",
       });
       assertions.push(assertTrue("trace-notfound-fails", !r.ok));
     }
@@ -421,7 +421,7 @@ export const operatorControlPlaneCase: EvalCase = {
       // Register a fake running process
       await processRegistry.register({
         id: crypto.randomUUID(),
-        flowId: intFlow.id,
+        runId: intFlow.id,
         stepId: (await store.listWorkflowSteps(intFlow.id))[0].id,
         processManagerId: "pm-1",
         processType: "process",
@@ -440,8 +440,8 @@ export const operatorControlPlaneCase: EvalCase = {
         assertions.push(assertEqual("interrupt-status", interrupted?.status, "interrupted"));
         assertions.push(assertEqual("interrupt-procs", (r.data as any)?.terminatedProcesses, 1));
         // Verify cleanup audit events were recorded
-        const flowEvents = await store.listWorkflowEvents(intFlow.id);
-        const cleanupEvents = flowEvents.filter((e) => e.data?.reason === "interrupt-cleanup");
+        const workflowEvents = await store.listWorkflowEvents(intFlow.id);
+        const cleanupEvents = workflowEvents.filter((e) => e.data?.reason === "interrupt-cleanup");
         assertions.push(assertTrue("interrupt-cleanup-events", cleanupEvents.length > 0));
         assertions.push(assertTrue("interrupt-cleanup-success", cleanupEvents.every((e) => e.data?.success === true)));
       }
@@ -456,7 +456,7 @@ export const operatorControlPlaneCase: EvalCase = {
     }
 
     return buildResult(
-      "operator-control-plane",
+      "workflow-command-control",
       "WorkflowCommandDispatcher routes and validates all slash commands",
       assertions,
       Date.now() - startedAt

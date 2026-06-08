@@ -80,10 +80,10 @@ const sidebars: SidebarsConfig = {
       items: [
         'adr/ADR-0001-skill-evolution-governance',
         'adr/ADR-0002-trace-and-eval-substrate',
-        'adr/ADR-0003-advisory-skills-vs-taskflow',
+        'adr/ADR-0003-skill-playbooks-vs-workflows',
         'adr/ADR-0004-generated-graphs-as-local-artifacts',
         'adr/ADR-0005-execution-plans-private-canonical-docs-public',
-        'adr/ADR-0006-taskflow-state-machine',
+        'adr/ADR-0006-workflow-state-machine',
       ],
     },
   ],

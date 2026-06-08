@@ -1,5 +1,5 @@
 // WorkflowAgentLoopAdapter — adapter layer between WorkflowEngine and AgentLoop
-// Track 5: System Integration — steer consumption, run/artifact linkage, auto-compaction
+// Workflow integration — steer consumption, run/artifact linkage, automatic event summaries
 
 import type { AgentLoop, AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { WorkflowRun, WorkflowRunId, WorkflowStep, RunId } from "./types.js";
@@ -13,7 +13,7 @@ export type WorkflowAgentLoopAdapterOptions = {
 };
 
 export type WorkflowTurnInput = {
-  flow: WorkflowRun;
+  run: WorkflowRun;
   step?: WorkflowStep;
   text: string;
   channel: AgentLoopInput["channel"];
@@ -23,7 +23,7 @@ export type WorkflowTurnInput = {
 
 export type WorkflowTurnResult = {
   response: AgentLoopResponse;
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   stepId?: string;
   steerGuidance?: string[];
 };
@@ -63,11 +63,11 @@ export class WorkflowAgentLoopAdapter {
    * 7. Checks automatic compaction at the safe boundary.
    */
   async runTurn(input: WorkflowTurnInput): Promise<WorkflowTurnResult> {
-    const flowId = input.flow.id;
+    const runId = input.run.id;
     const stepId = input.step?.id;
 
     // 1. Load unconsumed steer events
-    const steerEvents = await this.#store.listUnconsumedSteerEvents(flowId);
+    const steerEvents = await this.#store.listUnconsumedSteerEvents(runId);
     const steerGuidance = steerEvents.map((ev) => ev.metadata?.guidance as string).filter((g): g is string => typeof g === "string");
 
     // 2. Build text with structured operator-guidance block
@@ -99,11 +99,11 @@ export class WorkflowAgentLoopAdapter {
 
     // 6. Record run linkage using real trajectory id
     if (stepId && realRunId) {
-      const existingLinks = await this.#store.listWorkflowAgentRunLinks(flowId, stepId);
+      const existingLinks = await this.#store.listWorkflowAgentRunLinks(runId, stepId);
       await this.#store.linkWorkflowAgentRun({
-        runId: realRunId,
+        agentRunId: realRunId,
         stepId,
-        flowId,
+        runId,
         turnIndex: existingLinks.length,
         linkedAt: new Date().toISOString()
       });
@@ -111,7 +111,7 @@ export class WorkflowAgentLoopAdapter {
       // Real id unavailable: record explicit flow_event explaining why
       await this.#store.appendWorkflowEvent({
         id: crypto.randomUUID(),
-        flowId,
+        runId,
         stepId,
         kind: "run-link-unavailable",
         timestamp: new Date().toISOString(),
@@ -125,7 +125,7 @@ export class WorkflowAgentLoopAdapter {
         await this.#store.linkWorkflowArtifact({
           artifactId: artifact.id,
           stepId,
-          flowId,
+          runId,
           kind: "created",
           linkedAt: new Date().toISOString()
         });
@@ -134,12 +134,12 @@ export class WorkflowAgentLoopAdapter {
 
     // 8. Check automatic compaction at safe boundary
     if (this.#compactionService) {
-      await this.#compactionService.checkAndAutoCompact(flowId);
+      await this.#compactionService.checkAndAutoCompact(runId);
     }
 
     return {
       response,
-      flowId: input.flow.id,
+      runId: input.run.id,
       stepId: input.step?.id,
       steerGuidance: steerGuidance.length > 0 ? steerGuidance : undefined
     };

@@ -34,16 +34,16 @@ export class WorkflowProcessRegistry {
     await this.#store.updateWorkflowProcess(process);
   }
 
-  async list(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
-    return this.#store.listWorkflowProcesses(flowId, stepId);
+  async list(runId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
+    return this.#store.listWorkflowProcesses(runId, stepId);
   }
 
-  async listByFlow(flowId: WorkflowRunId): Promise<WorkflowProcess[]> {
-    return this.list(flowId);
+  async listByRun(runId: WorkflowRunId): Promise<WorkflowProcess[]> {
+    return this.list(runId);
   }
 
-  async listRunning(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
-    const all = await this.#store.listWorkflowProcesses(flowId, stepId);
+  async listRunning(runId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
+    const all = await this.#store.listWorkflowProcesses(runId, stepId);
     return all.filter((p) => p.status === "running");
   }
 
@@ -63,11 +63,11 @@ export class WorkflowProcessRegistry {
   }
 
   async cascadeStop(
-    flowId: WorkflowRunId,
+    runId: WorkflowRunId,
     stepId?: WorkflowStepId,
     stopFn: (processManagerId: string) => Promise<void> = async () => {}
   ): Promise<{ stopped: number; orphaned: number }> {
-    const processes = await this.listRunning(flowId, stepId);
+    const processes = await this.listRunning(runId, stepId);
     let stopped = 0;
     let orphaned = 0;
 

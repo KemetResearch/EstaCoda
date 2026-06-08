@@ -24,7 +24,7 @@ graph TB
         PTL["ProviderTurnLoop<br/>Streaming Loop"]
         TPR["ToolPlanRunner<br/>Plan Execution"]
         RR["RunRecorder<br/>Trajectory Capture"]
-        SWE["SkillWorkflowExecutor<br/>Skill Execution"]
+        SWE["SkillPlaybookRunner<br/>Skill Execution"]
         NTE["NativeToolExecutor<br/>Deterministic Intents"]
     end
 
@@ -46,7 +46,7 @@ graph TB
     subgraph Skills["Skill System (src/skills/)"]
         SLOAD["SkillLoader<br/>Load bundled/local/external"]
         SREG["SkillRegistry<br/>Catalog & Lookup"]
-        SWPLAN["SkillWorkflowPlanner<br/>Compile Plans"]
+        SWPLAN["SkillPlaybookPlanner<br/>Compile Plans"]
         SEVO["SkillEvolutionStore<br/>Propose Patches"]
         SLEARN["SkillLearningManager<br/>Telemetry & Learning"]
         STOOLS["SkillTools<br/>Skill-specific Tool Dispatch"]
@@ -234,7 +234,7 @@ graph TB
 | `ProviderTurnLoop` | Streaming provider execution | `src/runtime/provider-turn-loop.ts` |
 | `ToolPlanRunner` | Tool plan execution | `src/runtime/tool-plan-runner.ts` |
 | `RunRecorder` | Run recording and trajectory | `src/runtime/run-recorder.ts` |
-| `SkillWorkflowExecutor` | Skill workflow execution | `src/runtime/skill-workflow-executor.ts` |
+| `SkillPlaybookRunner` | Skill playbook execution | `src/runtime/skill-playbook-runner.ts` |
 | `NativeToolExecutor` | Deterministic native intent execution | `src/runtime/native-tool-executor.ts` |
 | `ProviderExecutor` | Streaming provider execution | `src/providers/provider-executor.ts` |
 | `ToolExecutor` | Concrete tool execution | `src/tools/tool-executor.ts` |

@@ -9,22 +9,22 @@ import {
 } from "../../workflow/types.js";
 import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
 
-export const taskflowStateTransitionsCase: EvalCase = {
-  id: "taskflow-state-transitions",
+export const workflowRunStateTransitionsCase: EvalCase = {
+  id: "workflow-run-state-transitions",
   name: "WorkflowRun and step state transitions are validated correctly",
   description: "Legal transitions succeed; illegal transitions throw IllegalTransitionError.",
-  tags: ["taskflow", "state-machine", "deterministic"],
+  tags: ["workflow", "state-machine", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
 
-    // Legal flow transitions
+    // Legal workflow run transitions
     assertions.push(assertEqual("pending→running", (() => { try { validateWorkflowRunTransition("pending", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
     assertions.push(assertEqual("running→paused", (() => { try { validateWorkflowRunTransition("running", "paused"); return "ok"; } catch { return "err"; } })(), "ok"));
     assertions.push(assertEqual("running→completed", (() => { try { validateWorkflowRunTransition("running", "completed"); return "ok"; } catch { return "err"; } })(), "ok"));
     assertions.push(assertEqual("paused→running", (() => { try { validateWorkflowRunTransition("paused", "running"); return "ok"; } catch { return "err"; } })(), "ok"));
 
-    // Illegal flow transitions
+    // Illegal workflow run transitions
     assertions.push(assertEqual("completed→running throws", (() => { try { validateWorkflowRunTransition("completed", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
     assertions.push(assertEqual("failed→pending throws", (() => { try { validateWorkflowRunTransition("failed", "pending"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
     assertions.push(assertEqual("cancelled→running throws", (() => { try { validateWorkflowRunTransition("cancelled", "running"); return "no-throw"; } catch (e) { return e instanceof IllegalTransitionError ? "ok" : "wrong"; } })(), "ok"));
@@ -52,6 +52,6 @@ export const taskflowStateTransitionsCase: EvalCase = {
     assertions.push(assertEqual("defaultRetryPolicy maxAttempts", defaultRetryPolicy().maxAttempts, 1));
     assertions.push(assertEqual("defaultFailurePolicy defaultAction", defaultFailurePolicy().defaultAction, "stop"));
 
-    return buildResult("taskflow-state-transitions", "WorkflowRun and step state transitions are validated correctly", assertions, Date.now() - startedAt);
+    return buildResult("workflow-run-state-transitions", "WorkflowRun and step state transitions are validated correctly", assertions, Date.now() - startedAt);
   }
 };

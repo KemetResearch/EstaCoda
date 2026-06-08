@@ -262,34 +262,34 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 ---
 
-## TaskFlow
+## Workflow
 
-يتطلب قاعدة بيانات جلسات SQLite. ترفض قاعدة بيانات الذاكرة أوامر TaskFlow.
+يتطلب قاعدة بيانات جلسات SQLite. ترفض قاعدة بيانات الذاكرة أوامر Workflow.
 
 ```bash
-estacoda flow list                      # التدفقات النشطة (غير النهائية)
-estacoda flow show <flowId>
-estacoda flow status <flowId>
-estacoda flow trace <flowId> [limit]
-estacoda flow pause <flowId> [reason]
-estacoda flow resume <flowId>
-estacoda flow interrupt <flowId> [reason]
-estacoda flow cancel <flowId> [reason]
-estacoda flow steer <flowId> <instruction>
-estacoda flow approve <stepId>
-estacoda flow reject <stepId> [reason]
-estacoda flow retry <stepId>
-estacoda flow skip <stepId> [reason]
-estacoda flow checkpoint <flowId> <name>
-estacoda flow compact <flowId>
+estacoda workflow list                      # تشغيلات Workflow النشطة (غير النهائية)
+estacoda workflow show <runId>
+estacoda workflow status <runId>
+estacoda workflow trace <runId> [limit]
+estacoda workflow pause <runId> [reason]
+estacoda workflow resume <runId>
+estacoda workflow interrupt <runId> [reason]
+estacoda workflow cancel <runId> [reason]
+estacoda workflow steer <runId> <instruction>
+estacoda workflow approve <stepId>
+estacoda workflow reject <stepId> [reason]
+estacoda workflow retry <stepId>
+estacoda workflow skip <stepId> [reason]
+estacoda workflow checkpoint <runId> <name>
+estacoda workflow summarize <runId>
 ```
 
-**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `flow_events`، `flow_steps`).
+**الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `workflow_events`، `workflow_steps`).
 
 **أنماط الفشل:**
 - إعادة المحاولة تعمل فقط إن كان `idempotent` أو `safeToRetry` صحيحاً وتحت `maxRetries`.
 - التخطي يعمل فقط إن لم يبدأ الخطوة وكان `allowSkipIfSkippable` صحيحاً.
-- يُرفض التوجيه للتدفقات في حالات نهائية.
+- يُرفض التوجيه لتشغيلات Workflow في حالات نهائية.
 - الإيقاف يرسل SIGTERM مع مهلة 5 ثوانٍ للعمليات النشطة، ثم ينتقل الحالة.
 
 ---

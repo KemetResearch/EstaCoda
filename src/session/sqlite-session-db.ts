@@ -872,7 +872,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         operator_action_summaries_json text not null,
         created_at text not null
       );
-      create index if not exists idx_workflow_event_summaries_flow on workflow_event_summaries(workflow_run_id, created_at);
+      create index if not exists idx_workflow_event_summaries_run on workflow_event_summaries(workflow_run_id, created_at);
     `);
   }
 
@@ -1040,15 +1040,15 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
       create index if not exists idx_workflow_runs_session on workflow_runs(session_id, created_at);
       create index if not exists idx_workflow_runs_status on workflow_runs(status);
-      create index if not exists idx_workflow_steps_flow on workflow_steps(workflow_run_id, step_index);
+      create index if not exists idx_workflow_steps_run on workflow_steps(workflow_run_id, step_index);
       create index if not exists idx_workflow_steps_status on workflow_steps(status);
-      create index if not exists idx_workflow_events_flow on workflow_events(workflow_run_id, timestamp);
+      create index if not exists idx_workflow_events_run on workflow_events(workflow_run_id, timestamp);
       create index if not exists idx_workflow_events_step on workflow_events(workflow_run_id, workflow_step_id, timestamp);
-      create index if not exists idx_workflow_operator_events_flow on workflow_operator_events(workflow_run_id, timestamp);
-      create index if not exists idx_workflow_checkpoints_flow on workflow_checkpoints(workflow_run_id, created_at);
-      create index if not exists idx_workflow_approval_gates_flow on workflow_approval_gates(workflow_run_id, status);
+      create index if not exists idx_workflow_operator_events_run on workflow_operator_events(workflow_run_id, timestamp);
+      create index if not exists idx_workflow_checkpoints_run on workflow_checkpoints(workflow_run_id, created_at);
+      create index if not exists idx_workflow_approval_gates_run on workflow_approval_gates(workflow_run_id, status);
       create index if not exists idx_workflow_approval_gates_step on workflow_approval_gates(workflow_step_id, status);
-      create index if not exists idx_workflow_processes_flow on workflow_processes(workflow_run_id, workflow_step_id);
+      create index if not exists idx_workflow_processes_run on workflow_processes(workflow_run_id, workflow_step_id);
       create index if not exists idx_workflow_locks_expires on workflow_locks(expires_at);
     `);
   }

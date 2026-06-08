@@ -4,11 +4,11 @@ import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
 import { assertTrue, assertEqual, buildResult } from "../eval-runner.js";
 import { rmSync } from "node:fs";
 
-export const taskflowMigrationCase: EvalCase = {
-  id: "taskflow-migration",
+export const workflowMigrationCase: EvalCase = {
+  id: "workflow-migration",
   name: "schema migration creates workflow tables and sets version",
   description: "SQLiteSessionDB introduces schema_version and workflow persistence tables on first open.",
-  tags: ["taskflow", "migration", "deterministic"],
+  tags: ["workflow", "migration", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const dbPath = `/tmp/estacoda-eval-migration-${Date.now()}.db`;
@@ -48,23 +48,23 @@ export const taskflowMigrationCase: EvalCase = {
 
       // Store can write and read a workflow run.
       const store = new SQLiteWorkflowStore({ db: sessionDb.db });
-      const flow = makeTestFlow("flow-1");
-      await store.createWorkflowRun(flow);
-      const retrieved = await store.getWorkflowRun("flow-1");
-      assertions.push(assertTrue("flow round-trip", retrieved !== null));
-      assertions.push(assertEqual("flow sessionId", retrieved?.sessionId, flow.sessionId));
-      assertions.push(assertEqual("flow status", retrieved?.status, flow.status));
+      const run = makeTestRun("run-1");
+      await store.createWorkflowRun(run);
+      const retrieved = await store.getWorkflowRun("run-1");
+      assertions.push(assertTrue("workflow run round-trip", retrieved !== null));
+      assertions.push(assertEqual("workflow run sessionId", retrieved?.sessionId, run.sessionId));
+      assertions.push(assertEqual("workflow run status", retrieved?.status, run.status));
 
       sessionDb.close();
     } finally {
       try { rmSync(dbPath); } catch { /* ignore */ }
     }
 
-    return buildResult("taskflow-migration", "schema migration creates workflow tables and sets version", assertions, Date.now() - startedAt);
+    return buildResult("workflow-migration", "schema migration creates workflow tables and sets version", assertions, Date.now() - startedAt);
   }
 };
 
-function makeTestFlow(id: string) {
+function makeTestRun(id: string) {
   return {
     id,
     sessionId: "session-1",
@@ -129,21 +129,28 @@ const LEGACY_WORKFLOW_INDEXES = [
   "idx_approval_gates_step",
   "idx_flow_processes_flow",
   "idx_flow_locks_expires",
-  "idx_compact_summaries_flow"
+  "idx_compact_summaries_flow",
+  "idx_workflow_steps_flow",
+  "idx_workflow_events_flow",
+  "idx_workflow_operator_events_flow",
+  "idx_workflow_checkpoints_flow",
+  "idx_workflow_approval_gates_flow",
+  "idx_workflow_processes_flow",
+  "idx_workflow_event_summaries_flow"
 ];
 
 const WORKFLOW_INDEXES = [
   "idx_workflow_runs_session",
   "idx_workflow_runs_status",
-  "idx_workflow_steps_flow",
+  "idx_workflow_steps_run",
   "idx_workflow_steps_status",
-  "idx_workflow_events_flow",
+  "idx_workflow_events_run",
   "idx_workflow_events_step",
-  "idx_workflow_operator_events_flow",
-  "idx_workflow_checkpoints_flow",
-  "idx_workflow_approval_gates_flow",
+  "idx_workflow_operator_events_run",
+  "idx_workflow_checkpoints_run",
+  "idx_workflow_approval_gates_run",
   "idx_workflow_approval_gates_step",
-  "idx_workflow_processes_flow",
+  "idx_workflow_processes_run",
   "idx_workflow_locks_expires",
-  "idx_workflow_event_summaries_flow"
+  "idx_workflow_event_summaries_run"
 ];

@@ -31,20 +31,20 @@ export class WorkflowLockService {
     return this.#heartbeatIntervalMs;
   }
 
-  async acquire(flowId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<boolean> {
-    return this.#store.acquireLock(flowId, ownerId, leaseMs ?? this.#defaultLeaseMs);
+  async acquire(runId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<boolean> {
+    return this.#store.acquireLock(runId, ownerId, leaseMs ?? this.#defaultLeaseMs);
   }
 
-  async release(flowId: WorkflowRunId, ownerId: string): Promise<void> {
-    return this.#store.releaseLock(flowId, ownerId);
+  async release(runId: WorkflowRunId, ownerId: string): Promise<void> {
+    return this.#store.releaseLock(runId, ownerId);
   }
 
-  async heartbeat(flowId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<void> {
-    return this.#store.heartbeatLock(flowId, ownerId, leaseMs ?? this.#defaultLeaseMs);
+  async heartbeat(runId: WorkflowRunId, ownerId: string, leaseMs?: number): Promise<void> {
+    return this.#store.heartbeatLock(runId, ownerId, leaseMs ?? this.#defaultLeaseMs);
   }
 
-  async get(flowId: WorkflowRunId): Promise<WorkflowLock | null> {
-    return this.#store.getLock(flowId);
+  async get(runId: WorkflowRunId): Promise<WorkflowLock | null> {
+    return this.#store.getLock(runId);
   }
 
   async recoverStale(before?: string): Promise<number> {

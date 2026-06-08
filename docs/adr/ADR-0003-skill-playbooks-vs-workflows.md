@@ -1,4 +1,4 @@
-# ADR-0003: Advisory Skills vs Durable TaskFlow Boundary
+# ADR-0003: Skill Playbooks vs Durable Workflows Boundary
 
 **Status:** Accepted  
 **Date:** 2026-05-03  
@@ -38,7 +38,7 @@ The split:
 - Skill template = authoring surface
 - Workflow schema = runtime interpretation layer
 - Tool planner = dependency-aware execution
-- TaskFlow = durable enforced orchestration
+- Workflow = durable enforced orchestration
 
 ## Rejected Alternatives
 
@@ -48,6 +48,6 @@ The split:
 
 ## Consequences
 
-- v0.7 supports advisory skill workflows.
-- v0.8 introduces TaskFlow for durable enforced orchestration.
+- v0.7 supports advisory skill playbooks.
+- v0.8 introduces Workflow for durable enforced orchestration.
 - Skills do not become a programming language.

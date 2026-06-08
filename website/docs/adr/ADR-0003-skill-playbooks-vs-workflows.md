@@ -1,10 +1,10 @@
 ---
-title: ADR-0003 Advisory Skills vs TaskFlow
-description: Markdown-first advisory skills and durable enforced orchestration via TaskFlow.
+title: ADR-0003 Skill Playbooks vs Workflows
+description: Markdown-first skill playbooks and durable enforced orchestration via Workflow.
 sidebar_position: 3
 ---
 
-# ADR-0003: Advisory Skills vs Durable TaskFlow Boundary
+# ADR-0003: Skill Playbooks vs Durable Workflows Boundary
 
 **Status:** Accepted
 **Date:** 2026-05-03
@@ -48,7 +48,7 @@ The split:
 - Skill template = authoring surface
 - Workflow schema = runtime interpretation layer
 - Tool planner = dependency-aware execution
-- TaskFlow = durable enforced orchestration
+- Workflow = durable enforced orchestration
 
 ## Rejected alternatives
 
@@ -58,27 +58,27 @@ The split:
 
 ## Consequences
 
-- v0.7 supports advisory skill workflows.
-- v0.8 introduces TaskFlow for durable enforced orchestration.
+- v0.7 supports advisory skill playbooks.
+- v0.8 introduces Workflow for durable enforced orchestration.
 - Skills do not become a programming language.
 
 ## Operational impact
 
 **What boundary it creates:**
-- Advisory skills provide guidance without guaranteeing execution order. The agent may skip, reorder, or reinterpret steps.
-- Enforced workflows execute through TaskFlow, which records every step, enforces transitions, and blocks illegal state changes.
+- Skill playbooks provide guidance without guaranteeing execution order. The agent may skip, reorder, or reinterpret steps.
+- Enforced workflows execute through Workflow, which records every step, enforces transitions, and blocks illegal state changes.
 
 **What files, commands, and subsystems it affects:**
 - `estacoda skills list` — browse available skills
 - `estacoda skills view <name>` — read full SKILL.md content
-- `estacoda flow` — TaskFlow operator commands
+- `estacoda workflow` — Workflow operator commands
 - `src/skills/skill-loader.ts` — skill parsing and validation
-- `src/taskflow/` — durable orchestration engine
+- `src/workflow/` — durable orchestration engine
 - `src/tools/tool-call-planner.ts` — dependency-aware execution planning
 
 **What maintainers must preserve:**
 - The advisory/enforced boundary must remain explicit. A skill that claims `advisory` must never be silently upgraded to `enforced` behavior.
-- TaskFlow state transitions must remain strict. Illegal transitions throw `IllegalTransitionError`; relaxing this corrupts execution guarantees.
+- Workflow state transitions must remain strict. Illegal transitions throw `IllegalTransitionError`; relaxing this corrupts execution guarantees.
 - Skill templates must stay Markdown-first. Turning skills into a DSL would violate the decision.
 
 **What failure or drift it prevents:**
@@ -89,10 +89,10 @@ The split:
 **What is intentionally outside the decision:**
 - Automatic workflow mode selection. The skill author chooses the mode.
 - Visual workflow builder. Authoring remains text-based.
-- Cross-skill workflow composition. A flow belongs to a single skill or explicit composition layer.
+- Cross-skill playbook composition. A workflow belongs to a single skill or explicit composition layer.
 
 ## Related docs
 
 - [Skills](../user-guide/skills.md)
-- [TaskFlow CLI](../reference/cli-commands.md)
-- [ADR-0006: TaskFlow State Machine](./ADR-0006-taskflow-state-machine.md)
+- [Workflow CLI](../reference/cli-commands.md)
+- [ADR-0006: Workflow State Machine](./ADR-0006-workflow-state-machine.md)

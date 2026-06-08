@@ -37,7 +37,7 @@ sidebar_position: 6
 
 | الأداة | المخاطر | الحالة المُعدّلة |
 |------|------|---------------|
-| `workflow.plan` | `read-only-local` | لا شيء |
+| `playbook.plan` | `read-only-local` | لا شيء |
 | `trajectory.record` | `read-only-local` | SQLite (أحداث المسار) |
 
 ### أدوات workspace

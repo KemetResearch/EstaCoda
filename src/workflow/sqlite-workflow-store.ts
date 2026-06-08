@@ -45,8 +45,8 @@ export class SQLiteWorkflowStore implements WorkflowStore {
 
   // ─── WorkflowRun ───
 
-  async createWorkflowRun(flow: WorkflowRun): Promise<void> {
-    this.#assertSessionInProfile(flow.sessionId);
+  async createWorkflowRun(run: WorkflowRun): Promise<void> {
+    this.#assertSessionInProfile(run.sessionId);
     this.#db
       .query(
         `insert into workflow_runs (
@@ -58,33 +58,33 @@ export class SQLiteWorkflowStore implements WorkflowStore {
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        flow.id,
-        flow.sessionId,
-        flow.status,
-        JSON.stringify(flow.intent),
-        flow.selectedSkill ?? null,
-        flow.currentStepId ?? null,
-        flow.createdAt,
-        flow.updatedAt,
-        flow.completedAt ?? null,
-        flow.cancelledAt ?? null,
-        flow.failedAt ?? null,
-        flow.pauseRequestedAt ?? null,
-        flow.pauseReason ?? null,
-        flow.interruptReason ?? null,
-        flow.cancelReason ?? null,
-        flow.waitReason ? JSON.stringify(flow.waitReason) : null,
-        flow.operatorSummary ?? null,
-        flow.compactedAt ?? null,
-        flow.checkpointCount,
-        flow.stepCount,
-        flow.retryCount,
-        JSON.stringify(flow.metadata)
+        run.id,
+        run.sessionId,
+        run.status,
+        JSON.stringify(run.intent),
+        run.selectedSkill ?? null,
+        run.currentStepId ?? null,
+        run.createdAt,
+        run.updatedAt,
+        run.completedAt ?? null,
+        run.cancelledAt ?? null,
+        run.failedAt ?? null,
+        run.pauseRequestedAt ?? null,
+        run.pauseReason ?? null,
+        run.interruptReason ?? null,
+        run.cancelReason ?? null,
+        run.waitReason ? JSON.stringify(run.waitReason) : null,
+        run.operatorSummary ?? null,
+        run.compactedAt ?? null,
+        run.checkpointCount,
+        run.stepCount,
+        run.retryCount,
+        JSON.stringify(run.metadata)
       );
   }
 
-  async updateWorkflowRun(flow: WorkflowRun): Promise<void> {
-    this.#assertSessionInProfile(flow.sessionId);
+  async updateWorkflowRun(run: WorkflowRun): Promise<void> {
+    this.#assertSessionInProfile(run.sessionId);
     this.#db
       .query(
         `update workflow_runs set
@@ -96,26 +96,26 @@ export class SQLiteWorkflowStore implements WorkflowStore {
         where id = ?`
       )
       .run(
-        flow.status,
-        JSON.stringify(flow.intent),
-        flow.selectedSkill ?? null,
-        flow.currentStepId ?? null,
-        flow.updatedAt,
-        flow.completedAt ?? null,
-        flow.cancelledAt ?? null,
-        flow.failedAt ?? null,
-        flow.pauseRequestedAt ?? null,
-        flow.pauseReason ?? null,
-        flow.interruptReason ?? null,
-        flow.cancelReason ?? null,
-        flow.waitReason ? JSON.stringify(flow.waitReason) : null,
-        flow.operatorSummary ?? null,
-        flow.compactedAt ?? null,
-        flow.checkpointCount,
-        flow.stepCount,
-        flow.retryCount,
-        JSON.stringify(flow.metadata),
-        flow.id
+        run.status,
+        JSON.stringify(run.intent),
+        run.selectedSkill ?? null,
+        run.currentStepId ?? null,
+        run.updatedAt,
+        run.completedAt ?? null,
+        run.cancelledAt ?? null,
+        run.failedAt ?? null,
+        run.pauseRequestedAt ?? null,
+        run.pauseReason ?? null,
+        run.interruptReason ?? null,
+        run.cancelReason ?? null,
+        run.waitReason ? JSON.stringify(run.waitReason) : null,
+        run.operatorSummary ?? null,
+        run.compactedAt ?? null,
+        run.checkpointCount,
+        run.stepCount,
+        run.retryCount,
+        JSON.stringify(run.metadata),
+        run.id
       );
   }
 
@@ -183,7 +183,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   // ─── Step ───
 
   async createWorkflowStep(step: WorkflowStep): Promise<void> {
-    this.#assertFlowInProfile(step.flowId);
+    this.#assertRunInProfile(step.runId);
     this.#db
       .query(
         `insert into workflow_steps (
@@ -197,7 +197,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       )
       .run(
         step.id,
-        step.flowId,
+        step.runId,
         step.index,
         step.status,
         step.name,
@@ -230,7 +230,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   }
 
   async updateWorkflowStep(step: WorkflowStep): Promise<void> {
-    this.#assertFlowInProfile(step.flowId);
+    this.#assertRunInProfile(step.runId);
     this.#db
       .query(
         `update workflow_steps set
@@ -243,7 +243,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
         where id = ?`
       )
       .run(
-        step.flowId,
+        step.runId,
         step.index,
         step.status,
         step.name,
@@ -291,10 +291,10 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     return row ? rowToWorkflowStep(row) : null;
   }
 
-  async listWorkflowSteps(flowId: WorkflowRunId): Promise<WorkflowStep[]> {
+  async listWorkflowSteps(runId: WorkflowRunId): Promise<WorkflowStep[]> {
     const rows =
       this.#profileId === undefined
-        ? this.#db.query<WorkflowStepRow>("select * from workflow_steps where workflow_run_id = ? order by step_index, created_at").all(flowId)
+        ? this.#db.query<WorkflowStepRow>("select * from workflow_steps where workflow_run_id = ? order by step_index, created_at").all(runId)
         : this.#db
             .query<WorkflowStepRow>(
               `select fs.*
@@ -304,7 +304,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
                where fs.workflow_run_id = ? and s.profile_id = ?
                order by fs.step_index, fs.created_at`
             )
-            .all(flowId, this.#profileId);
+            .all(runId, this.#profileId);
     return rows.map(rowToWorkflowStep);
   }
 
@@ -313,7 +313,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   async appendWorkflowEvent(event: WorkflowEvent): Promise<void> {
     this.#db
       .query("insert into workflow_events (id, workflow_run_id, workflow_step_id, kind, data_json, timestamp) values (?, ?, ?, ?, ?, ?)")
-      .run(event.id, event.flowId, event.stepId ?? null, event.kind, JSON.stringify(event.data), event.timestamp);
+      .run(event.id, event.runId, event.stepId ?? null, event.kind, JSON.stringify(event.data), event.timestamp);
   }
 
   async appendWorkflowOperatorEvent(event: WorkflowOperatorEvent): Promise<void> {
@@ -326,7 +326,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       )
       .run(
         event.id,
-        event.flowId,
+        event.runId,
         event.stepId ?? null,
         event.kind,
         event.operator,
@@ -339,13 +339,13 @@ export class SQLiteWorkflowStore implements WorkflowStore {
         event.consumedAt ?? null,
         event.consumedByStepId ?? null,
         event.consumedByRunId ?? null,
-        event.consumedByFlowEventId ?? null
+        event.consumedByWorkflowEventId ?? null
       );
   }
 
-  async listWorkflowEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowEvent[]> {
+  async listWorkflowEvents(runId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowEvent[]> {
     let sql = "select * from workflow_events where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (options?.stepId) {
       sql += " and workflow_step_id = ?";
       params.push(options.stepId);
@@ -363,9 +363,9 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     return rows.map(rowToWorkflowEvent);
   }
 
-  async listWorkflowOperatorEvents(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowOperatorEvent[]> {
+  async listWorkflowOperatorEvents(runId: WorkflowRunId, options?: { stepId?: WorkflowStepId; kind?: string; limit?: number }): Promise<WorkflowOperatorEvent[]> {
     let sql = "select * from workflow_operator_events where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (options?.stepId) {
       sql += " and workflow_step_id = ?";
       params.push(options.stepId);
@@ -388,12 +388,12 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   async linkWorkflowArtifact(link: WorkflowArtifactLink): Promise<void> {
     this.#db
       .query("insert into workflow_artifacts (artifact_id, workflow_step_id, workflow_run_id, kind, linked_at) values (?, ?, ?, ?, ?)")
-      .run(link.artifactId, link.stepId, link.flowId, link.kind, link.linkedAt);
+      .run(link.artifactId, link.stepId, link.runId, link.kind, link.linkedAt);
   }
 
-  async listWorkflowArtifactLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowArtifactLink[]> {
+  async listWorkflowArtifactLinks(runId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowArtifactLink[]> {
     let sql = "select * from workflow_artifacts where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (stepId) {
       sql += " and workflow_step_id = ?";
       params.push(stepId);
@@ -406,12 +406,12 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   async linkWorkflowAgentRun(link: WorkflowAgentRunLink): Promise<void> {
     this.#db
       .query("insert into workflow_agent_run_links (run_id, workflow_step_id, workflow_run_id, turn_index, linked_at) values (?, ?, ?, ?, ?)")
-      .run(link.runId, link.stepId, link.flowId, link.turnIndex, link.linkedAt);
+      .run(link.agentRunId, link.stepId, link.runId, link.turnIndex, link.linkedAt);
   }
 
-  async listWorkflowAgentRunLinks(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowAgentRunLink[]> {
+  async listWorkflowAgentRunLinks(runId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowAgentRunLink[]> {
     let sql = "select * from workflow_agent_run_links where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (stepId) {
       sql += " and workflow_step_id = ?";
       params.push(stepId);
@@ -428,7 +428,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       .query("insert into workflow_checkpoints (id, workflow_run_id, workflow_step_id, name, description, snapshot_json, created_at, created_by) values (?, ?, ?, ?, ?, ?, ?, ?)")
       .run(
         checkpoint.id,
-        checkpoint.flowId,
+        checkpoint.runId,
         checkpoint.stepId ?? null,
         checkpoint.name,
         checkpoint.description ?? null,
@@ -443,8 +443,8 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     return row ? rowToWorkflowCheckpoint(row) : null;
   }
 
-  async listWorkflowCheckpoints(flowId: WorkflowRunId): Promise<WorkflowCheckpoint[]> {
-    const rows = this.#db.query<WorkflowCheckpointRow>("select * from workflow_checkpoints where workflow_run_id = ? order by created_at desc").all(flowId);
+  async listWorkflowCheckpoints(runId: WorkflowRunId): Promise<WorkflowCheckpoint[]> {
+    const rows = this.#db.query<WorkflowCheckpointRow>("select * from workflow_checkpoints where workflow_run_id = ? order by created_at desc").all(runId);
     return rows.map(rowToWorkflowCheckpoint);
   }
 
@@ -462,7 +462,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       .run(
         gate.id,
         gate.stepId,
-        gate.flowId,
+        gate.runId,
         gate.status,
         gate.requestedAt,
         gate.resolvedAt ?? null,
@@ -521,9 +521,9 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     return row ? rowToWorkflowApprovalGate(row) : null;
   }
 
-  async listWorkflowApprovalGates(flowId: WorkflowRunId, options?: { stepId?: WorkflowStepId; status?: string }): Promise<WorkflowApprovalGate[]> {
+  async listWorkflowApprovalGates(runId: WorkflowRunId, options?: { stepId?: WorkflowStepId; status?: string }): Promise<WorkflowApprovalGate[]> {
     let sql = "select * from workflow_approval_gates where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (options?.stepId) {
       sql += " and workflow_step_id = ?";
       params.push(options.stepId);
@@ -539,7 +539,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
 
   // ─── Locks ───
 
-  async acquireLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<boolean> {
+  async acquireLock(runId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<boolean> {
     const now = this.#now().toISOString();
     const expires = new Date(this.#now().getTime() + leaseMs).toISOString();
 
@@ -547,35 +547,35 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     try {
       this.#db
         .query("insert into workflow_locks (workflow_run_id, owner_id, locked_at, heartbeat_at, expires_at) values (?, ?, ?, ?, ?)")
-        .run(flowId, ownerId, now, now, expires);
+        .run(runId, ownerId, now, now, expires);
       return true;
     } catch {
       // Lock exists; try to take it if expired
-      const existing = this.#db.query<WorkflowLockRow>("select * from workflow_locks where workflow_run_id = ?").get(flowId);
+      const existing = this.#db.query<WorkflowLockRow>("select * from workflow_locks where workflow_run_id = ?").get(runId);
       if (existing && existing.expires_at < now) {
         this.#db
           .query("update workflow_locks set owner_id = ?, locked_at = ?, heartbeat_at = ?, expires_at = ? where workflow_run_id = ?")
-          .run(ownerId, now, now, expires, flowId);
+          .run(ownerId, now, now, expires, runId);
         return true;
       }
       return false;
     }
   }
 
-  async releaseLock(flowId: WorkflowRunId, ownerId: string): Promise<void> {
-    this.#db.query("delete from workflow_locks where workflow_run_id = ? and owner_id = ?").run(flowId, ownerId);
+  async releaseLock(runId: WorkflowRunId, ownerId: string): Promise<void> {
+    this.#db.query("delete from workflow_locks where workflow_run_id = ? and owner_id = ?").run(runId, ownerId);
   }
 
-  async heartbeatLock(flowId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<void> {
+  async heartbeatLock(runId: WorkflowRunId, ownerId: string, leaseMs: number): Promise<void> {
     const now = this.#now().toISOString();
     const expires = new Date(this.#now().getTime() + leaseMs).toISOString();
     this.#db
       .query("update workflow_locks set heartbeat_at = ?, expires_at = ? where workflow_run_id = ? and owner_id = ?")
-      .run(now, expires, flowId, ownerId);
+      .run(now, expires, runId, ownerId);
   }
 
-  async getLock(flowId: WorkflowRunId): Promise<WorkflowLock | null> {
-    const row = this.#db.query<WorkflowLockRow>("select * from workflow_locks where workflow_run_id = ?").get(flowId);
+  async getLock(runId: WorkflowRunId): Promise<WorkflowLock | null> {
+    const row = this.#db.query<WorkflowLockRow>("select * from workflow_locks where workflow_run_id = ?").get(runId);
     return row ? rowToWorkflowLock(row) : null;
   }
 
@@ -594,7 +594,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       )
       .run(
         process.id,
-        process.flowId,
+        process.runId,
         process.stepId,
         process.processManagerId,
         process.processType,
@@ -616,9 +616,9 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     return row ? rowToWorkflowProcess(row) : null;
   }
 
-  async listWorkflowProcesses(flowId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
+  async listWorkflowProcesses(runId: WorkflowRunId, stepId?: WorkflowStepId): Promise<WorkflowProcess[]> {
     let sql = "select * from workflow_processes where workflow_run_id = ?";
-    const params: (string | number)[] = [flowId];
+    const params: (string | number)[] = [runId];
     if (stepId) {
       sql += " and workflow_step_id = ?";
       params.push(stepId);
@@ -640,7 +640,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       )
       .run(
         summary.id,
-        summary.flowId,
+        summary.runId,
         summary.compactedRange.fromEventId,
         summary.compactedRange.toEventId,
         JSON.stringify(summary.turnSummaries),
@@ -650,29 +650,29 @@ export class SQLiteWorkflowStore implements WorkflowStore {
       );
   }
 
-  async listWorkflowEventSummaries(flowId: WorkflowRunId): Promise<WorkflowEventSummary[]> {
+  async listWorkflowEventSummaries(runId: WorkflowRunId): Promise<WorkflowEventSummary[]> {
     const rows = this.#db
       .query<WorkflowEventSummaryRow>("select * from workflow_event_summaries where workflow_run_id = ? order by created_at desc")
-      .all(flowId);
+      .all(runId);
     return rows.map(rowToWorkflowEventSummary);
   }
 
   // ─── Steer consumption ───
 
-  async listUnconsumedSteerEvents(flowId: WorkflowRunId): Promise<WorkflowOperatorEvent[]> {
+  async listUnconsumedSteerEvents(runId: WorkflowRunId): Promise<WorkflowOperatorEvent[]> {
     const rows = this.#db
       .query<WorkflowOperatorEventRow>(
         `select * from workflow_operator_events
          where workflow_run_id = ? and kind = 'operator-steered' and consumed_at is null
          order by timestamp asc`
       )
-      .all(flowId);
+      .all(runId);
     return rows.map(rowToWorkflowOperatorEvent);
   }
 
   async markSteerConsumed(
     eventId: string,
-    consumption: { consumedByStepId?: WorkflowStepId; consumedByRunId?: RunId; consumedByFlowEventId?: EventId }
+    consumption: { consumedByStepId?: WorkflowStepId; consumedByRunId?: RunId; consumedByWorkflowEventId?: EventId }
   ): Promise<void> {
     this.#db
       .query(
@@ -687,7 +687,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
         this.#now().toISOString(),
         consumption.consumedByStepId ?? null,
         consumption.consumedByRunId ?? null,
-        consumption.consumedByFlowEventId ?? null,
+        consumption.consumedByWorkflowEventId ?? null,
         eventId
       );
   }
@@ -695,7 +695,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
   // ─── Atomic transition ───
 
   async atomicTransition<T>(
-    _flowId: WorkflowRunId,
+    _runId: WorkflowRunId,
     work: (tx: WorkflowStore) => Promise<T>
   ): Promise<T> {
     this.#db.exec("begin transaction");
@@ -726,7 +726,7 @@ export class SQLiteWorkflowStore implements WorkflowStore {
     }
   }
 
-  #assertFlowInProfile(flowId: WorkflowRunId): void {
+  #assertRunInProfile(runId: WorkflowRunId): void {
     if (this.#profileId === undefined) {
       return;
     }
@@ -738,9 +738,9 @@ export class SQLiteWorkflowStore implements WorkflowStore {
          join sessions s on s.id = f.session_id
          where f.id = ? and s.profile_id = ?`
       )
-      .get(flowId, this.#profileId);
+      .get(runId, this.#profileId);
     if (row === null) {
-      throw new Error(`WorkflowRun ${flowId} does not belong to profile ${this.#profileId}.`);
+      throw new Error(`WorkflowRun ${runId} does not belong to profile ${this.#profileId}.`);
     }
   }
 }
@@ -941,7 +941,7 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
 function rowToWorkflowStep(row: WorkflowStepRow): WorkflowStep {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     index: row.step_index,
     status: row.status as WorkflowStep["status"],
     name: row.name,
@@ -976,7 +976,7 @@ function rowToWorkflowStep(row: WorkflowStepRow): WorkflowStep {
 function rowToWorkflowEvent(row: WorkflowEventRow): WorkflowEvent {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     stepId: row.workflow_step_id ?? undefined,
     kind: row.kind as WorkflowEvent["kind"],
     data: JSON.parse(row.data_json) as Record<string, unknown>,
@@ -987,7 +987,7 @@ function rowToWorkflowEvent(row: WorkflowEventRow): WorkflowEvent {
 function rowToWorkflowOperatorEvent(row: WorkflowOperatorEventRow): WorkflowOperatorEvent {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     stepId: row.workflow_step_id ?? undefined,
     kind: row.kind as WorkflowOperatorEvent["kind"],
     operator: row.operator,
@@ -1000,14 +1000,14 @@ function rowToWorkflowOperatorEvent(row: WorkflowOperatorEventRow): WorkflowOper
     consumedAt: row.consumed_at ?? undefined,
     consumedByStepId: row.consumed_by_workflow_step_id ?? undefined,
     consumedByRunId: row.consumed_by_run_id ?? undefined,
-    consumedByFlowEventId: row.consumed_by_workflow_event_id ?? undefined
+    consumedByWorkflowEventId: row.consumed_by_workflow_event_id ?? undefined
   };
 }
 
 function rowToWorkflowCheckpoint(row: WorkflowCheckpointRow): WorkflowCheckpoint {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     stepId: row.workflow_step_id ?? undefined,
     name: row.name,
     description: row.description ?? undefined,
@@ -1021,7 +1021,7 @@ function rowToWorkflowApprovalGate(row: WorkflowApprovalGateRow): WorkflowApprov
   return {
     id: row.id,
     stepId: row.workflow_step_id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     status: row.status as WorkflowApprovalGate["status"],
     requestedAt: row.requested_at,
     resolvedAt: row.resolved_at ?? undefined,
@@ -1040,7 +1040,7 @@ function rowToWorkflowApprovalGate(row: WorkflowApprovalGateRow): WorkflowApprov
 
 function rowToWorkflowLock(row: WorkflowLockRow): WorkflowLock {
   return {
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     ownerId: row.owner_id,
     lockedAt: row.locked_at,
     heartbeatAt: row.heartbeat_at,
@@ -1051,7 +1051,7 @@ function rowToWorkflowLock(row: WorkflowLockRow): WorkflowLock {
 function rowToWorkflowProcess(row: WorkflowProcessRow): WorkflowProcess {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     stepId: row.workflow_step_id,
     processManagerId: row.process_manager_id,
     processType: row.process_type as WorkflowProcess["processType"],
@@ -1066,7 +1066,7 @@ function rowToWorkflowArtifactLink(row: WorkflowArtifactRow): WorkflowArtifactLi
   return {
     artifactId: row.artifact_id,
     stepId: row.workflow_step_id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     kind: row.kind as WorkflowArtifactLink["kind"],
     linkedAt: row.linked_at
   };
@@ -1074,9 +1074,9 @@ function rowToWorkflowArtifactLink(row: WorkflowArtifactRow): WorkflowArtifactLi
 
 function rowToWorkflowAgentRunLink(row: WorkflowAgentRunLinkRow): WorkflowAgentRunLink {
   return {
-    runId: row.run_id,
+    agentRunId: row.run_id,
     stepId: row.workflow_step_id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     turnIndex: row.turn_index,
     linkedAt: row.linked_at
   };
@@ -1085,7 +1085,7 @@ function rowToWorkflowAgentRunLink(row: WorkflowAgentRunLinkRow): WorkflowAgentR
 function rowToWorkflowEventSummary(row: WorkflowEventSummaryRow): WorkflowEventSummary {
   return {
     id: row.id,
-    flowId: row.workflow_run_id,
+    runId: row.workflow_run_id,
     compactedRange: { fromEventId: row.from_workflow_event_id, toEventId: row.to_workflow_event_id },
     turnSummaries: JSON.parse(row.turn_summaries_json) as string[],
     toolOutcomeSummaries: JSON.parse(row.tool_outcome_summaries_json) as string[],

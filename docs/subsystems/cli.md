@@ -102,7 +102,7 @@ Top-level semantic session compaction:
 estacoda sessions compact <session-id> [--topic <topic>]
 ```
 
-This calls the active runtime's session compaction service. It is semantic session compression for a session transcript, not TaskFlow compaction and not Memory File Compaction. This top-level CLI command is non-rotating in the current implementation; it does not create/adopt a compacted child session.
+This calls the active runtime's session compaction service. It is semantic session compression for a session transcript, not Workflow event summaries and not Memory File Compaction. This top-level CLI command is non-rotating in the current implementation; it does not create/adopt a compacted child session.
 
 Memory-file compaction is exposed as runtime tools, not as a top-level CLI command in this implementation:
 

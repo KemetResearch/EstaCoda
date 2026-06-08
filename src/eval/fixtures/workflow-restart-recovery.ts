@@ -18,11 +18,11 @@ function makeIntent(): IntentRoute {
   };
 }
 
-export const taskflowRestartRecoveryCase: EvalCase = {
-  id: "taskflow-restart-recovery",
-  name: "WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks",
+export const workflowRestartRecoveryCase: EvalCase = {
+  id: "workflow-restart-recovery",
+  name: "WorkflowRestartRecovery marks running workflow runs and steps interrupted and releases stale locks",
   description: "After restart: running→interrupted, paused/waiting preserved, stale locks recovered.",
-  tags: ["taskflow", "restart", "recovery", "deterministic"],
+  tags: ["workflow", "restart", "recovery", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const assertions = [];
@@ -31,13 +31,13 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     const store = new FakeWorkflowStore({ now: () => new Date(now) });
     const lockService = new WorkflowLockService({ store, now: () => new Date(now), defaultLeaseMs: 30_000 });
 
-    // Create flows in different states by directly manipulating store
-    const runningFlowId = "flow-running";
-    const pausedFlowId = "flow-paused";
-    const waitingFlowId = "flow-waiting";
+    // Create workflow runs in different states by directly manipulating store
+    const runningRunId = "run-running";
+    const pausedRunId = "run-paused";
+    const waitingRunId = "run-waiting";
 
     await store.createWorkflowRun({
-      id: runningFlowId,
+      id: runningRunId,
       sessionId: "session-1",
       status: "running",
       intent: makeIntent(),
@@ -50,7 +50,7 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     });
     await store.createWorkflowStep({
       id: "step-running",
-      flowId: runningFlowId,
+      runId: runningRunId,
       index: 0,
       status: "running",
       name: "Running Step",
@@ -67,10 +67,10 @@ export const taskflowRestartRecoveryCase: EvalCase = {
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     });
-    await lockService.acquire(runningFlowId, "old-worker");
+    await lockService.acquire(runningRunId, "old-worker");
 
     await store.createWorkflowRun({
-      id: pausedFlowId,
+      id: pausedRunId,
       sessionId: "session-2",
       status: "paused",
       intent: makeIntent(),
@@ -81,10 +81,10 @@ export const taskflowRestartRecoveryCase: EvalCase = {
       retryCount: 0,
       metadata: {}
     });
-    await lockService.acquire(pausedFlowId, "old-worker");
+    await lockService.acquire(pausedRunId, "old-worker");
 
     await store.createWorkflowRun({
-      id: waitingFlowId,
+      id: waitingRunId,
       sessionId: "session-3",
       status: "waiting",
       intent: makeIntent(),
@@ -107,22 +107,22 @@ export const taskflowRestartRecoveryCase: EvalCase = {
     assertions.push(assertEqual("stale locks released", result.staleLocksReleased, 2));
     assertions.push(assertTrue("has restart warning", result.warnings.some((w) => w.includes("interrupted"))));
 
-    const runningFlowAfter = await store.getWorkflowRun(runningFlowId);
-    assertions.push(assertEqual("running flow interrupted", runningFlowAfter?.status, "interrupted"));
+    const runningFlowAfter = await store.getWorkflowRun(runningRunId);
+    assertions.push(assertEqual("running workflow run interrupted", runningFlowAfter?.status, "interrupted"));
 
     const runningStepAfter = await store.getWorkflowStep("step-running");
     assertions.push(assertEqual("running step interrupted", runningStepAfter?.status, "interrupted"));
 
-    const pausedFlowAfter = await store.getWorkflowRun(pausedFlowId);
-    assertions.push(assertEqual("paused flow preserved", pausedFlowAfter?.status, "paused"));
+    const pausedFlowAfter = await store.getWorkflowRun(pausedRunId);
+    assertions.push(assertEqual("paused workflow run preserved", pausedFlowAfter?.status, "paused"));
 
-    const waitingFlowAfter = await store.getWorkflowRun(waitingFlowId);
-    assertions.push(assertEqual("waiting flow preserved", waitingFlowAfter?.status, "waiting"));
+    const waitingFlowAfter = await store.getWorkflowRun(waitingRunId);
+    assertions.push(assertEqual("waiting workflow run preserved", waitingFlowAfter?.status, "waiting"));
 
-    const events = await store.listWorkflowEvents(runningFlowId);
-    assertions.push(assertTrue("flow-state-changed event", events.some((e) => e.kind === "flow-state-changed")));
+    const events = await store.listWorkflowEvents(runningRunId);
+    assertions.push(assertTrue("workflow run state changed event", events.some((e) => e.kind === "flow-state-changed")));
     assertions.push(assertTrue("step-interrupted event", events.some((e) => e.kind === "step-interrupted")));
 
-    return buildResult("taskflow-restart-recovery", "WorkflowRestartRecovery marks running flows/steps interrupted and releases stale locks", assertions, Date.now() - startedAt);
+    return buildResult("workflow-restart-recovery", "WorkflowRestartRecovery marks running workflow runs and steps interrupted and releases stale locks", assertions, Date.now() - startedAt);
   }
 };

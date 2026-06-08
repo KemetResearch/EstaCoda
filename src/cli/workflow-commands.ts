@@ -113,13 +113,13 @@ function workflowHelp(): string {
 
 async function workflowList(db: SQLiteSessionDB, profileId: string): Promise<CliCommandResult> {
   const { store } = createWorkflowServices(db, profileId);
-  const flows = await store.listActiveWorkflowRuns();
+  const runs = await store.listActiveWorkflowRuns();
 
-  if (flows.length === 0) {
+  if (runs.length === 0) {
     return { handled: true, exitCode: 0, output: "No workflow runs found." };
   }
 
-  const lines = flows.map((f) => {
+  const lines = runs.map((f) => {
     const elapsed = f.createdAt ? Math.floor((Date.now() - new Date(f.createdAt).getTime()) / 1000) : 0;
     const elapsedStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m` : `${elapsed}s`;
     return `${f.id}  ${f.status.padEnd(12)}  ${elapsedStr.padStart(4)}  ${f.sessionId}`;

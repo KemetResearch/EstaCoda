@@ -250,38 +250,38 @@ Manage local browser/CDP connection.
 
 ---
 
-## TaskFlow
+## Workflow
 
-Requires SQLite session persistence. Available when TaskFlow is wired.
+Requires SQLite session persistence. Available when Workflow is wired.
 
 ```bash
-/flow status [flowId]
-/flow pause <flowId> [reason]
-/flow resume <flowId>
-/flow interrupt <flowId> [reason]
-/flow cancel <flowId> [reason]
-/flow steer <flowId> <guidance>
-/flow approve <stepId>
-/flow reject <stepId> [reason]
-/flow retry <stepId>
-/flow skip <stepId> [reason]
-/flow checkpoint <flowId> <name>
-/flow trace [flowId] [limit]
-/flow compact <flowId>
-/flow set <flowId>
-/flow unset
+/workflow status [runId]
+/workflow pause <runId> [reason]
+/workflow resume <runId>
+/workflow interrupt <runId> [reason]
+/workflow cancel <runId> [reason]
+/workflow steer <runId> <guidance>
+/workflow approve <stepId>
+/workflow reject <stepId> [reason]
+/workflow retry <stepId>
+/workflow skip <stepId> [reason]
+/workflow checkpoint <runId> <name>
+/workflow trace [runId] [limit]
+/workflow summarize <runId>
+/workflow activate <runId>
+/workflow deactivate
 ```
 
-If `flowId` is omitted for `status` and `trace`, the active flow is used.
+If `runId` is omitted for `status` and `trace`, the active workflow run is used.
 
-**State touched:** SQLite session DB (`flow_events`, `flow_steps`).
+**State touched:** SQLite session DB (`workflow_events`, `workflow_steps`).
 
 **Behavior:**
-- `/flow steer` records an unconsumed `OperatorEvent`. On the next adapter turn, guidance is prefixed to the user text in a structured block. Events are marked consumed and visible in `/flow trace`.
-- `/flow set` binds the current session to a flow. `/flow unset` clears the binding.
+- `/workflow steer` records an unconsumed `OperatorEvent`. On the next adapter turn, guidance is prefixed to the user text in a structured block. Events are marked consumed and visible in `/workflow trace`.
+- `/workflow activate` binds the current session to a workflow run. `/workflow deactivate` clears the binding.
 
 **Failure modes:**
-- Steer rejected for terminal-state flows.
+- Steer rejected for terminal-state workflow runs.
 - Retry requires `idempotent` or `safeToRetry` and `retryCount < maxRetries`.
 - Skip requires the step not started and `allowSkipIfSkippable`.
 

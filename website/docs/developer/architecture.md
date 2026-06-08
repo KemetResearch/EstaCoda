@@ -54,7 +54,7 @@ Construction order:
 3. Tool registry
 4. Skill registries (official, profile, external)
 5. Prompt dependencies (prompt cache, context expander)
-6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillWorkflowExecutor`, `NativeToolExecutor`)
+6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`)
 7. `AgentLoop`
 
 Key composition rules:
@@ -198,7 +198,7 @@ The primary end-to-end path:
 7. Final output is formatted per surface
 8. Session, memory, approvals, and trajectory state are persisted
 
-`AgentLoop.handle()` coordinates this flow but delegates execution to specialized components. It does not execute provider iterations, tool plans, or skill workflows directly.
+`AgentLoop.handle()` coordinates this flow but delegates execution to specialized components. It does not execute provider iterations, tool plans, or skill playbooks directly.
 
 ---
 
@@ -219,7 +219,7 @@ The primary end-to-end path:
 | Security policy | `live-proven` | Adaptive mode with smart assessor fallback. |
 | Gateway | `live-proven` | Telegram gateway. |
 | Cron | `implemented` | Job scheduling and execution. |
-| TaskFlow | `implemented` | Durable multi-step execution. Wired only with SQLite. |
+| Workflow | `implemented` | Durable multi-step execution. Wired only with SQLite. |
 | Browser (local CDP) | `live-proven` | Local Chrome DevTools Protocol. |
 | Browser (cloud) | `unsupported` | Registered stubs only. |
 | Web search | `unsupported` | Registered stubs only. Guarded fetch fallback only. |
@@ -230,7 +230,7 @@ The primary end-to-end path:
 ## Architectural Weak Spots
 
 1. **`create-runtime.ts` god factory** — 900+ lines, 69 imports, no DI boundary. Accepted risk. Builder pattern deferred.
-2. **AgentLoop remaining coupling** — Prompt assembly, memory context injection, and cross-component coordination still live in `AgentLoop`. Provider loop, tool execution, skill workflows, and native intents are already extracted.
+2. **AgentLoop remaining coupling** — Prompt assembly, memory context injection, and cross-component coordination still live in `AgentLoop`. Provider loop, tool execution, skill playbooks, and native intents are already extracted.
 3. **Gateway readiness vs. liveness** — `estacoda gateway diagnose` reports readiness per adapter, not background-process liveness.
 4. **Trajectory/Artifact skeletons** — Trajectory persists to SQLite. `ArtifactStore` is thin (in-memory with limited persistence).
 5. **Native SQLite bindings** — `better-sqlite3` requires install-time compilation on some platforms.

@@ -58,7 +58,7 @@ Profile state lives under `~/.estacoda/profiles/<id>/`. See [Architecture](./arc
 9. **Skill infrastructure** — `SkillRegistry`, `SkillLearningManager`, `SkillEvolutionStore`
 10. **Delegation manager**
 11. **Provider executor**
-12. **Extracted runtime components** — `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillWorkflowExecutor`, `NativeToolExecutor`, `RuntimeRouter`
+12. **Extracted runtime components** — `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`
 13. **AgentLoop** — the orchestration lifecycle
 
 Any constructor signature change cascades through this file. There is no DI container or plugin boundary.
