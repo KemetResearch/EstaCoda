@@ -57,7 +57,8 @@ export interface BuildStatusInput {
   readonly toolCount: number;
   readonly mcpActive: number;
   readonly mcpTotal: number;
-  readonly taskflowActive: boolean;
+  readonly workflowAvailable: boolean;
+  readonly workflowRunActive: boolean;
   readonly warnings?: readonly WarningErrorViewModel[];
   readonly sections?: readonly ViewModel[];
 }
@@ -73,7 +74,8 @@ export function buildStatusViewModel(input: BuildStatusInput): StatusViewModel {
     skillAutonomy: input.skillAutonomy,
     toolCount: input.toolCount,
     mcp: { active: input.mcpActive, total: input.mcpTotal },
-    taskflowActive: input.taskflowActive,
+    workflowAvailable: input.workflowAvailable,
+    workflowRunActive: input.workflowRunActive,
     warnings: input.warnings ?? [],
     sections: input.sections,
   };

@@ -16,26 +16,26 @@ import type { WorkflowEventSummaryService } from "./workflow-event-summary-servi
 import { isWorkflowRunStateTerminal } from "./types.js";
 
 export type OperatorCommand =
-  | { command: "/status"; flowId: WorkflowRunId }
-  | { command: "/pause"; flowId: WorkflowRunId; reason?: string; operator: string }
-  | { command: "/resume"; flowId: WorkflowRunId; operator: string }
-  | { command: "/interrupt"; flowId: WorkflowRunId; reason?: string; operator: string }
-  | { command: "/cancel"; flowId: WorkflowRunId; reason?: string; operator: string }
-  | { command: "/steer"; flowId: WorkflowRunId; guidance: string; operator: string }
+  | { command: "/status"; runId: WorkflowRunId }
+  | { command: "/pause"; runId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/resume"; runId: WorkflowRunId; operator: string }
+  | { command: "/interrupt"; runId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/cancel"; runId: WorkflowRunId; reason?: string; operator: string }
+  | { command: "/steer"; runId: WorkflowRunId; guidance: string; operator: string }
   | { command: "/approve"; stepId: WorkflowStepId; operator: string; grantId?: string }
   | { command: "/reject"; stepId: WorkflowStepId; operator: string; reason?: string }
   | { command: "/retry"; stepId: WorkflowStepId; operator: string }
   | { command: "/skip"; stepId: WorkflowStepId; reason?: string; operator: string }
-  | { command: "/checkpoint"; flowId: WorkflowRunId; name: string; description?: string; operator: string }
-  | { command: "/compact"; flowId: WorkflowRunId; operator: string }
-  | { command: "/trace"; flowId: WorkflowRunId; limit?: number };
+  | { command: "/checkpoint"; runId: WorkflowRunId; name: string; description?: string; operator: string }
+  | { command: "/compact"; runId: WorkflowRunId; operator: string }
+  | { command: "/trace"; runId: WorkflowRunId; limit?: number };
 
 export type CommandResult =
   | { ok: true; message: string; data?: Record<string, unknown> }
   | { ok: false; error: string };
 
 export type WorkflowStatusView = {
-  flowId: WorkflowRunId;
+  runId: WorkflowRunId;
   status: string;
   currentStepId?: string;
   currentStepName?: string;
@@ -71,17 +71,17 @@ export class WorkflowCommandDispatcher {
   async dispatch(cmd: OperatorCommand): Promise<CommandResult> {
     switch (cmd.command) {
       case "/status":
-        return this.#handleStatus(cmd.flowId);
+        return this.#handleStatus(cmd.runId);
       case "/pause":
-        return this.#handlePause(cmd.flowId, cmd.reason, cmd.operator);
+        return this.#handlePause(cmd.runId, cmd.reason, cmd.operator);
       case "/resume":
-        return this.#handleResume(cmd.flowId, cmd.operator);
+        return this.#handleResume(cmd.runId, cmd.operator);
       case "/interrupt":
-        return this.#handleInterrupt(cmd.flowId, cmd.reason, cmd.operator);
+        return this.#handleInterrupt(cmd.runId, cmd.reason, cmd.operator);
       case "/cancel":
-        return this.#handleCancel(cmd.flowId, cmd.reason, cmd.operator);
+        return this.#handleCancel(cmd.runId, cmd.reason, cmd.operator);
       case "/steer":
-        return this.#handleSteer(cmd.flowId, cmd.guidance, cmd.operator);
+        return this.#handleSteer(cmd.runId, cmd.guidance, cmd.operator);
       case "/approve":
         return this.#handleApprove(cmd.stepId, cmd.operator, cmd.grantId);
       case "/reject":
@@ -91,11 +91,11 @@ export class WorkflowCommandDispatcher {
       case "/skip":
         return this.#handleSkip(cmd.stepId, cmd.reason, cmd.operator);
       case "/checkpoint":
-        return this.#handleCheckpoint(cmd.flowId, cmd.name, cmd.description, cmd.operator);
+        return this.#handleCheckpoint(cmd.runId, cmd.name, cmd.description, cmd.operator);
       case "/compact":
-        return this.#handleCompact(cmd.flowId, cmd.operator);
+        return this.#handleCompact(cmd.runId, cmd.operator);
       case "/trace":
-        return this.#handleTrace(cmd.flowId, cmd.limit);
+        return this.#handleTrace(cmd.runId, cmd.limit);
       default:
         return { ok: false, error: `Unknown command: ${(cmd as OperatorCommand).command}` };
     }
@@ -105,7 +105,7 @@ export class WorkflowCommandDispatcher {
 
   async #handleStatus(flowId: WorkflowRunId): Promise<CommandResult> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) return { ok: false, error: "Flow not found" };
+    if (!flow) return { ok: false, error: "Workflow run not found" };
 
     const steps = await this.#store.listWorkflowSteps(flowId);
     const currentStep = steps.find((s) => s.id === flow.currentStepId);
@@ -116,7 +116,7 @@ export class WorkflowCommandDispatcher {
     const elapsedMs = Date.now() - createdAt;
 
     const view: WorkflowStatusView = {
-      flowId,
+      runId: flowId,
       status: flow.status,
       currentStepId: flow.currentStepId,
       currentStepName: currentStep?.name,
@@ -142,7 +142,7 @@ export class WorkflowCommandDispatcher {
   async #handlePause(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<CommandResult> {
     try {
       await this.#engine.requestWorkflowPause(flowId, reason, operator);
-      return { ok: true, message: `Pause requested for flow ${flowId}. Will take effect at next safe boundary.` };
+      return { ok: true, message: `Pause requested for workflow run ${flowId}. Will take effect at next safe boundary.` };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -153,7 +153,7 @@ export class WorkflowCommandDispatcher {
   async #handleResume(flowId: WorkflowRunId, operator: string): Promise<CommandResult> {
     try {
       const flow = await this.#engine.resumeWorkflowRun(flowId, operator);
-      return { ok: true, message: `Flow ${flowId} resumed. Current state: ${flow.status}.` };
+      return { ok: true, message: `Workflow run ${flowId} resumed. Current state: ${flow.status}.` };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -201,9 +201,9 @@ export class WorkflowCommandDispatcher {
 
       return {
         ok: true,
-        message: `Flow ${flowId} interrupted. ${terminated} process(es) terminated, ${failed} failed.`,
+        message: `Workflow run ${flowId} interrupted. ${terminated} process(es) terminated, ${failed} failed.`,
         data: {
-          flowStatus: flow.status,
+          runStatus: flow.status,
           terminatedProcesses: terminated,
           failedProcesses: failed,
           cleanupDetails: cleanupResults
@@ -256,9 +256,9 @@ export class WorkflowCommandDispatcher {
 
       return {
         ok: true,
-        message: `Flow ${flowId} cancelled. ${terminated} process(es) terminated, ${failed} failed. Final state: ${flow.status}.`,
+        message: `Workflow run ${flowId} cancelled. ${terminated} process(es) terminated, ${failed} failed. Final state: ${flow.status}.`,
         data: {
-          flowStatus: flow.status,
+          runStatus: flow.status,
           terminatedProcesses: terminated,
           failedProcesses: failed,
           cleanupDetails: cleanupResults
@@ -273,10 +273,10 @@ export class WorkflowCommandDispatcher {
 
   async #handleSteer(flowId: WorkflowRunId, guidance: string, operator: string): Promise<CommandResult> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) return { ok: false, error: "Flow not found" };
+    if (!flow) return { ok: false, error: "Workflow run not found" };
 
     if (isWorkflowRunStateTerminal(flow.status)) {
-      return { ok: false, error: `Cannot steer a flow in terminal state ${flow.status}` };
+      return { ok: false, error: `Cannot steer a workflow run in terminal state ${flow.status}` };
     }
 
     // Record steer as operator event via atomic transition
@@ -295,7 +295,7 @@ export class WorkflowCommandDispatcher {
       });
     });
 
-    return { ok: true, message: `Steer recorded for flow ${flowId}. Guidance will be included in next turn context.` };
+    return { ok: true, message: `Steer recorded for workflow run ${flowId}. Guidance will be included in next turn context.` };
   }
 
   // ─── /approve ───
@@ -347,7 +347,7 @@ export class WorkflowCommandDispatcher {
   async #handleCheckpoint(flowId: WorkflowRunId, name: string, description?: string, operator?: string): Promise<CommandResult> {
     try {
       const checkpoint = await this.#engine.createWorkflowCheckpoint(flowId, name, description, operator);
-      return { ok: true, message: `Checkpoint '${name}' created for flow ${flowId}.`, data: { checkpointId: checkpoint.id } };
+      return { ok: true, message: `Checkpoint '${name}' created for workflow run ${flowId}.`, data: { checkpointId: checkpoint.id } };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -357,7 +357,7 @@ export class WorkflowCommandDispatcher {
 
   async #handleTrace(flowId: WorkflowRunId, limit?: number): Promise<CommandResult> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) return { ok: false, error: "Flow not found" };
+    if (!flow) return { ok: false, error: "Workflow run not found" };
 
     const flowEvents = await this.#store.listWorkflowEvents(flowId);
     const opEvents = await this.#store.listWorkflowOperatorEvents(flowId);
@@ -383,7 +383,7 @@ export class WorkflowCommandDispatcher {
 
   #formatStatus(view: WorkflowStatusView): string {
     const lines = [
-      `Flow: ${view.flowId}`,
+      `Workflow: ${view.runId}`,
       `Status: ${view.status}`,
       view.currentStepName ? `Current step: ${view.currentStepName}` : undefined,
       `Progress: ${view.completedSteps}/${view.stepCount}`,
@@ -424,7 +424,7 @@ export class WorkflowCommandDispatcher {
       });
     if (compactSummaries && compactSummaries.length > 0) {
       lines.push("");
-      lines.push("--- Compact Summaries ---");
+      lines.push("--- Workflow Event Summaries ---");
       for (const cs of compactSummaries) {
         lines.push(`Summary ${cs.id}: ${cs.turnSummaries.length} turns, ${cs.toolOutcomeSummaries.length} tools, ${cs.operatorActionSummaries.length} ops`);
       }
@@ -438,11 +438,11 @@ export class WorkflowCommandDispatcher {
     try {
       const result = await this.#compactionService.compact(flowId, operator);
       if (!result.ok) {
-        return { ok: false, error: result.error ?? "Compaction failed" };
+        return { ok: false, error: result.error ?? "Workflow summary failed" };
       }
       return {
         ok: true,
-        message: `Compaction completed (${result.mode}). Preserved ${result.preservedSteps} steps, ${result.preservedProcesses} processes, ${result.preservedApprovals} approvals.`,
+        message: `Workflow summary completed (${result.mode}). Preserved ${result.preservedSteps} steps, ${result.preservedProcesses} processes, ${result.preservedApprovals} approvals.`,
         data: {
           compactSummaryId: result.summary?.id,
           mode: result.mode,
@@ -454,7 +454,7 @@ export class WorkflowCommandDispatcher {
         }
       };
     } catch (err) {
-      return { ok: false, error: `Compaction error: ${(err as Error).message}` };
+      return { ok: false, error: `Workflow summary error: ${(err as Error).message}` };
     }
   }
 }

@@ -110,7 +110,7 @@ export const track5IntegrationCase: EvalCase = {
     const dispatcher = new WorkflowCommandDispatcher({ engine, store, processRegistry, compactionService });
 
     // ═════════════════════════════════════════════════════════════════
-    // 1. /flow slash bridge dispatches to WorkflowCommandDispatcher
+    // 1. /workflow slash bridge dispatches to WorkflowCommandDispatcher
     // ═════════════════════════════════════════════════════════════════
     {
       const flow = await engine.createWorkflowRun({
@@ -120,8 +120,8 @@ export const track5IntegrationCase: EvalCase = {
       });
       await engine.startWorkflowRun(flow.id);
 
-      // Simulate what handleTaskFlowCommand does for /flow status
-      const result = await dispatcher.dispatch({ command: "/status", flowId: flow.id });
+      // Simulate what handleWorkflowCommand does for /workflow status
+      const result = await dispatcher.dispatch({ command: "/status", runId: flow.id });
       assertions.push(assertTrue("slash-bridge-dispatches", result.ok));
       if (result.ok) {
         assertions.push(assertContains("slash-bridge-message", result.message, flow.id));
@@ -129,7 +129,7 @@ export const track5IntegrationCase: EvalCase = {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 2. /flow set and /flow unset update activeFlowId correctly
+    // 2. /workflow activate and /workflow deactivate update activeRunId correctly
     // ═════════════════════════════════════════════════════════════════
     {
       const flow = await engine.createWorkflowRun({
@@ -137,19 +137,19 @@ export const track5IntegrationCase: EvalCase = {
         intent: makeIntent(),
         plan: { name: "Active Plan", description: "Test", steps: [{ name: "A1", description: "A1" }] }
       });
-      const mockTaskflow = { activeFlowId: null as string | null, setActiveFlowId(id: string | null) { this.activeFlowId = id; } };
+      const mockWorkflow = { activeRunId: null as string | null, setActiveRunId(id: string | null) { this.activeRunId = id; } };
 
-      // Simulate /flow set
-      mockTaskflow.setActiveFlowId(flow.id);
-      assertions.push(assertEqual("flow-set-active", mockTaskflow.activeFlowId, flow.id));
+      // Simulate /workflow activate
+      mockWorkflow.setActiveRunId(flow.id);
+      assertions.push(assertEqual("workflow-activate-active-run", mockWorkflow.activeRunId, flow.id));
 
-      // Simulate /flow unset
-      mockTaskflow.setActiveFlowId(null);
-      assertions.push(assertEqual("flow-unset-active", mockTaskflow.activeFlowId, null));
+      // Simulate /workflow deactivate
+      mockWorkflow.setActiveRunId(null);
+      assertions.push(assertEqual("workflow-deactivate-active-run", mockWorkflow.activeRunId, null));
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // 3. /flow status works through the real session command bridge
+    // 3. /workflow status works through the real session command bridge
     // ═════════════════════════════════════════════════════════════════
     {
       const flow = await engine.createWorkflowRun({
@@ -159,10 +159,10 @@ export const track5IntegrationCase: EvalCase = {
       });
       await engine.startWorkflowRun(flow.id);
 
-      const result = await dispatcher.dispatch({ command: "/status", flowId: flow.id });
+      const result = await dispatcher.dispatch({ command: "/status", runId: flow.id });
       assertions.push(assertTrue("flow-status-ok", result.ok));
       if (result.ok) {
-        assertions.push(assertContains("flow-status-has-flowId", result.message, flow.id));
+        assertions.push(assertContains("workflow-status-has-runId", result.message, flow.id));
         assertions.push(assertContains("flow-status-has-state", result.message, "running"));
       }
     }
@@ -181,7 +181,7 @@ export const track5IntegrationCase: EvalCase = {
       // Dispatch /steer
       const steerResult = await dispatcher.dispatch({
         command: "/steer",
-        flowId: steerFlow.id,
+        runId: steerFlow.id,
         guidance: "Use deterministic mode",
         operator: "cli"
       });
@@ -224,7 +224,7 @@ export const track5IntegrationCase: EvalCase = {
 
       await dispatcher.dispatch({
         command: "/steer",
-        flowId: steerFlow2.id,
+        runId: steerFlow2.id,
         guidance: "Check idempotency",
         operator: "cli"
       });
@@ -260,7 +260,7 @@ export const track5IntegrationCase: EvalCase = {
 
       await dispatcher.dispatch({
         command: "/steer",
-        flowId: traceFlow.id,
+        runId: traceFlow.id,
         guidance: "Trace me",
         operator: "cli"
       });
@@ -274,7 +274,7 @@ export const track5IntegrationCase: EvalCase = {
       const stepObj = (await store.listWorkflowSteps(traceFlow.id))[0];
       await adapter.runTurn({ flow: flowObj, step: stepObj, text: "Run", channel: "cli" });
 
-      const traceResult = await dispatcher.dispatch({ command: "/trace", flowId: traceFlow.id });
+      const traceResult = await dispatcher.dispatch({ command: "/trace", runId: traceFlow.id });
       assertions.push(assertTrue("trace-ok", traceResult.ok));
       if (traceResult.ok) {
         assertions.push(assertContains("trace-has-consumed-steer", traceResult.message, "steer"));
@@ -286,7 +286,7 @@ export const track5IntegrationCase: EvalCase = {
     // ═════════════════════════════════════════════════════════════════
     {
       // We verify the structural wiring by checking that createRuntime's
-      // taskflow block uses instanceof SQLiteSessionDB and wires all services.
+      // workflow block uses instanceof SQLiteSessionDB and wires all services.
       const { createRuntime } = await import("../../runtime/create-runtime.js");
       const { SQLiteSessionDB: SQLiteSessionDBClass } = await import("../../session/sqlite-session-db.js");
 
@@ -299,14 +299,14 @@ export const track5IntegrationCase: EvalCase = {
           sessionDb: sqliteDb
         });
 
-        assertions.push(assertTrue("runtime-has-taskflow", rt.taskflow !== undefined));
-        if (rt.taskflow) {
-          assertions.push(assertTrue("taskflow-has-engine", rt.taskflow.engine !== undefined));
-          assertions.push(assertTrue("taskflow-has-store", rt.taskflow.store !== undefined));
-          assertions.push(assertTrue("taskflow-has-dispatcher", rt.taskflow.dispatcher !== undefined));
-          assertions.push(assertTrue("taskflow-has-processRegistry", rt.taskflow.processRegistry !== undefined));
-          assertions.push(assertTrue("taskflow-has-compactionService", rt.taskflow.compactionService !== undefined));
-          assertions.push(assertTrue("taskflow-has-adapter", rt.taskflow.adapter !== undefined));
+        assertions.push(assertTrue("runtime-has-workflow", rt.workflow !== undefined));
+        if (rt.workflow) {
+          assertions.push(assertTrue("workflow-has-engine", rt.workflow.engine !== undefined));
+          assertions.push(assertTrue("workflow-has-store", rt.workflow.store !== undefined));
+          assertions.push(assertTrue("workflow-has-dispatcher", rt.workflow.dispatcher !== undefined));
+          assertions.push(assertTrue("workflow-has-processRegistry", rt.workflow.processRegistry !== undefined));
+          assertions.push(assertTrue("workflow-has-compactionService", rt.workflow.compactionService !== undefined));
+          assertions.push(assertTrue("workflow-has-adapter", rt.workflow.adapter !== undefined));
         }
         await rt.dispose();
       } finally {
@@ -342,7 +342,7 @@ export const track5IntegrationCase: EvalCase = {
 
         // Now createRuntime should run restart recovery
         const rt = await createRuntime({ ...minimalRuntimeOptions, sessionDb: sqliteDb });
-        assertions.push(assertTrue("recovery-ran-on-startup", rt.taskflow !== undefined));
+        assertions.push(assertTrue("recovery-ran-on-startup", rt.workflow !== undefined));
 
         // WorkflowRun should be interrupted
         const recoveredFlow = await tfStore.getWorkflowRun(flow.id);
@@ -538,7 +538,7 @@ export const track5IntegrationCase: EvalCase = {
 
       const intResult = await procDispatcher.dispatch({
         command: "/interrupt",
-        flowId: pFlow.id,
+        runId: pFlow.id,
         reason: "test",
         operator: "cli"
       });
@@ -548,7 +548,7 @@ export const track5IntegrationCase: EvalCase = {
         assertions.push(assertTrue("interrupt-has-proc-count", intResult.message.includes("terminated")));
       }
 
-      const statusResult = await procDispatcher.dispatch({ command: "/status", flowId: pFlow.id });
+      const statusResult = await procDispatcher.dispatch({ command: "/status", runId: pFlow.id });
       if (statusResult.ok) {
         assertions.push(assertContains("status-has-interrupt-reason", statusResult.message, "interrupted"));
       }

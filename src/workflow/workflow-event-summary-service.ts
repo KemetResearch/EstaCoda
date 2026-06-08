@@ -1,5 +1,5 @@
 // WorkflowRun-safe event summary service for v0.8
-// Manual /compact and configurable automatic compaction.
+// Manual summary and configurable automatic summaries.
 // Only operates at safe boundaries. Never compacts durable flow truth.
 
 import type {
@@ -69,7 +69,7 @@ export class WorkflowEventSummaryService {
   }> {
     const flow = await this.#store.getWorkflowRun(flowId);
     if (!flow) {
-      return { ok: false, reason: "Flow not found", activeSteps: [], activeProcesses: 0, pendingApprovals: 0 };
+      return { ok: false, reason: "Workflow run not found", activeSteps: [], activeProcesses: 0, pendingApprovals: 0 };
     }
 
     const steps = await this.#store.listWorkflowSteps(flowId);
@@ -105,17 +105,17 @@ export class WorkflowEventSummaryService {
     if (!boundary.ok) {
       return {
         ok: false,
-        error: `Compaction rejected: ${boundary.reason}`,
+        error: `Workflow summary rejected: ${boundary.reason}`,
         beforeEventCount: 0,
         afterEventCount: 0,
         preservedSteps: boundary.activeSteps.length,
         preservedProcesses: boundary.activeProcesses,
         preservedApprovals: boundary.pendingApprovals,
         mode: "manual",
-        trigger: `/compact by ${operator ?? "unknown"}`
+        trigger: `summarize by ${operator ?? "unknown"}`
       };
     }
-    return this.#doCompact(flowId, "manual", `/compact by ${operator ?? "unknown"}`, /* persist */ true);
+    return this.#doCompact(flowId, "manual", `summarize by ${operator ?? "unknown"}`, /* persist */ true);
   }
 
   // ─── Automatic compaction ───
@@ -157,7 +157,7 @@ export class WorkflowEventSummaryService {
     if (!flow) {
       return {
         ok: false,
-        error: "Flow not found",
+        error: "Workflow run not found",
         beforeEventCount: 0,
         afterEventCount: 0,
         preservedSteps: 0,
@@ -236,7 +236,7 @@ export class WorkflowEventSummaryService {
         id: this.#id(),
         flowId,
         kind: "operator-compacted",
-        operator: mode === "manual" ? (trigger.replace("/compact by ", "")) : "system",
+        operator: mode === "manual" ? (trigger.replace("summarize by ", "")) : "system",
         command: "/compact",
         effect: "compacted",
         previousState: flow.status,

@@ -395,15 +395,15 @@ export type Runtime = {
   consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
   // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
-  taskflow?: {
+  workflow?: {
     engine: import("../workflow/workflow-engine.js").WorkflowEngine;
     store: import("../workflow/workflow-store.js").WorkflowStore;
     dispatcher: import("../workflow/workflow-command-dispatcher.js").WorkflowCommandDispatcher;
     processRegistry: import("../workflow/workflow-process-registry.js").WorkflowProcessRegistry;
     compactionService: import("../workflow/workflow-event-summary-service.js").WorkflowEventSummaryService;
     adapter: import("../workflow/workflow-agent-loop-adapter.js").WorkflowAgentLoopAdapter;
-    activeFlowId: string | null;
-    setActiveFlowId(flowId: string | null): void;
+    activeRunId: string | null;
+    setActiveRunId(runId: string | null): void;
     recoverFromRestart(): Promise<{
       interruptedFlows: number;
       recoveredLocks: number;
@@ -1102,7 +1102,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
 
   // ─── Workflow module v0.8 Integration ───
-  let taskflow: Runtime["taskflow"] | undefined;
+  let workflow: Runtime["workflow"] | undefined;
 
   // Only wire the workflow module when using SQLiteSessionDB (real persistence required)
   try {
@@ -1139,20 +1139,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // Non-critical diagnostic; do not write to stdout to avoid breaking CLI output contracts
         // eslint-disable-next-line no-console
         console.error(
-          `[TaskFlow] Restart recovery: ${recoveryResult.interrupted} flows interrupted, ${recoveryResult.staleLocksReleased} stale locks recovered.`
+          `[Workflow] Restart recovery: ${recoveryResult.interrupted} workflow runs interrupted, ${recoveryResult.staleLocksReleased} stale locks recovered.`
         );
       }
 
-      taskflow = {
+      workflow = {
         engine: workflowEngine,
         store: workflowStore,
         dispatcher,
         processRegistry,
         compactionService,
         adapter,
-        activeFlowId: null,
-        setActiveFlowId(flowId: string | null) {
-          this.activeFlowId = flowId;
+        activeRunId: null,
+        setActiveRunId(runId: string | null) {
+          this.activeRunId = runId;
         },
         async recoverFromRestart() {
           const result = await restartRecovery.recover();
@@ -1165,7 +1165,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   } catch {
     // Workflow module integration is best-effort for v0.8. Do not block runtime creation.
-    taskflow = undefined;
+    workflow = undefined;
   }
 
   return {
@@ -1228,12 +1228,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       activeTrustedWorkspace = trustedWorkspace;
 
       // If an active flow is set, route through the adapter
-      if (taskflow?.activeFlowId) {
-        const flow = await taskflow.store.getWorkflowRun(taskflow.activeFlowId);
+      if (workflow?.activeRunId) {
+        const flow = await workflow.store.getWorkflowRun(workflow.activeRunId);
         if (flow && flow.status === "running") {
-          const steps = await taskflow.store.listWorkflowSteps(flow.id);
+          const steps = await workflow.store.listWorkflowSteps(flow.id);
           const activeStep = steps.find((s) => s.status === "running");
-          const turnResult = await taskflow.adapter.runTurn({
+          const turnResult = await workflow.adapter.runTurn({
             flow,
             step: activeStep,
             text: input.text,
@@ -1366,7 +1366,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `tools: ${toolRegistry.list().length}`,
         `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
-        taskflow ? `taskflow: active (SQLite)` : undefined,
+        workflow ? `workflow: available (SQLite)` : undefined,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
     },
@@ -1381,7 +1381,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         toolCount: toolRegistry.list().length,
         mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
         mcpTotal: loadedMcpServers.length,
-        taskflowActive: taskflow !== undefined,
+        workflowAvailable: workflow !== undefined,
+        workflowRunActive: (workflow?.activeRunId ?? null) !== null,
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
@@ -1442,7 +1443,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         updateHint,
       });
     },
-    taskflow
+    workflow
   };
 }
 

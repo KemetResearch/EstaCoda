@@ -93,7 +93,7 @@ export const flowCompactionCase: EvalCase = {
       const flow = await buildTestFlow();
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("compact-rejected-running", !r.ok));
@@ -112,7 +112,7 @@ export const flowCompactionCase: EvalCase = {
 
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("compact-paused-ok", r.ok));
@@ -140,7 +140,7 @@ export const flowCompactionCase: EvalCase = {
       });
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-2",
       });
       assertions.push(assertTrue("compact-waiting-ok", r.ok));
@@ -154,7 +154,7 @@ export const flowCompactionCase: EvalCase = {
       await engine.interruptWorkflowRun(flow.id, "test interrupt");
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-3",
       });
       assertions.push(assertTrue("compact-interrupted-ok", r.ok));
@@ -171,7 +171,7 @@ export const flowCompactionCase: EvalCase = {
       }
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-4",
       });
       assertions.push(assertTrue("compact-between-steps-ok", r.ok));
@@ -203,7 +203,7 @@ export const flowCompactionCase: EvalCase = {
       });
       const r = await dispatcher.dispatch({
         command: "/compact",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-5",
       });
       assertions.push(assertTrue("compact-rejected-process", !r.ok));
@@ -322,7 +322,7 @@ export const flowCompactionCase: EvalCase = {
       await engine.requestWorkflowPause(flow.id, "test");
       await engine.applyWorkflowPauseAtBoundary(flow.id);
       const before = await store.getWorkflowRun(flow.id);
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-6" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-6" });
       const after = await store.getWorkflowRun(flow.id);
       assertions.push(assertEqual("preserve-flow-status", after?.status, before?.status));
       assertions.push(assertEqual("preserve-flow-id", after?.id, before?.id));
@@ -337,7 +337,7 @@ export const flowCompactionCase: EvalCase = {
       await engine.requestWorkflowPause(flow.id, "test");
       await engine.applyWorkflowPauseAtBoundary(flow.id);
       const beforeSteps = await store.listWorkflowSteps(flow.id);
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-7" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-7" });
       const afterSteps = await store.listWorkflowSteps(flow.id);
       assertions.push(assertEqual("preserve-step-count", afterSteps.length, beforeSteps.length));
       for (let i = 0; i < beforeSteps.length; i++) {
@@ -364,7 +364,7 @@ export const flowCompactionCase: EvalCase = {
       await engine.requestWorkflowPause(flow.id, "test");
       await engine.applyWorkflowPauseAtBoundary(flow.id);
       const beforeGates = await store.listWorkflowApprovalGates(flow.id);
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-8" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-8" });
       const afterGates = await store.listWorkflowApprovalGates(flow.id);
       assertions.push(assertEqual("preserve-approval-count", afterGates.length, beforeGates.length));
       assertions.push(assertEqual("preserve-approval-status", afterGates[0].status, beforeGates[0].status));
@@ -389,7 +389,7 @@ export const flowCompactionCase: EvalCase = {
       await engine.requestWorkflowPause(flow.id, "test");
       await engine.applyWorkflowPauseAtBoundary(flow.id);
       const beforeOpEvents = await store.listWorkflowOperatorEvents(flow.id);
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-9" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-9" });
       const afterOpEvents = await store.listWorkflowOperatorEvents(flow.id);
       // Operator events should be preserved (new compaction event added)
       assertions.push(assertTrue("preserve-operator-events", afterOpEvents.length >= beforeOpEvents.length));
@@ -405,7 +405,7 @@ export const flowCompactionCase: EvalCase = {
       const beforeSteps = await store.listWorkflowSteps(flow.id);
       const failedStep = beforeSteps.find((s) => s.id === stepA.id)!;
       assertions.push(assertEqual("pre-compact-failed", failedStep.status, "failed"));
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-10" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-10" });
       const afterSteps = await store.listWorkflowSteps(flow.id);
       const afterFailedStep = afterSteps.find((s) => s.id === stepA.id)!;
       assertions.push(assertEqual("preserve-failure-state", afterFailedStep.status, "failed"));
@@ -417,7 +417,7 @@ export const flowCompactionCase: EvalCase = {
     {
       const flow = await buildTestFlow();
       await engine.interruptWorkflowRun(flow.id, "test");
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-11" });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-11" });
       const flowEvents = await store.listWorkflowEvents(flow.id, { kind: "compacted" });
       assertions.push(assertEqual("durable-compact-event", flowEvents.length, 1));
       const opEvents = await store.listWorkflowOperatorEvents(flow.id, { kind: "operator-compacted" });
@@ -432,8 +432,8 @@ export const flowCompactionCase: EvalCase = {
     {
       const flow = await buildTestFlow();
       await engine.interruptWorkflowRun(flow.id, "test");
-      await dispatcher.dispatch({ command: "/compact", flowId: flow.id, operator: "op-12" });
-      const traceResult = await dispatcher.dispatch({ command: "/trace", flowId: flow.id });
+      await dispatcher.dispatch({ command: "/compact", runId: flow.id, operator: "op-12" });
+      const traceResult = await dispatcher.dispatch({ command: "/trace", runId: flow.id });
       assertions.push(assertTrue("trace-ok", traceResult.ok));
       if (traceResult.ok) {
         const message = traceResult.message;

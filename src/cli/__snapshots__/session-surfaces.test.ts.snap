@@ -24,7 +24,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -57,7 +57,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /untrust: Revoke workspace trust
 - /workspace.trust.status: Show whether the current workspace is trusted
 - /doctor: Run a quick in-session health check
-- /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+- /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
@@ -90,7 +90,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -123,7 +123,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /untrust: Revoke workspace trust
 - /workspace.trust.status: Show whether the current workspace is trusted
 - /doctor: Run a quick in-session health check
-- /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+- /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
@@ -156,7 +156,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -189,7 +189,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /flow: TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -253,7 +253,8 @@ exports[`Session surfaces — /status > renders in narrow width > status-narrow 
 │ skills: 3 (suggest)
 │ tools: 12
 │ mcp: 1/2
-│ taskflow: [2minactive[0m"
+│ workflow: [2munavailable[0m
+│ workflow run: [2minactive[0m"
 `;
 
 exports[`Session surfaces — /status > renders in no Unicode > status-no Unicode 1`] = `
@@ -263,7 +264,8 @@ exports[`Session surfaces — /status > renders in no Unicode > status-no Unicod
 | skills: 3 (suggest)
 | tools: 12
 | mcp: 1/2
-| taskflow: [2minactive[0m"
+| workflow: [2munavailable[0m
+| workflow run: [2minactive[0m"
 `;
 
 exports[`Session surfaces — /status > renders in no color > status-no color 1`] = `
@@ -273,7 +275,8 @@ exports[`Session surfaces — /status > renders in no color > status-no color 1`
 │ skills: 3 (suggest)
 │ tools: 12
 │ mcp: 1/2
-│ taskflow: inactive"
+│ workflow: unavailable
+│ workflow run: inactive"
 `;
 
 exports[`Session surfaces — /status > renders in plain > status-plain 1`] = `
@@ -283,7 +286,8 @@ security: adaptive
 skills: 3 (suggest)
 tools: 12
 mcp: 1/2
-taskflow: inactive"
+workflow: unavailable
+workflow run: inactive"
 `;
 
 exports[`Session surfaces — /status > renders in standard dark > status-standard dark 1`] = `
@@ -293,7 +297,8 @@ exports[`Session surfaces — /status > renders in standard dark > status-standa
 │ skills: 3 (suggest)
 │ tools: 12
 │ mcp: 1/2
-│ taskflow: [2minactive[0m"
+│ workflow: [2munavailable[0m
+│ workflow run: [2minactive[0m"
 `;
 
 exports[`Session surfaces — /status > renders in standard light > status-standard light 1`] = `
@@ -303,7 +308,8 @@ exports[`Session surfaces — /status > renders in standard light > status-stand
 │ skills: 3 (suggest)
 │ tools: 12
 │ mcp: 1/2
-│ taskflow: [2minactive[0m"
+│ workflow: [2munavailable[0m
+│ workflow run: [2minactive[0m"
 `;
 
 exports[`Session surfaces — /tools > renders in narrow width > tools-narrow width 1`] = `"• No tools match ""."`;
@@ -495,7 +501,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -530,7 +536,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -565,7 +571,7 @@ Name                     Description
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -600,7 +606,7 @@ Name                     Description
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -635,7 +641,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -670,7 +676,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/flow                    TaskFlow operator commands (status, pause, resume, steer, trace, etc.)
+/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session

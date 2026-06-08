@@ -1676,8 +1676,8 @@ export async function handleSlashCommand(input: {
     case "doctor":
       input.output.write(`${await renderRuntimeDoctor(input.runtime)}\n\n`);
       return false;
-    case "flow": {
-      const result = await handleTaskFlowCommand(input, args);
+    case "workflow": {
+      const result = await handleWorkflowCommand(input, args);
       input.output.write(`${result}\n\n`);
       return false;
     }
@@ -1946,52 +1946,52 @@ function createNoticeLabelFormatter(
   return (value) => `\u001b[1m${value}\u001b[22m`;
 }
 
-async function handleTaskFlowCommand(input: {
+async function handleWorkflowCommand(input: {
   runtime: Runtime;
   output: NodeJS.WritableStream;
 }, args: string[]): Promise<string> {
-  if (input.runtime.taskflow === undefined) {
-    return "TaskFlow is not available. It requires SQLite session persistence.";
+  if (input.runtime.workflow === undefined) {
+    return "Workflow is not available. It requires SQLite session persistence.";
   }
 
-  const { taskflow } = input.runtime;
+  const { workflow } = input.runtime;
   const [subcommand = "", ...rest] = args;
 
   switch (subcommand) {
     case "":
     case "help":
       return [
-        "TaskFlow operator commands (v0.8)",
-        "  /flow status [flowId]           Show flow status (active flow if omitted)",
-        "  /flow pause <flowId> [reason]   Request pause at next safe boundary",
-        "  /flow resume <flowId>           Resume a paused/interrupted/waiting flow",
-        "  /flow interrupt <flowId> [r]    Interrupt a running flow",
-        "  /flow cancel <flowId> [reason]  Cancel a flow",
-        "  /flow steer <flowId> <text...>  Inject operator guidance into a flow",
-        "  /flow approve <stepId>          Approve a pending approval gate",
-        "  /flow reject <stepId> [reason]  Reject a pending approval gate",
-        "  /flow retry <stepId>            Retry a failed step",
-        "  /flow skip <stepId> [reason]    Skip a skippable step",
-        "  /flow checkpoint <flowId> <n>   Create a named checkpoint",
-        "  /flow trace [flowId] [limit]    Show flow trace",
-        "  /flow compact <flowId>          Compact flow events",
-        "  /flow set <flowId>              Set active flow for this session",
-        "  /flow unset                     Clear active flow"
+        "Workflow operator commands (v0.8)",
+        "  /workflow status [runId]           Show workflow status (active workflow if omitted)",
+        "  /workflow pause <runId> [reason]   Request pause at next safe boundary",
+        "  /workflow resume <runId>           Resume a paused/interrupted/waiting workflow",
+        "  /workflow interrupt <runId> [r]    Interrupt a running workflow",
+        "  /workflow cancel <runId> [reason]  Cancel a workflow",
+        "  /workflow steer <runId> <text...>  Inject operator guidance into a workflow",
+        "  /workflow approve <stepId>         Approve a pending approval gate",
+        "  /workflow reject <stepId> [reason] Reject a pending approval gate",
+        "  /workflow retry <stepId>           Retry a failed step",
+        "  /workflow skip <stepId> [reason]   Skip a skippable step",
+        "  /workflow checkpoint <runId> <n>   Create a named checkpoint",
+        "  /workflow trace [runId] [limit]    Show workflow trace",
+        "  /workflow summarize <runId>        Summarize workflow events",
+        "  /workflow activate <runId>         Activate workflow for this session",
+        "  /workflow deactivate               Clear active workflow"
       ].join("\n");
 
     case "status": {
-      const flowId = rest[0] ?? taskflow.activeFlowId ?? undefined;
-      if (flowId === undefined) return "No active flow. Use /flow set <flowId> or pass a flow ID.";
-      const result = await taskflow.dispatcher.dispatch({ command: "/status", flowId });
+      const runId = rest[0] ?? workflow.activeRunId ?? undefined;
+      if (runId === undefined) return "No active workflow. Use /workflow activate <runId> or pass a run ID.";
+      const result = await workflow.dispatcher.dispatch({ command: "/status", runId: runId });
       return result.ok ? result.message : `Error: ${result.error}`;
     }
 
     case "pause": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow pause <flowId> [reason]";
-      const result = await taskflow.dispatcher.dispatch({
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow pause <runId> [reason]";
+      const result = await workflow.dispatcher.dispatch({
         command: "/pause",
-        flowId,
+        runId: runId,
         reason: rest.slice(1).join(" ") || undefined,
         operator: "cli"
       });
@@ -1999,22 +1999,22 @@ async function handleTaskFlowCommand(input: {
     }
 
     case "resume": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow resume <flowId>";
-      const result = await taskflow.dispatcher.dispatch({
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow resume <runId>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/resume",
-        flowId,
+        runId: runId,
         operator: "cli"
       });
       return result.ok ? result.message : `Error: ${result.error}`;
     }
 
     case "interrupt": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow interrupt <flowId> [reason]";
-      const result = await taskflow.dispatcher.dispatch({
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow interrupt <runId> [reason]";
+      const result = await workflow.dispatcher.dispatch({
         command: "/interrupt",
-        flowId,
+        runId: runId,
         reason: rest.slice(1).join(" ") || undefined,
         operator: "cli"
       });
@@ -2022,11 +2022,11 @@ async function handleTaskFlowCommand(input: {
     }
 
     case "cancel": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow cancel <flowId> [reason]";
-      const result = await taskflow.dispatcher.dispatch({
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow cancel <runId> [reason]";
+      const result = await workflow.dispatcher.dispatch({
         command: "/cancel",
-        flowId,
+        runId: runId,
         reason: rest.slice(1).join(" ") || undefined,
         operator: "cli"
       });
@@ -2034,13 +2034,13 @@ async function handleTaskFlowCommand(input: {
     }
 
     case "steer": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow steer <flowId> <guidance>";
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow steer <runId> <guidance>";
       const guidance = rest.slice(1).join(" ");
-      if (guidance.length === 0) return "Usage: /flow steer <flowId> <guidance>";
-      const result = await taskflow.dispatcher.dispatch({
+      if (guidance.length === 0) return "Usage: /workflow steer <runId> <guidance>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/steer",
-        flowId,
+        runId: runId,
         guidance,
         operator: "cli"
       });
@@ -2049,8 +2049,8 @@ async function handleTaskFlowCommand(input: {
 
     case "approve": {
       const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /flow approve <stepId>";
-      const result = await taskflow.dispatcher.dispatch({
+      if (stepId === undefined) return "Usage: /workflow approve <stepId>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/approve",
         stepId,
         operator: "cli"
@@ -2060,8 +2060,8 @@ async function handleTaskFlowCommand(input: {
 
     case "reject": {
       const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /flow reject <stepId> [reason]";
-      const result = await taskflow.dispatcher.dispatch({
+      if (stepId === undefined) return "Usage: /workflow reject <stepId> [reason]";
+      const result = await workflow.dispatcher.dispatch({
         command: "/reject",
         stepId,
         reason: rest.slice(1).join(" ") || undefined,
@@ -2072,8 +2072,8 @@ async function handleTaskFlowCommand(input: {
 
     case "retry": {
       const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /flow retry <stepId>";
-      const result = await taskflow.dispatcher.dispatch({
+      if (stepId === undefined) return "Usage: /workflow retry <stepId>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/retry",
         stepId,
         operator: "cli"
@@ -2083,8 +2083,8 @@ async function handleTaskFlowCommand(input: {
 
     case "skip": {
       const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /flow skip <stepId> [reason]";
-      const result = await taskflow.dispatcher.dispatch({
+      if (stepId === undefined) return "Usage: /workflow skip <stepId> [reason]";
+      const result = await workflow.dispatcher.dispatch({
         command: "/skip",
         stepId,
         reason: rest.slice(1).join(" ") || undefined,
@@ -2094,13 +2094,13 @@ async function handleTaskFlowCommand(input: {
     }
 
     case "checkpoint": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow checkpoint <flowId> <name>";
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow checkpoint <runId> <name>";
       const name = rest.slice(1).join(" ");
-      if (name.length === 0) return "Usage: /flow checkpoint <flowId> <name>";
-      const result = await taskflow.dispatcher.dispatch({
+      if (name.length === 0) return "Usage: /workflow checkpoint <runId> <name>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/checkpoint",
-        flowId,
+        runId: runId,
         name,
         operator: "cli"
       });
@@ -2108,44 +2108,44 @@ async function handleTaskFlowCommand(input: {
     }
 
     case "trace": {
-      const flowId = rest[0] ?? taskflow.activeFlowId ?? undefined;
-      const limit = flowId !== undefined && rest[1] !== undefined ? parseInt(rest[1], 10) : undefined;
-      if (flowId === undefined) return "No active flow. Use /flow set <flowId> or pass a flow ID.";
-      const result = await taskflow.dispatcher.dispatch({
+      const runId = rest[0] ?? workflow.activeRunId ?? undefined;
+      const limit = runId !== undefined && rest[1] !== undefined ? parseInt(rest[1], 10) : undefined;
+      if (runId === undefined) return "No active workflow. Use /workflow activate <runId> or pass a run ID.";
+      const result = await workflow.dispatcher.dispatch({
         command: "/trace",
-        flowId,
+        runId: runId,
         limit: Number.isNaN(limit) ? undefined : limit
       });
       return result.ok ? result.message : `Error: ${result.error}`;
     }
 
-    case "compact": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow compact <flowId>";
-      const result = await taskflow.dispatcher.dispatch({
+    case "summarize": {
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow summarize <runId>";
+      const result = await workflow.dispatcher.dispatch({
         command: "/compact",
-        flowId,
+        runId: runId,
         operator: "cli"
       });
       return result.ok ? result.message : `Error: ${result.error}`;
     }
 
-    case "set": {
-      const flowId = rest[0];
-      if (flowId === undefined) return "Usage: /flow set <flowId>";
-      const flow = await taskflow.store.getWorkflowRun(flowId);
-      if (flow === null) return `Flow not found: ${flowId}`;
-      taskflow.setActiveFlowId(flowId);
-      return `Active flow set to ${flowId} (status: ${flow.status}).`;
+    case "activate": {
+      const runId = rest[0];
+      if (runId === undefined) return "Usage: /workflow activate <runId>";
+      const run = await workflow.store.getWorkflowRun(runId);
+      if (run === null) return `Workflow run not found: ${runId}`;
+      workflow.setActiveRunId(runId);
+      return `Activated workflow: ${runId}`;
     }
 
-    case "unset": {
-      taskflow.setActiveFlowId(null);
-      return "Active flow cleared. Normal agent mode.";
+    case "deactivate": {
+      workflow.setActiveRunId(null);
+      return "Active workflow cleared. Normal agent mode.";
     }
 
     default:
-      return `Unknown flow command: ${subcommand}\nUse /flow help for available commands.`;
+      return `Unknown workflow command: ${subcommand}\nUse /workflow help for available commands.`;
   }
 }
 

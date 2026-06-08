@@ -113,11 +113,11 @@ export class WorkflowEngine {
 
   async startWorkflowRun(flowId: WorkflowRunId): Promise<StartWorkflowRunResult> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) return { ok: false, error: "Flow not found" };
-    if (flow.status !== "pending") return { ok: false, error: `Cannot start flow in state ${flow.status}` };
+    if (!flow) return { ok: false, error: "Workflow run not found" };
+    if (flow.status !== "pending") return { ok: false, error: `Cannot start workflow run in state ${flow.status}` };
 
     const acquired = await this.#lockService.acquire(flowId, this.#ownerId);
-    if (!acquired) return { ok: false, error: "Could not acquire flow lock" };
+    if (!acquired) return { ok: false, error: "Could not acquire workflow run lock" };
 
     try {
       await this.#transitionFlow(flowId, "running", { from: "pending" });
@@ -148,7 +148,7 @@ export class WorkflowEngine {
 
   async completeWorkflowRun(flowId: WorkflowRunId): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     await this.#transitionFlow(flowId, "completed", { from: flow.status as WorkflowRunState });
     await this.#lockService.release(flowId, this.#ownerId);
@@ -159,7 +159,7 @@ export class WorkflowEngine {
 
   async failWorkflowRun(flowId: WorkflowRunId, reason?: string): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     await this.#transitionFlow(flowId, "failed", { from: flow.status as WorkflowRunState, reason });
     await this.#lockService.release(flowId, this.#ownerId);
@@ -170,7 +170,7 @@ export class WorkflowEngine {
 
   async cancelWorkflowRun(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     if (isWorkflowRunStateTerminal(flow.status)) {
       return flow;
@@ -188,7 +188,7 @@ export class WorkflowEngine {
       await this.#transitionFlowInTx(tx, flowId, "cancelled", { from: flow.status as WorkflowRunState, reason });
 
       if (operator) {
-        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-cancelled", operator, "/cancel", "Flow cancelled", flow.status, "cancelled", { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-cancelled", operator, "/cancel", "Workflow run cancelled", flow.status, "cancelled", { reason }));
       }
     });
 
@@ -208,7 +208,7 @@ export class WorkflowEngine {
     onFailure?: "stop" | "retry" | "skip" | "escalate";
   }): Promise<WorkflowStep> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     const steps = await this.#store.listWorkflowSteps(flowId);
     const index = steps.length;
@@ -379,10 +379,10 @@ export class WorkflowEngine {
 
   async requestWorkflowPause(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     if (flow.status !== "running") {
-      throw new Error(`Cannot pause flow in state ${flow.status}`);
+      throw new Error(`Cannot pause workflow run in state ${flow.status}`);
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
@@ -404,7 +404,7 @@ export class WorkflowEngine {
 
   async applyWorkflowPauseAtBoundary(flowId: WorkflowRunId): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     await this.#transitionFlow(flowId, "paused", { from: "running", reason: flow.pauseReason ?? "Paused at safe boundary" });
 
@@ -421,10 +421,10 @@ export class WorkflowEngine {
 
   async resumeWorkflowRun(flowId: WorkflowRunId, operator?: string): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     if (flow.status !== "paused" && flow.status !== "interrupted" && flow.status !== "waiting") {
-      throw new Error(`Cannot resume flow in state ${flow.status}`);
+      throw new Error(`Cannot resume workflow run in state ${flow.status}`);
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
@@ -443,7 +443,7 @@ export class WorkflowEngine {
       }
 
       if (operator) {
-        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-resumed", operator, "/resume", "Flow resumed", flow.status, "running"));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-resumed", operator, "/resume", "Workflow run resumed", flow.status, "running"));
       }
     });
 
@@ -454,10 +454,10 @@ export class WorkflowEngine {
 
   async interruptWorkflowRun(flowId: WorkflowRunId, reason?: string, operator?: string): Promise<WorkflowRun> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     if (flow.status !== "running" && flow.status !== "paused" && flow.status !== "waiting") {
-      throw new Error(`Cannot interrupt flow in state ${flow.status}`);
+      throw new Error(`Cannot interrupt workflow run in state ${flow.status}`);
     }
 
     await this.#store.atomicTransition(flowId, async (tx) => {
@@ -472,7 +472,7 @@ export class WorkflowEngine {
       await this.#transitionFlowInTx(tx, flowId, "interrupted", { from: flow.status as WorkflowRunState, reason });
 
       if (operator) {
-        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-interrupted", operator, "/interrupt", "Flow interrupted", flow.status, "interrupted", { reason }));
+        await tx.appendWorkflowOperatorEvent(this.#makeWorkflowOperatorEvent(flowId, undefined, "operator-interrupted", operator, "/interrupt", "Workflow run interrupted", flow.status, "interrupted", { reason }));
       }
     });
 
@@ -644,7 +644,7 @@ export class WorkflowEngine {
 
     const flowId = step.flowId;
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     const now = this.#now().toISOString();
     const retryWorkflowStep: WorkflowStep = {
@@ -702,7 +702,7 @@ export class WorkflowEngine {
 
   async createWorkflowCheckpoint(flowId: WorkflowRunId, name: string, description?: string, operator?: string): Promise<WorkflowCheckpoint> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     const steps = await this.#store.listWorkflowSteps(flowId);
     const stepStates: Record<WorkflowStepId, WorkflowStepState> = {};
@@ -764,7 +764,7 @@ export class WorkflowEngine {
 
   async registerWorkflowProcess(flowId: WorkflowRunId, stepId: WorkflowStepId, process: Omit<WorkflowProcess, "id" | "flowId" | "stepId" | "startedAt">): Promise<WorkflowProcess> {
     const flow = await this.#store.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     const fullProcess: WorkflowProcess = {
       id: this.#id(),
@@ -807,7 +807,7 @@ export class WorkflowEngine {
   async #transitionFlowInTx(tx: WorkflowStore, flowId: WorkflowRunId, to: WorkflowRunState, options: { from: WorkflowRunState; reason?: string }): Promise<void> {
     validateWorkflowRunTransition(options.from, to);
     const flow = await tx.getWorkflowRun(flowId);
-    if (!flow) throw new Error("Flow not found");
+    if (!flow) throw new Error("Workflow run not found");
 
     // Double-check current state hasn't changed
     if (flow.status !== options.from) {

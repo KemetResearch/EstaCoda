@@ -144,7 +144,8 @@ function fakeStatusViewModel(): ViewModel {
     skillAutonomy: "suggest",
     toolCount: 12,
     mcp: { active: 1, total: 2 },
-    taskflowActive: false,
+    workflowAvailable: false,
+    workflowRunActive: false,
     warnings: [],
   };
 }

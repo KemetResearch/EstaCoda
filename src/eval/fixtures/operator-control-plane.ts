@@ -94,11 +94,11 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/status",
-        flowId: flow.id,
+        runId: flow.id,
       });
       assertions.push(assertTrue("status-ok", r.ok));
       if (r.ok) {
-        assertions.push(assertEqual("status-flowId", (r.data as any)?.view?.flowId, flow.id));
+        assertions.push(assertEqual("status-runId", (r.data as any)?.view?.runId, flow.id));
         assertions.push(assertTrue("status-canPause", (r.data as any)?.view?.canPause));
       }
     }
@@ -107,7 +107,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/status",
-        flowId: "no-such-flow",
+        runId: "no-such-flow",
       });
       assertions.push(assertTrue("status-notfound-fails", !r.ok));
       if (!r.ok) {
@@ -121,7 +121,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/pause",
-        flowId: flow.id,
+        runId: flow.id,
         reason: "maintenance",
         operator: "op-1",
       });
@@ -139,7 +139,7 @@ export const operatorControlPlaneCase: EvalCase = {
 
       const r = await dispatcher.dispatch({
         command: "/resume",
-        flowId: flow.id,
+        runId: flow.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("resume-ok", r.ok));
@@ -153,7 +153,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/steer",
-        flowId: flow.id,
+        runId: flow.id,
         guidance: "Switch to plan B",
         operator: "op-1",
       });
@@ -167,7 +167,7 @@ export const operatorControlPlaneCase: EvalCase = {
       await engine.cancelWorkflowRun(flow.id);
       const r = await dispatcher.dispatch({
         command: "/steer",
-        flowId: flow.id,
+        runId: flow.id,
         guidance: "Should fail",
         operator: "op-1",
       });
@@ -342,7 +342,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/checkpoint",
-        flowId: flow.id,
+        runId: flow.id,
         name: "mid-flight",
         operator: "op-1",
       });
@@ -360,7 +360,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/trace",
-        flowId: flow.id,
+        runId: flow.id,
         limit: 10,
       });
       assertions.push(assertTrue("trace-ok", r.ok));
@@ -373,7 +373,7 @@ export const operatorControlPlaneCase: EvalCase = {
     {
       const r = await dispatcher.dispatch({
         command: "/trace",
-        flowId: "no-such-flow",
+        runId: "no-such-flow",
       });
       assertions.push(assertTrue("trace-notfound-fails", !r.ok));
     }
@@ -395,7 +395,7 @@ export const operatorControlPlaneCase: EvalCase = {
 
       const r = await dispatcher.dispatch({
         command: "/cancel",
-        flowId: cancelWorkflowRun.id,
+        runId: cancelWorkflowRun.id,
         operator: "op-1",
       });
       assertions.push(assertTrue("cancel-ok", r.ok));
@@ -430,7 +430,7 @@ export const operatorControlPlaneCase: EvalCase = {
 
       const r = await dispatcher.dispatch({
         command: "/interrupt",
-        flowId: intFlow.id,
+        runId: intFlow.id,
         reason: "Operator requested",
         operator: "op-1",
       });

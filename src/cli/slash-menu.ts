@@ -43,7 +43,7 @@ const implementedSlashCommands = new Set([
   "untrust",
   "workspace.trust.status",
   "doctor",
-  "flow",
+  "workflow",
   "handoff",
   "clear",
   "exit",
