@@ -76,6 +76,37 @@ export type SkillObservationRecord = {
   evidence?: Record<string, unknown>;
 };
 
+export type SkillLearningCandidate =
+  | {
+      id: string;
+      kind: "selected_skill_refinement";
+      selectedSkill: string;
+      evidenceIds: string[];
+      suggestedTarget: "skill_patch" | "routing_metadata_update";
+      reason: string;
+      confidence: number;
+      sessionId?: string;
+      promptHash?: string;
+      createdAt: string;
+    }
+  | {
+      id: string;
+      kind: "new_or_missing_playbook";
+      evidenceIds: string[];
+      suggestedTarget: "skill_create" | "routing_metadata_update";
+      reason: string;
+      confidence: number;
+      sessionId?: string;
+      promptHash?: string;
+      createdAt: string;
+    };
+
+export type SkillLearningCandidateInput =
+  | (Omit<Extract<SkillLearningCandidate, { kind: "selected_skill_refinement" }>, "id" | "createdAt" | "confidence"> &
+      Partial<Pick<SkillLearningCandidate, "id" | "createdAt" | "confidence">>)
+  | (Omit<Extract<SkillLearningCandidate, { kind: "new_or_missing_playbook" }>, "id" | "createdAt" | "confidence"> &
+      Partial<Pick<SkillLearningCandidate, "id" | "createdAt" | "confidence">>);
+
 export type SkillPatchOperation =
   | {
       type: "json_frontmatter_patch";
@@ -373,6 +404,21 @@ export class SkillEvolutionStore {
     };
     await this.#appendJsonl("observations.jsonl", observation);
     return observation;
+  }
+
+  async appendLearningCandidate(input: SkillLearningCandidateInput): Promise<SkillLearningCandidate> {
+    const candidate = {
+      ...input,
+      id: input.id ?? `learn_${randomUUID()}`,
+      confidence: clampConfidence(input.confidence ?? 0.5),
+      createdAt: input.createdAt ?? this.#nowIso()
+    } as SkillLearningCandidate;
+    await this.#appendJsonl("learning-candidates.jsonl", candidate);
+    return candidate;
+  }
+
+  async listLearningCandidates(): Promise<SkillLearningCandidate[]> {
+    return this.#readJsonl<SkillLearningCandidate>("learning-candidates.jsonl");
   }
 
   async proposePatch(input: {

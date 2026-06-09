@@ -850,7 +850,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: skillRegistry,
     localSkillsRoot,
     storePath: skillLearningStorePath,
-    sessionDb
+    sessionDb,
+    skillEvolutionStore
   });
   const memoryPromptContextBuilder = new MemoryPromptContextBuilder({
     store: memoryStore,
@@ -1102,6 +1103,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillConfig: options.skillConfig,
     skillLearningManager,
     skillEvolutionStore,
+    agentEvolutionPolicy,
     ui: options.ui,
     agentProfile: options.agentProfile
   });

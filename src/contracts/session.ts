@@ -532,6 +532,11 @@ export type SessionEvent =
         requiredToolsets: string[];
         bounded: boolean;
         status: "observed" | "candidate" | "created";
+        evidenceIds?: string[];
+        candidateId?: string;
+        candidateKind?: string;
+        promptHash?: string;
+        selectedSkillName?: string;
         createdSkillName?: string;
         createdSkillPath?: string;
         updatedAt: string;
