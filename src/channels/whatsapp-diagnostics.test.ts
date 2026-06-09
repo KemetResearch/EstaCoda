@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,5 +43,76 @@ describe("getWhatsAppGatewayDiagnostics", () => {
         process.env.ESTACODA_HOME = previousEstacodaHome;
       }
     }
+  });
+
+  it("reports bridge package readiness without importing root Baileys", async () => {
+    const homeDir = join(tempDir, "home");
+    const bridgeDir = join(tempDir, "bridge");
+    await mkdir(join(homeDir, ".estacoda", "whatsapp-auth"), { recursive: true });
+    await mkdir(join(bridgeDir, "node_modules", "@whiskeysockets", "baileys"), { recursive: true });
+    await mkdir(join(bridgeDir, "node_modules", "@hapi", "boom"), { recursive: true });
+    await writeFile(join(bridgeDir, "package.json"), JSON.stringify({
+      dependencies: {
+        "@whiskeysockets/baileys": "^7.0.0-rc.9",
+        "@hapi/boom": "^9.1.4"
+      }
+    }), "utf8");
+    await writeFile(join(bridgeDir, "package-lock.json"), "{}\n", "utf8");
+    await writeFile(join(bridgeDir, "bridge.js"), "export {};\n", "utf8");
+    await writeFile(join(bridgeDir, "README.md"), "# bridge\n", "utf8");
+    await writeFile(join(bridgeDir, "node_modules", "@whiskeysockets", "baileys", "package.json"), "{}\n", "utf8");
+    await writeFile(join(bridgeDir, "node_modules", "@hapi", "boom", "package.json"), "{}\n", "utf8");
+
+    const diagnostics = await getWhatsAppGatewayDiagnostics({ homeDir, bridgeDir });
+
+    expect(diagnostics.bridgePackagePresent).toBe(true);
+    expect(diagnostics.bridgeLockfilePresent).toBe(true);
+    expect(diagnostics.bridgeEntrypointPresent).toBe(true);
+    expect(diagnostics.bridgeReadmePresent).toBe(true);
+    expect(diagnostics.bridgeDependenciesInstalled).toBe(true);
+    expect(diagnostics.missing).toEqual([]);
+  });
+
+  it("finds the default bridge package when commands run outside the package root", async () => {
+    const homeDir = join(tempDir, "home");
+    const workspaceDir = join(tempDir, "workspace");
+    await mkdir(join(homeDir, ".estacoda", "whatsapp-auth"), { recursive: true });
+    await mkdir(workspaceDir, { recursive: true });
+
+    const previousCwd = process.cwd();
+    process.chdir(workspaceDir);
+    try {
+      const diagnostics = await getWhatsAppGatewayDiagnostics({ homeDir });
+
+      expect(diagnostics.bridgeDir).not.toBe(join(workspaceDir, "scripts", "whatsapp-bridge"));
+      expect(diagnostics.bridgePackagePresent).toBe(true);
+      expect(diagnostics.bridgeLockfilePresent).toBe(true);
+      expect(diagnostics.bridgeEntrypointPresent).toBe(true);
+      expect(diagnostics.bridgeReadmePresent).toBe(true);
+      expect(diagnostics.ready).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it("reports missing bridge dependencies clearly", async () => {
+    const homeDir = join(tempDir, "home");
+    const bridgeDir = join(tempDir, "bridge");
+    await mkdir(join(homeDir, ".estacoda", "whatsapp-auth"), { recursive: true });
+    await mkdir(bridgeDir, { recursive: true });
+    await writeFile(join(bridgeDir, "package.json"), JSON.stringify({
+      dependencies: {
+        "@whiskeysockets/baileys": "^7.0.0-rc.9"
+      }
+    }), "utf8");
+    await writeFile(join(bridgeDir, "package-lock.json"), "{}\n", "utf8");
+    await writeFile(join(bridgeDir, "bridge.js"), "export {};\n", "utf8");
+    await writeFile(join(bridgeDir, "README.md"), "# bridge\n", "utf8");
+
+    const diagnostics = await getWhatsAppGatewayDiagnostics({ homeDir, bridgeDir });
+
+    expect(diagnostics.bridgeDependenciesInstalled).toBe(false);
+    expect(diagnostics.statusLabel).toBe("bridge dependencies missing");
+    expect(diagnostics.missing).toContain("bridgeDependencies");
   });
 });

@@ -518,14 +518,15 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     kv("Experimental gate", data.whatsappExperimental ? "open" : "closed"),
   ];
   if (data.whatsappExperimental) {
-    waEntries.push(kv("Baileys available", data.whatsapp.baileysAvailable ? "yes" : "no"));
+    waEntries.push(kv("Bridge package", data.whatsapp.bridgePackagePresent ? "present" : "missing"));
+    waEntries.push(kv("Bridge dependencies", data.whatsapp.bridgeDependenciesInstalled ? "installed" : "missing"));
     waEntries.push(kv("Auth dir writable", data.whatsapp.authDirWritable ? "yes" : "no"));
-    if (!data.whatsapp.baileysAvailable) {
-      waEntries.push(kv("Baileys", "not installed", "warn"));
+    if (!data.whatsapp.bridgeDependenciesInstalled) {
+      waEntries.push(kv("Bridge dependencies", "not installed", "warn"));
       warnings.push(buildWarningErrorViewModel({
         severity: "warn",
         title: "WhatsApp",
-        message: "@whiskeysockets/baileys not installed",
+        message: "WhatsApp bridge dependencies not installed",
       }));
     }
   }
@@ -863,7 +864,10 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Experimental gate", config.experimental ? "open" : "closed"),
             kv("Ready", diag.ready ? "yes" : "no"),
             kv("Status", diag.statusLabel),
-            kv("Baileys available", diag.baileysAvailable ? "yes" : "no"),
+            kv("Bridge package", diag.bridgePackagePresent ? "present" : "missing"),
+            kv("Bridge lockfile", diag.bridgeLockfilePresent ? "present" : "missing"),
+            kv("Bridge entrypoint", diag.bridgeEntrypointPresent ? "present" : "missing"),
+            kv("Bridge dependencies", diag.bridgeDependenciesInstalled ? "installed" : "missing"),
             kv("Auth dir", diag.authDir),
             kv("Auth dir writable", diag.authDirWritable ? "yes" : "no"),
             kv("Allowed users", (config.allowedUsers ?? []).join(", ") || "none"),

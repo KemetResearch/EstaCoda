@@ -1,0 +1,20 @@
+{
+  "name": "@estacoda/whatsapp-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated WhatsApp transport bridge for EstaCoda.",
+  "main": "bridge.js",
+  "scripts": {
+    "test": "node --check bridge.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^9.1.4",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "pino": "^10.1.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -928,20 +928,21 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         }
         case "whatsapp": {
           const whatsapp = config.channels.whatsapp;
-          const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+          const authDir = whatsapp.authDir ?? join(profilePaths.gatewayStatePath, "whatsapp-auth");
+          const bridgeStatePath = join(authDir, "bridge-state.json");
           adapter = options.factories?.createWhatsAppAdapter
             ? options.factories.createWhatsAppAdapter({
                 authDir,
                 allowedUsers: whatsapp.allowedUsers,
-                pairingMode: whatsapp.pairingMode ?? "qr",
-                pairingCodePhoneNumber: whatsapp.pairingCodePhoneNumber,
+                experimental: whatsapp.experimental,
+                bridgeStatePath,
                 mediaRoot,
               })
             : new WhatsAppAdapter({
                 authDir,
                 allowedUsers: whatsapp.allowedUsers,
-                pairingMode: whatsapp.pairingMode ?? "qr",
-                pairingCodePhoneNumber: whatsapp.pairingCodePhoneNumber,
+                experimental: whatsapp.experimental,
+                bridgeStatePath,
                 mediaRoot,
               });
           router.registerAdapter(adapter);

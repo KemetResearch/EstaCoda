@@ -52,7 +52,7 @@ export const BASE_CAPABILITIES: Record<
     implementationStatus: "present_not_live_proven",
   },
   whatsapp: {
-    inboundMode: "websocket",
+    inboundMode: "polling",
     outboundMode: "push",
     supportsAttachments: false,
     supportsThreads: false,

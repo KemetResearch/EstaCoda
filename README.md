@@ -135,6 +135,8 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`.
 | Email | Present, not live-proven |
 | WhatsApp | Experimental-only — gated behind `experimental: true` |
 
+WhatsApp transport dependencies are isolated under `scripts/whatsapp-bridge/` so the root runtime does not install or import Baileys. The bridge package is managed separately and is not part of the root pnpm workspace.
+
 ### Other Capabilities
 
 - **Browser automation**: local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. browser-use, Firecrawl, and Camofox remain registered deferred providers.
