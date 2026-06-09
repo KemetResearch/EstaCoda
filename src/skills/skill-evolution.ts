@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillOutcome } from "../contracts/memory.js";
+import type { AgentEvolutionMode } from "../contracts/agent-evolution.js";
 import type {
   LoadedSkill,
   SkillDefinition,
@@ -122,6 +123,31 @@ export type SkillPatchOperation =
     };
 
 export type SkillPatchRiskLevel = "low" | "medium" | "high";
+export const PHASE_1A_GOVERNED_PROPOSAL_CHANGE_KINDS = [
+  "skill_patch",
+  "skill_create",
+  "routing_metadata_update"
+] as const;
+export type GovernedProposalChangeKind = typeof PHASE_1A_GOVERNED_PROPOSAL_CHANGE_KINDS[number];
+export type GovernedProposalTargetSurface = "skill" | "routing_metadata";
+export type GovernedProposalApprovalState =
+  | "not_required"
+  | "required"
+  | "approved"
+  | "rejected";
+export type GovernedProposalEvalPlan = {
+  command?: string;
+  constraintGates?: string[];
+  expectedMetrics?: string[];
+};
+export type GovernedProposalPolicyDecision = {
+  mode: AgentEvolutionMode;
+  createProposals: boolean;
+  shadowOnly: boolean;
+  allowed: boolean;
+  requiresApproval: boolean;
+  reason?: string;
+};
 
 export type SkillPatchProposal = {
   id: string;
@@ -138,13 +164,55 @@ export type SkillPatchProposal = {
   sourceTrust: SkillSourceTrust;
   mayPromoteAutomatically: boolean;
   requiresHumanApproval: boolean;
-  patch: SkillPatchOperation;
+  patch?: SkillPatchOperation;
+  changeKind?: GovernedProposalChangeKind;
+  targetSurface?: GovernedProposalTargetSurface;
+  affectedSurface?: string;
+  affectedFiles?: string[];
+  evidenceIds?: string[];
+  experimentId?: string;
+  hypothesis?: string;
+  riskClass?: SkillPatchRiskLevel;
+  authorityExpansion?: boolean;
+  sourceKind?: SkillSourceKind;
+  evalPlan?: GovernedProposalEvalPlan;
+  rollbackExpectation?: string;
+  policyDecision?: GovernedProposalPolicyDecision;
+  approvalState?: GovernedProposalApprovalState;
   status: "proposed" | "promoted" | "rejected";
   promotedAt?: string;
   rejectedAt?: string;
   approvedAt?: string;
   approvedBy?: string;
   promotionId?: string;
+  changeManifestId?: string;
+};
+
+export type SkillGovernedProposalInput = {
+  skillName: string;
+  source?: SkillSourceKind;
+  reason: string;
+  confidence?: number;
+  evidenceIds?: string[];
+  successes?: number;
+  failures?: number;
+  sourceTrust?: SkillSourceTrust;
+  mayPromoteAutomatically?: boolean;
+  requiresHumanApproval?: boolean;
+  patch?: SkillPatchOperation;
+  changeKind: GovernedProposalChangeKind;
+  targetSurface?: GovernedProposalTargetSurface;
+  affectedSurface?: string;
+  affectedFiles?: string[];
+  experimentId?: string;
+  hypothesis?: string;
+  riskClass?: SkillPatchRiskLevel;
+  authorityExpansion?: boolean;
+  sourceKind?: SkillSourceKind;
+  evalPlan?: GovernedProposalEvalPlan;
+  rollbackExpectation?: string;
+  policyDecision?: GovernedProposalPolicyDecision;
+  approvalState?: GovernedProposalApprovalState;
   changeManifestId?: string;
 };
 
@@ -434,8 +502,17 @@ export class SkillEvolutionStore {
     requiresHumanApproval?: boolean;
     patch: SkillPatchOperation;
     changeManifestId?: string;
+    affectedFiles?: string[];
+    hypothesis?: string;
+    riskClass?: SkillPatchRiskLevel;
+    authorityExpansion?: boolean;
+    evalPlan?: GovernedProposalEvalPlan;
+    rollbackExpectation?: string;
+    policyDecision?: GovernedProposalPolicyDecision;
+    approvalState?: GovernedProposalApprovalState;
   }): Promise<SkillPatchProposal> {
     const sourceTrust = input.sourceTrust ?? "user_direct";
+    const requiresHumanApproval = input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust);
     const proposal: SkillPatchProposal = {
       id: `patch_${randomUUID()}`,
       skillName: input.skillName,
@@ -450,8 +527,72 @@ export class SkillEvolutionStore {
       },
       sourceTrust,
       mayPromoteAutomatically: input.mayPromoteAutomatically ?? sourceTrustAllowsAutomaticPromotion(sourceTrust),
-      requiresHumanApproval: input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust),
+      requiresHumanApproval,
       patch: input.patch,
+      changeKind: "skill_patch",
+      targetSurface: "skill",
+      affectedSurface: input.skillName,
+      affectedFiles: input.affectedFiles,
+      evidenceIds: input.observationIds ?? [],
+      hypothesis: input.hypothesis ?? input.reason,
+      riskClass: input.riskClass,
+      authorityExpansion: input.authorityExpansion ?? false,
+      sourceKind: input.source,
+      evalPlan: input.evalPlan,
+      rollbackExpectation: input.rollbackExpectation,
+      policyDecision: input.policyDecision,
+      approvalState: input.approvalState ?? approvalStateForProposal({
+        requiresHumanApproval,
+        approvedAt: undefined,
+        rejectedAt: undefined,
+        status: "proposed"
+      }),
+      status: "proposed",
+      changeManifestId: input.changeManifestId
+    };
+    await this.#appendJsonl("proposed-patches.jsonl", proposal);
+    return proposal;
+  }
+
+  async appendGovernedProposal(input: SkillGovernedProposalInput): Promise<SkillPatchProposal> {
+    assertPhase1AGovernedProposalChangeKind(input.changeKind);
+    const sourceTrust = input.sourceTrust ?? "runtime_internal";
+    const requiresHumanApproval = input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust);
+    const proposal: SkillPatchProposal = {
+      id: `proposal_${randomUUID()}`,
+      skillName: input.skillName,
+      source: input.source,
+      createdAt: this.#nowIso(),
+      reason: input.reason,
+      confidence: clampConfidence(input.confidence ?? 0.5),
+      evidence: {
+        observations: input.evidenceIds ?? [],
+        successes: input.successes ?? 0,
+        failures: input.failures ?? 0
+      },
+      sourceTrust,
+      mayPromoteAutomatically: input.mayPromoteAutomatically ?? false,
+      requiresHumanApproval,
+      patch: input.patch,
+      changeKind: input.changeKind,
+      targetSurface: input.targetSurface ?? targetSurfaceForChangeKind(input.changeKind),
+      affectedSurface: input.affectedSurface ?? input.skillName,
+      affectedFiles: input.affectedFiles,
+      evidenceIds: input.evidenceIds ?? [],
+      experimentId: input.experimentId,
+      hypothesis: input.hypothesis ?? input.reason,
+      riskClass: input.riskClass,
+      authorityExpansion: input.authorityExpansion ?? false,
+      sourceKind: input.sourceKind ?? input.source,
+      evalPlan: input.evalPlan,
+      rollbackExpectation: input.rollbackExpectation,
+      policyDecision: input.policyDecision,
+      approvalState: input.approvalState ?? approvalStateForProposal({
+        requiresHumanApproval,
+        approvedAt: undefined,
+        rejectedAt: undefined,
+        status: "proposed"
+      }),
       status: "proposed",
       changeManifestId: input.changeManifestId
     };
@@ -460,7 +601,8 @@ export class SkillEvolutionStore {
   }
 
   async listProposals(filter: { skillName?: string; status?: SkillPatchProposal["status"] } = {}): Promise<SkillPatchProposal[]> {
-    const proposals = await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl");
+    const proposals = (await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl"))
+      .map(normalizeProposalRecord);
     return proposals.filter((proposal) =>
       (filter.skillName === undefined || proposal.skillName === filter.skillName) &&
       (filter.status === undefined || proposal.status === filter.status)
@@ -476,7 +618,8 @@ export class SkillEvolutionStore {
       ...proposal,
       approvedAt: this.#nowIso(),
       approvedBy,
-      requiresHumanApproval: false
+      requiresHumanApproval: false,
+      approvalState: "approved"
     }));
   }
 
@@ -585,12 +728,14 @@ export class SkillEvolutionStore {
     return await this.#rewriteProposal(id, (proposal) => ({
       ...proposal,
       status: "rejected",
-      rejectedAt: this.#nowIso()
+      rejectedAt: this.#nowIso(),
+      approvalState: "rejected"
     }));
   }
 
   async #rewriteProposal(id: string, update: (proposal: SkillPatchProposal) => SkillPatchProposal): Promise<SkillPatchProposal | undefined> {
-    const proposals = await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl");
+    const proposals = (await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl"))
+      .map(normalizeProposalRecord);
     let updated: SkillPatchProposal | undefined;
     const next = proposals.map((proposal) => {
       if (proposal.id !== id) {
@@ -765,6 +910,51 @@ function clampConfidence(value: number): number {
     return 0.5;
   }
   return Math.max(0, Math.min(1, value));
+}
+
+export function isPhase1AGovernedProposalChangeKind(value: string): value is GovernedProposalChangeKind {
+  return (PHASE_1A_GOVERNED_PROPOSAL_CHANGE_KINDS as readonly string[]).includes(value);
+}
+
+function assertPhase1AGovernedProposalChangeKind(value: string): asserts value is GovernedProposalChangeKind {
+  if (!isPhase1AGovernedProposalChangeKind(value)) {
+    throw new Error(`Unsupported Phase 1A governed proposal change kind: ${value}`);
+  }
+}
+
+function targetSurfaceForChangeKind(kind: GovernedProposalChangeKind): GovernedProposalTargetSurface {
+  return kind === "routing_metadata_update" ? "routing_metadata" : "skill";
+}
+
+function approvalStateForProposal(input: {
+  requiresHumanApproval: boolean;
+  approvedAt?: string;
+  rejectedAt?: string;
+  status: SkillPatchProposal["status"];
+}): GovernedProposalApprovalState {
+  if (input.status === "rejected" || input.rejectedAt !== undefined) {
+    return "rejected";
+  }
+  if (input.approvedAt !== undefined) {
+    return "approved";
+  }
+  return input.requiresHumanApproval ? "required" : "not_required";
+}
+
+function normalizeProposalRecord(proposal: SkillPatchProposal): SkillPatchProposal {
+  const changeKind = proposal.changeKind ?? "skill_patch";
+  const evidenceIds = proposal.evidenceIds ?? proposal.evidence?.observations ?? [];
+  return {
+    ...proposal,
+    changeKind,
+    targetSurface: proposal.targetSurface ?? targetSurfaceForChangeKind(changeKind),
+    affectedSurface: proposal.affectedSurface ?? proposal.skillName,
+    evidenceIds,
+    hypothesis: proposal.hypothesis ?? proposal.reason,
+    sourceKind: proposal.sourceKind ?? proposal.source,
+    authorityExpansion: proposal.authorityExpansion ?? false,
+    approvalState: proposal.approvalState ?? approvalStateForProposal(proposal)
+  };
 }
 
 function sourceTrustAllowsAutomaticPromotion(sourceTrust: SkillSourceTrust): boolean {
