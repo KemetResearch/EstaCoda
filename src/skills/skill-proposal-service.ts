@@ -235,8 +235,8 @@ export class SkillProposalService {
       hypothesis: options.lesson,
       predictedImpact: options.candidateImprovement,
       riskLevel: options.sourceTrust === "developer" || options.sourceTrust === "runtime_internal" ? "low" : "medium",
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
     await this.#options.changeManifestStore.linkEvidence(manifest.id, {
@@ -267,8 +267,8 @@ export class SkillProposalService {
       hypothesis: options.reason,
       predictedImpact: `Apply ${options.patch.type} to skill ${options.skillName}`,
       riskLevel,
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
     return { manifestId: manifest.id };
@@ -296,8 +296,8 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "low",
-      evalCommand: `pnpm run smoke`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert tool description to previous version via manifest store.`
     });
     return { manifestId: manifest.id };
@@ -326,8 +326,8 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "medium",
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert routing metadata to previous version via manifest store.`
     });
     return { manifestId: manifest.id };
