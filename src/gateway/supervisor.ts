@@ -930,12 +930,20 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           const whatsapp = config.channels.whatsapp;
           const authDir = whatsapp.authDir ?? join(profilePaths.gatewayStatePath, "whatsapp-auth");
           const bridgeStatePath = join(authDir, "bridge-state.json");
+          const bridgeLogPath = join(profilePaths.logsPath, "whatsapp-bridge.log");
+          const bridgeInstallLogPath = join(profilePaths.logsPath, "whatsapp-bridge-install.log");
+          const bridgePidPath = join(authDir, "bridge.pid");
+          const bridgeLockPath = join(authDir, "whatsapp-session.lock");
           adapter = options.factories?.createWhatsAppAdapter
             ? options.factories.createWhatsAppAdapter({
                 authDir,
                 allowedUsers: whatsapp.allowedUsers,
                 experimental: whatsapp.experimental,
                 bridgeStatePath,
+                bridgeLogPath,
+                bridgeInstallLogPath,
+                bridgePidPath,
+                bridgeLockPath,
                 mediaRoot,
               })
             : new WhatsAppAdapter({
@@ -943,6 +951,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 allowedUsers: whatsapp.allowedUsers,
                 experimental: whatsapp.experimental,
                 bridgeStatePath,
+                bridgeLogPath,
+                bridgeInstallLogPath,
+                bridgePidPath,
+                bridgeLockPath,
                 mediaRoot,
               });
           router.registerAdapter(adapter);

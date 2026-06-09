@@ -13,10 +13,11 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { WhatsAppChannelConfig } from "../config/runtime-config.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import {
-  HttpWhatsAppBridgeClient,
   type WhatsAppBridgeClient,
   type WhatsAppBridgeInboundMessage,
 } from "./whatsapp-bridge-client.js";
+import { ManagedWhatsAppBridgeClient } from "./whatsapp-bridge-lifecycle.js";
+import { WhatsAppBridgeRuntimeError } from "./whatsapp-bridge-errors.js";
 
 export type WhatsAppAdapterOptions = {
   /** Directory for WhatsApp bridge/Baileys auth state persistence */
@@ -31,6 +32,16 @@ export type WhatsAppAdapterOptions = {
   experimental?: boolean;
   /** Bridge state file written by the lifecycle manager in later commits */
   bridgeStatePath?: string;
+  /** Profile-local bridge stdout/stderr log */
+  bridgeLogPath?: string;
+  /** Profile-local bridge dependency install log */
+  bridgeInstallLogPath?: string;
+  /** Profile-local bridge pid file */
+  bridgePidPath?: string;
+  /** Profile-local bridge session lock file */
+  bridgeLockPath?: string;
+  /** Standalone bridge package directory */
+  bridgeDir?: string;
   /** Inject a fake or custom bridge client for tests */
   bridgeClient?: WhatsAppBridgeClient;
   now?: () => Date;
@@ -64,8 +75,15 @@ export class WhatsAppAdapter implements ChannelAdapter {
   constructor(options: WhatsAppAdapterOptions = {}) {
     this.options = options;
     this.missing = options.missing;
-    this.bridgeClient = options.bridgeClient ?? new HttpWhatsAppBridgeClient({
-      statePath: options.bridgeStatePath ?? join(options.authDir ?? process.cwd(), "bridge-state.json"),
+    const authDir = options.authDir ?? process.cwd();
+    this.bridgeClient = options.bridgeClient ?? new ManagedWhatsAppBridgeClient({
+      authDir,
+      statePath: options.bridgeStatePath ?? join(authDir, "bridge-state.json"),
+      logPath: options.bridgeLogPath,
+      installLogPath: options.bridgeInstallLogPath,
+      pidPath: options.bridgePidPath,
+      lockPath: options.bridgeLockPath,
+      bridgeDir: options.bridgeDir,
     });
   }
 
@@ -95,6 +113,16 @@ export class WhatsAppAdapter implements ChannelAdapter {
       this.connectionStatus = "error";
       throw error;
     });
+    if (health.status === "logged_out") {
+      throw new WhatsAppBridgeRuntimeError({
+        code: "whatsapp_logged_out",
+        message: health.error?.message ?? "WhatsApp bridge is logged out.",
+        details: health.error?.details,
+      });
+    }
+    if (health.error !== undefined) {
+      throw new WhatsAppBridgeRuntimeError(health.error);
+    }
     this.connectionStatus = health.status === "connected" ? "open" : "connecting";
   }
 

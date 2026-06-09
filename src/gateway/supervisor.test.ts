@@ -668,6 +668,48 @@ describe("runGatewaySupervisor", () => {
     expect(result.processed).toBe(0);
   });
 
+  it("passes profile-local WhatsApp bridge lifecycle paths to the adapter factory", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          allowedUsers: ["971501234567"],
+        },
+      },
+    }));
+    let received: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: (input) => {
+          received = input;
+          return fakeAdapter("whatsapp") as any;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(received).toMatchObject({
+      authDir,
+      bridgeStatePath: join(authDir, "bridge-state.json"),
+      bridgeLogPath: join(profilePaths.logsPath, "whatsapp-bridge.log"),
+      bridgeInstallLogPath: join(profilePaths.logsPath, "whatsapp-bridge-install.log"),
+      bridgePidPath: join(authDir, "bridge.pid"),
+      bridgeLockPath: join(authDir, "whatsapp-session.lock"),
+      experimental: true,
+    });
+  });
+
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {
     const configPath = profileConfigPath(tmpDir);
     await mkdir(dirname(configPath), { recursive: true });

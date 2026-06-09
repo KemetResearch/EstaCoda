@@ -1,4 +1,5 @@
 import type { ChannelAdapter, ChannelKind, ChannelDelivery, ChannelMessage } from "../contracts/channel.js";
+import { classifyWhatsAppBridgeError } from "../channels/whatsapp-bridge-errors.js";
 import type { AdapterRuntimeState } from "./adapter-runtime-state.js";
 import type { GatewayHookEventName, GatewayHookPayloadByName } from "./hook-registry.js";
 import { HookRegistry, sanitizeHookError } from "./hook-registry.js";
@@ -204,6 +205,7 @@ export class AdapterResilienceSupervisor {
 
   #handleFailure(operation: "start" | "poll", err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
+    const classification = this.kind === "whatsapp" ? classifyWhatsAppBridgeError(err) : undefined;
     const now = new Date().toISOString();
     const isRetry = this.#state.lastError !== undefined && this.#state.pendingOperation === operation;
     const consecutiveCount = isRetry
@@ -219,7 +221,23 @@ export class AdapterResilienceSupervisor {
 
     let attempt: number | undefined;
 
-    if (!isRetry) {
+    if (classification?.retryable === false) {
+      this.#state.state = "failed";
+      this.#state.retry = undefined;
+    } else if (classification?.retryDelayMs !== undefined) {
+      attempt = isRetry && this.#state.retry !== undefined ? this.#state.retry.attempt + 1 : 1;
+      if (attempt > this.#options.maxAttempts) {
+        this.#state.state = "failed";
+        this.#state.retry = undefined;
+      } else {
+        this.#state.state = "retry_scheduled";
+        this.#state.retry = {
+          attempt,
+          maxAttempts: this.#options.maxAttempts,
+          nextRetryAt: new Date(Date.now() + classification.retryDelayMs).toISOString(),
+        };
+      }
+    } else if (!isRetry) {
       // First failure for this operation
       this.#state.state = "degraded";
       this.#state.retry = undefined;
@@ -256,7 +274,16 @@ export class AdapterResilienceSupervisor {
     });
 
     // 3. Emit adapter:degraded or adapter:retry if applicable
-    if (!isRetry) {
+    if (classification?.retryable === false) {
+      // Non-retryable bridge failures are terminal for this adapter run.
+    } else if (classification?.retryDelayMs !== undefined && this.#state.retry !== undefined) {
+      this.#emitHook("adapter:retry", {
+        kind: this.kind,
+        operation,
+        retryCount: this.#state.retry.attempt,
+        nextRetryAt: this.#state.retry.nextRetryAt,
+      });
+    } else if (!isRetry) {
       this.#emitHook("adapter:degraded", {
         kind: this.kind,
         operation,

@@ -11,15 +11,19 @@ import type {
   WhatsAppBridgeClient,
   WhatsAppBridgeHealth,
   WhatsAppBridgeInboundMessage,
+  WhatsAppBridgeEditInput,
   WhatsAppBridgeSendMediaInput,
   WhatsAppBridgeSendTextInput,
+  WhatsAppBridgeTypingInput,
 } from "./whatsapp-bridge-client.js";
 
 class FakeWhatsAppBridgeClient implements WhatsAppBridgeClient {
-  health: WhatsAppBridgeHealth = { ok: true, status: "connected" };
+  health: WhatsAppBridgeHealth = { ok: true, apiVersion: "whatsapp-bridge.v1", status: "connected" };
   messages: WhatsAppBridgeInboundMessage[] = [];
   sentText: WhatsAppBridgeSendTextInput[] = [];
+  edited: WhatsAppBridgeEditInput[] = [];
   sentMedia: WhatsAppBridgeSendMediaInput[] = [];
+  typing: WhatsAppBridgeTypingInput[] = [];
   started = false;
   stopped = false;
   sendTextOk = true;
@@ -53,6 +57,20 @@ class FakeWhatsAppBridgeClient implements WhatsAppBridgeClient {
     return this.sendMediaOk
       ? { ok: true, messageId: "media-1", messageIds: ["media-1"] }
       : { ok: false, error: { code: "media_failed", message: "Media send failed" } };
+  }
+
+  async editMessage(input: WhatsAppBridgeEditInput) {
+    this.edited.push(input);
+    return { ok: true, messageId: input.messageId, messageIds: [input.messageId] };
+  }
+
+  async sendTyping(input: WhatsAppBridgeTypingInput) {
+    this.typing.push(input);
+    return { ok: true };
+  }
+
+  async getChat(chatId: string) {
+    return { id: chatId };
   }
 }
 
@@ -146,7 +164,7 @@ describe("WhatsAppAdapter", () => {
   });
 
   it("keeps connecting status when bridge is not connected yet", async () => {
-    bridge.health = { ok: true, status: "connecting" };
+    bridge.health = { ok: true, apiVersion: "whatsapp-bridge.v1", status: "connecting" };
     const adapter = createAdapter();
     await adapter.start(async () => {});
     expect(adapter.connectionStatus).toBe("connecting");

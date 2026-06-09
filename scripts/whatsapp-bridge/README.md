@@ -18,6 +18,11 @@ Current scope:
 
 - Own Baileys socket construction.
 - Own Baileys/Boom disconnect classification.
+- Own loopback HTTP transport for the main runtime.
+- Require a per-launch bearer token for every request.
+- Reject non-loopback binds and bad Host headers.
+- Validate request bodies, cap JSON responses, and emit stable JSON error envelopes.
+- Cap inbound event queue length and report API version, queue/dropped counts through health.
 - Keep socket defaults local to the bridge:
   - `syncFullHistory: false`
   - `markOnlineOnConnect: false`
@@ -27,8 +32,6 @@ Current scope:
 
 Not implemented in this commit:
 
-- bridge lifecycle manager
-- HTTP API server
 - QR wizard
 - secure user pairing
 - self-chat

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { AdapterResilienceSupervisor, DEFAULT_ADAPTER_BACKOFF, computeBackoffDelay } from "./adapter-resilience.js";
 import type { ChannelAdapter } from "../contracts/channel.js";
 import { HookRegistry } from "./hook-registry.js";
+import { WhatsAppBridgeRuntimeError } from "../channels/whatsapp-bridge-errors.js";
 
 function fakeAdapter(overrides?: Partial<ChannelAdapter> & { pollThrows?: boolean; startThrows?: boolean }): ChannelAdapter {
   return {
@@ -137,6 +138,63 @@ describe("AdapterResilienceSupervisor", () => {
       globalThis.Date.now = original;
     }
     expect(wrapper.getState().state).toBe("failed");
+  });
+
+  it("WhatsApp non-retryable bridge errors fail without scheduling retries", async () => {
+    const adapter = fakeAdapter({
+      kind: "whatsapp",
+      start: async () => {
+        throw new WhatsAppBridgeRuntimeError({
+          code: "whatsapp_logged_out",
+          message: "WhatsApp logged out",
+        });
+      },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+
+    await wrapper.start(async () => {});
+
+    const state = wrapper.getState();
+    expect(state.state).toBe("failed");
+    expect(state.retry).toBeUndefined();
+    expect(state.pendingOperation).toBe("start");
+  });
+
+  it("WhatsApp restart-required schedules a fast reconnect", async () => {
+    const adapter = fakeAdapter({
+      kind: "whatsapp",
+      start: async () => {
+        throw new WhatsAppBridgeRuntimeError({
+          code: "whatsapp_restart_required",
+          message: "WhatsApp restart required",
+        });
+      },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter, { randomFn: () => 0 });
+    const before = Date.now();
+
+    await wrapper.start(async () => {});
+
+    const state = wrapper.getState();
+    expect(state.state).toBe("retry_scheduled");
+    expect(state.retry?.attempt).toBe(1);
+    expect(new Date(state.retry!.nextRetryAt).getTime() - before).toBeLessThanOrEqual(1500);
+  });
+
+  it("non-WhatsApp adapters with code-shaped errors keep generic retry behavior", async () => {
+    const error = new Error("discord transport fail") as Error & { code: string; retryable: boolean };
+    error.code = "whatsapp_logged_out";
+    error.retryable = false;
+    const adapter = fakeAdapter({
+      kind: "discord",
+      start: async () => { throw error; },
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+
+    await wrapper.start(async () => {});
+
+    expect(wrapper.getState().state).toBe("degraded");
+    expect(wrapper.getState().retry).toBeUndefined();
   });
 
   it("poll succeeds -> increments pollsTotal and pollMessagesProcessed", async () => {
