@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
-import type { EvolutionChangeManifest } from "../contracts/evolution.js";
+import type { EvolutionChangeManifest, EvolutionExperiment } from "../contracts/evolution.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import {
   SkillEvolutionStore,
@@ -54,6 +54,35 @@ export type ProposalReview = {
   };
   recommendedAction: "none" | "review" | "reject" | "promote" | "approve";
   blockedReason?: string;
+};
+
+export type ProposalEvidenceSummary = Pick<
+  SkillObservationRecord,
+  | "id"
+  | "skillName"
+  | "sessionId"
+  | "timestamp"
+  | "type"
+  | "outcome"
+  | "lesson"
+  | "candidateImprovement"
+  | "sourceTrust"
+>;
+
+export type ProposalLearningCandidateSummary = SkillLearningCandidate;
+
+export type ProposalEvalRunSummary = Pick<
+  SkillEvalRunRecord,
+  "id" | "skillName" | "evalId" | "ranAt" | "score" | "passed" | "threshold"
+>;
+
+export type ProposalReviewDetails = {
+  proposal: SkillPatchProposal;
+  review: ProposalReview;
+  linkedEvidence: ProposalEvidenceSummary[];
+  linkedLearningCandidates: ProposalLearningCandidateSummary[];
+  linkedExperiment?: EvolutionExperiment;
+  evalRuns: ProposalEvalRunSummary[];
 };
 
 export type LearningCandidateProposalResult =
@@ -119,6 +148,31 @@ export class SkillProposalService {
           },
       recommendedAction,
       blockedReason: trustGate.ok ? undefined : trustGate.reason
+    };
+  }
+
+  async reviewProposalDetails(proposal: SkillPatchProposal): Promise<ProposalReviewDetails> {
+    const review = await this.reviewProposal(proposal);
+    const evidenceIds = evidenceIdsForProposal(proposal);
+    const evidenceIdSet = new Set(evidenceIds);
+    const [observations, learningCandidates, linkedExperiment, evalRuns] = await Promise.all([
+      this.#options.skillEvolutionStore.listObservations({ ids: evidenceIds }),
+      this.#options.skillEvolutionStore.listLearningCandidates(),
+      proposal.experimentId === undefined
+        ? Promise.resolve(undefined)
+        : this.#options.skillEvolutionStore.findExperiment(proposal.experimentId),
+      this.#options.skillEvolutionStore.listEvalRuns({ skillName: proposal.skillName })
+    ]);
+    const linkedLearningCandidates = learningCandidates.filter((candidate) =>
+      evidenceIdSet.has(candidate.id) || candidate.evidenceIds.some((id) => evidenceIdSet.has(id))
+    );
+    return {
+      proposal,
+      review,
+      linkedEvidence: observations.map(summarizeObservationForReview),
+      linkedLearningCandidates,
+      linkedExperiment,
+      evalRuns: evalRuns.map(summarizeEvalRunForReview)
     };
   }
 
@@ -520,6 +574,39 @@ function riskLevelForProposal(proposal: SkillPatchProposal): SkillPatchRiskLevel
     return classifyPatchRisk(proposal.patch);
   }
   return riskClassForGovernedChangeKind(proposal.changeKind ?? "skill_patch");
+}
+
+function evidenceIdsForProposal(proposal: SkillPatchProposal): string[] {
+  return [...new Set([
+    ...(proposal.evidenceIds ?? []),
+    ...(proposal.evidence?.observations ?? [])
+  ])];
+}
+
+function summarizeObservationForReview(observation: SkillObservationRecord): ProposalEvidenceSummary {
+  return {
+    id: observation.id,
+    skillName: observation.skillName,
+    sessionId: observation.sessionId,
+    timestamp: observation.timestamp,
+    type: observation.type,
+    outcome: observation.outcome,
+    lesson: observation.lesson,
+    candidateImprovement: observation.candidateImprovement,
+    sourceTrust: observation.sourceTrust
+  };
+}
+
+function summarizeEvalRunForReview(run: SkillEvalRunRecord): ProposalEvalRunSummary {
+  return {
+    id: run.id,
+    skillName: run.skillName,
+    evalId: run.evalId,
+    ranAt: run.ranAt,
+    score: run.score,
+    passed: run.passed,
+    threshold: run.threshold
+  };
 }
 
 export function evaluateProposalTrust(
