@@ -4,6 +4,12 @@ import { randomUUID } from "node:crypto";
 import type { SkillOutcome } from "../contracts/memory.js";
 import type { AgentEvolutionMode } from "../contracts/agent-evolution.js";
 import type {
+  EvolutionExperiment,
+  EvolutionExperimentCostRuntime,
+  EvolutionExperimentOutcome,
+  EvolutionExperimentTargetSurface
+} from "../contracts/evolution.js";
+import type {
   LoadedSkill,
   SkillDefinition,
   SkillLifecycleState,
@@ -214,6 +220,31 @@ export type SkillGovernedProposalInput = {
   policyDecision?: GovernedProposalPolicyDecision;
   approvalState?: GovernedProposalApprovalState;
   changeManifestId?: string;
+};
+
+export type EvolutionExperimentInput = {
+  id?: string;
+  hypothesis: string;
+  targetSurface: EvolutionExperimentTargetSurface;
+  evidenceIds?: string[];
+  proposedChangeIds?: string[];
+  baselineMetrics?: Record<string, number>;
+  evalPlan?: string;
+  resultMetrics?: Record<string, number>;
+  costRuntime?: EvolutionExperimentCostRuntime;
+  outcome?: EvolutionExperimentOutcome;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type EvolutionExperimentUpdate = {
+  evidenceIds?: string[];
+  proposedChangeIds?: string[];
+  baselineMetrics?: Record<string, number>;
+  evalPlan?: string;
+  resultMetrics?: Record<string, number>;
+  costRuntime?: EvolutionExperimentCostRuntime;
+  outcome?: EvolutionExperimentOutcome;
 };
 
 export type SkillEvalRunRecord = {
@@ -489,6 +520,52 @@ export class SkillEvolutionStore {
     return this.#readJsonl<SkillLearningCandidate>("learning-candidates.jsonl");
   }
 
+  async appendExperiment(input: EvolutionExperimentInput): Promise<EvolutionExperiment> {
+    const now = this.#nowIso();
+    const experiment: EvolutionExperiment = {
+      id: input.id ?? `exp_${randomUUID()}`,
+      hypothesis: input.hypothesis,
+      targetSurface: input.targetSurface,
+      evidenceIds: input.evidenceIds ?? [],
+      proposedChangeIds: input.proposedChangeIds ?? [],
+      baselineMetrics: sanitizeMetricRecord(input.baselineMetrics),
+      evalPlan: sanitizeSkillObservationText(input.evalPlan),
+      resultMetrics: sanitizeMetricRecord(input.resultMetrics),
+      costRuntime: sanitizeCostRuntime(input.costRuntime),
+      outcome: input.outcome ?? "proposed",
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? input.createdAt ?? now
+    };
+    await this.#appendJsonl("experiments.jsonl", experiment);
+    return experiment;
+  }
+
+  async listExperiments(filter: { targetSurface?: EvolutionExperimentTargetSurface; outcome?: EvolutionExperimentOutcome } = {}): Promise<EvolutionExperiment[]> {
+    const experiments = await this.#readJsonl<EvolutionExperiment>("experiments.jsonl");
+    return experiments.filter((experiment) =>
+      (filter.targetSurface === undefined || experiment.targetSurface === filter.targetSurface) &&
+      (filter.outcome === undefined || experiment.outcome === filter.outcome)
+    );
+  }
+
+  async findExperiment(id: string): Promise<EvolutionExperiment | undefined> {
+    return (await this.listExperiments()).find((experiment) => experiment.id === id);
+  }
+
+  async updateExperiment(id: string, update: EvolutionExperimentUpdate): Promise<EvolutionExperiment | undefined> {
+    return await this.#rewriteExperiment(id, (experiment) => ({
+      ...experiment,
+      evidenceIds: update.evidenceIds ?? experiment.evidenceIds,
+      proposedChangeIds: update.proposedChangeIds ?? experiment.proposedChangeIds,
+      baselineMetrics: update.baselineMetrics === undefined ? experiment.baselineMetrics : sanitizeMetricRecord(update.baselineMetrics),
+      evalPlan: update.evalPlan === undefined ? experiment.evalPlan : sanitizeSkillObservationText(update.evalPlan),
+      resultMetrics: update.resultMetrics === undefined ? experiment.resultMetrics : sanitizeMetricRecord(update.resultMetrics),
+      costRuntime: update.costRuntime === undefined ? experiment.costRuntime : sanitizeCostRuntime(update.costRuntime),
+      outcome: update.outcome ?? experiment.outcome,
+      updatedAt: this.#nowIso()
+    }));
+  }
+
   async proposePatch(input: {
     skillName: string;
     source?: SkillSourceKind;
@@ -751,6 +828,23 @@ export class SkillEvolutionStore {
     return updated;
   }
 
+  async #rewriteExperiment(id: string, update: (experiment: EvolutionExperiment) => EvolutionExperiment): Promise<EvolutionExperiment | undefined> {
+    const experiments = await this.#readJsonl<EvolutionExperiment>("experiments.jsonl");
+    let updated: EvolutionExperiment | undefined;
+    const next = experiments.map((experiment) => {
+      if (experiment.id !== id) {
+        return experiment;
+      }
+      updated = update(experiment);
+      return updated;
+    });
+    if (updated === undefined) {
+      return undefined;
+    }
+    await this.#writeJsonl("experiments.jsonl", next);
+    return updated;
+  }
+
   async #updateUsage(
     skillName: string,
     source: SkillSourceKind | undefined,
@@ -883,6 +977,34 @@ function sanitizeSkillEvidence(value: Record<string, unknown> | undefined): Reco
     return undefined;
   }
   return sanitizeSkillEvidenceValue(value) as Record<string, unknown>;
+}
+
+function sanitizeMetricRecord(value: Record<string, number> | undefined): Record<string, number> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const sanitized: Record<string, number> = {};
+  for (const [key, metric] of Object.entries(value)) {
+    if (Number.isFinite(metric)) {
+      sanitized[key] = metric;
+    }
+  }
+  return sanitized;
+}
+
+function sanitizeCostRuntime(value: EvolutionExperimentCostRuntime | undefined): EvolutionExperimentCostRuntime | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return {
+    providerCostUsd: finiteOrUndefined(value.providerCostUsd),
+    wallClockMs: finiteOrUndefined(value.wallClockMs),
+    evalRuns: finiteOrUndefined(value.evalRuns)
+  };
+}
+
+function finiteOrUndefined(value: number | undefined): number | undefined {
+  return value === undefined || !Number.isFinite(value) ? undefined : value;
 }
 
 function sanitizeSkillEvidenceValue(value: unknown): unknown {

@@ -35,3 +35,40 @@ export type EvolutionChangeManifest = {
   promotedAt?: string;
   promotedBy?: string;
 };
+
+export type EvolutionExperimentOutcome =
+  | "proposed"
+  | "running"
+  | "passed"
+  | "failed"
+  | "inconclusive"
+  | "promoted"
+  | "reverted";
+
+export type EvolutionExperimentTargetSurface =
+  | "skill"
+  | "routing_metadata"
+  | "memory_policy"
+  | "tool_description"
+  | "playbook";
+
+export type EvolutionExperimentCostRuntime = {
+  providerCostUsd?: number;
+  wallClockMs?: number;
+  evalRuns?: number;
+};
+
+export type EvolutionExperiment = {
+  id: string;
+  hypothesis: string;
+  targetSurface: EvolutionExperimentTargetSurface;
+  evidenceIds: string[];
+  proposedChangeIds: string[];
+  baselineMetrics?: Record<string, number>;
+  evalPlan?: string;
+  resultMetrics?: Record<string, number>;
+  costRuntime?: EvolutionExperimentCostRuntime;
+  outcome: EvolutionExperimentOutcome;
+  createdAt: string;
+  updatedAt: string;
+};
