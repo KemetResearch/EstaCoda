@@ -4956,6 +4956,56 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).toContain("locked");
     });
 
+    it("lets unauthorized WhatsApp DMs redeem pairing codes before denial", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const pair = vi.fn(async (message: ChannelMessage) =>
+        message.channel === "whatsapp" && message.text === "12345678"
+          ? "WhatsApp paired. This account can now talk to EstaCoda."
+          : undefined
+      );
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"] } },
+        pair,
+      });
+
+      const result = await gateway.receive(makeMessage("12345678", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "971501234567@s.whatsapp.net", displayName: "New user" }
+      }));
+
+      expect(pair).toHaveBeenCalledOnce();
+      expect(result.replyText).toBe("WhatsApp paired. This account can now talk to EstaCoda.");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("does not route unauthorized WhatsApp non-code text into runtime", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const pair = vi.fn(async () => undefined);
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"] } },
+        pair,
+      });
+
+      const result = await gateway.receive(makeMessage("hello runtime", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "971501234567@s.whatsapp.net", displayName: "New user" }
+      }));
+
+      expect(pair).toHaveBeenCalledOnce();
+      expect(result.replyText).toContain("locked");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
     it("allowed Discord user does not authorize Email sender", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const gateway = new ChannelGateway({

@@ -10,6 +10,7 @@ import {
   normalizeSessionCompressionConfig,
   redactExternalMemoryConfig,
   saveRuntimeConfig,
+  addWhatsAppAllowedUser,
   setupAuxiliaryModelConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
@@ -1278,6 +1279,51 @@ describe("loadRuntimeConfig channel readiness", () => {
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
     expect(loaded.channels.whatsapp.missing).toContain("authDir");
     expect(loaded.channels.whatsapp.missing).toContain("allowedUsers");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("appends WhatsApp user authorization without preserving stale pairing config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: "/tmp/estacoda-whatsapp-auth",
+          allowedUsers: [],
+          mode: "bot",
+          dmPolicy: "pairing",
+          pairingMode: "qr",
+          pairingCodePhoneNumber: "+971501234567",
+          stalePairingCode: "123456",
+          unknownWhatsAppKey: true
+        }
+      }
+    }));
+
+    const result = await addWhatsAppAllowedUser({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      userId: "971501234567@s.whatsapp.net"
+    });
+
+    expect(result.added).toBe(true);
+    expect(result.config.channels?.whatsapp).toEqual({
+      enabled: true,
+      experimental: true,
+      authDir: "/tmp/estacoda-whatsapp-auth",
+      allowedUsers: ["971501234567"],
+      mode: "bot",
+      dmPolicy: "allowlist",
+      pairingMode: "qr"
+    });
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.whatsapp.pairingCodePhoneNumber).toBeUndefined();
+    expect(persisted.channels.whatsapp.stalePairingCode).toBeUndefined();
+    expect(persisted.channels.whatsapp.unknownWhatsAppKey).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
   });
 });

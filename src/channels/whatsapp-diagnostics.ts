@@ -69,7 +69,9 @@ export async function getWhatsAppGatewayDiagnostics(
   }
 
   let statusLabel = "ok";
-  if (!bridgePackagePresent || !bridgeEntrypointPresent) {
+  if (config.enabled === false) {
+    statusLabel = "disabled";
+  } else if (!bridgePackagePresent || !bridgeEntrypointPresent) {
     statusLabel = "bridge missing";
   } else if (!bridgeDependenciesInstalled) {
     statusLabel = "bridge dependencies missing";

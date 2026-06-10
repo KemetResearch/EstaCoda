@@ -164,6 +164,10 @@ Gateway approvals use a durable `pending_approvals` table in the session databas
 
 **WhatsApp experimental gate:** The WhatsApp adapter only initializes when `channels.whatsapp.experimental: true`. This is a deliberate gate to prevent accidental use of the unofficial Baileys API.
 
+**WhatsApp user authorization:** `dmPolicy: "pairing"` is a locked waiting state, not an open policy. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are persisted only as salted SHA-256 hashes in profile-local state; a redeemed code adds only the redeeming sender to `channels.whatsapp.allowedUsers`.
+
+Telegram pairing remains config-backed and unchanged for now.
+
 ### Handoff Code Security
 
 CLI↔Telegram handoff uses short-lived, single-use codes:

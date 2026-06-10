@@ -2,14 +2,14 @@ import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
-import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
+import { addWhatsAppAllowedUser, loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
-import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
+import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind, ChannelMessage } from "../contracts/channel.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
@@ -37,6 +37,7 @@ import { TelegramAdapter, type TelegramFetch } from "../channels/telegram-adapte
 import { DiscordAdapter } from "../channels/discord-adapter.js";
 import { EmailAdapter } from "../channels/email-adapter.js";
 import { WhatsAppAdapter } from "../channels/whatsapp-adapter.js";
+import { consumeWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
 import { AdapterRegistry } from "../channels/adapter-registry.js";
 import {
   deriveTelegramIdentityHash,
@@ -1076,6 +1077,37 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }
       return state.gatewayLocalWhisper;
     };
+    const pairChannelMessage = async (message: ChannelMessage): Promise<string | undefined> => {
+      if (message.channel === "telegram") {
+        const result = await consumeTelegramPairingCode({
+          workspaceRoot: options.workspaceRoot,
+          homeDir,
+          code: message.text,
+          userId: message.sender.id,
+          chatId: message.sessionKey.chatId,
+        });
+        if (!result.paired) return undefined;
+        return "Telegram paired. This chat can now talk to EstaCoda.";
+      }
+
+      if (message.channel === "whatsapp") {
+        const result = await consumeWhatsAppUserAuthCode({
+          storePath: defaultWhatsAppUserAuthStorePath({ homeDir, profileId }),
+          senderId: message.sender.id,
+          code: message.text
+        });
+        if (!result.paired) return undefined;
+        await addWhatsAppAllowedUser({
+          workspaceRoot: options.workspaceRoot,
+          homeDir,
+          profileId,
+          userId: result.normalizedSenderId
+        });
+        return "WhatsApp paired. This account can now talk to EstaCoda.";
+      }
+
+      return undefined;
+    };
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
@@ -1099,17 +1131,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               audit: voiceAudit
             });
           },
-          pair: async (message) => {
-            const result = await consumeTelegramPairingCode({
-              workspaceRoot: options.workspaceRoot,
-              homeDir,
-              code: message.text,
-              userId: message.sender.id,
-              chatId: message.sessionKey.chatId,
-            });
-            if (!result.paired) return undefined;
-            return "Telegram paired. This chat can now talk to EstaCoda.";
-          },
+          pair: pairChannelMessage,
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
@@ -1175,17 +1197,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               audit: voiceAudit
             });
           },
-          pair: async (message) => {
-            const result = await consumeTelegramPairingCode({
-              workspaceRoot: options.workspaceRoot,
-              homeDir,
-              code: message.text,
-              userId: message.sender.id,
-              chatId: message.sessionKey.chatId,
-            });
-            if (!result.paired) return undefined;
-            return "Telegram paired. This chat can now talk to EstaCoda.";
-          },
+          pair: pairChannelMessage,
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,

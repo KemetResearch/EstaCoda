@@ -39,6 +39,7 @@ import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-st
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
 import { HookRegistry } from "./hook-registry.js";
 import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
+import { createWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -775,6 +776,116 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(true);
     expect(authPolicy.whatsapp.allowedNumbers).toEqual([]);
     expect(authPolicy.whatsapp.deniedMessage).toContain("locked");
+  });
+
+  it("preserves Telegram config-backed pairing through the channel pairing callback", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const whatsappStorePath = defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" });
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+          allowedUserIds: [],
+          allowedChatIds: [],
+          pairing: {
+            code: "TG-1234",
+            createdAt: "2026-06-10T10:00:00.000Z",
+            expiresAt: "2026-06-10T10:10:00.000Z"
+          }
+        },
+      },
+    }));
+    process.env.TEST_BOT_TOKEN = "fake";
+    await expect(readFile(whatsappStorePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    let pair: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          pair = input.pair;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createTelegramAdapter: () => fakeAdapter("telegram") as any,
+      },
+    });
+    delete process.env.TEST_BOT_TOKEN;
+
+    expect(result.ok).toBe(true);
+    await expect(pair({
+      id: "tg-msg-1",
+      channel: "telegram",
+      sessionKey: { platform: "telegram", chatId: "chat-123", userId: "user-123" },
+      sender: { id: "user-123" },
+      text: "TG 1234",
+      receivedAt: "2026-06-10T10:01:00.000Z"
+    })).resolves.toBe("Telegram paired. This chat can now talk to EstaCoda.");
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.telegram.allowedUserIds).toEqual(["user-123"]);
+    expect(persisted.channels.telegram.allowedChatIds).toEqual(["chat-123"]);
+    expect(persisted.channels.telegram.pairing?.code).toBeUndefined();
+    await expect(readFile(whatsappStorePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("wires WhatsApp user-auth redemption into the channel pairing callback", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          mode: "bot",
+          dmPolicy: "pairing",
+          allowedUsers: [],
+          pairingMode: "qr",
+        },
+      },
+    }));
+    await createWhatsAppUserAuthCode({
+      storePath: defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" }),
+      requesterId: "owner",
+      code: () => "12345678",
+      now: () => new Date("2026-06-10T10:00:00.000Z")
+    });
+    let pair: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          pair = input.pair;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: () => fakeAdapter("whatsapp") as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(pair({
+      id: "wa-msg-1",
+      channel: "whatsapp",
+      sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+      sender: { id: "971501234567@s.whatsapp.net" },
+      text: "12345678",
+      receivedAt: "2026-06-10T10:01:00.000Z"
+    })).resolves.toBe("WhatsApp paired. This account can now talk to EstaCoda.");
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.whatsapp.allowedUsers).toEqual(["971501234567"]);
+    expect(persisted.channels.whatsapp.dmPolicy).toBe("allowlist");
   });
 
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {

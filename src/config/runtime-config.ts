@@ -2872,6 +2872,48 @@ export async function setupWhatsAppConfig(options: {
   };
 }
 
+export async function addWhatsAppAllowedUser(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  userId: string;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+  added: boolean;
+}> {
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const whatsapp = existing.config.channels?.whatsapp ?? {};
+  const normalizedUserId = normalizeWhatsAppAllowedUser(options.userId);
+  const allowedUsers = uniqueStrings([...(whatsapp.allowedUsers ?? []), normalizedUserId]);
+  const whatsappPatch: WhatsAppChannelConfig = {
+    enabled: whatsapp.enabled,
+    experimental: whatsapp.experimental,
+    authDir: whatsapp.authDir,
+    allowedUsers,
+    mode: whatsapp.mode,
+    dmPolicy: allowedUsers.length > 0 && whatsapp.dmPolicy === "pairing" ? "allowlist" : whatsapp.dmPolicy
+  };
+  if (whatsapp.pairingMode === "qr") whatsappPatch.pairingMode = "qr";
+  if (whatsapp.busyPolicy !== undefined) whatsappPatch.busyPolicy = whatsapp.busyPolicy;
+  if (whatsapp.queueDepth !== undefined) whatsappPatch.queueDepth = whatsapp.queueDepth;
+  const config: EstaCodaConfig = {
+    ...existing.config,
+    channels: {
+      ...(existing.config.channels ?? {}),
+      whatsapp: whatsappPatch
+    }
+  };
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config,
+    added: !(whatsapp.allowedUsers ?? []).includes(normalizedUserId)
+  };
+}
+
 export async function createTelegramPairingCode(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -3341,6 +3383,14 @@ function randomPairingCode(): string {
 
 function normalizePairingCode(code: string): string {
   return code.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function normalizeWhatsAppAllowedUser(userId: string): string {
+  return userId
+    .trim()
+    .replace(/^whatsapp:/iu, "")
+    .replace(/@s\.whatsapp\.net$/iu, "")
+    .replace(/@lid$/iu, "");
 }
 
 function uniqueStrings(values: string[]): string[] {

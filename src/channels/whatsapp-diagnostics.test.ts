@@ -178,6 +178,29 @@ describe("getWhatsAppGatewayDiagnostics", () => {
     expect(diagnostics.statusLabel).toBe("auth directory outside profile WhatsApp state");
     expect(diagnostics.missing).toContain("authDirProfileLocal");
   });
+
+  it("distinguishes explicitly disabled WhatsApp from pairing-pending authorization", async () => {
+    const homeDir = join(tempDir, "home");
+    const bridgeDir = join(tempDir, "bridge");
+    await mkdir(join(homeDir, ".estacoda", "whatsapp-auth"), { recursive: true });
+    await writeReadyBridgePackage(bridgeDir);
+
+    const diagnostics = await getWhatsAppGatewayDiagnostics({
+      homeDir,
+      bridgeDir,
+      config: {
+        enabled: false,
+        experimental: true,
+        dmPolicy: "pairing",
+        allowedUsers: [],
+      },
+    });
+
+    expect(diagnostics.ready).toBe(false);
+    expect(diagnostics.statusLabel).toBe("disabled");
+    expect(diagnostics.pairingPending).toBe(false);
+    expect(diagnostics.missing).toEqual([]);
+  });
 });
 
 async function writeReadyBridgePackage(bridgeDir: string): Promise<void> {

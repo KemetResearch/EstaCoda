@@ -131,7 +131,7 @@ The wizard uses QR-only device pairing and renders the QR code in the terminal. 
 }
 ```
 
-If no allowed WhatsApp users are added during setup, `dmPolicy` is set to `"pairing"`. That means the device can be QR-paired, but the channel is not reported as fully ready and messages are not open to arbitrary users.
+If no allowed WhatsApp users are added during setup, `dmPolicy` is set to `"pairing"`. That means the device can be QR-paired, but the channel is not reported as fully ready and messages are not open to arbitrary users. User authorization codes are separate from device QR pairing: codes are displayed once by operator flows, expire after 10 minutes, are single-use, and are persisted only as salted SHA-256 hashes in profile-local state.
 
 **Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
 

@@ -137,7 +137,7 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`.
 
 WhatsApp transport dependencies are isolated under `scripts/whatsapp-bridge/` so the root runtime does not install or import Baileys. The bridge package is managed separately and is not part of the root pnpm workspace.
 
-Run `estacoda whatsapp` to start the WhatsApp setup wizard. The wizard uses QR-only device pairing, asks before installing the isolated bridge dependencies, and leaves the channel pairing-pending if no allowed WhatsApp users are configured yet.
+Run `estacoda whatsapp` to start the WhatsApp setup wizard. The wizard uses QR-only device pairing, asks before installing the isolated bridge dependencies, and leaves the channel pairing-pending if no allowed WhatsApp users are configured yet. WhatsApp user authorization codes are one-time, expire after 10 minutes, and are stored only as salted hashes in profile-local state.
 
 ### Other Capabilities
 
