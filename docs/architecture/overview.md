@@ -219,8 +219,8 @@ Email-specific behavior:
 - Home address configuration
 
 WhatsApp-specific behavior (experimental):
-- Baileys linked-device model
-- QR code and pairing-code login
+- Baileys linked-device model through the isolated `scripts/whatsapp-bridge/` helper
+- QR-only device login through `estacoda whatsapp`
 - DM-first (no group support)
 - Media download/upload
 - Message chunking

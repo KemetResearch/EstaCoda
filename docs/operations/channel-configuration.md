@@ -105,6 +105,14 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
 
 ## WhatsApp
 
+Use the single setup wizard:
+
+```bash
+estacoda whatsapp
+```
+
+The wizard uses QR-only device pairing and renders the QR code in the terminal. It checks the isolated bridge package under `scripts/whatsapp-bridge/`; if dependencies are missing, it asks before running the repair/install step. It does not silently install dependencies or write WhatsApp config until QR pairing succeeds.
+
 ```json
 {
   "channels": {
@@ -112,9 +120,10 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
       "enabled": true,
       "experimental": true,
       "authDir": "~/.estacoda/profiles/<id>/gateway/whatsapp-auth",
+      "mode": "bot",
+      "dmPolicy": "allowlist",
       "allowedUsers": ["1234567890"],
       "pairingMode": "qr",
-      "pairingCodePhoneNumber": "+1234567890",
       "busyPolicy": "reject",
       "queueDepth": 3
     }
@@ -122,7 +131,9 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
 }
 ```
 
-**Important:** WhatsApp requires `experimental: true`. Without it, the adapter throws on start. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
+If no allowed WhatsApp users are added during setup, `dmPolicy` is set to `"pairing"`. That means the device can be QR-paired, but the channel is not reported as fully ready and messages are not open to arbitrary users.
+
+**Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
 
 ## Defaults
 

@@ -177,6 +177,7 @@ import {
 import { runModelSetupCodex } from "./model-setup-codex.js";
 import { profileCommand } from "./profile-commands.js";
 import type { ProfileContextGenerator } from "./profile-state.js";
+import { runWhatsAppWizard, type WhatsAppWizardDependencies } from "./whatsapp-wizard.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -201,6 +202,7 @@ export type CliOptions = {
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
   voiceModeEnv?: CliVoiceEnvironmentOptions;
+  whatsappWizardDependencies?: WhatsAppWizardDependencies;
 };
 
 export type ParsedGlobalCliOptions =
@@ -282,6 +284,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return acp(options, args);
     case "telegram":
       return telegram(options, args);
+    case "whatsapp":
+      return whatsapp(options, args);
     case "gateway":
       return gateway(options, args);
     case "model":
@@ -2902,6 +2906,40 @@ async function tryCreateExecutionStore(options: CliOptions): Promise<{ store: Cr
   } catch {
     return undefined;
   }
+}
+
+async function whatsapp(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [arg] = args;
+  if (arg === "--help" || arg === "-h") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        "EstaCoda WhatsApp setup",
+        "  estacoda whatsapp",
+      ].join("\n"),
+    };
+  }
+  if (args.length > 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "WhatsApp setup uses a single command: estacoda whatsapp",
+    };
+  }
+  const result = await runWhatsAppWizard({
+    workspaceRoot: options.workspaceRoot,
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    prompt: options.prompt,
+    output: options.output,
+    dependencies: options.whatsappWizardDependencies,
+  });
+  return {
+    handled: result.handled,
+    exitCode: result.exitCode,
+    output: result.output,
+  };
 }
 
 async function telegram(options: CliOptions, args: string[]): Promise<CliCommandResult> {

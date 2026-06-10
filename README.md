@@ -137,6 +137,8 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`.
 
 WhatsApp transport dependencies are isolated under `scripts/whatsapp-bridge/` so the root runtime does not install or import Baileys. The bridge package is managed separately and is not part of the root pnpm workspace.
 
+Run `estacoda whatsapp` to start the WhatsApp setup wizard. The wizard uses QR-only device pairing, asks before installing the isolated bridge dependencies, and leaves the channel pairing-pending if no allowed WhatsApp users are configured yet.
+
 ### Other Capabilities
 
 - **Browser automation**: local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. browser-use, Firecrawl, and Camofox remain registered deferred providers.

@@ -167,27 +167,27 @@ estacoda email configure \
 
 | Capability | Evidence |
 |------------|----------|
-| Baileys linked-device login | `experimental` |
-| QR code login | `experimental` |
-| Pairing-code login | `experimental` |
+| Baileys linked-device login through isolated bridge | `experimental` |
+| QR code login | `estacoda whatsapp` |
 | DM text delivery | `experimental` |
 | Media download/upload | `experimental` |
 | Message chunking | `experimental` |
 
-**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The adapter uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
+**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The main runtime talks to a quarantined bridge package under `scripts/whatsapp-bridge/`; that bridge uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
 
 **Limitations:**
 
 - DM-first; no group support.
 - Live credential smoke is optional/manual.
-- Baileys availability is checked at runtime; adapter fails gracefully if missing.
+- Bridge dependency readiness is checked before setup/startup; missing dependencies require an explicit repair/install step.
 
 **Setup:**
 
 ```bash
-estacoda whatsapp configure --allowed-user 1234567890
-# Set channels.whatsapp.experimental: true in config
+estacoda whatsapp
 ```
+
+The wizard renders the WhatsApp QR code in the terminal. If no allowed user is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed by a later flow.
 
 ## DeliveryRouter
 

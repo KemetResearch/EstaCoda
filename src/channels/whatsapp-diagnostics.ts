@@ -1,6 +1,7 @@
 import { access, constants } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
+import type { WhatsAppChannelConfig } from "../config/runtime-config.js";
 import { defaultWhatsAppBridgeDir, getWhatsAppBridgeDependencyStatus } from "./whatsapp-bridge-lifecycle.js";
 
 export type WhatsAppGatewayDiagnostics = {
@@ -9,6 +10,9 @@ export type WhatsAppGatewayDiagnostics = {
   experimental: boolean;
   ready: boolean;
   statusLabel: string;
+  mode?: WhatsAppChannelConfig["mode"];
+  dmPolicy?: WhatsAppChannelConfig["dmPolicy"];
+  pairingPending: boolean;
   authDir: string;
   authDirWritable: boolean;
   bridgeDir: string;
@@ -24,17 +28,25 @@ export type WhatsAppGatewayDiagnostics = {
 };
 
 export async function getWhatsAppGatewayDiagnostics(
-  options: { homeDir?: string; gatewayStatePath?: string; bridgeDir?: string } = {}
+  options: { homeDir?: string; gatewayStatePath?: string; bridgeDir?: string; config?: WhatsAppChannelConfig } = {}
 ): Promise<WhatsAppGatewayDiagnostics> {
   const missing: string[] = [];
   const homeDir = resolveHomeDir(options.homeDir);
   const stateRoot = join(homeDir, ".estacoda");
-  const authDir = join(options.gatewayStatePath ?? stateRoot, "whatsapp-auth");
+  const config = options.config ?? {};
+  const defaultAuthDir = join(options.gatewayStatePath ?? stateRoot, "whatsapp-auth");
+  const authDir = config.authDir ?? defaultAuthDir;
+  const authDirProfileLocal = resolve(authDir) === resolve(defaultAuthDir);
   const bridgeDir = options.bridgeDir ?? defaultWhatsAppBridgeDir();
+  const allowedUsers = config.allowedUsers ?? [];
+  const pairingPending = config.enabled === true && config.dmPolicy === "pairing" && allowedUsers.length === 0;
 
   const authDirWritable = await canWrite(authDir);
   if (!authDirWritable) {
     missing.push("authDirWritable");
+  }
+  if (config.authDir !== undefined && !authDirProfileLocal) {
+    missing.push("authDirProfileLocal");
   }
 
   const bridgeStatus = await getWhatsAppBridgeDependencyStatus({ bridgeDir });
@@ -49,22 +61,36 @@ export async function getWhatsAppGatewayDiagnostics(
   if (!bridgeEntrypointPresent) missing.push("bridgeEntrypoint");
   if (!bridgeReadmePresent) missing.push("bridgeReadme");
   if (!bridgeDependenciesInstalled) missing.push("bridgeDependencies");
+  if (config.enabled === true) {
+    if (config.experimental !== true) missing.push("experimental");
+    if (allowedUsers.length === 0) {
+      missing.push(pairingPending ? "pairingPending" : "allowedUsers");
+    }
+  }
 
   let statusLabel = "ok";
   if (!bridgePackagePresent || !bridgeEntrypointPresent) {
     statusLabel = "bridge missing";
   } else if (!bridgeDependenciesInstalled) {
     statusLabel = "bridge dependencies missing";
+  } else if (config.authDir !== undefined && !authDirProfileLocal) {
+    statusLabel = "auth directory outside profile WhatsApp state";
   } else if (!authDirWritable) {
     statusLabel = "auth directory not writable";
+  } else if (pairingPending) {
+    statusLabel = "pairing pending";
   }
+  const ready = config.enabled === true && config.experimental === true && missing.length === 0;
 
   return {
     adapter: "whatsapp",
-    enabled: false,
-    experimental: false,
-    ready: false,
+    enabled: config.enabled === true,
+    experimental: config.experimental === true,
+    ready,
     statusLabel,
+    mode: config.mode,
+    dmPolicy: config.dmPolicy,
+    pairingPending,
     authDir,
     authDirWritable,
     bridgeDir,
@@ -75,7 +101,7 @@ export async function getWhatsAppGatewayDiagnostics(
     bridgeDependenciesInstalled,
     queueLength: undefined,
     droppedMessages: undefined,
-    allowedUsers: undefined,
+    allowedUsers,
     missing,
   };
 }

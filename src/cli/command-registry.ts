@@ -457,6 +457,14 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
+    name: "whatsapp",
+    aliases: [],
+    category: "Channels",
+    description: "Configure WhatsApp channel",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
     name: "gateway",
     aliases: [],
     category: "Channels",

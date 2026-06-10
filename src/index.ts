@@ -436,6 +436,7 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     "update",
     "verify",
     "voice",
+    "whatsapp",
     "web"
   ]).has(command);
 }

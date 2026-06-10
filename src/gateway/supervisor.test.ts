@@ -710,6 +710,73 @@ describe("runGatewaySupervisor", () => {
     });
   });
 
+  it("does not construct WhatsApp bridge paths from an outside-root authDir", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: join(tmpDir, "outside-whatsapp-auth"),
+          allowedUsers: ["971501234567"],
+        },
+      },
+    }));
+    const createWhatsAppAdapter = vi.fn(() => fakeAdapter("whatsapp") as any);
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createWhatsAppAdapter).not.toHaveBeenCalled();
+  });
+
+  it("keeps pairing-pending WhatsApp locked until allowed users exist", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          mode: "bot",
+          dmPolicy: "pairing",
+          allowedUsers: [],
+        },
+      },
+    }));
+    let authPolicy: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          authPolicy = input.authPolicy;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: () => fakeAdapter("whatsapp") as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(authPolicy.whatsapp.allowedNumbers).toEqual([]);
+    expect(authPolicy.whatsapp.deniedMessage).toContain("locked");
+  });
+
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {
     const configPath = profileConfigPath(tmpDir);
     await mkdir(dirname(configPath), { recursive: true });

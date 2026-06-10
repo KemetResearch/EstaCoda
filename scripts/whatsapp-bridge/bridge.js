@@ -66,6 +66,7 @@ export function createBridgeServer(options) {
   const token = requireString(options?.token, "token");
   const authDir = requireString(options?.authDir, "authDir");
   const logger = options?.logger ?? pino({ level: "silent" });
+  const printQRInTerminal = options?.printQRInTerminal === true;
   const maxResponseBytes = typeof options?.maxResponseBytes === "number" && options.maxResponseBytes > 0
     ? options.maxResponseBytes
     : MAX_RESPONSE_BYTES;
@@ -156,7 +157,7 @@ export function createBridgeServer(options) {
 
   async function startSocket() {
     try {
-      socket = await createWhatsAppSocket({ authDir, logger });
+      socket = await createWhatsAppSocket({ authDir, logger, printQRInTerminal });
       socket.ev.on("messages.upsert", (event) => {
         for (const message of event.messages ?? []) {
           const normalized = normalizeInboundMessage(message);
@@ -412,11 +413,15 @@ function requireString(value, name) {
 
 function parseArgs(argv) {
   const args = new Map();
-  for (let index = 0; index < argv.length; index += 2) {
+  for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    const value = argv[index + 1];
-    if (key?.startsWith("--") && value !== undefined) {
-      args.set(key.slice(2), value);
+    if (!key?.startsWith("--")) continue;
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith("--")) {
+      args.set(key.slice(2), "true");
+    } else {
+      args.set(key.slice(2), next);
+      index += 1;
     }
   }
   return args;
@@ -433,9 +438,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const authDir = requireString(args.get("auth-dir"), "auth-dir");
   const host = args.get("host") ?? "127.0.0.1";
   const port = Number(args.get("port") ?? "0");
+  const pairOnly = args.get("pair-only") === "true";
   const token = requireString(process.env.ESTACODA_WHATSAPP_BRIDGE_TOKEN, "ESTACODA_WHATSAPP_BRIDGE_TOKEN");
   validateBindHost(host);
-  const bridge = createBridgeServer({ authDir, token });
+  const bridge = createBridgeServer({ authDir, token, printQRInTerminal: pairOnly });
   bridge.server.listen(port, host.replace(/^\[(.*)\]$/u, "$1"), async () => {
     console.log("ESTACODA_WHATSAPP_BRIDGE_READY");
     try {

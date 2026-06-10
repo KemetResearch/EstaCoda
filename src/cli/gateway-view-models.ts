@@ -521,6 +521,11 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     waEntries.push(kv("Bridge package", data.whatsapp.bridgePackagePresent ? "present" : "missing"));
     waEntries.push(kv("Bridge dependencies", data.whatsapp.bridgeDependenciesInstalled ? "installed" : "missing"));
     waEntries.push(kv("Auth dir writable", data.whatsapp.authDirWritable ? "yes" : "no"));
+    waEntries.push(kv("Mode", data.whatsapp.mode ?? "bot"));
+    waEntries.push(kv("DM policy", data.whatsapp.dmPolicy ?? "allowlist"));
+    if (data.whatsapp.pairingPending) {
+      waEntries.push(kv("User authorization", "pairing pending", "warn"));
+    }
     if (!data.whatsapp.bridgeDependenciesInstalled) {
       waEntries.push(kv("Bridge dependencies", "not installed", "warn"));
       warnings.push(buildWarningErrorViewModel({
@@ -870,6 +875,9 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Bridge dependencies", diag.bridgeDependenciesInstalled ? "installed" : "missing"),
             kv("Auth dir", diag.authDir),
             kv("Auth dir writable", diag.authDirWritable ? "yes" : "no"),
+            kv("Mode", config.mode ?? "bot"),
+            kv("DM policy", config.dmPolicy ?? "allowlist"),
+            kv("Pairing pending", diag.pairingPending ? "yes" : "no"),
             kv("Allowed users", (config.allowedUsers ?? []).join(", ") || "none"),
             kv("Pairing mode", config.pairingMode ?? "qr"),
             kv("Busy policy", busyPolicy),

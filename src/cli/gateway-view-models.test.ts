@@ -64,6 +64,7 @@ function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"], cacheN
       experimental: false,
       ready: false,
       statusLabel: "disabled",
+      pairingPending: false,
       authDir: "/tmp/.estacoda/whatsapp-auth",
       authDirWritable: false,
       bridgeDir: "/tmp/estacoda/scripts/whatsapp-bridge",

@@ -19,6 +19,10 @@ function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
+function whatsappAuthDir(homeDir: string): string {
+  return join(resolveProfileStateHome({ homeDir, profileId: "default" }).gatewayStatePath, "whatsapp-auth");
+}
+
 async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
   const previous = process.env.ESTACODA_ALLOW_PRIVATE_URLS;
   if (value === undefined) {
@@ -1204,12 +1208,59 @@ describe("loadRuntimeConfig channel readiness", () => {
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { whatsapp: { enabled: true, experimental: true, authDir: "/tmp/estacoda-whatsapp-auth", allowedUsers: ["971501234567"] } }
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: whatsappAuthDir(workspace), allowedUsers: ["971501234567"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(true);
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready with authDir outside the selected profile WhatsApp auth directory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: join(tmpdir(), "estacoda-whatsapp-auth"), allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready when authDir is the gateway state root", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    const paths = resolveProfileStateHome({ homeDir: workspace, profileId: "default" });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: paths.gatewayStatePath, allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready when authDir is a sibling profile-local directory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    const paths = resolveProfileStateHome({ homeDir: workspace, profileId: "default" });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: join(paths.gatewayStatePath, "not-whatsapp-auth"), allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
     await rm(workspace, { recursive: true, force: true });
   });
 
