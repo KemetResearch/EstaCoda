@@ -146,8 +146,8 @@ export type AgentLoopSessionInput = {
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
   skillConfig?: Record<string, Record<string, unknown>>;
-  skillLearningManager: SkillLearningManager;
-  agentEvolutionPolicy: AgentEvolutionPolicy;
+  skillLearningManager?: SkillLearningManager;
+  agentEvolutionPolicy?: AgentEvolutionPolicy;
   responseLabel: string;
   ui?: AgentLoopOptions["ui"];
   agentProfile?: AgentLoopOptions["agentProfile"];
@@ -159,6 +159,9 @@ export type AgentLoopSessionInput = {
   trustedWorkspace: () => Promise<boolean>;
   disabledToolsets?: ToolsetName[];
   skillVisibilityStrategy?: AgentLoopSkillVisibilityStrategy;
+  memoryRecall?: "enabled" | "disabled";
+  sessionCompression?: "enabled" | "disabled";
+  projectContext?: ProjectContextSnapshot;
 };
 
 export type BuiltAgentLoopSession = {
@@ -374,16 +377,18 @@ export class AgentLoopBuilder {
       skillEvolutionStore: substrate.skillEvolutionStore,
       memoryProvider: substrate.memoryProvider
     });
-    const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
-      builder: substrate.memoryPromptContextBuilder,
-      sessionRecallService,
-      recorder: runRecorder,
-      externalMemory: substrate.externalMemory,
-      externalMemoryProviders: substrate.externalMemoryProviders,
-      profileId: substrate.profileId,
-      sessionId: () => sessionRuntimeContext.currentSessionId(),
-      workspaceRoot: substrate.workspaceRoot
-    });
+    const memoryRecallOrchestrator = input.memoryRecall === "disabled"
+      ? undefined
+      : new MemoryRecallOrchestrator({
+        builder: substrate.memoryPromptContextBuilder,
+        sessionRecallService,
+        recorder: runRecorder,
+        externalMemory: substrate.externalMemory,
+        externalMemoryProviders: substrate.externalMemoryProviders,
+        profileId: substrate.profileId,
+        sessionId: () => sessionRuntimeContext.currentSessionId(),
+        workspaceRoot: substrate.workspaceRoot
+      });
     const toolPlanRunner = (this.#factories.toolPlanRunner ?? ((options) => new ToolPlanRunner(options)))({
       toolCallPlanner,
       toolExecutor,
@@ -457,12 +462,12 @@ export class AgentLoopBuilder {
       memoryProvider: substrate.memoryProvider,
       memoryPromptContext: substrate.memoryPromptContext,
       memoryRecallOrchestrator,
-      sessionCompressionService: substrate.sessionCompressionService,
-      compressionConfig: substrate.compressionConfig,
+      sessionCompressionService: input.sessionCompression === "disabled" ? undefined : substrate.sessionCompressionService,
+      compressionConfig: input.sessionCompression === "disabled" ? undefined : substrate.compressionConfig,
       model: substrate.routes.model,
       providerPreferences: substrate.routes.providerPreferences,
       contextReferenceExpander: substrate.contextReferenceExpander,
-      projectContext: substrate.projectContext,
+      projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
       soul: undefined,
       skillsIndex: sessionSkillCatalog,

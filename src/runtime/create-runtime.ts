@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import type { DelegationConfig } from "../contracts/delegation.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -27,7 +28,6 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
-import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
@@ -77,6 +77,7 @@ import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
 import { AgentLoopBuilder } from "./agent-loop-builder.js";
+import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
@@ -162,6 +163,7 @@ export type RuntimeOptions = {
   cronStore?: CronStore;
   disableCronTools?: boolean;
   disabledToolsets?: ToolsetName[];
+  delegationConfig?: DelegationConfig;
   workspaceFsAdapter?: WorkspaceFsAdapter;
   sessionMetadata?: Record<string, unknown>;
 };
@@ -756,6 +758,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       currentPlatform: options.currentPlatform
     }
   });
+  const childFactory = new DefaultChildAgentLoopFactory({
+    builder,
+    sessionDb,
+    trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({
+      profileId,
+      sessionId,
+      modelId: options.model.id
+    }),
+    responseLabel: runtimeBranding.responseLabel,
+    workspaceRoot,
+    delegationConfig: options.delegationConfig,
+    skillConfig: options.skillConfig,
+    ui: options.ui,
+    agentProfile: options.agentProfile
+  });
   const builtSession = await builder.buildSession({
     sessionId,
     sessionRuntimeContext,
@@ -768,9 +785,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     securityPolicy,
-    delegationManagerFactory: ({ toolExecutor }) => new DelegationManager({
+    delegationManagerFactory: () => new DelegationManager({
       sessionDb,
-      toolExecutor,
+      childFactory,
       trajectoryRecorder
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),

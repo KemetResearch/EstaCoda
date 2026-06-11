@@ -1,4 +1,4 @@
-import type { RegisteredTool, SessionToolProvider, ToolsetName } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
 import type { DelegationManager } from "../delegation/delegation-manager.js";
 
 export type DelegationToolOptions = {
@@ -41,7 +41,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       progressLabel: "delegating task",
       maxResultSizeChars: 8000,
       isAvailable: () => true,
-      run: async (input: DelegateTaskInput) => {
+      run: async (input: DelegateTaskInput, context?: ToolExecutionContext) => {
         const task = input.task?.trim();
 
         if (task === undefined || task.length === 0) {
@@ -58,7 +58,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           context: input.context,
           allowedToolsets: input.allowedToolsets ?? ["core", "research"],
           allowedTools: input.allowedTools ?? [],
-          trustedWorkspace: await options.trustedWorkspace()
+          trustedWorkspace: await options.trustedWorkspace(),
+          signal: context?.signal
         });
 
         return {

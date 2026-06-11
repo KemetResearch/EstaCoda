@@ -1,8 +1,11 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolsetName } from "../contracts/tool.js";
-import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { ProviderUsage } from "../contracts/provider.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import type { AgentLoopResponse } from "../runtime/agent-loop.js";
+import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -13,11 +16,20 @@ export type DelegationRequest = {
   allowedTools?: string[];
   channel?: ChannelKind;
   trustedWorkspace: boolean;
+  signal?: AbortSignal;
+};
+
+export type DelegationUsageMetadata = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
 };
 
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error";
   task: string;
   summary: string;
   toolExecutions: Array<{
@@ -27,206 +39,234 @@ export type DelegationSummary = {
   }>;
   allowedToolsets: ToolsetName[];
   allowedTools: string[];
+  usage?: DelegationUsageMetadata;
 };
 
 export type DelegationManagerOptions = {
   sessionDb: SessionDB;
-  toolExecutor: ToolExecutor;
+  childFactory: ChildAgentLoopFactory;
   trajectoryRecorder: TrajectoryRecorder;
-  id?: () => string;
 };
 
 export class DelegationManager {
   readonly #sessionDb: SessionDB;
-  readonly #toolExecutor: ToolExecutor;
+  readonly #childFactory: ChildAgentLoopFactory;
   readonly #trajectoryRecorder: TrajectoryRecorder;
-  readonly #id: () => string;
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
-    this.#toolExecutor = options.toolExecutor;
+    this.#childFactory = options.childFactory;
     this.#trajectoryRecorder = options.trajectoryRecorder;
-    this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
-    const childSession = await this.#sessionDb.createSession({
-      id: this.#id(),
-      profileId: request.profileId,
-      parentSessionId: request.parentSessionId,
-      title: `Delegated: ${request.task.slice(0, 60)}`,
-      metadata: {
-        kind: "delegated-child",
-        allowedToolsets: request.allowedToolsets ?? [],
-        allowedTools: request.allowedTools ?? [],
-        context: request.context ?? ""
-      }
-    });
+    const allowedToolsets = request.allowedToolsets ?? [];
+    const allowedTools = request.allowedTools ?? [];
 
-    await this.#sessionDb.appendEvent(request.parentSessionId, {
-      kind: "delegation-started",
-      childSessionId: childSession.id,
-      task: request.task,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? []
-    });
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "system",
-      channel: request.channel,
-      content: [
-        "You are an isolated delegated EstaCoda child session.",
-        "Use only the explicit task/context below.",
-        `Task: ${request.task}`,
-        request.context === undefined ? undefined : `Context:\n${request.context}`,
-        `Allowed toolsets: ${(request.allowedToolsets ?? []).join(", ") || "none"}`,
-        `Allowed tools: ${(request.allowedTools ?? []).join(", ") || "none"}`
-      ]
-        .filter((line) => line !== undefined)
-        .join("\n\n"),
-      metadata: {
-        parentSessionId: request.parentSessionId
-      }
-    });
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "user",
-      channel: request.channel,
-      content: request.task,
-      metadata: {
-        delegated: true,
-        parentSessionId: request.parentSessionId
-      }
-    });
-    this.#trajectoryRecorder.record("delegation-started", {
-      parentSessionId: request.parentSessionId,
-      childSessionId: childSession.id,
-      task: request.task,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? []
-    });
+    if (request.signal?.aborted === true) {
+      return await this.#cancelledBeforeStart(request, allowedToolsets, allowedTools);
+    }
 
-    const toolExecutions = await this.#runInitialDelegatedTools({
-      childSessionId: childSession.id,
-      task: request.task,
-      context: request.context,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? [],
-      trustedWorkspace: request.trustedWorkspace
-    });
-    const summary = this.#summarize(request.task, toolExecutions);
-    const status: DelegationSummary["status"] = toolExecutions.some((execution) => execution.decision !== "allow")
-      ? "blocked"
-      : "completed";
+    const startedAt = Date.now();
+    let childSessionId: string | undefined;
+    let child: ChildAgentLoopRuntime | undefined;
+    try {
+      child = await this.#childFactory.createChild({
+        parentSessionId: request.parentSessionId,
+        profileId: request.profileId,
+        task: request.task,
+        context: request.context,
+        allowedToolsets,
+        allowedTools,
+        role: "leaf",
+        depth: 1,
+        channel: request.channel,
+        trustedWorkspace: request.trustedWorkspace
+      });
+      childSessionId = child.childSessionId;
 
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "agent",
-      channel: request.channel,
-      content: summary,
-      metadata: {
-        toolExecutions: toolExecutions.map((execution) => execution.tool.name)
+      await this.#recordStarted({
+        parentSessionId: request.parentSessionId,
+        childSessionId,
+        task: request.task,
+        allowedToolsets,
+        allowedTools
+      });
+
+      const childResponse = await child.handle({
+        text: delegatedPrompt(request.task, request.context),
+        channel: request.channel ?? "cli",
+        trustedWorkspace: request.trustedWorkspace,
+        signal: request.signal,
+        inputMetadata: {
+          delegated: true,
+          parentSessionId: request.parentSessionId
+        }
+      });
+      const summary = childResponse.text;
+      const status = await this.#statusFromChildResponse(child.childSessionId, childResponse, request.signal);
+      const result: DelegationSummary = {
+        childSessionId: child.childSessionId,
+        status: status.status,
+        reason: status.reason,
+        task: request.task,
+        summary,
+        allowedToolsets,
+        allowedTools,
+        usage: usageFromProviderResponse(childResponse.providerExecution?.response?.usage),
+        toolExecutions: childResponse.toolExecutions.map((execution) => ({
+          tool: execution.tool.name,
+          decision: execution.decision,
+          ok: execution.result?.ok
+        }))
+      };
+      await this.#recordFinished({
+        parentSessionId: request.parentSessionId,
+        childSessionId: child.childSessionId,
+        status: result.status,
+        summary: result.summary,
+        durationMs: Date.now() - startedAt
+      });
+      return result;
+    } catch (error) {
+      const summary = error instanceof Error ? error.message : "Unknown child delegation error.";
+      const result: DelegationSummary = {
+        childSessionId: childSessionId ?? "unavailable",
+        status: "failed",
+        reason: childSessionId === undefined ? "construction-error" : "runtime-error",
+        task: request.task,
+        summary,
+        allowedToolsets,
+        allowedTools,
+        toolExecutions: []
+      };
+      if (childSessionId !== undefined) {
+        await this.#recordFinished({
+          parentSessionId: request.parentSessionId,
+          childSessionId,
+          status: "failed",
+          summary,
+          durationMs: Date.now() - startedAt,
+          error: summary
+        });
       }
-    });
-    await this.#sessionDb.appendEvent(request.parentSessionId, {
-      kind: "delegation-finished",
-      childSessionId: childSession.id,
-      summary,
-      status
-    });
+      return result;
+    } finally {
+      await child?.cleanup().catch(() => undefined);
+    }
+  }
+
+  async #cancelledBeforeStart(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[]
+  ): Promise<DelegationSummary> {
+    const summary = "Delegation cancelled before child start.";
     this.#trajectoryRecorder.record("delegation-finished", {
       parentSessionId: request.parentSessionId,
-      childSessionId: childSession.id,
-      status,
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "cancelled",
       summary
     });
-
     return {
-      childSessionId: childSession.id,
-      status,
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "cancelled",
       task: request.task,
       summary,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? [],
-      toolExecutions: toolExecutions.map((execution) => ({
-        tool: execution.tool.name,
-        decision: execution.decision,
-        ok: execution.result?.ok
-      }))
+      allowedToolsets,
+      allowedTools,
+      toolExecutions: []
     };
   }
 
-  async #runInitialDelegatedTools(input: {
+  async #recordStarted(input: {
+    parentSessionId: string;
     childSessionId: string;
     task: string;
-    context?: string;
     allowedToolsets: ToolsetName[];
     allowedTools: string[];
-    trustedWorkspace: boolean;
-  }): Promise<ToolExecutionRecord[]> {
-    const records: ToolExecutionRecord[] = [];
-
-    if (
-      isToolAllowed("playbook.plan", input.allowedTools) &&
-      (input.allowedToolsets.includes("research") || input.allowedToolsets.includes("core"))
-    ) {
-      const execution = await this.#toolExecutor.executeTool({
-        tool: "playbook.plan",
-        sessionId: input.childSessionId,
-        trustedWorkspace: input.trustedWorkspace,
-        input: {
-          skill: "delegated-task",
-          intent: ["delegation"],
-          firstStep: input.task
-        }
-      });
-
-      if (execution !== undefined) {
-        records.push(execution);
-      }
-    }
-
-    if (
-      isToolAllowed("file.search", input.allowedTools) &&
-      input.allowedToolsets.includes("files") &&
-      input.context !== undefined
-    ) {
-      const firstSearchTerm = input.context
-        .split(/\s+/)
-        .find((term) => term.length > 5 && /^[a-zA-Z0-9_.-]+$/.test(term));
-
-      if (firstSearchTerm !== undefined) {
-        const execution = await this.#toolExecutor.executeTool({
-          tool: "file.search",
-          sessionId: input.childSessionId,
-          trustedWorkspace: input.trustedWorkspace,
-          input: {
-            query: firstSearchTerm
-          }
-        });
-
-        if (execution !== undefined) {
-          records.push(execution);
-        }
-      }
-    }
-
-    return records;
+  }): Promise<void> {
+    await this.#sessionDb.appendEvent(input.parentSessionId, {
+      kind: "delegation-started",
+      childSessionId: input.childSessionId,
+      task: input.task,
+      allowedToolsets: input.allowedToolsets,
+      allowedTools: input.allowedTools,
+      role: "leaf",
+      depth: 1
+    });
+    this.#trajectoryRecorder.record("delegation-started", input);
   }
 
-  #summarize(task: string, toolExecutions: ToolExecutionRecord[]): string {
-    const lines = [
-      `Delegated task: ${task}`,
-      `Tool steps: ${toolExecutions.length}`,
-      ...toolExecutions.map((execution) =>
-        `- ${execution.tool.name}: ${execution.decision}${execution.result === undefined ? "" : ` / ${execution.result.ok ? "ok" : "error"}`}`
-      )
-    ];
+  async #recordFinished(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    status: DelegationSummary["status"];
+    summary: string;
+    durationMs: number;
+    error?: string;
+  }): Promise<void> {
+    await this.#sessionDb.appendEvent(input.parentSessionId, {
+      kind: "delegation-finished",
+      childSessionId: input.childSessionId,
+      summary: input.summary,
+      status: input.status,
+      durationMs: input.durationMs,
+      error: input.error
+    });
+    this.#trajectoryRecorder.record("delegation-finished", input);
+  }
 
-    return lines.join("\n");
+  async #statusFromChildResponse(
+    childSessionId: string,
+    response: AgentLoopResponse,
+    signal: AbortSignal | undefined
+  ): Promise<{ status: DelegationSummary["status"]; reason?: DelegationSummary["reason"] }> {
+    if (signal?.aborted === true) {
+      return { status: "failed", reason: "cancelled" };
+    }
+    const events = await this.#sessionDb.listEvents(childSessionId);
+    if (hasStructuredBlock(response.toolExecutions, events)) {
+      return { status: "blocked", reason: "blocked" };
+    }
+    if (response.providerExecution?.ok === false) {
+      return { status: "failed", reason: "provider-error" };
+    }
+    return { status: "completed" };
   }
 }
 
-function isToolAllowed(tool: string, allowedTools: string[]): boolean {
-  return allowedTools.length === 0 || allowedTools.includes(tool);
+export function delegatedPrompt(task: string, context: string | undefined): string {
+  if (context === undefined || context.trim().length === 0) {
+    return task;
+  }
+  return [
+    `Delegated task: ${task}`,
+    "",
+    `Context: ${context}`
+  ].join("\n");
+}
+
+function hasStructuredBlock(toolExecutions: ToolExecutionRecord[], events: SessionEvent[]): boolean {
+  if (toolExecutions.some((execution) => execution.decision !== "allow")) {
+    return true;
+  }
+  return events.some((event) =>
+    event.kind === "tool-gated" && event.decision !== "allow" ||
+    event.kind === "security-assessed" && event.assessment.decision !== "allow"
+  );
+}
+
+function usageFromProviderResponse(usage: ProviderUsage | undefined): DelegationUsageMetadata | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    reasoningTokens: usage.reasoningTokens
+  };
 }

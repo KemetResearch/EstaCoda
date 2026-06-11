@@ -128,6 +128,7 @@ export class SessionSearchService {
     const excluded = new Set(options.excludeSessionIds ?? []);
     const sessions = (await this.#sessionDb.listSessions(options.profileId))
       .filter((session) => !excluded.has(session.id))
+      .filter((session) => !isDelegatedChildSession(session))
       .filter((session) => sessionMatchesWorkspace(session, options.workspaceRoot))
       .sort(sessionComparator(options.sort ?? "newest"));
 
@@ -172,6 +173,7 @@ export class SessionSearchService {
     const filtered = rawHits
       .map((hit, index) => ({ hit, rankIndex: index }))
       .filter(({ hit }) => !excluded.has(hit.session.id))
+      .filter(({ hit }) => !isDelegatedChildSession(hit.session))
       .filter(({ hit }) => sessionMatchesWorkspace(hit.session, options.workspaceRoot))
       .filter(({ hit }) => roleFilter === undefined || roleFilter.has(hit.message.role));
     const sorted = [...filtered].sort(hitComparator(options.sort ?? "rank"));
@@ -201,6 +203,7 @@ export class SessionSearchService {
 
     if (
       (options.profileId !== undefined && session.profileId !== options.profileId) ||
+      isDelegatedChildSession(session) ||
       !sessionMatchesWorkspace(session, options.workspaceRoot)
     ) {
       return scrollError({
@@ -348,6 +351,10 @@ function sessionMatchesWorkspace(session: SessionRecord, workspaceRoot: string |
   return metadata.workspaceRoot === workspaceRoot ||
     metadata.workspaceDirectory === workspaceRoot ||
     metadata.projectRoot === workspaceRoot;
+}
+
+function isDelegatedChildSession(session: SessionRecord): boolean {
+  return session.metadata?.kind === "delegated-child";
 }
 
 function scrollError(input: {

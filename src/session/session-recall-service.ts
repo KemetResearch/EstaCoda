@@ -112,6 +112,7 @@ export class SessionRecallService {
     });
     const hits = rawHits.filter((hit) =>
       !this.#excludedSessionIds().has(hit.session.id) &&
+      !isDelegatedChildSession(hit.session) &&
       sessionMatchesWorkspace(hit.session, this.#workspaceRoot)
     );
     const groups = groupHitsBySession(hits).slice(0, this.#maxSessions);
@@ -416,6 +417,10 @@ function sessionMatchesWorkspace(session: SessionRecord, workspaceRoot: string |
   }
   const value = workspaceFromMetadata(session.metadata);
   return value === workspaceRoot;
+}
+
+function isDelegatedChildSession(session: SessionRecord): boolean {
+  return session.metadata?.kind === "delegated-child";
 }
 
 function workspaceFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {

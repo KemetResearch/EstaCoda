@@ -78,6 +78,38 @@ describe("SessionSearchService", () => {
     ]);
   });
 
+  it("excludes delegated child sessions from browse, search, and scroll by default", async () => {
+    const { db } = createFixture();
+    await createSessionWithMessage(db, {
+      sessionId: "parent",
+      content: "needle parent"
+    });
+    await createSessionWithMessage(db, {
+      sessionId: "child",
+      content: "needle child",
+      metadata: { kind: "delegated-child" }
+    });
+    const childMessage = (await db.listMessages("child"))[0]!;
+    const service = new SessionSearchService({ sessionDb: db });
+
+    const browse = await service.browseRecentSessions({ sort: "oldest" });
+    const search = await service.searchMessages({ query: "needle" });
+    const scroll = await service.scrollAroundMessage({
+      sessionId: "child",
+      aroundMessageId: childMessage.id
+    });
+
+    expect(browse.sessions.map((session) => session.sessionId)).toEqual(["parent"]);
+    expect(search.messages.map((message) => message.sessionId)).toEqual(["parent"]);
+    expect(scroll).toMatchObject({
+      ok: false,
+      error: {
+        code: "session-not-accessible",
+        sessionId: "child"
+      }
+    });
+  });
+
   it("browse limit clamps to 20 and supports oldest sort", async () => {
     const { db } = createFixture();
     await seedSessions(db, 25);

@@ -2526,6 +2526,189 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("runs delegate_task through a real child AgentLoop and records child metadata", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-child",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: "local-child",
+          content: "Child final answer",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 5,
+            totalTokens: 17
+          }
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Inspect delegated runtime",
+          context: "Use bounded context only."
+        }
+      });
+      const metadata = execution?.result?.metadata as { childSessionId?: string; status?: string; usage?: Record<string, unknown> } | undefined;
+      const childSessionId = metadata?.childSessionId;
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(metadata).toMatchObject({
+        status: "completed",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 5,
+          totalTokens: 17
+        }
+      });
+      expect(typeof childSessionId).toBe("string");
+      const childSession = await sessionDb.getSession(childSessionId!);
+      expect(childSession).toMatchObject({
+        parentSessionId: runtime.sessionId,
+        metadata: expect.objectContaining({
+          kind: "delegated-child",
+          parentSessionId: runtime.sessionId,
+          role: "leaf",
+          depth: 1,
+          approvalMode: "non-interactive-fail-closed",
+          suppressedRuntimeFeatures: expect.arrayContaining(["memoryRecall", "skillLearning", "sessionCompression"])
+        })
+      });
+      const childMessages = await sessionDb.listMessages(childSessionId!);
+      expect(childMessages.filter((message) => message.role === "user").map((message) => message.content)).toEqual([
+        [
+          "Delegated task: Inspect delegated runtime",
+          "",
+          "Context: Use bounded context only."
+        ].join("\n")
+      ]);
+      expect(childMessages.some((message) => message.role === "agent" && message.content.includes("Child final answer"))).toBe(true);
+      expect(providerRequests[0]?.messages.some((message) =>
+        typeof message.content === "string" && message.content.includes("Inspect delegated runtime")
+      )).toBe(true);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("lets a child provider request a safe tool and receive tool feedback", async () => {
+    const options = await minimalRuntimeOptions();
+    await writeFile(join(options.workspaceRoot, "needle.txt"), "needle-value");
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-child-tools",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const responses = [
+      {
+        ok: true,
+        provider: "local" as const,
+        model: "local-child-tools",
+        content: "",
+        finishReason: "tool_calls" as const,
+        raw: {
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "call-1",
+                    function: {
+                      name: "file.search",
+                      arguments: JSON.stringify({ query: "needle-value" })
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        ok: true,
+        provider: "local" as const,
+        model: "local-child-tools",
+        content: "Tool feedback received."
+      }
+    ];
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return responses.shift()!;
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child-tools", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Find the needle"
+        }
+      });
+
+      expect(execution?.result?.metadata).toMatchObject({
+        status: "completed",
+        summary: "Tool feedback received."
+      });
+      expect(providerRequests.length).toBeGreaterThanOrEqual(2);
+      const metadata = execution?.result?.metadata as { childSessionId?: string } | undefined;
+      const childMessages = await sessionDb.listMessages(metadata!.childSessionId!);
+      expect(childMessages.some((message) => message.role === "tool" && message.metadata?.tool === "file.search")).toBe(true);
+      const childEvents = await sessionDb.listEvents(metadata!.childSessionId!);
+      expect(childEvents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "tool-called", tool: "file.search" }),
+        expect.objectContaining({ kind: "tool-result", tool: "file.search" })
+      ]));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("omits cron tools when cron registration is disabled", async () => {
     const options = await minimalRuntimeOptions();
     const runtime = await createRuntime({

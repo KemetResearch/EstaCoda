@@ -47,6 +47,23 @@ describe("SessionRecallService", () => {
     expect(result.blocks[0]?.sourceSessionIds).toEqual(["session-cite"]);
   });
 
+  it("excludes delegated child sessions from recall by default", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-parent", "default", ["alpha parent note"]);
+    await seedSession(db, "session-child", "default", ["alpha child note"], {
+      kind: "delegated-child"
+    });
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      ...auxiliaryOptions()
+    }).recall("alpha");
+
+    expect(result.blocks.map((block) => block.sessionId)).toEqual(["session-parent"]);
+    expect(result.diagnostics.rawHitCount).toBe(2);
+  });
+
   it("redacts recall query and historical context before auxiliary session_search", async () => {
     const db = new InMemorySessionDB();
     const rawContextSecret = "OPENAI_API_KEY=context-secret-value";
