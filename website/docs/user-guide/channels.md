@@ -197,32 +197,41 @@ WhatsApp is experimental and gated behind `channels.whatsapp.experimental: true`
 |---|---|
 | Baileys linked-device login | `experimental` |
 | QR code login | `experimental` |
-| Pairing-code login | `experimental` |
 | DM text delivery | `experimental` |
+| Group policy gating | `experimental` |
 | Media download/upload | `experimental` |
 | Message chunking | `experimental` |
+| Final-only replies | `experimental` |
+| Voice-bubble delivery | `ffmpeg` optional |
 
-**Important:** The adapter uses `@whiskeysockets/baileys`, which is an unofficial API. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk.
+**Important:** WhatsApp uses `@whiskeysockets/baileys` through the isolated `scripts/whatsapp-bridge/` npm package. Baileys is an unofficial API; Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. The root runtime does not install or import Baileys or WhatsApp-specific `@hapi/boom` handling.
 
 **Gaps:**
 
-- DM-only. No group support.
 - No approvals.
-- No progress delivery.
+- No visible progress delivery; WhatsApp receives final replies only, with best-effort typing presence during work.
 - Live credential smoke is optional and manual.
 
 **Setup:**
 
 ```bash
-estacoda whatsapp configure --allowed-user 1234567890
+estacoda whatsapp
 ```
 
-Then set `channels.whatsapp.experimental: true` in config.
+The wizard asks before repairing bridge dependencies, renders a QR code in the terminal, and writes profile config only after successful QR pairing. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` WhatsApp device pairing-code setup is not exposed.
+
+If no `allowedUsers` are entered, setup writes `dmPolicy: "pairing"`. That is a waiting state for secure user authorization, not open access. WhatsApp authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes. Telegram pairing remains config-backed and unchanged.
+
+`mode: "bot"` ignores `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix`, and suppresses echoes. `groupPolicy` defaults to `"disabled"`; `"allowlist"` requires `allowedGroups`, and `"open"` must be configured explicitly.
+
+Outbound media is validated in the main runtime before the bridge receives a local path. Voice-hinted incompatible audio requires `ffmpeg` for WhatsApp voice/PTT conversion; if conversion is unavailable, EstaCoda sends normal audio with a fallback caption.
 
 **Readiness requirements:**
 
 - `enabled: true`
 - `experimental: true`
+- QR-paired auth state
+- `dmPolicy`/`groupPolicy` satisfied (`allowedUsers` or `allowedGroups` where required)
 
 ---
 
@@ -324,7 +333,7 @@ silent
 
 **Email not polling:** Verify IMAP host, SMTP host, username, and password. Check that the password env var is exported.
 
-**WhatsApp QR code not scanning:** Baileys availability is checked at runtime. If the adapter fails gracefully, install `@whiskeysockets/baileys` in the operator environment.
+**WhatsApp QR code not scanning:** Run `estacoda whatsapp` again. The QR code is rendered only in the terminal and expires after 120 seconds. If diagnostics report missing bridge dependencies, approve the explicit repair step or run `npm ci` inside `scripts/whatsapp-bridge/`; do not install Baileys in the root package.
 
 ---
 

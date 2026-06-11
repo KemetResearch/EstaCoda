@@ -116,7 +116,7 @@ estacoda gateway status           # حالة البوابة الكاملة
 - وجود رمز Telegram، المستخدمين المسموح لهم، المحادثات
 - وجود رمز Discord
 - بيانات Email IMAP/SMTP، الاعتماد، العناوين
-- بوابة WhatsApp التجريبية، توفر Baileys، كتابة دليل المصادقة
+- بوابة WhatsApp التجريبية، جاهزية حزمة الجسر المعزولة، كتابة دليل المصادقة، ربط الجهاز، تفويض المستخدم، `dmPolicy`، `groupPolicy`، `mode`، وضغط الطابور
 - أذونات دليل cron
 
 يرجع رمز الخروج 1 إذا كانت هناك تحذيرات.
@@ -143,6 +143,16 @@ estacoda channels disable telegram
 الأسماء الصالحة: `telegram`، `discord`، `email`، `whatsapp` (غير حساسة للحالة).
 
 `enable` يضعع `enabled: true` في إعدادات الملف الشخصي. `disable` يضعع `enabled: false`. كلاهما امتثاليتان ويحفظان بقية الحقول.
+
+## إعداد WhatsApp
+
+```bash
+estacoda whatsapp
+```
+
+يفتح `estacoda whatsapp` wizard إعداد WhatsApp الوحيد. يوضح أن النقل تجريبي وغير رسمي ومدعوم بـ Baileys، ويحافظ على الاعتمادات داخل `scripts/whatsapp-bridge/`، ويسأل قبل إصلاح الاعتمادات، ويعرض QR code في الطرفية، ولا يكتب الإعدادات إلا بعد نجاح QR pairing. يدعم QR فقط لربط الجهاز؛ لا توجد واجهة pairing code لجهاز WhatsApp.
+
+إذا لم تُدخل `allowedUsers`، يكتب wizard القيمة `dmPolicy: "pairing"` بحيث يكون الجهاز مربوطاً لكن ينتظر تفويض مستخدم آمن. حالة logged-out تتطلب re-pair/reset صريحاً لدليل مصادقة WhatsApp الخاص بالملف الشخصي المحدد فقط.
 
 ## نضج القناة
 

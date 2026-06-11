@@ -197,32 +197,41 @@ WhatsApp تجريبي ومحصور بـ `channels.whatsapp.experimental: true`.
 |---|---|
 | تسجيل دخول Baileys كجهاز مرتبط | `experimental` |
 | تسجيل دخول برمز QR | `experimental` |
-| تسجيل دخول برمز ربط | `experimental` |
 | توصيل نصي مباشر | `experimental` |
+| ضبط سياسة المجموعات | `experimental` |
 | تحميل/رفع الوسائط | `experimental` |
 | تقسيم الرسائل | `experimental` |
+| ردود نهائية فقط | `experimental` |
+| توصيل voice bubble | يتطلب `ffmpeg` اختيارياً |
 
-**هام:** المحول يستخدم `@whiskeysockets/baileys`، وهي واجهة برمجة غير رسمية. Meta قد تُعلّق حسابات WhatsApp التي تستخدم مكتبات غير رسمية. استخدمها على مسؤوليتك.
+**هام:** يستخدم WhatsApp الحزمة `@whiskeysockets/baileys` عبر حزمة npm المعزولة `scripts/whatsapp-bridge/`. Baileys واجهة غير رسمية؛ قد تُعلّق Meta حسابات WhatsApp التي تستخدم مكتبات غير رسمية. استخدمها على مسؤوليتك. لا يثبت runtime الجذري Baileys أو معالجة `@hapi/boom` الخاصة بـ WhatsApp ولا يستوردهما.
 
 **الثغرات:**
 
-- مباشر فقط. لا دعم للمجموعات.
 - لا موافقات.
-- لا توصيل تقدم.
+- لا توجد رسائل تقدم مرئية؛ يحصل WhatsApp على الرد النهائي فقط، مع حضور typing بأفضل جهد أثناء العمل.
 - اختبار الدخان الحي للاعتمادات اختياري ويدوي.
 
 **الإعداد:**
 
 ```bash
-estacoda whatsapp configure --allowed-user 1234567890
+estacoda whatsapp
 ```
 
-ثم عيّن `channels.whatsapp.experimental: true` في الإعداد.
+يسأل wizard قبل إصلاح اعتمادات الجسر، ويعرض QR code في الطرفية، ولا يكتب إعدادات profile إلا بعد نجاح QR pairing. تنتهي مهلة QR بعد 120 ثانية برسالة `Pairing timed out - run estacoda whatsapp to try again.` ولا توجد واجهة لإعداد pairing code لجهاز WhatsApp.
+
+إذا لم تُدخل `allowedUsers`، يكتب الإعداد `dmPolicy: "pairing"`. هذه حالة انتظار لتفويض المستخدم الآمن وليست وصولاً مفتوحاً. رموز تفويض مستخدمي WhatsApp أحادية الاستخدام، تنتهي بعد 10 دقائق، ولا تُخزن إلا كـ salted SHA-256 hashes. يبقى ربط Telegram مدعوماً بالإعدادات كما هو حالياً ودون تغيير.
+
+الوضع `mode: "bot"` يتجاهل رسائل `fromMe`. الوضع `mode: "self-chat"` يقبل إدخال self-chat المقصود، ويضيف `replyPrefix` إلى ردود البوت، ويمنع الأصداء. السياسة `groupPolicy` افتراضياً `"disabled"`؛ وتتطلب `"allowlist"` قيمة `allowedGroups`، أما `"open"` فيجب ضبطها صراحة.
+
+تتحقق main runtime من الوسائط الصادرة قبل أن يستقبل الجسر مساراً محلياً. الصوت غير المتوافق مع voice hint يحتاج `ffmpeg` للتحويل إلى WhatsApp voice/PTT؛ وإذا لم يكن التحويل متاحاً، ترسل EstaCoda صوتاً عادياً مع توضيح fallback.
 
 **متطلبات الجاهزية:**
 
 - `enabled: true`
 - `experimental: true`
+- حالة مصادقة مربوطة عبر QR
+- تحقق `dmPolicy`/`groupPolicy`، بما في ذلك `allowedUsers` أو `allowedGroups` عند الحاجة
 
 ---
 
@@ -324,7 +333,7 @@ silent
 
 **Email لا يستطلع:** تحقق من مضيف IMAP ومضيف SMTP واسم المستخدم وكلمة المرور. تأكد من تصدير متغير البيئة.
 
-**رمز QR لـ WhatsApp لا يُمسح:** توفر Baileys يُتحقق في وقت التشغيل. إذا فشل المحول بسلاسة، ثبّت `@whiskeysockets/baileys` في بيئة المشغل.
+**رمز QR لـ WhatsApp لا يُمسح:** شغّل `estacoda whatsapp` مرة أخرى. يظهر QR code في الطرفية فقط وتنتهي مهلته بعد 120 ثانية. إذا أبلغت التشخيصات عن نقص اعتمادات الجسر، وافق على خطوة الإصلاح الصريحة أو شغّل `npm ci` داخل `scripts/whatsapp-bridge/`؛ لا تثبت Baileys في حزمة الجذر.
 
 ---
 

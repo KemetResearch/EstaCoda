@@ -147,6 +147,60 @@ estacoda channels enable telegram
 # تحقق من تكوين allowedUserIds أو allowedSenders
 ```
 
+## اعتمادات جسر WhatsApp مفقودة
+
+**العرض:** يبلغ `estacoda whatsapp` أو `estacoda gateway diagnose` أو `estacoda gateway status` أن اعتمادات جسر WhatsApp مفقودة.
+
+**السبب المحتمل:** لم يتم تشغيل `npm ci` داخل حزمة npm المعزولة `scripts/whatsapp-bridge/`، أو أزيل دليل `node_modules`.
+
+**الفحص:**
+
+```bash
+ls -la scripts/whatsapp-bridge
+estacoda gateway diagnose
+```
+
+**الإصلاح:**
+
+شغّل `estacoda whatsapp` ووافق على خطوة إصلاح الجسر الصريحة، أو شغّل:
+
+```bash
+cd scripts/whatsapp-bridge
+npm ci
+```
+
+استخدم `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` لضبط مهلة الإصلاح الصريح. لا تضف Baileys أو `@hapi/boom` إلى حزمة الجذر.
+
+## انتهت مهلة QR pairing في WhatsApp
+
+**العرض:** يطبع الإعداد `Pairing timed out - run estacoda whatsapp to try again.`
+
+**السبب المحتمل:** لم يتم مسح QR code خلال 120 ثانية، أو أن الطرفية لم تعرض QR code بوضوح.
+
+**الإصلاح:**
+
+شغّل `estacoda whatsapp` مرة أخرى من طرفية تستطيع عرض QR code. لا يتم تخزين QR strings.
+
+## WhatsApp ينتظر تفويض المستخدم
+
+**العرض:** تعرض التشخيصات pairing-pending أو waiting for user authorization بعد نجاح QR pairing.
+
+**السبب المحتمل:** لم تُدخل `allowedUsers` أثناء الإعداد، لذلك يستخدم config القيمة `dmPolicy: "pairing"` بدلاً من الوصول المفتوح.
+
+**الإصلاح:**
+
+استبدل رمز تفويض مستخدم WhatsApp الآمن من حساب WhatsApp المقصود، أو أعد تشغيل `estacoda whatsapp` وأدخل `allowedUsers` صريحة. `dmPolicy: "pairing"` ليست سياسة مفتوحة.
+
+## WhatsApp voice bubble غير متاحة
+
+**العرض:** يتم إرسال الصوت ذي voice hint كصوت عادي مع رسالة fallback.
+
+**السبب المحتمل:** `ffmpeg` غير متاح، أو فشل التحويل، أو أن الصوت المصدر غير قابل للتحويل إلى OGG/Opus.
+
+**الإصلاح:**
+
+ثبّت `ffmpeg` في بيئة المشغل وأعد المحاولة. تنفذ main runtime التحويل داخل جذور temp/media الخاصة بالملف الشخصي؛ الجسر المعزول لا يشغل `ffmpeg`.
+
 ## رمز Telegram أو متغير البيئة مفقود
 
 **العرض:** محول Telegram يفشل في البدء مع خطأ رمز مفقود.

@@ -170,6 +170,8 @@ Telegram pairing remains config-backed and unchanged for now.
 
 **WhatsApp identity policy:** WhatsApp authorization compares canonical phone/JID/LID/group identities. LID-to-phone aliases are stored in profile-local state with restrictive file permissions where supported and do not include message content. Self-chat echo prevention tracks only recent sent message IDs and the configured reply prefix.
 
+**WhatsApp bridge boundary:** The isolated bridge binds loopback only, validates `Host`, requires a per-launch bearer token, and writes token/port/PID state under the selected profile's gateway/auth state. Bridge stdout/stderr goes to `~/.estacoda/profiles/<profile-id>/logs/whatsapp-bridge.log`; explicit dependency repair output goes to `whatsapp-bridge-install.log`. The bridge owns Baileys socket setup and disconnect classification, but it does not own workspace trust, approvals, user authorization, media path policy, or `ffmpeg`.
+
 ### Handoff Code Security
 
 CLI↔Telegram handoff uses short-lived, single-use codes:

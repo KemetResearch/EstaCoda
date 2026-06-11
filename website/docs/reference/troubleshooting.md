@@ -147,6 +147,60 @@ estacoda channels enable telegram
 # Verify allowedUserIds or allowedSenders are configured
 ```
 
+## WhatsApp bridge dependencies missing
+
+**Symptom:** `estacoda whatsapp`, `estacoda gateway diagnose`, or `estacoda gateway status` reports missing WhatsApp bridge dependencies.
+
+**Likely cause:** The isolated `scripts/whatsapp-bridge/` npm package has not had `npm ci` run, or its `node_modules` directory was removed.
+
+**Inspect:**
+
+```bash
+ls -la scripts/whatsapp-bridge
+estacoda gateway diagnose
+```
+
+**Repair:**
+
+Run `estacoda whatsapp` and approve the explicit bridge repair step, or run:
+
+```bash
+cd scripts/whatsapp-bridge
+npm ci
+```
+
+Use `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` to adjust the explicit repair timeout. Do not add Baileys or `@hapi/boom` to the root package.
+
+## WhatsApp QR pairing timed out
+
+**Symptom:** Setup prints `Pairing timed out - run estacoda whatsapp to try again.`
+
+**Likely cause:** The QR code was not scanned within 120 seconds, or the terminal did not display the QR code clearly.
+
+**Repair:**
+
+Run `estacoda whatsapp` again from a terminal that can render the QR code. QR strings are not persisted.
+
+## WhatsApp waiting for user authorization
+
+**Symptom:** Diagnostics show pairing-pending or waiting for user authorization after successful QR pairing.
+
+**Likely cause:** No `allowedUsers` were entered during setup, so config uses `dmPolicy: "pairing"` instead of open access.
+
+**Repair:**
+
+Redeem a secure WhatsApp user authorization code from the intended WhatsApp account, or rerun `estacoda whatsapp` and enter explicit `allowedUsers`. `dmPolicy: "pairing"` is not an open policy.
+
+## WhatsApp voice bubble unavailable
+
+**Symptom:** Voice-hinted audio is delivered as normal audio with a fallback caption.
+
+**Likely cause:** `ffmpeg` is unavailable, conversion failed, or the source audio was not convertible to OGG/Opus.
+
+**Repair:**
+
+Install `ffmpeg` in the operator environment and retry. The main runtime performs conversion under profile-local temp/media roots; the isolated bridge never runs `ffmpeg`.
+
 ## Telegram token or env var missing
 
 **Symptom:** Telegram adapter fails to start with missing token error.

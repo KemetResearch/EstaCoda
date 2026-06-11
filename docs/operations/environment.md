@@ -84,6 +84,14 @@ Voice:
 
 Voice credentials are direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources.
 
+WhatsApp:
+
+| Variable | Purpose |
+|----------|---------|
+| `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` | Optional timeout, in milliseconds, for the explicit `estacoda whatsapp` bridge dependency repair/install step. Defaults to the bridge installer timeout. |
+
+WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through `estacoda whatsapp`; user authorization is controlled by `dmPolicy`, `allowedUsers`, `groupPolicy`, and `allowedGroups` in profile config. The isolated bridge dependencies stay under `scripts/whatsapp-bridge/` and are installed only after operator confirmation.
+
 Rules:
 - Do not hardcode secrets in repo files.
 - Do not commit real keys.
@@ -158,6 +166,8 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `temp/` | Profile temporary files |
 
 Voice uses profile-local `temp/audio/` for CLI recordings, auto-TTS temp files, Telegram conversion temps, and Discord voice receive audio. Gateway voice state and STT preprocess audit logs live under the selected profile `gateway/` directory.
+
+WhatsApp uses profile-local `gateway/whatsapp-auth` for Baileys linked-device auth, `logs/whatsapp-bridge.log` for bridge stdout/stderr, `logs/whatsapp-bridge-install.log` for explicit bridge dependency repair output, and profile-local media/temp roots for validated outbound media and optional `ffmpeg` voice conversion.
 
 **Project-local overlays:**
 

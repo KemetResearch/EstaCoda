@@ -100,7 +100,7 @@ The Service Manager block reports installed/active state for the user service an
 - Telegram token presence, allowed users/chats
 - Discord token presence
 - Email IMAP/SMTP hosts, username, password, ownAddress, homeAddress
-- WhatsApp experimental gate, Baileys availability, auth dir writable
+- WhatsApp experimental gate, isolated bridge package/readiness, auth dir writability, device pairing, user-authorization state, `dmPolicy`, `groupPolicy`, `mode`, and queue pressure
 - Cron directory permissions (jobs file readable, output/lock dirs writable)
 
 Returns exit code 1 if any warnings exist.
@@ -265,6 +265,16 @@ Channel status shows:
 - Surface pointers attached to the channel
 - WhatsApp experimental gate status (for WhatsApp)
 - Email home/default address (for Email)
+
+### WhatsApp Wizard
+
+```bash
+estacoda whatsapp
+```
+
+`estacoda whatsapp` is the only WhatsApp setup surface. It warns that WhatsApp support is experimental, unofficial, and Baileys-backed; checks the isolated `scripts/whatsapp-bridge/` npm package; asks before running bridge dependency repair; renders the QR code in the terminal; and writes profile config only after QR pairing succeeds. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.`
+
+The wizard supports QR-only device pairing. It does not expose WhatsApp device pairing-code setup. If existing auth is logged out or missing, re-pair reset is explicit and limited to the selected profile's dedicated WhatsApp auth directory. If no `allowedUsers` are entered, the wizard writes `dmPolicy: "pairing"` so the linked device is waiting for secure user authorization rather than open to arbitrary DMs.
 
 ## Cron Operator Commands
 

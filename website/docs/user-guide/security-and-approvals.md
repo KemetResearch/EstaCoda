@@ -100,6 +100,8 @@ All channels share the **same runtime security policy**. There is no channel-spe
 
 Email `allowAllUsers: true` bypasses sender filtering. WhatsApp requires `channels.whatsapp.experimental: true` to initialize.
 
+WhatsApp user authorization is separate from WhatsApp device pairing: `estacoda whatsapp` links the device with a terminal QR code, while `dmPolicy: "pairing"` waits for a single-use hashed authorization code and is not open access. Telegram pairing remains config-backed and unchanged for now.
+
 ### Gateway Approvals
 
 Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are redacted after approval, denial, or expiry.

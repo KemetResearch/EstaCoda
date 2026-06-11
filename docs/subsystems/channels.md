@@ -11,11 +11,13 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 
 | File | Lines | Role |
 |------|-------|------|
-| `src/channels/channel-gateway.ts` | 1,408 | Generic adapter bridge |
+| `src/channels/channel-gateway.ts` | ~1,400 | Gateway auth, session, command, approval, and pairing orchestration |
 | `src/channels/telegram-adapter.ts` | ~1,160 | Telegram-specific adapter |
 | `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
 | `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
-| `src/channels/whatsapp-adapter.ts` | ~500 | WhatsApp-specific adapter (Baileys) |
+| `src/channels/whatsapp-adapter.ts` | ~900 | WhatsApp bridge-client adapter, identity policy, formatting, media validation, and final-only delivery |
+| `src/channels/whatsapp-bridge-lifecycle.ts` | ~500 | Managed isolated WhatsApp bridge lifecycle, dependency readiness, and logs |
+| `scripts/whatsapp-bridge/bridge.js` | ~450 | Standalone Baileys/Boom transport bridge package |
 | `src/channels/delivery-router.ts` | ~430 | Normalized delivery path |
 | `src/channels/voice-transcription.ts` | ~280 | Gateway voice attachment transcript injection and STT preprocessing handoff |
 | `src/gateway/voice-state.ts` | ~160 | Profile-local per-chat voice mode and duplicate transcript state |
@@ -182,6 +184,7 @@ estacoda email configure \
 - DM-first messaging UX; group access can be policy-gated, but full group mention/routing UX is not complete yet.
 - Live credential smoke is optional/manual.
 - Bridge dependency readiness is checked before setup/startup; missing dependencies require an explicit repair/install step.
+- WhatsApp device pairing-code setup is not exposed; `estacoda whatsapp` supports QR-only pairing.
 
 **Setup:**
 
@@ -191,6 +194,8 @@ estacoda whatsapp
 
 The wizard renders the WhatsApp QR code in the terminal. If no allowed user is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes in profile-local state; plaintext codes are shown once and are not written to config.
 
+QR pairing is foreground and times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` A logged-out state requires explicit re-pair/reset, and reset is constrained to the selected profile's dedicated WhatsApp auth directory.
+
 WhatsApp identities are matched canonically: phone numbers and `@s.whatsapp.net` JIDs normalize to digits, `@lid` IDs normalize case-insensitively, and group JIDs normalize as `@g.us`. Profile-local alias state can associate an LID with a phone number without storing message content.
 
 `mode: "bot"` ignores WhatsApp `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix` (default `EstaCoda: `), and ignores echoed replies by recent sent message ID or that prefix.
@@ -198,6 +203,8 @@ WhatsApp identities are matched canonically: phone numbers and `@s.whatsapp.net`
 WhatsApp is final-only: provider/tool progress is translated only into ephemeral WhatsApp presence, not visible progress messages. Final replies are formatted for WhatsApp's limited markup (`**bold**`/`__bold__` becomes `*bold*`, Markdown links become `text (url)`, headers become bold text, and code spans/blocks are preserved), then chunked by the adapter with a short internal delay between chunks. Where WhatsApp supports it, the first final-answer chunk quotes the inbound message.
 
 Outbound media policy stays in the main runtime. The adapter sends the bridge only validated local file paths under explicit allowed roots such as the trusted workspace and profile-local media/temp roots, enforces upload size limits, and caches explicitly allowed remote media URLs locally before delivery. Converted and cached WhatsApp media is written under profile-local media/temp roots. The bridge does not fetch URLs, run `ffmpeg`, or decide workspace trust. Image, video, normal audio, voice/PTT audio, and documents use separate bridge media types. Voice-hinted incompatible audio converts to OGG/Opus with `ffmpeg` when available; if conversion is unavailable, EstaCoda sends normal audio with an explicit fallback caption.
+
+Bridge stdout/stderr is captured in the selected profile logs as `whatsapp-bridge.log`. Dependency repair output is captured separately as `whatsapp-bridge-install.log`. Status/diagnostics distinguish disabled, pairing-pending, allowlisted-ready, open policy, bot mode, self-chat mode, group policy, and queue pressure.
 
 ## DeliveryRouter
 
