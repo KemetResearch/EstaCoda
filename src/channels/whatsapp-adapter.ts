@@ -18,12 +18,28 @@ import {
 } from "./whatsapp-bridge-client.js";
 import { ManagedWhatsAppBridgeClient } from "./whatsapp-bridge-lifecycle.js";
 import { WhatsAppBridgeRuntimeError } from "./whatsapp-bridge-errors.js";
+import {
+  WHATSAPP_DEFAULT_REPLY_PREFIX,
+  normalizeWhatsAppChatId,
+  normalizeWhatsAppUserId,
+  rememberWhatsAppAlias,
+  resolveWhatsAppAlias,
+  whatsappChatIdToJid,
+} from "./whatsapp-identity.js";
+
+const MAX_RECENT_SENT_IDS = 50;
 
 export type WhatsAppAdapterOptions = {
   /** Directory for WhatsApp bridge/Baileys auth state persistence */
   authDir?: string;
   /** Allowed user phone numbers or JIDs. Gateway auth owns enforcement; this is capability/config metadata only. */
   allowedUsers?: string[];
+  /** Profile-local LID/phone alias map. */
+  aliasStorePath?: string;
+  /** Bot ignores fromMe. Self-chat treats intentional fromMe input as inbound. */
+  mode?: WhatsAppChannelConfig["mode"];
+  /** Prefix applied to self-chat replies and ignored when echoed back. */
+  replyPrefix?: string;
   /** Max characters per message chunk. The bridge owns final chunking in the quarantined transport. */
   maxTextLength?: number;
   /** Directory to save downloaded media */
@@ -70,6 +86,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private options: WhatsAppAdapterOptions;
   private missing: string[] | undefined;
   private seenMessageIds = new Set<string>();
+  private recentSentIds: string[] = [];
+  private recentSentIdSet = new Set<string>();
   private bridgeClient: WhatsAppBridgeClient;
 
   constructor(options: WhatsAppAdapterOptions = {}) {
@@ -93,6 +111,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
       authDir: this.options.authDir,
       allowedUsers: this.options.allowedUsers,
       experimental: this.options.experimental,
+      mode: this.options.mode,
+      replyPrefix: this.options.replyPrefix,
       busyPolicy: undefined,
       queueDepth: undefined,
     };
@@ -140,7 +160,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
     for (const message of messages) {
       if (this.seenMessageIds.has(message.messageId)) continue;
       this.seenMessageIds.add(message.messageId);
-      await this.handler(bridgeMessageToChannelMessage(message, this.options.now));
+      if (this.shouldIgnoreInbound(message)) continue;
+      const channelMessage = await bridgeMessageToChannelMessage(message, {
+        now: this.options.now,
+        aliasStorePath: this.options.aliasStorePath,
+      });
+      if (channelMessage === undefined) continue;
+      await this.handler(channelMessage);
       processed += 1;
     }
     return processed;
@@ -149,13 +175,15 @@ export class WhatsAppAdapter implements ChannelAdapter {
   get delivery(): ChannelDelivery {
     return {
       sendText: async (sessionKey: ChannelSessionKey, text: string, _options?: ChannelTextOptions) => {
+        const message = this.decorateOutboundText(text);
         const result = await this.bridgeClient.sendText({
-          chatId: sessionKey.chatId,
-          message: text,
+          chatId: whatsappChatIdToJid(sessionKey.chatId, { isGroup: sessionKey.chatType === "group" }),
+          message,
         });
         if (!result.ok) {
           throw new Error(result.error?.message ?? "WhatsApp bridge text send failed");
         }
+        this.rememberSentIds(result.messageIds ?? (result.messageId === undefined ? [] : [result.messageId]));
       },
       sendProgress: async (_sessionKey: ChannelSessionKey, _event: RuntimeEvent) => {
         // WhatsApp is final-only. Progress events must not create visible WhatsApp messages.
@@ -164,17 +192,18 @@ export class WhatsAppAdapter implements ChannelAdapter {
         const caption = renderArtifactNotice(artifact);
         if (artifact.path.length === 0) {
           const result = await this.bridgeClient.sendText({
-            chatId: sessionKey.chatId,
+            chatId: whatsappChatIdToJid(sessionKey.chatId, { isGroup: sessionKey.chatType === "group" }),
             message: caption,
           });
           if (!result.ok) {
             throw new Error(result.error?.message ?? "WhatsApp bridge artifact notice failed");
           }
+          this.rememberSentIds(result.messageIds ?? (result.messageId === undefined ? [] : [result.messageId]));
           return;
         }
 
         const result = await this.bridgeClient.sendMedia({
-          chatId: sessionKey.chatId,
+          chatId: whatsappChatIdToJid(sessionKey.chatId, { isGroup: sessionKey.chatType === "group" }),
           filePath: artifact.path,
           mediaType: mediaTypeForArtifact(artifact),
           caption,
@@ -183,16 +212,55 @@ export class WhatsAppAdapter implements ChannelAdapter {
         if (!result.ok) {
           throw new Error(result.error?.message ?? "WhatsApp bridge media send failed");
         }
+        this.rememberSentIds(result.messageIds ?? (result.messageId === undefined ? [] : [result.messageId]));
       },
     };
   }
+
+  private shouldIgnoreInbound(message: WhatsAppBridgeInboundMessage): boolean {
+    if (message.fromMe !== true) return false;
+    if (this.recentSentIdSet.has(message.messageId)) return true;
+    const mode = this.options.mode ?? "bot";
+    if (mode !== "self-chat") return true;
+    const prefix = this.selfChatReplyPrefix();
+    return prefix.length > 0 && (message.body ?? "").startsWith(prefix);
+  }
+
+  private decorateOutboundText(text: string): string {
+    if ((this.options.mode ?? "bot") !== "self-chat") return text;
+    return `${this.selfChatReplyPrefix()}${text}`;
+  }
+
+  private selfChatReplyPrefix(): string {
+    return this.options.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX;
+  }
+
+  private rememberSentIds(ids: string[]): void {
+    for (const id of ids) {
+      if (id.length === 0 || this.recentSentIdSet.has(id)) continue;
+      this.recentSentIds.push(id);
+      this.recentSentIdSet.add(id);
+      while (this.recentSentIds.length > MAX_RECENT_SENT_IDS) {
+        const evicted = this.recentSentIds.shift();
+        if (evicted !== undefined) this.recentSentIdSet.delete(evicted);
+      }
+    }
+  }
 }
 
-function bridgeMessageToChannelMessage(
+async function bridgeMessageToChannelMessage(
   message: WhatsAppBridgeInboundMessage,
-  now: (() => Date) | undefined
-): ChannelMessage {
-  const senderId = normalizeWhatsAppSender(message.senderId);
+  options: {
+    now: (() => Date) | undefined;
+    aliasStorePath: string | undefined;
+  }
+): Promise<ChannelMessage | undefined> {
+  await rememberAliasFromInbound(options.aliasStorePath, message);
+  const senderId = await resolveWhatsAppAlias(options.aliasStorePath, message.senderId);
+  const chatId = message.isGroup === true
+    ? normalizeWhatsAppChatId(message.chatId, { isGroup: true })
+    : await resolveWhatsAppAlias(options.aliasStorePath, message.chatId);
+  if (senderId.length === 0 || chatId.length === 0) return undefined;
   const attachments = (message.attachments ?? []).map<ChannelAttachment>((attachment) => ({
     id: attachment.id ?? `${message.messageId}:attachment`,
     kind: attachment.kind,
@@ -211,7 +279,7 @@ function bridgeMessageToChannelMessage(
     channel: "whatsapp",
     sessionKey: {
       platform: "whatsapp",
-      chatId: message.chatId,
+      chatId,
       chatType: message.isGroup ? "group" : "dm",
       userId: senderId,
     },
@@ -221,9 +289,12 @@ function bridgeMessageToChannelMessage(
       displayName: message.senderName ?? senderId,
     },
     attachments: attachments.length > 0 ? attachments : undefined,
-    receivedAt: now?.().toISOString() ?? new Date().toISOString(),
+    receivedAt: options.now?.().toISOString() ?? new Date().toISOString(),
     metadata: {
       timestamp: message.timestamp,
+      rawChatId: message.chatId,
+      rawSenderId: message.senderId,
+      fromMe: message.fromMe,
       chatName: message.chatName,
       mentionedIds: message.mentionedIds,
       quotedMessageId: message.quotedMessageId,
@@ -236,8 +307,16 @@ function bridgeMessageToChannelMessage(
   };
 }
 
-function normalizeWhatsAppSender(senderId: string): string {
-  return senderId.replace(/@s\.whatsapp\.net$/u, "").replace(/@lid$/u, "");
+async function rememberAliasFromInbound(
+  aliasStorePath: string | undefined,
+  message: WhatsAppBridgeInboundMessage
+): Promise<void> {
+  if (message.isGroup === true) return;
+  const chat = normalizeWhatsAppUserId(message.chatId);
+  const sender = normalizeWhatsAppUserId(message.senderId);
+  if (chat.length > 0 && sender.length > 0) {
+    await rememberWhatsAppAlias(aliasStorePath, chat, sender);
+  }
 }
 
 function mediaTypeForArtifact(artifact: ArtifactRecord): "image" | "video" | "audio" | "document" {

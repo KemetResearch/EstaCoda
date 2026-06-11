@@ -327,6 +327,7 @@ function normalizeInboundMessage(message) {
     senderId,
     senderName: message.pushName,
     isGroup: chatId.endsWith("@g.us"),
+    fromMe: key.fromMe === true,
     body,
     timestamp: typeof message.messageTimestamp === "number" ? message.messageTimestamp : undefined,
   };

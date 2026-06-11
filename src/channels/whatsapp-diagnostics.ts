@@ -12,6 +12,7 @@ export type WhatsAppGatewayDiagnostics = {
   statusLabel: string;
   mode?: WhatsAppChannelConfig["mode"];
   dmPolicy?: WhatsAppChannelConfig["dmPolicy"];
+  groupPolicy?: WhatsAppChannelConfig["groupPolicy"];
   pairingPending: boolean;
   authDir: string;
   authDirWritable: boolean;
@@ -24,6 +25,7 @@ export type WhatsAppGatewayDiagnostics = {
   queueLength?: number;
   droppedMessages?: number;
   allowedUsers?: string[];
+  allowedGroups?: string[];
   missing: string[];
 };
 
@@ -39,7 +41,10 @@ export async function getWhatsAppGatewayDiagnostics(
   const authDirProfileLocal = resolve(authDir) === resolve(defaultAuthDir);
   const bridgeDir = options.bridgeDir ?? defaultWhatsAppBridgeDir();
   const allowedUsers = config.allowedUsers ?? [];
-  const pairingPending = config.enabled === true && config.dmPolicy === "pairing" && allowedUsers.length === 0;
+  const allowedGroups = config.allowedGroups ?? [];
+  const dmPolicy = config.dmPolicy ?? "allowlist";
+  const groupPolicy = config.groupPolicy ?? "disabled";
+  const pairingPending = config.enabled === true && dmPolicy === "pairing" && allowedUsers.length === 0;
 
   const authDirWritable = await canWrite(authDir);
   if (!authDirWritable) {
@@ -63,9 +68,9 @@ export async function getWhatsAppGatewayDiagnostics(
   if (!bridgeDependenciesInstalled) missing.push("bridgeDependencies");
   if (config.enabled === true) {
     if (config.experimental !== true) missing.push("experimental");
-    if (allowedUsers.length === 0) {
-      missing.push(pairingPending ? "pairingPending" : "allowedUsers");
-    }
+    if (dmPolicy === "allowlist" && allowedUsers.length === 0) missing.push("allowedUsers");
+    if (dmPolicy === "pairing" && allowedUsers.length === 0) missing.push("pairingPending");
+    if (groupPolicy === "allowlist" && allowedGroups.length === 0) missing.push("allowedGroups");
   }
 
   let statusLabel = "ok";
@@ -80,7 +85,11 @@ export async function getWhatsAppGatewayDiagnostics(
   } else if (!authDirWritable) {
     statusLabel = "auth directory not writable";
   } else if (pairingPending) {
-    statusLabel = "pairing pending";
+    statusLabel = "waiting for user authorization";
+  } else if (config.mode === "self-chat") {
+    statusLabel = `ok (${dmPolicy} DMs, ${groupPolicy} groups, self-chat)`;
+  } else if (config.enabled === true && config.experimental === true && missing.length === 0) {
+    statusLabel = `ok (${dmPolicy} DMs, ${groupPolicy} groups, bot)`;
   }
   const ready = config.enabled === true && config.experimental === true && missing.length === 0;
 
@@ -91,7 +100,8 @@ export async function getWhatsAppGatewayDiagnostics(
     ready,
     statusLabel,
     mode: config.mode,
-    dmPolicy: config.dmPolicy,
+    dmPolicy,
+    groupPolicy,
     pairingPending,
     authDir,
     authDirWritable,
@@ -104,6 +114,7 @@ export async function getWhatsAppGatewayDiagnostics(
     queueLength: undefined,
     droppedMessages: undefined,
     allowedUsers,
+    allowedGroups,
     missing,
   };
 }

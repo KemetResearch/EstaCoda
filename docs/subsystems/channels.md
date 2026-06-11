@@ -177,7 +177,7 @@ estacoda email configure \
 
 **Limitations:**
 
-- DM-first; no group support.
+- DM-first messaging UX; group access can be policy-gated, but full group mention/routing UX is not complete yet.
 - Live credential smoke is optional/manual.
 - Bridge dependency readiness is checked before setup/startup; missing dependencies require an explicit repair/install step.
 
@@ -188,6 +188,10 @@ estacoda whatsapp
 ```
 
 The wizard renders the WhatsApp QR code in the terminal. If no allowed user is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes in profile-local state; plaintext codes are shown once and are not written to config.
+
+WhatsApp identities are matched canonically: phone numbers and `@s.whatsapp.net` JIDs normalize to digits, `@lid` IDs normalize case-insensitively, and group JIDs normalize as `@g.us`. Profile-local alias state can associate an LID with a phone number without storing message content.
+
+`mode: "bot"` ignores WhatsApp `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix` (default `EstaCoda: `), and ignores echoed replies by recent sent message ID or that prefix.
 
 ## DeliveryRouter
 

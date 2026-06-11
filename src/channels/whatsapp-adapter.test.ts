@@ -192,8 +192,79 @@ describe("WhatsAppAdapter", () => {
     expect(received[0]!.channel).toBe("whatsapp");
     expect(received[0]!.text).toBe("Hello from bridge");
     expect(received[0]!.sessionKey.platform).toBe("whatsapp");
+    expect(received[0]!.sessionKey.chatId).toBe("971501234567");
     expect(received[0]!.sessionKey.userId).toBe("971501234567");
     expect(received[0]!.sender.displayName).toBe("Test User");
+  });
+
+  it("persists aliases and uses canonical IDs for allowlist/session matching", async () => {
+    const adapter = createAdapter({ aliasStorePath: join(tmpDir, "gateway", "whatsapp-identity-aliases.json") });
+    bridge.messages.push({
+      messageId: "msg-lid",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "ABC123@lid",
+      senderName: "Linked User",
+      body: "Hello from linked identity",
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.sender.id).toBe("971501234567");
+    expect(received[0]!.sessionKey.userId).toBe("971501234567");
+    expect(received[0]!.sessionKey.chatId).toBe("971501234567");
+  });
+
+  it("normalizes group JIDs for session keys", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push({
+      messageId: "msg-group",
+      chatId: "120363025555555555@g.us",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "group hello",
+      isGroup: true,
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.sessionKey.chatType).toBe("group");
+    expect(received[0]!.sessionKey.chatId).toBe("120363025555555555@g.us");
+    expect(received[0]!.sessionKey.userId).toBe("971501234567");
+  });
+
+  it("drops invalid WhatsApp identities before creating session keys", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push(
+      {
+        messageId: "invalid-dm",
+        chatId: "not a whatsapp chat",
+        senderId: "not a whatsapp sender",
+        body: "bad dm",
+      },
+      {
+        messageId: "invalid-group",
+        chatId: "not-a-group",
+        senderId: "971501234567@s.whatsapp.net",
+        body: "bad group",
+        isGroup: true,
+      }
+    );
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    const processed = await adapter.pollOnce();
+
+    expect(processed).toBe(0);
+    expect(received).toEqual([]);
   });
 
   it("does not silently drop users before gateway authorization", async () => {
@@ -219,8 +290,8 @@ describe("WhatsAppAdapter", () => {
   it("deduplicates bridge messages by message id", async () => {
     const adapter = createAdapter();
     bridge.messages.push(
-      { messageId: "msg-3", chatId: "chat@s.whatsapp.net", senderId: "chat@s.whatsapp.net", body: "one" },
-      { messageId: "msg-3", chatId: "chat@s.whatsapp.net", senderId: "chat@s.whatsapp.net", body: "one again" }
+      { messageId: "msg-3", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "one" },
+      { messageId: "msg-3", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "one again" }
     );
     const received: ChannelMessage[] = [];
     await adapter.start(async (msg) => {
@@ -233,12 +304,130 @@ describe("WhatsAppAdapter", () => {
     expect(received).toHaveLength(1);
   });
 
+  it("ignores fromMe messages in bot mode", async () => {
+    const adapter = createAdapter({ mode: "bot" });
+    bridge.messages.push({
+      messageId: "self-1",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "manual self message",
+      fromMe: true,
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    const processed = await adapter.pollOnce();
+
+    expect(processed).toBe(0);
+    expect(received).toEqual([]);
+  });
+
+  it("accepts intentional fromMe input in self-chat mode", async () => {
+    const adapter = createAdapter({ mode: "self-chat" });
+    bridge.messages.push({
+      messageId: "self-2",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "intentional prompt",
+      fromMe: true,
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    const processed = await adapter.pollOnce();
+
+    expect(processed).toBe(1);
+    expect(received[0]!.text).toBe("intentional prompt");
+  });
+
+  it("applies self-chat reply prefix only in self-chat mode and ignores prefix echoes", async () => {
+    const selfChat = createAdapter({ mode: "self-chat", replyPrefix: "Bot: " });
+    await selfChat.start(async () => {});
+
+    await selfChat.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567", userId: "971501234567", chatType: "dm" },
+      "Hello"
+    );
+
+    expect(bridge.sentText[0]!.message).toBe("Bot: Hello");
+
+    bridge.messages.push({
+      messageId: "prefix-echo",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "Bot: Hello",
+      fromMe: true,
+    });
+    const received: ChannelMessage[] = [];
+    await selfChat.stop();
+    await selfChat.start(async (msg) => {
+      received.push(msg);
+    });
+
+    expect(await selfChat.pollOnce()).toBe(0);
+    expect(received).toEqual([]);
+
+    const botBridge = new FakeWhatsAppBridgeClient();
+    const bot = createAdapter({ mode: "bot", bridgeClient: botBridge });
+    await bot.start(async () => {});
+    await bot.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567", userId: "971501234567", chatType: "dm" },
+      "Hello"
+    );
+    expect(botBridge.sentText[0]!.message).toBe("Hello");
+  });
+
+  it("tracks recent sent ids for self-chat echo prevention with FIFO eviction", async () => {
+    const adapter = createAdapter({ mode: "self-chat", replyPrefix: "" });
+    await adapter.start(async () => {});
+    for (let i = 0; i < 51; i += 1) {
+      bridge.sendText = async (input) => {
+        bridge.sentText.push(input);
+        return { ok: true, messageId: `sent-${i}`, messageIds: [`sent-${i}`] };
+      };
+      await adapter.delivery!.sendText(
+        { platform: "whatsapp", chatId: "971501234567", userId: "971501234567", chatType: "dm" },
+        `message ${i}`
+      );
+    }
+    const received: ChannelMessage[] = [];
+    await adapter.stop();
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+    bridge.messages.push(
+      {
+        messageId: "sent-0",
+        chatId: "971501234567@s.whatsapp.net",
+        senderId: "971501234567@s.whatsapp.net",
+        body: "evicted manual input",
+        fromMe: true,
+      },
+      {
+        messageId: "sent-50",
+        chatId: "971501234567@s.whatsapp.net",
+        senderId: "971501234567@s.whatsapp.net",
+        body: "recent echo",
+        fromMe: true,
+      }
+    );
+
+    const processed = await adapter.pollOnce();
+
+    expect(processed).toBe(1);
+    expect(received.map((message) => message.id)).toEqual(["sent-0"]);
+  });
+
   it("preserves bridge attachments", async () => {
     const adapter = createAdapter();
     bridge.messages.push({
       messageId: "msg-4",
-      chatId: "chat@s.whatsapp.net",
-      senderId: "chat@s.whatsapp.net",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
       body: "",
       attachments: [
         {

@@ -194,6 +194,12 @@ export type EmailAuthPolicy = {
 
 export type WhatsAppAuthPolicy = {
   allowedNumbers?: string[];
+  allowedGroups?: string[];
+  dmPolicy?: "disabled" | "allowlist" | "pairing" | "open";
+  groupPolicy?: "disabled" | "allowlist" | "open";
+  requireMention?: boolean;
+  mentionPatterns?: string[];
+  freeResponseChats?: string[];
   deniedMessage?: string;
 };
 

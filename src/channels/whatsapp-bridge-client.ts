@@ -41,6 +41,7 @@ export type WhatsAppBridgeInboundMessage = {
   senderName?: string;
   chatName?: string;
   isGroup?: boolean;
+  fromMe?: boolean;
   body?: string;
   hasMedia?: boolean;
   mediaType?: string;

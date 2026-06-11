@@ -168,6 +168,8 @@ Gateway approvals use a durable `pending_approvals` table in the session databas
 
 Telegram pairing remains config-backed and unchanged for now.
 
+**WhatsApp identity policy:** WhatsApp authorization compares canonical phone/JID/LID/group identities. LID-to-phone aliases are stored in profile-local state with restrictive file permissions where supported and do not include message content. Self-chat echo prevention tracks only recent sent message IDs and the configured reply prefix.
+
 ### Handoff Code Security
 
 CLI↔Telegram handoff uses short-lived, single-use codes:

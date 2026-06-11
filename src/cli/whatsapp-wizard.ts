@@ -233,7 +233,7 @@ function yes(value: string | undefined): boolean {
 function normalizeMode(value: string | undefined): WhatsAppChannelMode | undefined {
   const normalized = (value ?? "").trim().toLowerCase();
   if (normalized === "bot") return "bot";
-  if (normalized === "self" || normalized === "personal") return "self";
+  if (normalized === "self" || normalized === "personal" || normalized === "self-chat") return "self-chat";
   return undefined;
 }
 

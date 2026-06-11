@@ -4956,6 +4956,26 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).toContain("locked");
     });
 
+    it("allows WhatsApp allowlist matches by canonical sender and session IDs", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { allowedNumbers: ["971501234567"], dmPolicy: "allowlist" } },
+      });
+
+      const result = await gateway.receive(makeMessage("hello", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "971501234567@s.whatsapp.net", displayName: "Allowed" }
+      }));
+
+      expect(result.replyText).toBe("ok");
+      expect(runtimeForSession).toHaveBeenCalledOnce();
+    });
+
     it("lets unauthorized WhatsApp DMs redeem pairing codes before denial", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
@@ -4968,7 +4988,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession,
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"] } },
+        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"], dmPolicy: "pairing" } },
         pair,
       });
 
@@ -4991,7 +5011,7 @@ describe("ChannelGateway commands", () => {
         adapters: [adapter],
         runtimeForSession,
         sessionStore: new InMemoryChannelSessionStore(),
-        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"] } },
+        authPolicy: { whatsapp: { allowedNumbers: ["1234567890"], dmPolicy: "pairing" } },
         pair,
       });
 
@@ -5004,6 +5024,290 @@ describe("ChannelGateway commands", () => {
       expect(pair).toHaveBeenCalledOnce();
       expect(result.replyText).toContain("locked");
       expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("does not treat dmPolicy pairing as open access", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { dmPolicy: "pairing" } },
+        pair: async () => undefined,
+      });
+
+      const result = await gateway.receive(makeMessage("hello runtime", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "971501234567", displayName: "New user" }
+      }));
+
+      expect(result.replyText).toContain("locked");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("allows all WhatsApp DMs only when dmPolicy open is explicit", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { dmPolicy: "open" } },
+      });
+
+      const result = await gateway.receive(makeMessage("hello runtime", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "someone@lid", displayName: "Open user" }
+      }));
+
+      expect(result.replyText).toBe("ok");
+      expect(runtimeForSession).toHaveBeenCalledOnce();
+    });
+
+    it("does not invoke pairing when dmPolicy disabled", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const pair = vi.fn(async () => "paired");
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { dmPolicy: "disabled" } },
+        pair,
+      });
+
+      const result = await gateway.receive(makeMessage("12345678", {
+        channel: "whatsapp",
+        sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+        sender: { id: "971501234567", displayName: "Disabled user" }
+      }));
+
+      expect(result.replyText).toContain("not accepting direct messages");
+      expect(pair).not.toHaveBeenCalled();
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("drops disabled WhatsApp groups silently and allows allowlisted groups", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const closed = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { whatsapp: { dmPolicy: "open" } },
+      });
+
+      const groupMessage = makeMessage("hello group", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "120363025555555555@g.us",
+          userId: "971501234567",
+          chatType: "group"
+        },
+        sender: { id: "971501234567", displayName: "Group user" }
+      });
+
+      const denied = await closed.receive(groupMessage);
+      expect(denied).toEqual({ sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 });
+      expect(runtimeForSession).not.toHaveBeenCalled();
+      expect(adapter.records).toEqual([]);
+
+      const allowlisted = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          whatsapp: {
+            groupPolicy: "allowlist",
+            allowedGroups: ["120363025555555555@g.us"],
+          }
+        },
+      });
+
+      const allowed = await allowlisted.receive(groupMessage);
+      expect(allowed.replyText).toBe("ok");
+      expect(runtimeForSession).toHaveBeenCalledOnce();
+    });
+
+    it("drops non-allowlisted WhatsApp groups silently without session side effects", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const sessionStore = {
+        getOrCreateSessionId: vi.fn(async () => "should-not-be-created"),
+        resetSessionId: vi.fn(),
+        setSessionId: vi.fn(),
+      } satisfies ChannelSessionStore;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore,
+        authPolicy: {
+          whatsapp: {
+            groupPolicy: "allowlist",
+            allowedGroups: ["120363025555555555@g.us"],
+          }
+        },
+      });
+      const message = makeMessage("hello group", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "120363029999999999@g.us",
+          userId: "971501234567",
+          chatType: "group"
+        },
+        sender: { id: "971501234567", displayName: "Group user" }
+      });
+
+      const result = await gateway.receive(message);
+
+      expect(result).toEqual({ sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 });
+      expect(runtimeForSession).not.toHaveBeenCalled();
+      expect(adapter.records).toEqual([]);
+      expect(sessionStore.getOrCreateSessionId).not.toHaveBeenCalled();
+      expect(sessionStore.resetSessionId).not.toHaveBeenCalled();
+      expect(sessionStore.setSessionId).not.toHaveBeenCalled();
+    });
+
+    it("strips required WhatsApp group mentions before runtime", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          whatsapp: {
+            groupPolicy: "allowlist",
+            allowedGroups: ["120363025555555555@g.us"],
+            requireMention: true,
+            mentionPatterns: ["@EstaCoda"],
+          }
+        },
+      });
+
+      const result = await gateway.receive(makeMessage("@EstaCoda: summarize this.", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "120363025555555555@g.us",
+          userId: "971501234567",
+          chatType: "group"
+        },
+        sender: { id: "971501234567", displayName: "Group user" }
+      }));
+
+      expect(result.replyText).toBe("ok");
+      expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "summarize this." }));
+    });
+
+    it("does not strip normal text in free-response WhatsApp groups", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          whatsapp: {
+            groupPolicy: "allowlist",
+            allowedGroups: ["120363025555555555@g.us"],
+            requireMention: true,
+            mentionPatterns: ["@EstaCoda"],
+            freeResponseChats: ["120363025555555555@g.us"],
+          }
+        },
+      });
+
+      await gateway.receive(makeMessage("please summarize @notbot", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "120363025555555555@g.us",
+          userId: "971501234567",
+          chatType: "group"
+        },
+        sender: { id: "971501234567", displayName: "Group user" }
+      }));
+
+      expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "please summarize @notbot" }));
+    });
+
+    it("ignores non-mentioned WhatsApp groups when mention is required", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId }));
+      const sessionStore = {
+        getOrCreateSessionId: vi.fn(async () => "should-not-be-created"),
+        resetSessionId: vi.fn(),
+        setSessionId: vi.fn(),
+      } satisfies ChannelSessionStore;
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore,
+        authPolicy: {
+          whatsapp: {
+            groupPolicy: "allowlist",
+            allowedGroups: ["120363025555555555@g.us"],
+            requireMention: true,
+            mentionPatterns: ["@EstaCoda"],
+          }
+        },
+      });
+
+      const result = await gateway.receive(makeMessage("summarize this", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "120363025555555555@g.us",
+          userId: "971501234567",
+          chatType: "group"
+        },
+        sender: { id: "971501234567", displayName: "Group user" }
+      }));
+
+      expect(result).toEqual({ sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 });
+      expect(runtimeForSession).not.toHaveBeenCalled();
+      expect(adapter.records).toEqual([]);
+      expect(sessionStore.getOrCreateSessionId).not.toHaveBeenCalled();
+    });
+
+    it("does not strip WhatsApp DM text even when mention patterns are configured", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+      const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: {
+          whatsapp: {
+            dmPolicy: "allowlist",
+            allowedNumbers: ["971501234567"],
+            requireMention: true,
+            mentionPatterns: ["@EstaCoda"],
+          }
+        },
+      });
+
+      await gateway.receive(makeMessage("@EstaCoda summarize this", {
+        channel: "whatsapp",
+        sessionKey: {
+          platform: "whatsapp",
+          chatId: "971501234567",
+          userId: "971501234567",
+          chatType: "dm"
+        },
+        sender: { id: "971501234567", displayName: "DM user" }
+      }));
+
+      expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "@EstaCoda summarize this" }));
     });
 
     it("allowed Discord user does not authorize Email sender", async () => {

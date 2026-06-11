@@ -134,7 +134,7 @@ describe("getWhatsAppGatewayDiagnostics", () => {
     });
 
     expect(pending.ready).toBe(false);
-    expect(pending.statusLabel).toBe("pairing pending");
+    expect(pending.statusLabel).toBe("waiting for user authorization");
     expect(pending.pairingPending).toBe(true);
     expect(pending.missing).toContain("pairingPending");
 
@@ -150,7 +150,7 @@ describe("getWhatsAppGatewayDiagnostics", () => {
     });
 
     expect(allowlisted.ready).toBe(true);
-    expect(allowlisted.statusLabel).toBe("ok");
+    expect(allowlisted.statusLabel).toBe("ok (allowlist DMs, disabled groups, bot)");
     expect(allowlisted.pairingPending).toBe(false);
     expect(allowlisted.missing).toEqual([]);
   });
@@ -177,6 +177,33 @@ describe("getWhatsAppGatewayDiagnostics", () => {
     expect(diagnostics.ready).toBe(false);
     expect(diagnostics.statusLabel).toBe("auth directory outside profile WhatsApp state");
     expect(diagnostics.missing).toContain("authDirProfileLocal");
+  });
+
+  it("distinguishes DM policy, group policy, and self-chat mode", async () => {
+    const homeDir = join(tempDir, "home");
+    const bridgeDir = join(tempDir, "bridge");
+    await mkdir(join(homeDir, ".estacoda", "whatsapp-auth"), { recursive: true });
+    await writeReadyBridgePackage(bridgeDir);
+
+    const diagnostics = await getWhatsAppGatewayDiagnostics({
+      homeDir,
+      bridgeDir,
+      config: {
+        enabled: true,
+        experimental: true,
+        dmPolicy: "open",
+        groupPolicy: "allowlist",
+        allowedGroups: ["120363025555555555@g.us"],
+        mode: "self-chat",
+      },
+    });
+
+    expect(diagnostics.ready).toBe(true);
+    expect(diagnostics.mode).toBe("self-chat");
+    expect(diagnostics.dmPolicy).toBe("open");
+    expect(diagnostics.groupPolicy).toBe("allowlist");
+    expect(diagnostics.statusLabel).toBe("ok (open DMs, allowlist groups, self-chat)");
+    expect(diagnostics.allowedGroups).toEqual(["120363025555555555@g.us"]);
   });
 
   it("distinguishes explicitly disabled WhatsApp from pairing-pending authorization", async () => {

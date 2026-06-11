@@ -1215,6 +1215,56 @@ describe("loadRuntimeConfig channel readiness", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(true);
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    expect(loaded.channels.whatsapp.dmPolicy).toBe("allowlist");
+    expect(loaded.channels.whatsapp.groupPolicy).toBe("disabled");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp explicit open DM policy is ready without allowed users", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: whatsappAuthDir(workspace),
+          dmPolicy: "open"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(true);
+    expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    expect(loaded.channels.whatsapp.dmPolicy).toBe("open");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp group allowlist requires allowed groups and canonicalizes group JIDs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: whatsappAuthDir(workspace),
+          dmPolicy: "open",
+          groupPolicy: "allowlist",
+          allowedGroups: ["120363025555555555@g.us"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(true);
+    expect(loaded.channels.whatsapp.allowedGroups).toEqual(["120363025555555555@g.us"]);
+    expect(loaded.channels.whatsapp.groupPolicy).toBe("allowlist");
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -1316,6 +1366,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       experimental: true,
       authDir: "/tmp/estacoda-whatsapp-auth",
       allowedUsers: ["971501234567"],
+      allowedGroups: [],
       mode: "bot",
       dmPolicy: "allowlist",
       pairingMode: "qr"

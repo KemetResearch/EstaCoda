@@ -523,6 +523,7 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     waEntries.push(kv("Auth dir writable", data.whatsapp.authDirWritable ? "yes" : "no"));
     waEntries.push(kv("Mode", data.whatsapp.mode ?? "bot"));
     waEntries.push(kv("DM policy", data.whatsapp.dmPolicy ?? "allowlist"));
+    waEntries.push(kv("Group policy", data.whatsapp.groupPolicy ?? "disabled"));
     if (data.whatsapp.pairingPending) {
       waEntries.push(kv("User authorization", "pairing pending", "warn"));
     }
@@ -877,6 +878,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Auth dir writable", diag.authDirWritable ? "yes" : "no"),
             kv("Mode", config.mode ?? "bot"),
             kv("DM policy", config.dmPolicy ?? "allowlist"),
+            kv("Group policy", config.groupPolicy ?? "disabled"),
             kv("Pairing pending", diag.pairingPending ? "yes" : "no"),
             kv("Allowed users", (config.allowedUsers ?? []).join(", ") || "none"),
             kv("Pairing mode", config.pairingMode ?? "qr"),

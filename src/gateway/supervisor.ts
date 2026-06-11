@@ -38,6 +38,7 @@ import { DiscordAdapter } from "../channels/discord-adapter.js";
 import { EmailAdapter } from "../channels/email-adapter.js";
 import { WhatsAppAdapter } from "../channels/whatsapp-adapter.js";
 import { consumeWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
+import { defaultWhatsAppAliasStorePath, normalizeWhatsAppAllowlist, normalizeWhatsAppGroupAllowlist } from "../channels/whatsapp-identity.js";
 import { AdapterRegistry } from "../channels/adapter-registry.js";
 import {
   deriveTelegramIdentityHash,
@@ -940,6 +941,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 authDir,
                 allowedUsers: whatsapp.allowedUsers,
                 experimental: whatsapp.experimental,
+                aliasStorePath: defaultWhatsAppAliasStorePath({ homeDir, profileId }),
+                mode: whatsapp.mode,
+                replyPrefix: whatsapp.replyPrefix,
                 bridgeStatePath,
                 bridgeLogPath,
                 bridgeInstallLogPath,
@@ -951,6 +955,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 authDir,
                 allowedUsers: whatsapp.allowedUsers,
                 experimental: whatsapp.experimental,
+                aliasStorePath: defaultWhatsAppAliasStorePath({ homeDir, profileId }),
+                mode: whatsapp.mode,
+                replyPrefix: whatsapp.replyPrefix,
                 bridgeStatePath,
                 bridgeLogPath,
                 bridgeInstallLogPath,
@@ -1039,7 +1046,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     }
     if (whatsapp.enabled === true) {
       authPolicies.whatsapp = {
-        allowedNumbers: whatsapp.allowedUsers ?? [],
+        allowedNumbers: normalizeWhatsAppAllowlist(whatsapp.allowedUsers),
+        allowedGroups: normalizeWhatsAppGroupAllowlist(whatsapp.allowedGroups),
+        dmPolicy: whatsapp.dmPolicy ?? "allowlist",
+        groupPolicy: whatsapp.groupPolicy ?? "disabled",
+        requireMention: whatsapp.requireMention,
+        mentionPatterns: whatsapp.mentionPatterns,
+        freeResponseChats: normalizeWhatsAppGroupAllowlist(whatsapp.freeResponseChats),
         deniedMessage: (whatsapp.allowedUsers ?? []).length > 0
           ? "This EstaCoda WhatsApp gateway is not paired with this account. Ask the owner to add your phone number."
           : "This EstaCoda WhatsApp gateway is locked. Add your phone number to the allowlist before messaging it."

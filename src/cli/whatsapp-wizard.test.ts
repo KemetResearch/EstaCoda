@@ -99,7 +99,7 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["bot", "971501234567, user@s.whatsapp.net"]),
+      prompt: fakePrompt(["bot", "971501234567, abc123@lid"]),
       dependencies: deps,
     });
 
@@ -113,7 +113,7 @@ describe("runWhatsAppWizard", () => {
       mode: "bot",
       dmPolicy: "allowlist",
       pairingMode: "qr",
-      allowedUsers: ["971501234567", "user@s.whatsapp.net"],
+      allowedUsers: ["971501234567", "abc123@lid"],
     });
   });
 
@@ -153,8 +153,13 @@ describe("runWhatsAppWizard", () => {
       experimental: true,
       authDir,
       allowedUsers: ["971501234567"],
+      allowedGroups: [],
       mode: "bot",
       dmPolicy: "allowlist",
+      groupPolicy: "disabled",
+      mentionPatterns: [],
+      freeResponseChats: [],
+      replyPrefix: "EstaCoda: ",
       pairingMode: "qr",
     });
     expect(whatsapp).not.toHaveProperty("pairingCodePhoneNumber");
@@ -178,7 +183,7 @@ describe("runWhatsAppWizard", () => {
     expect(config.config.channels?.whatsapp).toMatchObject({
       enabled: true,
       experimental: true,
-      mode: "self",
+      mode: "self-chat",
       dmPolicy: "pairing",
       allowedUsers: [],
     });
