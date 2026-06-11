@@ -352,6 +352,33 @@ describe("LocalMemoryProvider", () => {
     expect(store.read("MEMORY.md")).not.toContain("private tool rationale");
   });
 
+  it("records redacted bounded delegation outcomes in MEMORY.md", async () => {
+    const store = new MemoryStore();
+    const provider = new LocalMemoryProvider({ store });
+
+    await provider.recordDelegationOutcome({
+      taskPreview: "<think>private prompt</think>Inspect OPENAI_API_KEY=sk-secretsecretsecretsecretsecret",
+      resultSummary: "<reasoning>private answer</reasoning>Found password=super-secret-value",
+      status: "completed",
+      childSessionId: "child-1",
+      parentSessionId: "parent-1",
+      role: "leaf",
+      depth: 1,
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      createdAt: "2026-06-11T00:00:00.000Z"
+    });
+
+    const memory = store.read("MEMORY.md");
+    expect(memory).toContain("- delegation | status:completed");
+    expect(memory).toContain("child:child-1");
+    expect(memory).toContain("usage:in:1,out:2,total:3");
+    expect(memory).toContain("[REDACTED]");
+    expect(memory).not.toContain("private prompt");
+    expect(memory).not.toContain("private answer");
+    expect(memory).not.toContain("sk-secret");
+    expect(memory).not.toContain("super-secret-value");
+  });
+
   it("search excludes SOUL.md in the legacy fallback path", async () => {
     const store = new MemoryStore();
     store.write("SOUL.md", "protected-search-token identity");

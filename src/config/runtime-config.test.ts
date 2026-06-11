@@ -265,6 +265,25 @@ describe("normalizeDelegationConfig", () => {
     }).diagnostics.includePromptPreview).toBe(true);
   });
 
+  it("defaults delegation outcome memory off and bounds partial overrides", () => {
+    expect(normalizeDelegationConfig({}).outcomeMemory).toEqual({
+      enabled: false,
+      maxTaskPreviewChars: 240,
+      maxResultSummaryChars: 400
+    });
+    expect(normalizeDelegationConfig({
+      outcomeMemory: {
+        enabled: true,
+        maxTaskPreviewChars: 0,
+        maxResultSummaryChars: 10_000
+      }
+    }).outcomeMemory).toEqual({
+      enabled: true,
+      maxTaskPreviewChars: 1,
+      maxResultSummaryChars: 4_000
+    });
+  });
+
   it("ignores unknown delegation config keys during config loading", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

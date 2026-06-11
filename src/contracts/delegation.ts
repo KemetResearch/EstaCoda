@@ -16,6 +16,11 @@ export type DelegationConfig = {
     enabled: boolean;
     includePromptPreview: boolean;
   };
+  outcomeMemory: {
+    enabled: boolean;
+    maxTaskPreviewChars: number;
+    maxResultSummaryChars: number;
+  };
   defaultAllowedRiskClasses: ToolRiskClass[];
   defaultExcludedToolsets: ToolsetName[];
   defaultAllowedToolsets: ToolsetName[];

@@ -800,6 +800,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       currentDepth: 0,
       subagentRegistry,
       diagnosticsRoot: profilePaths.tempPath,
+      memoryProvider,
       parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
