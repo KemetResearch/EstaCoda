@@ -69,6 +69,12 @@ process.stdin.on("end", () => {
   if (pkg.homepage !== "https://estacoda.kemetresearch.com") {
     metadataFailures.push("expected homepage to point at estacoda.kemetresearch.com");
   }
+  const rootDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  for (const dependency of ["@whiskeysockets/baileys", "@hapi/boom"]) {
+    if (dependency in rootDeps) {
+      metadataFailures.push(`expected ${dependency} to stay out of the root dependency tree`);
+    }
+  }
   const files = Array.isArray(first.files) ? first.files.map((entry) => entry.path) : [];
   const fileSet = new Set(files);
   const requiredFiles = [
@@ -77,6 +83,10 @@ process.stdin.on("end", () => {
     "scripts/setup-estacoda.sh",
     "scripts/uninstall.sh",
     "scripts/estacoda-wrapper.sh",
+    "scripts/whatsapp-bridge/package.json",
+    "scripts/whatsapp-bridge/package-lock.json",
+    "scripts/whatsapp-bridge/bridge.js",
+    "scripts/whatsapp-bridge/README.md",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -97,6 +107,8 @@ process.stdin.on("end", () => {
       path.startsWith("src/") ||
       path === "website" ||
       path.startsWith("website/") ||
+      path === "scripts/whatsapp-bridge/node_modules" ||
+      path.startsWith("scripts/whatsapp-bridge/node_modules/") ||
       path.startsWith("dist/test/") ||
       path.endsWith(".test.js") ||
       path.endsWith(".test.js.map") ||

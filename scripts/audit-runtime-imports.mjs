@@ -5,6 +5,8 @@ const root = process.cwd();
 const sourceRoot = path.join(root, "src");
 
 const driverRules = new Map([
+  ["@whiskeysockets/baileys", new Set()],
+  ["@hapi/boom", new Set()],
   ["bun:sqlite", new Set(["src/storage/bun-sqlite.ts", "src/storage/sqlite-adapter.test.ts"])],
   ["better-sqlite3", new Set(["src/storage/better-sqlite3.ts"])],
   ["node:sqlite", new Set()]

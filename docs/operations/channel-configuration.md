@@ -105,6 +105,14 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
 
 ## WhatsApp
 
+Use the single setup wizard:
+
+```bash
+estacoda whatsapp
+```
+
+The wizard uses QR-only device pairing and renders the QR code in the terminal. It checks the isolated bridge package under `scripts/whatsapp-bridge/`; if dependencies are missing, it asks before running the repair/install step. It does not silently install dependencies or write WhatsApp config until QR pairing succeeds.
+
 ```json
 {
   "channels": {
@@ -112,9 +120,13 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
       "enabled": true,
       "experimental": true,
       "authDir": "~/.estacoda/profiles/<id>/gateway/whatsapp-auth",
+      "mode": "bot",
+      "dmPolicy": "allowlist",
+      "groupPolicy": "disabled",
       "allowedUsers": ["1234567890"],
+      "allowedGroups": [],
+      "replyPrefix": "EstaCoda: ",
       "pairingMode": "qr",
-      "pairingCodePhoneNumber": "+1234567890",
       "busyPolicy": "reject",
       "queueDepth": 3
     }
@@ -122,7 +134,21 @@ See [Voice Operations](./voice.md) for optional package and troubleshooting deta
 }
 ```
 
-**Important:** WhatsApp requires `experimental: true`. Without it, the adapter throws on start. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
+If no allowed WhatsApp users are added during setup, `dmPolicy` is set to `"pairing"`. That means the device can be QR-paired, but the channel is not reported as fully ready and messages are not open to arbitrary users. User authorization codes are separate from device QR pairing: codes are displayed once by operator flows, expire after 10 minutes, are single-use, and are persisted only as salted SHA-256 hashes in profile-local state.
+
+WhatsApp DM policies are explicit: `"disabled"` rejects direct messages, `"allowlist"` accepts canonical `allowedUsers`, `"pairing"` only allows authorization-code redemption plus denial handling, and `"open"` accepts all DMs only when configured. Group policy fails closed by default: `"disabled"` ignores groups, `"allowlist"` accepts canonical `allowedGroups`, and `"open"` accepts all groups only when configured.
+
+WhatsApp allowlists use canonical identities. Phone numbers and `@s.whatsapp.net` JIDs normalize to digits, `@lid` IDs normalize case-insensitively, and group IDs normalize as `@g.us` JIDs. LID/phone aliases are stored profile-locally without message content.
+
+Use `mode: "self-chat"` only when the linked account is intentionally used as the operator chat. In self-chat mode EstaCoda prefixes replies with `replyPrefix` and suppresses echoes by recent sent message ID or prefix; in `mode: "bot"`, `fromMe` messages are ignored and no reply prefix is applied.
+
+WhatsApp does not stream visible progress. Tool/provider progress is best-effort typing presence only, and users receive the final reply after the turn finishes. Final text is adapted to WhatsApp formatting and chunked by the adapter. Telegram remains richer for live progress and inline action UX; WhatsApp supports final text, quoted first replies where possible, and media delivery through the isolated bridge.
+
+WhatsApp media delivery accepts only main-runtime validated local paths. The trusted workspace root and profile-local channel media/temp roots are allowed; arbitrary system paths are rejected before the bridge sees them. Explicitly allowed remote media URLs are downloaded into the profile-local channel media cache first and still obey upload size limits. Text-like inbound document previews are bounded before prompt assembly; binary documents and oversized media surface as structured attachment status rather than injected content.
+
+For WhatsApp voice bubbles, install `ffmpeg` in the operator environment. Voice-hinted audio that is already OGG/Opus is sent as voice/PTT. Incompatible provider audio converts to OGG/Opus in the main runtime under profile-local temp/media roots; if `ffmpeg` is unavailable or conversion fails, EstaCoda falls back to normal audio delivery with a clear fallback caption.
+
+**Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
 
 ## Defaults
 

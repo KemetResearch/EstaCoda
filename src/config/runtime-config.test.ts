@@ -10,6 +10,7 @@ import {
   normalizeSessionCompressionConfig,
   redactExternalMemoryConfig,
   saveRuntimeConfig,
+  addWhatsAppAllowedUser,
   setupAuxiliaryModelConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
@@ -17,6 +18,10 @@ import { resolveProfileStateHome } from "./profile-home.js";
 
 function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function whatsappAuthDir(homeDir: string): string {
+  return join(resolveProfileStateHome({ homeDir, profileId: "default" }).gatewayStatePath, "whatsapp-auth");
 }
 
 async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
@@ -1204,12 +1209,109 @@ describe("loadRuntimeConfig channel readiness", () => {
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
-      channels: { whatsapp: { enabled: true, experimental: true, authDir: "/tmp/estacoda-whatsapp-auth", allowedUsers: ["971501234567"] } }
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: whatsappAuthDir(workspace), allowedUsers: ["971501234567"] } }
     }));
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(true);
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    expect(loaded.channels.whatsapp.dmPolicy).toBe("allowlist");
+    expect(loaded.channels.whatsapp.groupPolicy).toBe("disabled");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp explicit open DM policy is ready without allowed users", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: whatsappAuthDir(workspace),
+          dmPolicy: "open"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(true);
+    expect(loaded.channels.whatsapp.missing).toBeUndefined();
+    expect(loaded.channels.whatsapp.dmPolicy).toBe("open");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp group allowlist requires allowed groups and canonicalizes group JIDs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: whatsappAuthDir(workspace),
+          dmPolicy: "open",
+          groupPolicy: "allowlist",
+          allowedGroups: ["120363025555555555@g.us"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(true);
+    expect(loaded.channels.whatsapp.allowedGroups).toEqual(["120363025555555555@g.us"]);
+    expect(loaded.channels.whatsapp.groupPolicy).toBe("allowlist");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready with authDir outside the selected profile WhatsApp auth directory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: join(tmpdir(), "estacoda-whatsapp-auth"), allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready when authDir is the gateway state root", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    const paths = resolveProfileStateHome({ homeDir: workspace, profileId: "default" });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: paths.gatewayStatePath, allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("whatsapp is not ready when authDir is a sibling profile-local directory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    const paths = resolveProfileStateHome({ homeDir: workspace, profileId: "default" });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { whatsapp: { enabled: true, experimental: true, authDir: join(paths.gatewayStatePath, "not-whatsapp-auth"), allowedUsers: ["971501234567"] } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.ready).toBe(false);
+    expect(loaded.channels.whatsapp.missing).toContain("authDirProfileLocal");
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -1227,6 +1329,52 @@ describe("loadRuntimeConfig channel readiness", () => {
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
     expect(loaded.channels.whatsapp.missing).toContain("authDir");
     expect(loaded.channels.whatsapp.missing).toContain("allowedUsers");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("appends WhatsApp user authorization without preserving stale pairing config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: "/tmp/estacoda-whatsapp-auth",
+          allowedUsers: [],
+          mode: "bot",
+          dmPolicy: "pairing",
+          pairingMode: "qr",
+          pairingCodePhoneNumber: "+971501234567",
+          stalePairingCode: "123456",
+          unknownWhatsAppKey: true
+        }
+      }
+    }));
+
+    const result = await addWhatsAppAllowedUser({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      userId: "971501234567@s.whatsapp.net"
+    });
+
+    expect(result.added).toBe(true);
+    expect(result.config.channels?.whatsapp).toEqual({
+      enabled: true,
+      experimental: true,
+      authDir: "/tmp/estacoda-whatsapp-auth",
+      allowedUsers: ["971501234567"],
+      allowedGroups: [],
+      mode: "bot",
+      dmPolicy: "allowlist",
+      pairingMode: "qr"
+    });
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.whatsapp.pairingCodePhoneNumber).toBeUndefined();
+    expect(persisted.channels.whatsapp.stalePairingCode).toBeUndefined();
+    expect(persisted.channels.whatsapp.unknownWhatsAppKey).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
   });
 });

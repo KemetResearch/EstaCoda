@@ -135,6 +135,10 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`.
 | Email | Present, not live-proven |
 | WhatsApp | Experimental-only — gated behind `experimental: true` |
 
+WhatsApp is optional, experimental, and backed by the unofficial Baileys linked-device API. Transport dependencies are isolated under `scripts/whatsapp-bridge/` so the root runtime does not install or import Baileys or `@hapi/boom`. The bridge package is managed separately with its own `package-lock.json` and is not part of the root pnpm workspace.
+
+Run `estacoda whatsapp` to start the WhatsApp setup wizard. The wizard uses QR-only device pairing, asks before installing the isolated bridge dependencies, and leaves the channel pairing-pending if no allowed WhatsApp users are configured yet. WhatsApp user authorization codes are one-time, expire after 10 minutes, and are stored only as salted hashes in profile-local state. WhatsApp replies are final-only: progress becomes best-effort typing presence, while final text, media, and voice-hinted audio are delivered after the turn completes. Voice bubbles require `ffmpeg`; without it, EstaCoda falls back to normal audio.
+
 ### Other Capabilities
 
 - **Browser automation**: local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. browser-use, Firecrawl, and Camofox remain registered deferred providers.

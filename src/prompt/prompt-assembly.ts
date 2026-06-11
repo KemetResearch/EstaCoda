@@ -513,10 +513,31 @@ function renderChannelAttachments(attachments: ChannelAttachment[] | undefined):
       attachment.remoteUrl === undefined && attachment.url === undefined ? undefined : `remote_ref=${attachment.remoteUrl ?? attachment.url}`,
       attachment.failureCode === undefined ? undefined : `failure=${attachment.failureCode}`,
       attachment.failureMessage === undefined ? undefined : `note=${attachment.failureMessage}`,
+      documentTextPreview(attachment),
       suggestedTools.length === 0 ? undefined : `suggested_tools=${suggestedTools.join(", ")}`
     ].filter((value) => value !== undefined && value !== "");
     return `- ${parts.join(" · ")}`;
   }).join("\n");
+}
+
+function documentTextPreview(attachment: ChannelAttachment): string | undefined {
+  if (attachment.kind !== "document" || attachment.status !== "ready") return undefined;
+  if (!isTextLikeDocumentAttachment(attachment)) return undefined;
+  const preview = attachment.metadata?.textPreview;
+  if (typeof preview !== "string" || preview.length === 0) return undefined;
+  const truncated = attachment.metadata?.textPreviewTruncated === true ? " truncated" : "";
+  return `text_preview${truncated}=${preview.slice(0, 4000)}`;
+}
+
+function isTextLikeDocumentAttachment(attachment: ChannelAttachment): boolean {
+  const mime = attachment.mimeType?.toLowerCase();
+  const name = (attachment.originalName ?? "").toLowerCase();
+  return mime?.startsWith("text/") === true ||
+    mime === "application/json" ||
+    mime === "application/xml" ||
+    mime === "text/xml" ||
+    mime === "text/markdown" ||
+    /\.(txt|md|markdown|json|xml|csv)$/iu.test(name);
 }
 
 function suggestedToolsForAttachment(attachment: ChannelAttachment): string[] {

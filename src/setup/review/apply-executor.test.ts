@@ -1275,7 +1275,7 @@ describe("reviewed setup apply executor", () => {
     expect(whatsappResult.error).toContain("WhatsApp apply requires");
   });
 
-  it("rejects reviewed WhatsApp beta auth directories outside selected profile gateway state", async () => {
+  it("rejects reviewed WhatsApp beta auth directories outside the selected profile WhatsApp auth directory", async () => {
     const result = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.whatsapp.draft", {
       authDir: join(tempDir, "outside-whatsapp-auth"),
       allowedUsers: ["971501234567"],
@@ -1285,7 +1285,7 @@ describe("reviewed setup apply executor", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("profile gateway state");
+    expect(result.error).toContain("selected profile WhatsApp auth directory");
   });
 
   it("stops verification when save/apply fails", async () => {

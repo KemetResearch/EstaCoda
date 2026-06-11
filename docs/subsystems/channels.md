@@ -11,11 +11,13 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 
 | File | Lines | Role |
 |------|-------|------|
-| `src/channels/channel-gateway.ts` | 1,408 | Generic adapter bridge |
+| `src/channels/channel-gateway.ts` | ~1,400 | Gateway auth, session, command, approval, and pairing orchestration |
 | `src/channels/telegram-adapter.ts` | ~1,160 | Telegram-specific adapter |
 | `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
 | `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
-| `src/channels/whatsapp-adapter.ts` | ~500 | WhatsApp-specific adapter (Baileys) |
+| `src/channels/whatsapp-adapter.ts` | ~900 | WhatsApp bridge-client adapter, identity policy, formatting, media validation, and final-only delivery |
+| `src/channels/whatsapp-bridge-lifecycle.ts` | ~500 | Managed isolated WhatsApp bridge lifecycle, dependency readiness, and logs |
+| `scripts/whatsapp-bridge/bridge.js` | ~450 | Standalone Baileys/Boom transport bridge package |
 | `src/channels/delivery-router.ts` | ~430 | Normalized delivery path |
 | `src/channels/voice-transcription.ts` | ~280 | Gateway voice attachment transcript injection and STT preprocessing handoff |
 | `src/gateway/voice-state.ts` | ~160 | Profile-local per-chat voice mode and duplicate transcript state |
@@ -167,33 +169,48 @@ estacoda email configure \
 
 | Capability | Evidence |
 |------------|----------|
-| Baileys linked-device login | `experimental` |
-| QR code login | `experimental` |
-| Pairing-code login | `experimental` |
+| Baileys linked-device login through isolated bridge | `experimental` |
+| QR code login | `estacoda whatsapp` |
 | DM text delivery | `experimental` |
 | Media download/upload | `experimental` |
 | Message chunking | `experimental` |
+| Final-only replies | `experimental` |
+| Voice-bubble delivery | `ffmpeg` optional |
 
-**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The adapter uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
+**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The main runtime talks to a quarantined bridge package under `scripts/whatsapp-bridge/`; that bridge uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
 
 **Limitations:**
 
-- DM-first; no group support.
+- DM-first messaging UX; group access can be policy-gated, but full group mention/routing UX is not complete yet.
 - Live credential smoke is optional/manual.
-- Baileys availability is checked at runtime; adapter fails gracefully if missing.
+- Bridge dependency readiness is checked before setup/startup; missing dependencies require an explicit repair/install step.
+- WhatsApp device pairing-code setup is not exposed; `estacoda whatsapp` supports QR-only pairing.
 
 **Setup:**
 
 ```bash
-estacoda whatsapp configure --allowed-user 1234567890
-# Set channels.whatsapp.experimental: true in config
+estacoda whatsapp
 ```
+
+The wizard renders the WhatsApp QR code in the terminal. If no allowed user is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes in profile-local state; plaintext codes are shown once and are not written to config.
+
+QR pairing is foreground and times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` A logged-out state requires explicit re-pair/reset, and reset is constrained to the selected profile's dedicated WhatsApp auth directory.
+
+WhatsApp identities are matched canonically: phone numbers and `@s.whatsapp.net` JIDs normalize to digits, `@lid` IDs normalize case-insensitively, and group JIDs normalize as `@g.us`. Profile-local alias state can associate an LID with a phone number without storing message content.
+
+`mode: "bot"` ignores WhatsApp `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix` (default `EstaCoda: `), and ignores echoed replies by recent sent message ID or that prefix.
+
+WhatsApp is final-only: provider/tool progress is translated only into ephemeral WhatsApp presence, not visible progress messages. Final replies are formatted for WhatsApp's limited markup (`**bold**`/`__bold__` becomes `*bold*`, Markdown links become `text (url)`, headers become bold text, and code spans/blocks are preserved), then chunked by the adapter with a short internal delay between chunks. Where WhatsApp supports it, the first final-answer chunk quotes the inbound message.
+
+Outbound media policy stays in the main runtime. The adapter sends the bridge only validated local file paths under explicit allowed roots such as the trusted workspace and profile-local media/temp roots, enforces upload size limits, and caches explicitly allowed remote media URLs locally before delivery. Converted and cached WhatsApp media is written under profile-local media/temp roots. The bridge does not fetch URLs, run `ffmpeg`, or decide workspace trust. Image, video, normal audio, voice/PTT audio, and documents use separate bridge media types. Voice-hinted incompatible audio converts to OGG/Opus with `ffmpeg` when available; if conversion is unavailable, EstaCoda sends normal audio with an explicit fallback caption.
+
+Bridge stdout/stderr is captured in the selected profile logs as `whatsapp-bridge.log`. Dependency repair output is captured separately as `whatsapp-bridge-install.log`. Status/diagnostics distinguish disabled, pairing-pending, allowlisted-ready, open policy, bot mode, self-chat mode, group policy, and queue pressure.
 
 ## DeliveryRouter
 
 `DeliveryRouter` is the normalized delivery path for all channels.
 
-Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitrary model-emitted path text. `MEDIA:/path` text remains normal text unless an existing non-auto file-delivery path explicitly handles it with its own path checks. Telegram sends compatible `.ogg`, `.opus`, and `audio/ogg` artifacts as voice bubbles; voice-hinted incompatible audio converts through ffmpeg when available and otherwise falls back to normal audio delivery.
+Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitrary model-emitted path text. `MEDIA:/path` text remains normal text unless an existing non-auto file-delivery path explicitly handles it with its own path checks. Telegram and WhatsApp send compatible `.ogg`, `.opus`, and `audio/ogg` artifacts as voice bubbles; voice-hinted incompatible audio converts through ffmpeg when available and otherwise falls back to normal audio delivery.
 
 **Targets:**
 
@@ -223,7 +240,7 @@ Platform message limits belong to channel adapters because formatting and transp
 
 - Telegram formats replies first, then chunks the formatted payload in `telegram-adapter.ts`. Each outgoing `sendMessage` text payload, including suffixes such as `(1/3)`, must fit within Telegram's 4096 UTF-16 code-unit limit. Inline action buttons are sent only on the final chunk. If sending any chunk fails, later chunks are not sent and delivery reports failure.
 - Discord keeps adapter-owned text chunking in `discord-adapter.ts`.
-- WhatsApp keeps adapter-owned text chunking in `whatsapp-adapter.ts`.
+- WhatsApp formats for WhatsApp markdown, preserves code spans/blocks, then chunks in `whatsapp-adapter.ts`. Inter-chunk delay is internal adapter behavior, not a CLI/config option.
 - Email and custom adapters receive full text unless they implement their own limits.
 
 ### Overflow And Hooks

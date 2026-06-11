@@ -67,6 +67,12 @@ import {
   type VoiceFetchLike
 } from "../tools/voice-tools.js";
 import { getTtsTextCap } from "../tools/tts-providers.js";
+import {
+  normalizeWhatsAppAllowlist,
+  normalizeWhatsAppGroupAllowlist,
+  normalizeWhatsAppGroupId,
+  normalizeWhatsAppUserId,
+} from "./whatsapp-identity.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
@@ -655,7 +661,16 @@ export class ChannelGateway {
     const auth = authorizeChannelMessage(message, this.#authPolicy);
 
     if (!auth.allowed) {
-      const pairedMessage = await this.#pair?.(message);
+      if (auth.silentDrop === true) {
+        return {
+          sessionId: "",
+          replyText: "",
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      const pairedMessage = auth.pairingAllowed === false ? undefined : await this.#pair?.(message);
 
       if (pairedMessage !== undefined) {
         await this.#deliverText(adapter, message.sessionKey, pairedMessage);
@@ -688,7 +703,11 @@ export class ChannelGateway {
       };
     }
 
-    const commandResult = await this.#handleCommand(message, adapter);
+    const authorizedMessage = auth.authorizedText === undefined
+      ? message
+      : { ...message, text: auth.authorizedText };
+
+    const commandResult = await this.#handleCommand(authorizedMessage, adapter);
 
     if (commandResult !== undefined) {
       return commandResult;
@@ -697,11 +716,11 @@ export class ChannelGateway {
     // --- Drain check (before any turn side effects) ---
     if (this.#isDraining?.()) {
       const drainText = "Gateway is restarting, please try again shortly.";
-      await this.#deliverText(adapter, message.sessionKey, drainText);
+      await this.#deliverText(adapter, authorizedMessage.sessionKey, drainText);
       return { sessionId: "", replyText: drainText, artifactCount: 0, progressCount: 0 };
     }
 
-    const processedMessage = await this.#preprocessMessage?.(message) ?? message;
+    const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
     const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
     const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
@@ -898,7 +917,12 @@ export class ChannelGateway {
         this.#pendingApprovals.delete(activeTurnKey);
       }
 
-      await this.#deliverText(adapter, normalizedSessionKey, response.text);
+      await this.#deliverText(
+        adapter,
+        normalizedSessionKey,
+        response.text,
+        message.channel === "whatsapp" ? { replyTo: message.id } : undefined
+      );
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
@@ -3020,6 +3044,9 @@ function parseGatewayVoiceCommand(text: string): GatewayVoiceCommand | undefined
 export function authorizeChannelMessage(message: ChannelMessage, policies: ChannelAuthPolicies): {
   allowed: boolean;
   message: string;
+  pairingAllowed?: boolean;
+  silentDrop?: boolean;
+  authorizedText?: string;
 } {
   const kind = message.channel;
   const policy = policies[kind as keyof ChannelAuthPolicies];
@@ -3081,11 +3108,53 @@ export function authorizeChannelMessage(message: ChannelMessage, policies: Chann
 
   if (kind === "whatsapp") {
     const whatsappPolicy = policy as import("../contracts/channel.js").WhatsAppAuthPolicy;
-    const allowedNumbers = new Set(whatsappPolicy.allowedNumbers ?? []);
-    const normalizedSender = message.sender.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "");
-    const allowed = allowedNumbers.has(normalizedSender) || allowedNumbers.has(message.sender.id);
+    if (message.sessionKey.chatType === "group") {
+      const groupPolicy = whatsappPolicy.groupPolicy ?? "disabled";
+      const groupId = normalizeWhatsAppGroupId(message.sessionKey.chatId);
+      const allowedGroups = new Set(normalizeWhatsAppGroupAllowlist(whatsappPolicy.allowedGroups));
+      const freeResponseChats = new Set(normalizeWhatsAppGroupAllowlist(whatsappPolicy.freeResponseChats));
+      const groupAllowed = groupPolicy === "open" || (groupPolicy === "allowlist" && allowedGroups.has(groupId));
+      const matchedMentionPattern = firstMatchingMentionPattern(message.text, whatsappPolicy.mentionPatterns ?? []);
+      const mentionAllowed =
+        whatsappPolicy.requireMention !== true ||
+        freeResponseChats.has(groupId) ||
+        matchedMentionPattern !== undefined;
+      const allowed = groupAllowed && mentionAllowed;
+      return {
+        allowed,
+        pairingAllowed: false,
+        silentDrop: !allowed,
+        authorizedText: allowed && whatsappPolicy.requireMention === true && !freeResponseChats.has(groupId) && matchedMentionPattern !== undefined
+          ? stripMentionPattern(message.text, matchedMentionPattern)
+          : undefined,
+        message: allowed
+          ? ""
+          : whatsappPolicy.deniedMessage ??
+            "This EstaCoda WhatsApp gateway is locked. Ask the owner to allow this WhatsApp group."
+      };
+    }
+
+    const dmPolicy = whatsappPolicy.dmPolicy ?? "allowlist";
+    if (dmPolicy === "disabled") {
+      return {
+        allowed: false,
+        pairingAllowed: false,
+        message: whatsappPolicy.deniedMessage ??
+          "This EstaCoda WhatsApp gateway is not accepting direct messages."
+      };
+    }
+    if (dmPolicy === "open") {
+      return { allowed: true, message: "" };
+    }
+
+    const allowedNumbers = new Set(normalizeWhatsAppAllowlist(whatsappPolicy.allowedNumbers));
+    const normalizedSender = normalizeWhatsAppUserId(message.sender.id);
+    const normalizedSessionUser = normalizeWhatsAppUserId(message.sessionKey.userId ?? "");
+    const allowed = dmPolicy === "allowlist" &&
+      (allowedNumbers.has(normalizedSender) || allowedNumbers.has(normalizedSessionUser));
     return {
       allowed,
+      pairingAllowed: dmPolicy === "pairing",
       message: allowed
         ? ""
         : whatsappPolicy.deniedMessage ??
@@ -3097,6 +3166,29 @@ export function authorizeChannelMessage(message: ChannelMessage, policies: Chann
     allowed: false,
     message: `This EstaCoda ${kind} gateway is locked. Authorization is not implemented for this channel kind.`
   };
+}
+
+function firstMatchingMentionPattern(text: string, patterns: readonly string[]): string | undefined {
+  let best: { pattern: string; index: number } | undefined;
+  for (const pattern of patterns) {
+    if (pattern.length === 0) continue;
+    const index = text.indexOf(pattern);
+    if (index === -1) continue;
+    if (best === undefined || index < best.index || (index === best.index && pattern.length > best.pattern.length)) {
+      best = { pattern, index };
+    }
+  }
+  return best?.pattern;
+}
+
+function stripMentionPattern(text: string, pattern: string): string {
+  const index = text.indexOf(pattern);
+  if (index === -1) return text;
+  const before = text.slice(0, index).replace(/[\s,;:.-]+$/u, " ");
+  const after = text.slice(index + pattern.length).replace(/^[\s,;:.-]+/u, " ");
+  return `${before}${after}`
+    .replace(/[ \t]{2,}/gu, " ")
+    .trim();
 }
 
 function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {

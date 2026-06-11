@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type {
   AuxiliaryModelConfig,
@@ -48,6 +48,12 @@ import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } f
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
 import { normalizeMemoryConfig, type MemoryConfig, type MemoryConfigInput } from "./memory-config.js";
+import {
+  WHATSAPP_DEFAULT_REPLY_PREFIX,
+  normalizeWhatsAppAllowlist,
+  normalizeWhatsAppGroupAllowlist,
+  normalizeWhatsAppUserId,
+} from "../channels/whatsapp-identity.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -56,6 +62,9 @@ export type ActivityLabelsLocale = "en" | "ar";
 export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
 export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
+export type WhatsAppChannelMode = "bot" | "self-chat";
+export type WhatsAppDmPolicy = "disabled" | "allowlist" | "pairing" | "open";
+export type WhatsAppGroupPolicy = "disabled" | "allowlist" | "open";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 export type ImageGenerationProvider = "fal" | "byteplus";
@@ -483,8 +492,15 @@ export type WhatsAppChannelConfig = {
   experimental?: boolean;
   authDir?: string;
   allowedUsers?: string[];
-  pairingMode?: "qr" | "code";
-  pairingCodePhoneNumber?: string;
+  allowedGroups?: string[];
+  mode?: WhatsAppChannelMode;
+  dmPolicy?: WhatsAppDmPolicy;
+  groupPolicy?: WhatsAppGroupPolicy;
+  requireMention?: boolean;
+  mentionPatterns?: string[];
+  freeResponseChats?: string[];
+  replyPrefix?: string;
+  pairingMode?: "qr";
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
 };
@@ -694,6 +710,15 @@ export type WhatsAppSetupInput = {
   experimental?: boolean;
   authDir?: string;
   allowedUsers?: string[];
+  allowedGroups?: string[];
+  mode?: WhatsAppChannelMode;
+  dmPolicy?: WhatsAppDmPolicy;
+  groupPolicy?: WhatsAppGroupPolicy;
+  requireMention?: boolean;
+  mentionPatterns?: string[];
+  freeResponseChats?: string[];
+  replyPrefix?: string;
+  pairingMode?: "qr";
   enabled?: boolean;
 };
 
@@ -793,11 +818,26 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   }
 
   const whatsapp = config.channels?.whatsapp ?? {};
+  const whatsappDmPolicy = whatsapp.dmPolicy ?? "allowlist";
+  const whatsappGroupPolicy = whatsapp.groupPolicy ?? "disabled";
+  const defaultWhatsAppAuthDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+  const whatsappAuthDirProfileLocal = whatsapp.authDir === undefined
+    ? false
+    : resolve(whatsapp.authDir) === resolve(defaultWhatsAppAuthDir);
   const whatsappMissing: string[] = [];
   if (whatsapp.enabled === true) {
     if (whatsapp.experimental !== true) whatsappMissing.push("experimental");
     if (whatsapp.authDir === undefined) whatsappMissing.push("authDir");
-    if ((whatsapp.allowedUsers?.length ?? 0) === 0) whatsappMissing.push("allowedUsers");
+    if (whatsapp.authDir !== undefined && !whatsappAuthDirProfileLocal) whatsappMissing.push("authDirProfileLocal");
+    if (whatsappDmPolicy === "allowlist" && (whatsapp.allowedUsers?.length ?? 0) === 0) {
+      whatsappMissing.push("allowedUsers");
+    }
+    if (whatsappDmPolicy === "pairing" && (whatsapp.allowedUsers?.length ?? 0) === 0) {
+      whatsappMissing.push("pairingPending");
+    }
+    if (whatsappGroupPolicy === "allowlist" && (whatsapp.allowedGroups?.length ?? 0) === 0) {
+      whatsappMissing.push("allowedGroups");
+    }
   }
   const warnedInvalidBusyPolicies = new Set<string>();
   const normalizedFallbacks = normalizeModelFallbacks(config);
@@ -926,6 +966,13 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       },
       whatsapp: {
         ...whatsapp,
+        mode: whatsapp.mode ?? "bot",
+        dmPolicy: whatsappDmPolicy,
+        groupPolicy: whatsappGroupPolicy,
+        allowedUsers: normalizeWhatsAppAllowlist(whatsapp.allowedUsers),
+        allowedGroups: normalizeWhatsAppGroupAllowlist(whatsapp.allowedGroups),
+        freeResponseChats: normalizeWhatsAppGroupAllowlist(whatsapp.freeResponseChats),
+        replyPrefix: whatsapp.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX,
         ready: whatsapp.enabled === true && whatsappMissing.length === 0,
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
         busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
@@ -2820,9 +2867,15 @@ export async function setupWhatsAppConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateWhatsAppSetupInput(options.input);
-  const allowedUsers = uniqueStrings(options.input.allowedUsers ?? []);
-  if ((options.input.enabled ?? true) && allowedUsers.length === 0) {
+  const allowedUsers = normalizeWhatsAppAllowlist(options.input.allowedUsers);
+  const allowedGroups = normalizeWhatsAppGroupAllowlist(options.input.allowedGroups);
+  const dmPolicy = options.input.dmPolicy ?? (allowedUsers.length > 0 ? "allowlist" : "pairing");
+  if ((options.input.enabled ?? true) && allowedUsers.length === 0 && dmPolicy === "allowlist") {
     throw new Error("WhatsApp setup requires allowed user numbers.");
+  }
+  const groupPolicy = options.input.groupPolicy ?? (allowedGroups.length > 0 ? "allowlist" : "disabled");
+  if ((options.input.enabled ?? true) && allowedGroups.length === 0 && groupPolicy === "allowlist") {
+    throw new Error("WhatsApp setup requires allowed group JIDs.");
   }
   const enabled = options.input.enabled ?? true;
   const targetPath = resolveConfigMutationPath(options);
@@ -2831,26 +2884,84 @@ export async function setupWhatsAppConfig(options: {
   const gatewayStatePath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).gatewayStatePath;
   const defaultAuthDir = join(gatewayStatePath, "whatsapp-auth");
   const authDir = options.input.authDir ?? defaultAuthDir;
-  if (!isPathInside(gatewayStatePath, authDir)) {
-    throw new Error("WhatsApp authDir must stay under the selected profile gateway state directory.");
+  if (resolve(authDir) !== resolve(defaultAuthDir)) {
+    throw new Error("WhatsApp authDir must be the selected profile WhatsApp auth directory.");
   }
   const whatsappPatch: WhatsAppChannelConfig = {
-    ...(existing.config.channels?.whatsapp ?? {}),
     enabled,
     experimental: enabled ? true : options.input.experimental ?? false,
     authDir,
-    allowedUsers
+    allowedUsers,
+    allowedGroups,
+    mode: options.input.mode ?? existing.config.channels?.whatsapp?.mode ?? "bot",
+    dmPolicy,
+    groupPolicy,
+    requireMention: options.input.requireMention,
+    mentionPatterns: uniqueStrings(options.input.mentionPatterns ?? []),
+    freeResponseChats: normalizeWhatsAppGroupAllowlist(options.input.freeResponseChats),
+    replyPrefix: options.input.replyPrefix ?? existing.config.channels?.whatsapp?.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX,
+    pairingMode: options.input.pairingMode ?? "qr"
   };
-  const config = patchConfig(existing.config, {
+  const config: EstaCodaConfig = {
+    ...existing.config,
     channels: {
+      ...(existing.config.channels ?? {}),
       whatsapp: whatsappPatch
     }
-  });
+  };
 
   await saveRuntimeConfig(targetPath, config);
   return {
     path: targetPath,
     config
+  };
+}
+
+export async function addWhatsAppAllowedUser(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  userId: string;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+  added: boolean;
+}> {
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const whatsapp = existing.config.channels?.whatsapp ?? {};
+  const normalizedUserId = normalizeWhatsAppUserId(options.userId);
+  const allowedUsers = uniqueStrings([...(whatsapp.allowedUsers ?? []), normalizedUserId]);
+  const whatsappPatch: WhatsAppChannelConfig = {
+    enabled: whatsapp.enabled,
+    experimental: whatsapp.experimental,
+    authDir: whatsapp.authDir,
+    allowedUsers: normalizeWhatsAppAllowlist(allowedUsers),
+    allowedGroups: normalizeWhatsAppGroupAllowlist(whatsapp.allowedGroups),
+    mode: whatsapp.mode,
+    dmPolicy: allowedUsers.length > 0 && whatsapp.dmPolicy === "pairing" ? "allowlist" : whatsapp.dmPolicy
+  };
+  if (whatsapp.groupPolicy !== undefined) whatsappPatch.groupPolicy = whatsapp.groupPolicy;
+  if (whatsapp.requireMention !== undefined) whatsappPatch.requireMention = whatsapp.requireMention;
+  if (whatsapp.mentionPatterns !== undefined) whatsappPatch.mentionPatterns = uniqueStrings(whatsapp.mentionPatterns);
+  if (whatsapp.freeResponseChats !== undefined) whatsappPatch.freeResponseChats = normalizeWhatsAppGroupAllowlist(whatsapp.freeResponseChats);
+  if (whatsapp.replyPrefix !== undefined) whatsappPatch.replyPrefix = whatsapp.replyPrefix;
+  if (whatsapp.pairingMode === "qr") whatsappPatch.pairingMode = "qr";
+  if (whatsapp.busyPolicy !== undefined) whatsappPatch.busyPolicy = whatsapp.busyPolicy;
+  if (whatsapp.queueDepth !== undefined) whatsappPatch.queueDepth = whatsapp.queueDepth;
+  const config: EstaCodaConfig = {
+    ...existing.config,
+    channels: {
+      ...(existing.config.channels ?? {}),
+      whatsapp: whatsappPatch
+    }
+  };
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config,
+    added: !(whatsapp.allowedUsers ?? []).includes(normalizedUserId)
   };
 }
 
@@ -3154,9 +3265,31 @@ function validateDiscordSetupInput(input: DiscordSetupInput): void {
 
 function validateWhatsAppSetupInput(input: WhatsAppSetupInput): void {
   requireOptionalNonEmpty(input.authDir, "authDir");
+  if (input.mode !== undefined && input.mode !== "bot" && input.mode !== "self-chat") {
+    throw new Error("WhatsApp mode must be bot or self-chat.");
+  }
+  if (input.dmPolicy !== undefined && input.dmPolicy !== "disabled" && input.dmPolicy !== "allowlist" && input.dmPolicy !== "pairing" && input.dmPolicy !== "open") {
+    throw new Error("WhatsApp dmPolicy must be disabled, allowlist, pairing, or open.");
+  }
+  if (input.groupPolicy !== undefined && input.groupPolicy !== "disabled" && input.groupPolicy !== "allowlist" && input.groupPolicy !== "open") {
+    throw new Error("WhatsApp groupPolicy must be disabled, allowlist, or open.");
+  }
+  if (input.pairingMode !== undefined && input.pairingMode !== "qr") {
+    throw new Error("WhatsApp pairingMode must be qr.");
+  }
   for (const value of input.allowedUsers ?? []) {
     requireNonEmpty(value, "WhatsApp allowed user");
   }
+  for (const value of input.allowedGroups ?? []) {
+    requireNonEmpty(value, "WhatsApp allowed group");
+  }
+  for (const value of input.mentionPatterns ?? []) {
+    requireNonEmpty(value, "WhatsApp mention pattern");
+  }
+  for (const value of input.freeResponseChats ?? []) {
+    requireNonEmpty(value, "WhatsApp free response chat");
+  }
+  requireOptionalNonEmpty(input.replyPrefix, "WhatsApp replyPrefix");
 }
 
 function validateRiskClass(value: ToolRiskClass | undefined, field: string): void {
@@ -3318,11 +3451,6 @@ function normalizePairingCode(code: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
-}
-
-function isPathInside(parent: string, child: string): boolean {
-  const relativePath = relative(resolve(parent), resolve(child));
-  return relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
 }
 
 function fallbackRouteKey(fallback: ModelFallbackConfig): string {

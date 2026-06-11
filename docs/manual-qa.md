@@ -778,3 +778,44 @@ pnpm run smoke
 ```
 
 All three must pass. Snapshot changes must be reviewed for unexpected ANSI/emoji/box-drawing leaks.
+
+## 13. WhatsApp Manual QA
+
+Automated smoke covers fake wizard flows and package boundaries. Do not mark real-device WhatsApp checks as passed without a real WhatsApp account/session.
+
+### 13.1 No-Device Checks
+
+```bash
+pnpm run smoke --id whatsapp-support
+pnpm exec vitest run src/cli/whatsapp-wizard.test.ts src/channels/whatsapp-diagnostics.test.ts
+pnpm run verify:package-bin
+```
+
+**Verify:**
+- `estacoda whatsapp` wizard cancellation leaves profile config unchanged.
+- Declining bridge dependency repair leaves profile config unchanged.
+- Successful fake QR setup writes only expected WhatsApp keys: `enabled`, `experimental`, `authDir`, `mode`, `dmPolicy`, `groupPolicy`, `allowedUsers`, `allowedGroups`, `mentionPatterns`, `freeResponseChats`, `replyPrefix`, and `pairingMode`.
+- Arabic wizard output preserves technical tokens including `estacoda whatsapp`, `WhatsApp`, `Baileys`, `dmPolicy`, `allowedUsers`, `authDir`, and `scripts/whatsapp-bridge/`.
+- The root package includes the four bridge helper files and excludes `scripts/whatsapp-bridge/node_modules/`.
+- The root package and root runtime do not depend on Baileys or `@hapi/boom`.
+
+### 13.2 Real-Device Checks
+
+Run only with an account you are willing to use with the unofficial Baileys API.
+
+```bash
+estacoda whatsapp
+estacoda gateway diagnose
+estacoda gateway status
+estacoda gateway run
+```
+
+**Verify:**
+- QR is rendered in the terminal and expires after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` if not scanned.
+- Missing bridge dependencies prompt before install; `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` controls the explicit repair timeout.
+- Logged-out state reports clearly and requires explicit re-pair/reset.
+- `dmPolicy: "pairing"` is shown as waiting for user authorization, not ready/open.
+- Allowlisted-ready, open-policy, bot mode, self-chat mode, group policy, and queue pressure states are distinguishable in diagnostics/status.
+- WhatsApp sends final replies only; progress is typing presence, not visible progress text.
+- Voice-hinted OGG/Opus sends as a voice/PTT bubble. Incompatible audio uses `ffmpeg` conversion when available and falls back to normal audio when unavailable.
+- Bridge logs are written to `logs/whatsapp-bridge.log`; install repair logs are written to `logs/whatsapp-bridge-install.log`.

@@ -119,6 +119,17 @@ describe("DeliveryRouter", () => {
       expect(telegram.records[0].sessionKey.chatId).toBe("123");
     });
 
+    it("preserves reply metadata when routing text to channel adapters", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const whatsapp = createFakeWhatsAppAdapter() as FakeAdapter;
+      router.registerAdapter(whatsapp);
+
+      const targets = router.parseTarget("whatsapp:971501234567", baseSessionKey);
+      await router.deliverText(targets, "Hello", { replyTo: "incoming-1" });
+
+      expect(whatsapp.records[0]?.options).toMatchObject({ replyTo: "incoming-1" });
+    });
+
     it("does not truncate long channel text by default", async () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const telegram = createFakeTelegramAdapter() as FakeAdapter;

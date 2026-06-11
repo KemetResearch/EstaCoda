@@ -164,6 +164,14 @@ Gateway approvals use a durable `pending_approvals` table in the session databas
 
 **WhatsApp experimental gate:** The WhatsApp adapter only initializes when `channels.whatsapp.experimental: true`. This is a deliberate gate to prevent accidental use of the unofficial Baileys API.
 
+**WhatsApp user authorization:** `dmPolicy: "pairing"` is a locked waiting state, not an open policy. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are persisted only as salted SHA-256 hashes in profile-local state; a redeemed code adds only the redeeming sender to `channels.whatsapp.allowedUsers`.
+
+Telegram pairing remains config-backed and unchanged for now.
+
+**WhatsApp identity policy:** WhatsApp authorization compares canonical phone/JID/LID/group identities. LID-to-phone aliases are stored in profile-local state with restrictive file permissions where supported and do not include message content. Self-chat echo prevention tracks only recent sent message IDs and the configured reply prefix.
+
+**WhatsApp bridge boundary:** The isolated bridge binds loopback only, validates `Host`, requires a per-launch bearer token, and writes token/port/PID state under the selected profile's gateway/auth state. Bridge stdout/stderr goes to `~/.estacoda/profiles/<profile-id>/logs/whatsapp-bridge.log`; explicit dependency repair output goes to `whatsapp-bridge-install.log`. The bridge owns Baileys socket setup and disconnect classification, but it does not own workspace trust, approvals, user authorization, media path policy, or `ffmpeg`.
+
 ### Handoff Code Security
 
 CLI↔Telegram handoff uses short-lived, single-use codes:
@@ -212,6 +220,8 @@ Voice credentials are direct environment variables only. The OpenAI audio resolv
 Local faster-whisper STT uses a managed Python environment at `~/.estacoda/python-env` and a separate model cache at `~/.estacoda/cache/huggingface` by default. `estacoda voice setup --stt-provider local` creates or repairs that venv and installs only the pinned `faster-whisper==1.2.1` package after explicit local STT setup. System Python and user-managed venvs are not modified. `--python-binary` and `stt.local.engine: "command"` are operator-owned escape hatches.
 
 Auto-TTS is text-first and fail-open. Generated auto-TTS media is ephemeral, profile-temp scoped, and not inserted into durable artifact storage, session DB, artifact history, prompt context, or model-visible attachment lists. Arbitrary `MEDIA:/path` response text is not an auto-TTS signal.
+
+WhatsApp media delivery keeps trust and file policy in the main runtime. The root adapter validates outbound paths against configured profile-local media/temp roots, caches explicitly allowed remote media URLs locally, enforces size limits, and performs optional `ffmpeg` voice conversion before sending a local path to the isolated bridge. The bridge does not fetch URLs, inspect workspace trust, or run `ffmpeg`.
 
 Local STT risk classes are:
 

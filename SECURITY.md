@@ -114,7 +114,7 @@ Gateway access denies by default unless a platform is explicitly configured for 
 The following are not considered security vulnerabilities in EstaCoda itself:
 
 - **Native Windows installer** — not part of the v0.1.0 support surface.
-- **Experimental WhatsApp channel** — gated behind `experimental: true`; Baileys is an unofficial API with account-risk implications.
+- **Experimental WhatsApp channel** — gated behind `experimental: true`; Baileys is an unofficial API with account-risk implications. EstaCoda quarantines Baileys and WhatsApp-specific `@hapi/boom` handling in `scripts/whatsapp-bridge/`, but that isolation does not remove the account risk of using an unofficial WhatsApp library.
 - **Cloud browser providers except Browserbase** — browser-use, Firecrawl, and Camofox are registered stubs, not live-supported. Browserbase is implemented behind explicit spend approval.
 - **Registered-but-not-live web research providers** — Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs; only guarded fetch extraction is live.
 - **Local environment compromise** not caused by EstaCoda — a compromised OS account, malicious co-tenant, or physical access to the machine.

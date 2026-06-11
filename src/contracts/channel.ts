@@ -66,6 +66,8 @@ export type ChannelTextAction = {
 export type ChannelTextOptions = {
   format?: "plain" | "html";
   actions?: ChannelTextAction[][];
+  replyTo?: string | null;
+  editMessageId?: string | null;
 };
 
 export type ChannelSender = {
@@ -194,6 +196,12 @@ export type EmailAuthPolicy = {
 
 export type WhatsAppAuthPolicy = {
   allowedNumbers?: string[];
+  allowedGroups?: string[];
+  dmPolicy?: "disabled" | "allowlist" | "pairing" | "open";
+  groupPolicy?: "disabled" | "allowlist" | "open";
+  requireMention?: boolean;
+  mentionPatterns?: string[];
+  freeResponseChats?: string[];
   deniedMessage?: string;
 };
 

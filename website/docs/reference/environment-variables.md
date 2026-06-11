@@ -79,8 +79,11 @@ These credentials satisfy Browserbase readiness only. They do not approve billab
 |----------|---------|
 | `ESTACODA_TELEGRAM_BOT_TOKEN` | Telegram bot token used by guided setup |
 | `ESTACODA_DISCORD_TOKEN` | Discord bot token |
+| `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` | Optional timeout, in milliseconds, for the explicit `estacoda whatsapp` bridge dependency repair/install step |
 
 Email uses `passwordEnv` config keys that reference arbitrary env vars, for example `EMAIL_PASSWORD`.
+
+WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through `estacoda whatsapp`, and bridge dependencies stay isolated under `scripts/whatsapp-bridge/`.
 
 ## Browser and web debug
 

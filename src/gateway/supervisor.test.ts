@@ -39,6 +39,7 @@ import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-st
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
 import { HookRegistry } from "./hook-registry.js";
 import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
+import { createWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -666,6 +667,228 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(true);
     expect(result.polls).toBe(1);
     expect(result.processed).toBe(0);
+  });
+
+  it("passes profile-local WhatsApp bridge lifecycle paths to the adapter factory", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          allowedUsers: ["971501234567"],
+        },
+      },
+    }));
+    let received: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: (input) => {
+          received = input;
+          return fakeAdapter("whatsapp") as any;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(received).toMatchObject({
+      authDir,
+      bridgeStatePath: join(authDir, "bridge-state.json"),
+      bridgeLogPath: join(profilePaths.logsPath, "whatsapp-bridge.log"),
+      bridgeInstallLogPath: join(profilePaths.logsPath, "whatsapp-bridge-install.log"),
+      bridgePidPath: join(authDir, "bridge.pid"),
+      bridgeLockPath: join(authDir, "whatsapp-session.lock"),
+      experimental: true,
+    });
+  });
+
+  it("does not construct WhatsApp bridge paths from an outside-root authDir", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: join(tmpDir, "outside-whatsapp-auth"),
+          allowedUsers: ["971501234567"],
+        },
+      },
+    }));
+    const createWhatsAppAdapter = vi.fn(() => fakeAdapter("whatsapp") as any);
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createWhatsAppAdapter).not.toHaveBeenCalled();
+  });
+
+  it("keeps pairing-pending WhatsApp locked until allowed users exist", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          mode: "bot",
+          dmPolicy: "pairing",
+          allowedUsers: [],
+        },
+      },
+    }));
+    let authPolicy: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          authPolicy = input.authPolicy;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: () => fakeAdapter("whatsapp") as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(authPolicy.whatsapp.allowedNumbers).toEqual([]);
+    expect(authPolicy.whatsapp.deniedMessage).toContain("locked");
+  });
+
+  it("preserves Telegram config-backed pairing through the channel pairing callback", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const whatsappStorePath = defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" });
+    const pairingCreatedAt = new Date(Date.now() - 60_000);
+    const pairingExpiresAt = new Date(Date.now() + 9 * 60_000);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+          allowedUserIds: [],
+          allowedChatIds: [],
+          pairing: {
+            code: "TG-1234",
+            createdAt: pairingCreatedAt.toISOString(),
+            expiresAt: pairingExpiresAt.toISOString()
+          }
+        },
+      },
+    }));
+    process.env.TEST_BOT_TOKEN = "fake";
+    await expect(readFile(whatsappStorePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    let pair: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          pair = input.pair;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createTelegramAdapter: () => fakeAdapter("telegram") as any,
+      },
+    });
+    delete process.env.TEST_BOT_TOKEN;
+
+    expect(result.ok).toBe(true);
+    await expect(pair({
+      id: "tg-msg-1",
+      channel: "telegram",
+      sessionKey: { platform: "telegram", chatId: "chat-123", userId: "user-123" },
+      sender: { id: "user-123" },
+      text: "TG 1234",
+      receivedAt: new Date().toISOString()
+    })).resolves.toBe("Telegram paired. This chat can now talk to EstaCoda.");
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.telegram.allowedUserIds).toEqual(["user-123"]);
+    expect(persisted.channels.telegram.allowedChatIds).toEqual(["chat-123"]);
+    expect(persisted.channels.telegram.pairing?.code).toBeUndefined();
+    await expect(readFile(whatsappStorePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("wires WhatsApp user-auth redemption into the channel pairing callback", async () => {
+    const configPath = profileConfigPath(tmpDir);
+    const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    const pairingCreatedAt = new Date(Date.now() - 60_000);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir,
+          mode: "bot",
+          dmPolicy: "pairing",
+          allowedUsers: [],
+          pairingMode: "qr",
+        },
+      },
+    }));
+    await createWhatsAppUserAuthCode({
+      storePath: defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" }),
+      requesterId: "owner",
+      code: () => "12345678",
+      now: () => pairingCreatedAt
+    });
+    let pair: any;
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (input: any) => {
+          pair = input.pair;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        createWhatsAppAdapter: () => fakeAdapter("whatsapp") as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(pair({
+      id: "wa-msg-1",
+      channel: "whatsapp",
+      sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
+      sender: { id: "971501234567@s.whatsapp.net" },
+      text: "12345678",
+      receivedAt: new Date().toISOString()
+    })).resolves.toBe("WhatsApp paired. This account can now talk to EstaCoda.");
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.channels.whatsapp.allowedUsers).toEqual(["971501234567"]);
+    expect(persisted.channels.whatsapp.dmPolicy).toBe("allowlist");
   });
 
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {

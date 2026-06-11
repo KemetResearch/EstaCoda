@@ -116,7 +116,7 @@ estacoda gateway status           # Full gateway status
 - Telegram token presence, allowed users/chats
 - Discord token presence
 - Email IMAP/SMTP hosts, credentials, addresses
-- WhatsApp experimental gate, Baileys availability, auth directory writability
+- WhatsApp experimental gate, isolated bridge package/readiness, auth directory writability, device pairing, user authorization, `dmPolicy`, `groupPolicy`, `mode`, and queue pressure
 - Cron directory permissions
 
 Returns exit code 1 if any warnings exist.
@@ -143,6 +143,16 @@ estacoda channels disable telegram
 Valid names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitive).
 
 `enable` sets `enabled: true` in profile config. `disable` sets `enabled: false`. Both are idempotent and preserve other fields.
+
+## WhatsApp setup
+
+```bash
+estacoda whatsapp
+```
+
+`estacoda whatsapp` opens the single WhatsApp setup wizard. It warns about the experimental unofficial Baileys transport, keeps dependencies inside `scripts/whatsapp-bridge/`, asks before dependency repair, renders a QR code in the terminal, and writes config only after QR pairing succeeds. It supports QR-only device pairing; WhatsApp pairing-code setup is not exposed.
+
+If no `allowedUsers` are entered, the wizard writes `dmPolicy: "pairing"` so the device is linked but waiting for secure user authorization. Logged-out state requires explicit re-pair/reset of only the selected profile's WhatsApp auth directory.
 
 ## Channel maturity
 

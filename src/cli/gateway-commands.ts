@@ -350,7 +350,11 @@ export async function runGatewayDiagnose(
   const homeDir = selected.homeDir;
 
   const tgDiag = await getTelegramGatewayDiagnostics({ ...options, profileId: selected.profileId });
-  const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir, gatewayStatePath: selected.paths.gatewayStatePath });
+  const waDiag = await getWhatsAppGatewayDiagnostics({
+    homeDir,
+    gatewayStatePath: selected.paths.gatewayStatePath,
+    config: config.channels.whatsapp,
+  });
 
   const cronStore = cronStoreFor(selected.paths);
   const cronJobs = await cronStore.list();
@@ -897,7 +901,11 @@ export async function runChannelsStatus(
   }
 
   if (channel === "whatsapp") {
-    const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir: selected.homeDir, gatewayStatePath: selected.paths.gatewayStatePath });
+    const waDiag = await getWhatsAppGatewayDiagnostics({
+      homeDir: selected.homeDir,
+      gatewayStatePath: selected.paths.gatewayStatePath,
+      config: config.channels.whatsapp,
+    });
     const waPointers = surfacePointers.filter((p) => p.surfaceType === "whatsapp");
 
     const data: ChannelsStatusData = {
