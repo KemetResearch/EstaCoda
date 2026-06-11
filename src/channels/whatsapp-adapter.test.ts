@@ -205,7 +205,7 @@ describe("WhatsAppAdapter", () => {
     expect(received[0]!.sender.displayName).toBe("Test User");
   });
 
-  it("batches rapid messages from the same chat and sender into one handler call", async () => {
+  it("batches messages from the same poll, chat, and sender into one handler call", async () => {
     const adapter = createAdapter();
     bridge.messages.push(
       { messageId: "batch-1", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "first" },

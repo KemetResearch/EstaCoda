@@ -134,6 +134,12 @@ export type BusyPolicyConfig = {
   queueDepth: number;
 };
 
+export type WhatsAppTextDebounceConfig = {
+  textDebounceMs: number;
+  textDebounceMaxMessages: number;
+  textDebounceMaxChars: number;
+};
+
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
   sessionKey: ChannelSessionKey;
@@ -192,6 +198,7 @@ export type ChannelGatewayOptions = {
   autoTtsFetch?: VoiceFetchLike;
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
+  whatsappTextDebounce?: WhatsAppTextDebounceConfig;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -199,6 +206,16 @@ type ApprovalScope = "once" | "session" | "always";
 type AutoTtsUsageWindow = {
   windowStartMs: number;
   chars: number;
+};
+
+type WhatsAppTextDebounceBuffer = {
+  adapter: ChannelAdapter;
+  firstMessage: ChannelMessage;
+  latestReceivedAt: string;
+  textChunks: string[];
+  messageIds: string[];
+  totalChars: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
 };
 
 type PendingApprovalContinuation = {
@@ -344,6 +361,8 @@ export class ChannelGateway {
   readonly #autoTtsNow: () => number;
   readonly #autoTtsId: (() => string) | undefined;
   readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
+  readonly #whatsappTextDebounce: WhatsAppTextDebounceConfig | undefined;
+  readonly #whatsappTextDebounceBuffers = new Map<string, WhatsAppTextDebounceBuffer>();
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -387,6 +406,7 @@ export class ChannelGateway {
     this.#autoTtsFetch = options.autoTtsFetch;
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
+    this.#whatsappTextDebounce = options.whatsappTextDebounce;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -400,7 +420,8 @@ export class ChannelGateway {
       : this.#activeTurns.size > 0;
     const hasQueued = this.#sessionMessageQueue.totalSize() > 0;
     const hasDraining = this.#drainingQueue.size > 0;
-    return hasActiveTurns || hasQueued || hasDraining;
+    const hasDebouncedText = this.#whatsappTextDebounceBuffers.size > 0;
+    return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText;
   }
 
   async #deliverText(
@@ -636,8 +657,16 @@ export class ChannelGateway {
   }
 
   async stop(): Promise<void> {
+    await this.flushPendingDebounces();
     for (const adapter of this.#adapters.values()) {
       await adapter.stop?.();
+    }
+  }
+
+  async flushPendingDebounces(): Promise<void> {
+    const keys = [...this.#whatsappTextDebounceBuffers.keys()];
+    for (const key of keys) {
+      await this.#flushWhatsAppTextDebounce(key);
     }
   }
 
@@ -749,6 +778,128 @@ export class ChannelGateway {
     }
 
     const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
+
+    const debounced = await this.#maybeDebounceWhatsAppText(processedMessage, adapter);
+    if (debounced !== undefined) {
+      return debounced;
+    }
+
+    return this.#routeNormalTurn(processedMessage, adapter);
+  }
+
+  async #maybeDebounceWhatsAppText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
+    if (!this.#isEligibleForWhatsAppTextDebounce(message)) {
+      return undefined;
+    }
+    const config = this.#whatsappTextDebounce;
+    if (config === undefined) {
+      return undefined;
+    }
+
+    const key = this.#whatsappTextDebounceKey(message);
+    const text = message.text.trim();
+    const existing = this.#whatsappTextDebounceBuffers.get(key);
+    if (existing !== undefined) {
+      existing.textChunks.push(text);
+      existing.messageIds.push(message.id);
+      existing.latestReceivedAt = message.receivedAt;
+      existing.totalChars += text.length;
+      existing.adapter = adapter;
+      this.#resetWhatsAppTextDebounceTimer(key, existing);
+      if (
+        existing.textChunks.length >= config.textDebounceMaxMessages ||
+        existing.totalChars >= config.textDebounceMaxChars
+      ) {
+        return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      }
+      return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+    }
+
+    const buffer: WhatsAppTextDebounceBuffer = {
+      adapter,
+      firstMessage: message,
+      latestReceivedAt: message.receivedAt,
+      textChunks: [text],
+      messageIds: [message.id],
+      totalChars: text.length,
+      timer: undefined
+    };
+    this.#whatsappTextDebounceBuffers.set(key, buffer);
+    this.#resetWhatsAppTextDebounceTimer(key, buffer);
+
+    if (
+      buffer.textChunks.length >= config.textDebounceMaxMessages ||
+      buffer.totalChars >= config.textDebounceMaxChars
+    ) {
+      return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+    }
+
+    return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+  }
+
+  #isEligibleForWhatsAppTextDebounce(message: ChannelMessage): boolean {
+    if (message.channel !== "whatsapp") {
+      return false;
+    }
+    if (this.#whatsappTextDebounce === undefined || this.#whatsappTextDebounce.textDebounceMs <= 0) {
+      return false;
+    }
+    if (message.attachments !== undefined && message.attachments.length > 0) {
+      return false;
+    }
+    const text = message.text.trim();
+    if (text.length === 0 || text.startsWith("/")) {
+      return false;
+    }
+    return true;
+  }
+
+  #whatsappTextDebounceKey(message: ChannelMessage): string {
+    return [
+      message.channel,
+      message.sessionKey.chatId,
+      message.sessionKey.userId ?? message.sender.id
+    ].join(":");
+  }
+
+  #resetWhatsAppTextDebounceTimer(key: string, buffer: WhatsAppTextDebounceBuffer): void {
+    if (buffer.timer !== undefined) {
+      clearTimeout(buffer.timer);
+    }
+    buffer.timer = setTimeout(() => {
+      void this.#flushWhatsAppTextDebounce(key).catch((error) => {
+        this.#logWarning?.(`WhatsApp text debounce flush failed for ${key}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, this.#whatsappTextDebounce?.textDebounceMs ?? 0);
+  }
+
+  async #flushWhatsAppTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {
+    const buffer = this.#whatsappTextDebounceBuffers.get(key);
+    if (buffer === undefined) {
+      return undefined;
+    }
+    this.#whatsappTextDebounceBuffers.delete(key);
+    if (buffer.timer !== undefined) {
+      clearTimeout(buffer.timer);
+    }
+
+    const combinedText = buffer.textChunks.join("\n\n");
+    const combinedMessage: ChannelMessage = {
+      ...buffer.firstMessage,
+      text: combinedText,
+      receivedAt: buffer.latestReceivedAt,
+      metadata: {
+        ...(buffer.firstMessage.metadata ?? {}),
+        debouncedMessageIds: buffer.messageIds,
+        debounceSize: buffer.textChunks.length,
+        debounceWindowMs: this.#whatsappTextDebounce?.textDebounceMs ?? 0
+      }
+    };
+
+    return this.#routeNormalTurn(combinedMessage, buffer.adapter);
+  }
+
+  async #routeNormalTurn(processedMessage: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
     const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
     const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
@@ -924,6 +1075,7 @@ export class ChannelGateway {
       const trustedWorkspace = typeof this.#trustedWorkspace === "function"
         ? await this.#trustedWorkspace(message)
         : this.#trustedWorkspace;
+      const debounceMetadata = readDebounceMetadata(message.metadata);
 
       // Handle the turn
       const response = await runtime.handle({
@@ -936,7 +1088,8 @@ export class ChannelGateway {
           surfaceType: message.sessionKey.platform,
           chatId: message.sessionKey.chatId,
           userId: message.sender.id,
-          origin: message.text.startsWith("/") ? "command" : "message"
+          origin: message.text.startsWith("/") ? "command" : "message",
+          ...(debounceMetadata === undefined ? {} : debounceMetadata)
         },
         onEvent: async (event) => {
           progressCount += 1;
@@ -3286,6 +3439,31 @@ function stripMentionPattern(text: string, pattern: string): string {
   return `${before}${after}`
     .replace(/[ \t]{2,}/gu, " ")
     .trim();
+}
+
+function readDebounceMetadata(metadata: Record<string, unknown> | undefined): {
+  debouncedMessageIds: string[];
+  debounceSize: number;
+  debounceWindowMs: number;
+} | undefined {
+  const ids = metadata?.debouncedMessageIds;
+  const size = metadata?.debounceSize;
+  const windowMs = metadata?.debounceWindowMs;
+  if (
+    !Array.isArray(ids) ||
+    ids.some((id) => typeof id !== "string") ||
+    typeof size !== "number" ||
+    !Number.isFinite(size) ||
+    typeof windowMs !== "number" ||
+    !Number.isFinite(windowMs)
+  ) {
+    return undefined;
+  }
+  return {
+    debouncedMessageIds: ids.slice(0, 100),
+    debounceSize: Math.max(0, Math.trunc(size)),
+    debounceWindowMs: Math.max(0, Math.trunc(windowMs))
+  };
 }
 
 function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {

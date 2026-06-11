@@ -13,6 +13,8 @@ import {
 import { WhatsAppAdapter } from "../../channels/whatsapp-adapter.js";
 import type { WhatsAppBridgeInboundMessage } from "../../channels/whatsapp-bridge-client.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { ChannelGateway, InMemoryChannelSessionStore } from "../../channels/channel-gateway.js";
+import type { Runtime } from "../../runtime/create-runtime.js";
 
 export const whatsapp_support_case: SmokeCase = {
   id: "whatsapp-support",
@@ -27,6 +29,7 @@ export const whatsapp_support_case: SmokeCase = {
       await assertCancellationLeavesConfigUnchanged(join(tempRoot, "cancel"));
       await assertSuccessfulSetupWritesOnlyExpectedKeys(join(tempRoot, "success"));
       await assertFakeBridgeInboundImageReachesRuntime(join(tempRoot, "inbound-image"));
+      await assertFakeBridgeRapidTextsDebounce(join(tempRoot, "debounce"));
       await assertArabicWizardCopyPreservesTechnicalTokens(join(tempRoot, "arabic"));
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -120,6 +123,83 @@ async function assertFakeBridgeInboundImageReachesRuntime(homeDir: string): Prom
   await adapter.stop();
   if (!receivedAttachment) {
     throw new Error("Fake WhatsApp bridge image attachment did not reach the runtime handler");
+  }
+}
+
+async function assertFakeBridgeRapidTextsDebounce(homeDir: string): Promise<void> {
+  const messages: WhatsAppBridgeInboundMessage[] = [
+    {
+      messageId: "text-1",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "first",
+    },
+    {
+      messageId: "text-2",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "second",
+    }
+  ];
+  const adapter = new WhatsAppAdapter({
+    authDir: join(homeDir, "gateway", "whatsapp-auth"),
+    mediaRoot: join(homeDir, "profile", "channel-media"),
+    experimental: true,
+    bridgeClient: {
+      start: async () => undefined,
+      stop: async () => undefined,
+      getHealth: async () => ({ ok: true, apiVersion: "whatsapp-bridge.v1", status: "connected" }),
+      pollMessages: async () => {
+        const next = messages.shift();
+        return next === undefined ? [] : [next];
+      },
+      sendText: async () => ({ ok: true }),
+      editMessage: async () => ({ ok: true }),
+      sendMedia: async () => ({ ok: true }),
+      sendTyping: async () => ({ ok: true }),
+      getChat: async (chatId: string) => ({ id: chatId }),
+    },
+  });
+  const runtimeTexts: string[] = [];
+  const gateway = new ChannelGateway({
+    adapters: [adapter],
+    runtimeForSession: async () => ({
+      handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+        runtimeTexts.push(input.text);
+        return {
+          label: "ok",
+          text: "ok",
+          matchedSkills: [],
+          intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+          securityDecision: "allow",
+          toolExecutions: [],
+          toolPlans: [],
+          skillOutcomes: [],
+          artifacts: [],
+          context: undefined,
+          projectContext: undefined,
+          progress: []
+        };
+      },
+      dispose: async () => undefined,
+    }) as unknown as Runtime,
+    sessionStore: new InMemoryChannelSessionStore(),
+    authPolicy: { whatsapp: { dmPolicy: "open" } },
+    whatsappTextDebounce: {
+      textDebounceMs: 10,
+      textDebounceMaxMessages: 10,
+      textDebounceMaxChars: 8_000
+    }
+  });
+  await gateway.start();
+  await adapter.pollOnce();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await adapter.pollOnce();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await gateway.stop();
+
+  if (runtimeTexts.length !== 1 || runtimeTexts[0] !== "first\n\nsecond") {
+    throw new Error(`Fake WhatsApp bridge rapid texts were not debounced into one runtime turn: ${JSON.stringify(runtimeTexts)}`);
   }
 }
 

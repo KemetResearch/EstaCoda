@@ -5619,6 +5619,330 @@ describe("ChannelGateway commands", () => {
       expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "@EstaCoda summarize this" }));
     });
 
+    describe("WhatsApp rapid text debounce", () => {
+      const debounceConfig = {
+        textDebounceMs: 100,
+        textDebounceMaxMessages: 10,
+        textDebounceMaxChars: 8_000
+      };
+
+      function makeWhatsAppMessage(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
+        return makeMessage(text, {
+          id: `wa-${text}`,
+          channel: "whatsapp",
+          sessionKey: {
+            platform: "whatsapp",
+            chatId: "971501234567",
+            userId: "971501234567",
+            chatType: "dm"
+          },
+          sender: { id: "971501234567", displayName: "WhatsApp user" },
+          ...overrides
+        });
+      }
+
+      function createDebounceGateway(input: {
+        handle?: Runtime["handle"];
+        authPolicy?: ConstructorParameters<typeof ChannelGateway>[0]["authPolicy"];
+        busyPolicyResolver?: ConstructorParameters<typeof ChannelGateway>[0]["busyPolicyResolver"];
+        activeTurnRegistry?: ActiveTurnRegistry;
+        config?: typeof debounceConfig;
+      } = {}) {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const handle = input.handle ?? vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: input.authPolicy ?? { whatsapp: { dmPolicy: "open" } },
+          whatsappTextDebounce: input.config ?? debounceConfig,
+          busyPolicyResolver: input.busyPolicyResolver,
+          activeTurnRegistry: input.activeTurnRegistry
+        });
+        return { adapter, gateway, handle, runtimeForSession };
+      }
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("combines WhatsApp DM texts within the quiet window into one runtime call", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 10, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("first", { id: "m1" }));
+        await gateway.receive(makeWhatsAppMessage("second", { id: "m2" }));
+        expect(handle).not.toHaveBeenCalled();
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(handle).toHaveBeenCalledTimes(1);
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({
+          text: "first\n\nsecond",
+          inputMetadata: expect.objectContaining({
+            debouncedMessageIds: ["m1", "m2"],
+            debounceSize: 2,
+            debounceWindowMs: 10
+          })
+        }));
+      });
+
+      it("resets the quiet timer when another WhatsApp text arrives", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 10, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("first"));
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        await gateway.receive(makeWhatsAppMessage("second"));
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        expect(handle).not.toHaveBeenCalled();
+
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(handle).toHaveBeenCalledTimes(1);
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "first\n\nsecond" }));
+      });
+
+      it("does not merge WhatsApp texts from different senders or chats", async () => {
+        const texts: string[] = [];
+        const handle = vi.fn(async (input) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({ handle });
+
+        await gateway.receive(makeWhatsAppMessage("chat one", { id: "m1" }));
+        await gateway.receive(makeWhatsAppMessage("chat two", {
+          id: "m2",
+          sessionKey: {
+            platform: "whatsapp",
+            chatId: "971509999999",
+            userId: "971509999999",
+            chatType: "dm"
+          },
+          sender: { id: "971509999999", displayName: "Other chat" }
+        }));
+        await gateway.flushPendingDebounces();
+
+        expect(texts.sort()).toEqual(["chat one", "chat two"]);
+      });
+
+      it("bypasses debounce for slash and control commands", async () => {
+        vi.useFakeTimers();
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ handle });
+
+        const status = await gateway.receive(makeWhatsAppMessage("/status"));
+        const stop = await gateway.receive(makeWhatsAppMessage("/stop"));
+        const approve = await gateway.receive(makeWhatsAppMessage("/approve"));
+        const deny = await gateway.receive(makeWhatsAppMessage("/deny"));
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(status.replyText).toContain("EstaCoda channel status");
+        expect(stop.replyText).toContain("Stopping the EstaCoda gateway");
+        expect(approve.replyText).toContain("no pending approval");
+        expect(deny.replyText).toContain("no pending approval");
+        expect(handle).not.toHaveBeenCalled();
+      });
+
+      it("bypasses debounce for WhatsApp auth pairing codes", async () => {
+        vi.useFakeTimers();
+        const pair = vi.fn(async (message: ChannelMessage) => message.text === "12345678" ? "paired" : undefined);
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { whatsapp: { dmPolicy: "pairing" } },
+          pair,
+          whatsappTextDebounce: debounceConfig
+        });
+
+        const result = await gateway.receive(makeWhatsAppMessage("12345678"));
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(result.replyText).toBe("paired");
+        expect(pair).toHaveBeenCalledOnce();
+        expect(handle).not.toHaveBeenCalled();
+      });
+
+      it("bypasses debounce for messages with attachments", async () => {
+        vi.useFakeTimers();
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ handle });
+
+        await gateway.receive(makeWhatsAppMessage("caption", {
+          attachments: [{ id: "image-1", kind: "image", status: "ready", localPath: "/profile/channel-media/whatsapp/inbound/image.jpg", bytes: 128 }]
+        }));
+
+        expect(handle).toHaveBeenCalledTimes(1);
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "caption" }));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(handle).toHaveBeenCalledTimes(1);
+      });
+
+      it("strips required group mentions before buffering WhatsApp text", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          authPolicy: {
+            whatsapp: {
+              groupPolicy: "allowlist",
+              allowedGroups: ["120363025555555555@g.us"],
+              requireMention: true,
+              mentionPatterns: ["@EstaCoda"]
+            }
+          }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("@EstaCoda summarize", {
+          id: "g1",
+          sessionKey: {
+            platform: "whatsapp",
+            chatId: "120363025555555555@g.us",
+            userId: "971501234567",
+            chatType: "group"
+          }
+        }));
+        await gateway.receive(makeWhatsAppMessage("@EstaCoda then translate", {
+          id: "g2",
+          sessionKey: {
+            platform: "whatsapp",
+            chatId: "120363025555555555@g.us",
+            userId: "971501234567",
+            chatType: "group"
+          }
+        }));
+        await gateway.flushPendingDebounces();
+
+        expect(handle).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({
+          text: "summarize\n\nthen translate"
+        }));
+      });
+
+      it("keeps free-response group text intact while debouncing", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          authPolicy: {
+            whatsapp: {
+              groupPolicy: "allowlist",
+              allowedGroups: ["120363025555555555@g.us"],
+              requireMention: true,
+              mentionPatterns: ["@EstaCoda"],
+              freeResponseChats: ["120363025555555555@g.us"]
+            }
+          }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("summarize @notbot", {
+          sessionKey: {
+            platform: "whatsapp",
+            chatId: "120363025555555555@g.us",
+            userId: "971501234567",
+            chatType: "group"
+          }
+        }));
+        await gateway.flushPendingDebounces();
+
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "summarize @notbot" }));
+      });
+
+      it("flushes immediately at max message count and max chars", async () => {
+        vi.useFakeTimers();
+        const texts: string[] = [];
+        const handle = vi.fn(async (input) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+
+        const byCount = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 1000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        await byCount.gateway.receive(makeWhatsAppMessage("one"));
+        await byCount.gateway.receive(makeWhatsAppMessage("two"));
+        expect(texts).toContain("one\n\ntwo");
+
+        const byChars = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 1000, textDebounceMaxMessages: 10, textDebounceMaxChars: 5 }
+        });
+        await byChars.gateway.receive(makeWhatsAppMessage("abc"));
+        await byChars.gateway.receive(makeWhatsAppMessage("def"));
+        expect(texts).toContain("abc\n\ndef");
+      });
+
+      it("flushes pending WhatsApp text buffers on graceful gateway shutdown", async () => {
+        vi.useFakeTimers();
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ handle });
+
+        await gateway.receive(makeWhatsAppMessage("before shutdown"));
+        expect(handle).not.toHaveBeenCalled();
+
+        await gateway.flushPendingDebounces();
+
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "before shutdown" }));
+      });
+
+      it("queues one combined busy-session turn for rapid WhatsApp texts", async () => {
+        const registry = new ActiveTurnRegistry();
+        const seenTexts: string[] = [];
+        let releaseFirst: (() => void) | undefined;
+        const firstDone = new Promise<void>((resolve) => { releaseFirst = resolve; });
+        const handle = vi.fn(async (input) => {
+          seenTexts.push(input.text);
+          if (input.text === "active") {
+            await firstDone;
+          }
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          activeTurnRegistry: registry,
+          config: { textDebounceMs: 10, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 },
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        const active = gateway.receive(makeWhatsAppMessage("active", {
+          attachments: [{ id: "image-active", kind: "image", status: "failed", failureCode: "test" }]
+        }));
+        await Promise.resolve();
+        await gateway.receive(makeWhatsAppMessage("one"));
+        await gateway.receive(makeWhatsAppMessage("two"));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(seenTexts).toEqual(["active"]);
+
+        releaseFirst?.();
+        await active;
+        await waitFor(() => seenTexts.includes("one\n\ntwo"));
+
+        expect(seenTexts).toEqual(["active", "one\n\ntwo"]);
+      });
+
+      it("disables debounce when textDebounceMs is zero", async () => {
+        vi.useFakeTimers();
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 0, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("immediate"));
+
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "immediate" }));
+      });
+    });
+
     it("allowed Discord user does not authorize Email sender", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const gateway = new ChannelGateway({

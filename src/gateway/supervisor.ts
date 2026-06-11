@@ -541,6 +541,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         activeTurnCount: state.activeTurnRegistry?.stats().activeTurnCount ?? 0,
         timeoutMs: options.drainTimeoutMs ?? 30_000,
       });
+      await state.channelGateway?.flushPendingDebounces?.();
 
       const drainStartMs = Date.now();
       const drainTimeoutMs = options.drainTimeoutMs ?? 30_000;
@@ -1181,6 +1182,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               queueDepth: channelConfig?.queueDepth ?? 3,
             };
           },
+          whatsappTextDebounce: {
+            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
+            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
+            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
+          },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
@@ -1246,6 +1252,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               busyPolicy: channelConfig?.busyPolicy ?? "reject",
               queueDepth: channelConfig?.queueDepth ?? 3,
             };
+          },
+          whatsappTextDebounce: {
+            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
+            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
+            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
           },
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
