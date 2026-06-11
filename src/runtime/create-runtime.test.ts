@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -2380,6 +2381,7 @@ describe("createRuntime MCP trust gating", () => {
               "context",
               "role",
               "task",
+              "tasks",
             ],
             "toolsets": [
               "core",
@@ -2631,6 +2633,60 @@ describe("createRuntime MCP trust gating", () => {
         "process_start",
         "process_stop"
       ]));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("reflects delegation config limits in delegate_task provider schema descriptions", async () => {
+    const options = await minimalRuntimeOptions();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-schema",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: model.id,
+          content: "ok"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: model.id, profile: model },
+      providerRegistry: registry,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        maxConcurrentChildren: 2,
+        maxBatchTasks: 4,
+        maxSpawnDepth: 3
+      }
+    });
+
+    try {
+      await runtime.handle({ text: "hello", channel: "cli", trustedWorkspace: true });
+      const delegateSchema = (providerRequests[0]?.tools as Array<{ function: { name: string; description: string } }> | undefined)?.find((tool) =>
+        tool.function.name === "delegate_task"
+      );
+      expect(delegateSchema?.function.description).toContain("up to 4 batch tasks");
+      expect(delegateSchema?.function.description).toContain("at most 2 children");
+      expect(delegateSchema?.function.description).toContain("limited to 3");
+      expect(JSON.stringify(delegateSchema)).not.toContain(options.workspaceRoot);
     } finally {
       await runtime.dispose();
     }

@@ -29,6 +29,7 @@ export type SessionToolContext = {
   providerExecutor?: import("../providers/provider-executor.js").ProviderExecutor;
   toolExecutor?: import("../tools/tool-executor.js").ToolExecutor;
   delegationManager?: import("../delegation/delegation-manager.js").DelegationManager;
+  delegationConfig?: import("./delegation.js").DelegationConfig;
   trustedWorkspace?: () => Promise<boolean>;
   memoryStore?: import("../memory/memory-store.js").MemoryStore;
   memoryPersistenceService?: import("../memory/memory-persistence-service.js").MemoryPersistenceService;

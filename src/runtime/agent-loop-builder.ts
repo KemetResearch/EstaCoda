@@ -12,6 +12,8 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
+import type { DelegationConfig } from "../contracts/delegation.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { DelegationManager } from "../delegation/delegation-manager.js";
 import type { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import type { MemoryIndexSync } from "../memory/memory-index-sync.js";
@@ -103,6 +105,7 @@ export type AgentLoopRuntimeSubstrate = {
   homeDir: string | undefined;
   profileId: string;
   loadedConfig?: LoadedRuntimeConfig;
+  delegationConfig?: DelegationConfig;
   providerRegistry: ProviderRegistry;
   providerExecutor: ProviderExecutor;
   routes: AgentLoopRouteInput;
@@ -376,6 +379,7 @@ export class AgentLoopBuilder {
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         toolExecutor,
         delegationManager,
+        delegationConfig: substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
         sessionDb: input.sessionDb,
         trajectoryRecorder: input.trajectoryRecorder,
         trustedWorkspace: input.trustedWorkspace
@@ -429,7 +433,8 @@ export class AgentLoopBuilder {
       runRecorder,
       sessionId: input.sessionId,
       sessionRuntimeContext,
-      maxConcurrentSafeTools: 4
+      maxConcurrentSafeTools: 4,
+      delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,
@@ -651,6 +656,7 @@ function buildPostToolExecutorToolContext(input: SessionToolContext): SessionToo
     currentSessionId: input.currentSessionId,
     toolExecutor: input.toolExecutor,
     delegationManager: input.delegationManager,
+    delegationConfig: input.delegationConfig,
     sessionDb: input.sessionDb,
     trajectoryRecorder: input.trajectoryRecorder,
     trustedWorkspace: input.trustedWorkspace

@@ -7,6 +7,7 @@ import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { packetizeToolExecution } from "../tools/tool-result-packet.js";
+import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit } from "../utils/runtime-helpers.js";
@@ -18,6 +19,7 @@ export type ToolPlanRunnerOptions = {
   sessionId: string;
   sessionRuntimeContext?: SessionRuntimeContext;
   maxConcurrentSafeTools: number;
+  delegateTaskCallLimit?: number;
 };
 
 export class ToolPlanRunner {
@@ -27,6 +29,7 @@ export class ToolPlanRunner {
   readonly #sessionId: string;
   readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #maxConcurrentSafeTools: number;
+  readonly #delegateCallBudget: DelegateCallBudget | undefined;
 
   constructor(options: ToolPlanRunnerOptions) {
     this.#toolCallPlanner = options.toolCallPlanner;
@@ -35,6 +38,14 @@ export class ToolPlanRunner {
     this.#sessionId = options.sessionId;
     this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#maxConcurrentSafeTools = options.maxConcurrentSafeTools;
+    this.#delegateCallBudget = options.delegateTaskCallLimit === undefined
+      ? undefined
+      : new DelegateCallBudget(options.delegateTaskCallLimit);
+  }
+
+  resetPerTurnBudgets(): void {
+    this.#delegateCallBudget?.reset();
+    this.#toolExecutor.resetPerTurnBudgets?.();
   }
 
   async executePlans(input: {
@@ -154,7 +165,8 @@ export class ToolPlanRunner {
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      delegateCallBudget: this.#delegateCallBudget
     });
 
     if (execution === undefined) {

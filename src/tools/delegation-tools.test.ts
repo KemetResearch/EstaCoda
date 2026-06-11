@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { createDelegationTools } from "./delegation-tools.js";
 
 describe("createDelegationTools", () => {
@@ -13,9 +14,15 @@ describe("createDelegationTools", () => {
     expect(tool?.name).toBe("delegate_task");
     expect(tool?.inputSchema).toMatchObject({
       type: "object",
-      required: ["task"],
+      anyOf: [
+        { required: ["task"] },
+        { required: ["tasks"] }
+      ],
       properties: {
         task: { type: "string" },
+        tasks: expect.objectContaining({
+          oneOf: expect.any(Array)
+        }),
         context: { type: "string" },
         allowedToolsets: {
           type: "array",
@@ -88,5 +95,246 @@ describe("createDelegationTools", () => {
       ok: false,
       content: "delegate_task requires a non-empty task."
     });
+  });
+
+  it("rejects invalid batch inputs with structured errors", async () => {
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        maxBatchTasks: 2
+      }
+    });
+
+    await expect(tool!.run({ tasks: [] })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "empty-tasks"
+      }
+    });
+    await expect(tool!.run({ tasks: [{ task: "ok" }, { task: "two" }, { task: "three" }] })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        code: "too-many-tasks"
+      }
+    });
+    await expect(tool!.run({ tasks: [{ task: " " }] })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        code: "empty-task-string"
+      }
+    });
+  });
+
+  it("recovers strict JSON-string tasks when enabled", async () => {
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch",
+      status: "completed",
+      summary: "done",
+      results: [],
+      maxObservedConcurrency: 1,
+      recoveredTasksFromJsonString: true
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        recoverJsonStringTasks: true
+      }
+    });
+
+    const result = await tool!.run({
+      tasks: JSON.stringify([{ task: "A" }])
+    });
+
+    expect(result.ok).toBe(true);
+    expect(delegateBatch).toHaveBeenCalledWith(expect.objectContaining({
+      recoveredTasksFromJsonString: true,
+      tasks: [expect.objectContaining({ task: "A" })]
+    }));
+  });
+
+  it("rejects invalid or disabled JSON-string task recovery", async () => {
+    const [enabledTool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        recoverJsonStringTasks: true
+      }
+    });
+    await expect(enabledTool!.run({ tasks: "{\"task\":\"nope\"}" })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        code: "json-tasks-not-array"
+      }
+    });
+    await expect(enabledTool!.run({ tasks: JSON.stringify([{ task: "A", context: 123 }]) })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-task-object"
+      }
+    });
+    await expect(enabledTool!.run({ tasks: JSON.stringify([{ task: "A", extra: true }]) })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-task-object"
+      }
+    });
+
+    const [disabledTool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        recoverJsonStringTasks: false
+      }
+    });
+    await expect(disabledTool!.run({ tasks: JSON.stringify([{ task: "A" }]) })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        code: "json-string-recovery-disabled"
+      }
+    });
+  });
+
+  it("does not launch delegation for invalid recovered task objects", async () => {
+    const delegateBatch = vi.fn();
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        recoverJsonStringTasks: true
+      }
+    });
+
+    const result = await tool!.run({
+      tasks: JSON.stringify([{ task: "A", context: 123 }])
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-task-object"
+      }
+    });
+    expect(delegateBatch).not.toHaveBeenCalled();
+  });
+
+  it("applies batch defaults and task-level overrides", async () => {
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch",
+      status: "completed",
+      summary: "done",
+      results: [],
+      maxObservedConcurrency: 1
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+
+    await tool!.run({
+      tasks: [
+        { task: "A" },
+        { task: "B", context: "task context", allowedTools: ["web.search"], role: "leaf" }
+      ],
+      context: "batch context",
+      allowedTools: ["file.read"],
+      allowedToolsets: ["research"],
+      role: "orchestrator"
+    });
+
+    expect(delegateBatch).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [
+        {
+          task: "A",
+          context: "batch context",
+          allowedTools: ["file.read"],
+          allowedToolsets: ["research"],
+          role: "orchestrator"
+        },
+        {
+          task: "B",
+          context: "task context",
+          allowedTools: ["web.search"],
+          allowedToolsets: ["research"],
+          role: "leaf"
+        }
+      ]
+    }));
+  });
+
+  it("accepts valid recovered task context", async () => {
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch",
+      status: "completed",
+      summary: "done",
+      results: [],
+      maxObservedConcurrency: 1,
+      recoveredTasksFromJsonString: true
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        recoverJsonStringTasks: true
+      }
+    });
+
+    await tool!.run({
+      tasks: JSON.stringify([{ task: "A", context: "valid context" }])
+    });
+
+    expect(delegateBatch).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [expect.objectContaining({
+        task: "A",
+        context: "valid context"
+      })]
+    }));
+  });
+
+  it("reflects delegation limits in deterministic schema descriptions", () => {
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        maxConcurrentChildren: 2,
+        maxBatchTasks: 4,
+        maxSpawnDepth: 3
+      }
+    });
+
+    const serialized = JSON.stringify(tool);
+    expect(tool?.description).toContain("up to 4 batch tasks");
+    expect(tool?.description).toContain("at most 2 children");
+    expect(tool?.description).toContain("limited to 3");
+    expect(serialized).not.toContain("/Users/");
+    expect(serialized).not.toContain("API_KEY");
   });
 });

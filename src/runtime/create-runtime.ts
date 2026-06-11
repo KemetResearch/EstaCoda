@@ -4,6 +4,7 @@ import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../
 import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -681,6 +682,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       workspaceRoot,
       homeDir: options.homeDir,
       profileId,
+      delegationConfig: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
       providerRegistry,
       providerExecutor,
       routes: {

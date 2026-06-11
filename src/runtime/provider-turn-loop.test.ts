@@ -809,6 +809,16 @@ describe("ProviderTurnLoop provider availability", () => {
     expect(loop.canRunProvider()).toBe(true);
   });
 
+  it("resets provider-turn tool budgets once per run", async () => {
+    const resetSpy = vi.spyOn(ToolPlanRunner.prototype, "resetPerTurnBudgets");
+    const loop = await createProviderTurnLoopForTest();
+
+    await runBasicProviderTurn(loop);
+
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    resetSpy.mockRestore();
+  });
+
   it("cannot run provider without a provider executor", async () => {
     const loop = await createProviderTurnLoopForTest({ providerExecutor: undefined });
 

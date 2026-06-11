@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
+import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
@@ -15,6 +16,16 @@ const fileReadTool: ToolDefinition = {
   riskClass: "read-only-local",
   toolsets: ["files"],
   progressLabel: "read",
+  maxResultSizeChars: 1_000,
+};
+
+const delegateTool: ToolDefinition = {
+  name: "delegate_task",
+  description: "Delegate",
+  inputSchema: {},
+  riskClass: "shared-state-mutation",
+  toolsets: ["core"],
+  progressLabel: "delegate",
   maxResultSizeChars: 1_000,
 };
 
@@ -191,6 +202,87 @@ describe("runtime tool activity events", () => {
       targetSummary: "Provider tool call did not include a tool name.",
       activityId: "tc1",
     });
+  });
+
+  it("resets delegate call budgets between provider turns", async () => {
+    let planIndex = 0;
+    const executeTool = vi.fn(async (request: {
+      input: Record<string, unknown>;
+      delegateCallBudget?: DelegateCallBudget;
+    }) => {
+      const budget = request.delegateCallBudget?.tryConsume();
+      if (budget?.allowed === false) {
+        return execution({
+          tool: delegateTool,
+          decision: "deny",
+          riskClass: "shared-state-mutation",
+          result: {
+            ok: false,
+            content: "delegate_task call skipped",
+            metadata: {
+              reason: "delegate-call-limit",
+              limit: budget.limit,
+              skippedCount: budget.skippedCount
+            }
+          }
+        });
+      }
+      return execution({
+        tool: delegateTool,
+        input: request.input,
+        riskClass: "shared-state-mutation",
+        result: { ok: true, content: "delegated" }
+      });
+    });
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => {
+          planIndex += 1;
+          return {
+            id: `delegate-${planIndex}`,
+            tool: "delegate_task",
+            input: { task: `task ${planIndex}` },
+            source: "provider-tool-call",
+            status: "planned",
+          };
+        },
+      } as never,
+      toolExecutor: {
+        getToolDefinition: () => delegateTool,
+        executeTool,
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 1,
+      delegateTaskCallLimit: 1,
+    });
+
+    const firstTurn = await runner.executePlans({
+      providerExecution: {
+        ...providerExecution(),
+        toolCalls: [{}, {}],
+      },
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 2,
+      riskBaseline: "read-only-local",
+    });
+    runner.resetPerTurnBudgets();
+    const secondTurn = await runner.executePlans({
+      providerExecution: providerExecution(),
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 1,
+      riskBaseline: "read-only-local",
+    });
+
+    expect(firstTurn.executions.map((item) => item.result?.ok)).toEqual([true, false]);
+    expect(firstTurn.executions[1]?.result?.metadata).toMatchObject({
+      reason: "delegate-call-limit",
+      limit: 1,
+      skippedCount: 1
+    });
+    expect(secondTurn.executions[0]?.result?.ok).toBe(true);
   });
 
   it("forwards target summaries from skill playbook tools", async () => {

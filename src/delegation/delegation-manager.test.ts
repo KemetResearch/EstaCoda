@@ -465,6 +465,102 @@ describe("DelegationManager", () => {
       })
     ]);
   });
+
+  it("runs batch children with bounded concurrency and preserves input order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const releases: Array<() => void> = [];
+    const harness = await createHarness({
+      maxConcurrentChildren: 2,
+      handle: async (handleInput) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise<void>((resolve) => {
+          releases.push(resolve);
+        });
+        active -= 1;
+        return response({ text: `answer for ${handleInput.text}` });
+      }
+    });
+
+    const pending = harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [
+        { task: "one" },
+        { task: "two" },
+        { task: "three" }
+      ],
+      trustedWorkspace: true
+    });
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    releases.shift()?.();
+    await vi.waitFor(() => expect(harness.handleInputs).toHaveLength(3));
+    releases.splice(0).forEach((release) => release());
+    const result = await pending;
+
+    expect(maxActive).toBe(2);
+    expect(result.status).toBe("completed");
+    expect(result.results.map((child) => child.task)).toEqual(["one", "two", "three"]);
+    expect(result.results.map((child) => child.index)).toEqual([0, 1, 2]);
+    expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
+  });
+
+  it("preserves timeout child status when batch aggregate fails", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const harness = await createHarness({
+      maxConcurrentChildren: 2,
+      childTimeoutSeconds: 0.001,
+      handle: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return response({ text: "fast" });
+        }
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      }
+    });
+
+    const pending = harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [{ task: "fast" }, { task: "slow" }],
+      trustedWorkspace: true
+    });
+    await vi.advanceTimersByTimeAsync(2);
+    const result = await pending;
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("child-timeout");
+    expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "timeout"]);
+  });
+
+  it("parent abort cancels running batch children and skips queued children", async () => {
+    const controller = new AbortController();
+    let runningSignal: AbortSignal | undefined;
+    const harness = await createHarness({
+      maxConcurrentChildren: 1,
+      handle: async (handleInput) => {
+        runningSignal = handleInput.signal;
+        controller.abort();
+        throw new Error("cancelled by parent");
+      }
+    });
+
+    const result = await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [{ task: "running" }, { task: "queued" }],
+      trustedWorkspace: true,
+      signal: controller.signal
+    });
+
+    expect(runningSignal?.aborted).toBe(true);
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("cancelled");
+    expect(result.results.map((child) => child.childStatus)).toEqual(["cancelled", "cancelled"]);
+    expect(harness.factory.createChild).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("delegatedPrompt", () => {
@@ -480,6 +576,8 @@ async function createHarness(input: {
   handleError?: Error;
   currentDepth?: number;
   maxSpawnDepth?: number;
+  maxConcurrentChildren?: number;
+  maxBatchTasks?: number;
   childTimeoutSeconds?: number;
   registry?: SubagentRegistry;
 } = {}) {
@@ -487,18 +585,21 @@ async function createHarness(input: {
   const registry = input.registry ?? new SubagentRegistry();
   await db.createSession({ id: "parent", profileId: "default" });
   const handleInputs: Array<{ text: string; signal?: AbortSignal }> = [];
-    const factory: ChildAgentLoopFactory = {
+  let childSequence = 0;
+  const factory: ChildAgentLoopFactory = {
     createChild: vi.fn(async () => {
+      childSequence += 1;
+      const childSessionId = childSequence === 1 ? "child" : `child-${childSequence}`;
       await db.createSession({
-        id: "child",
+        id: childSessionId,
         profileId: "default",
         parentSessionId: "parent",
         metadata: { kind: "delegated-child" }
       });
       return {
-        childSessionId: "child",
-        childSession: (await db.getSession("child"))!,
-        sessionRuntimeContext: { currentSessionId: () => "child" } as never,
+        childSessionId,
+        childSession: (await db.getSession(childSessionId))!,
+        sessionRuntimeContext: { currentSessionId: () => childSessionId } as never,
         builtSession: {} as never,
         agentLoop: {} as never,
         suppressedRuntimeFeatures: [],
@@ -538,11 +639,11 @@ async function createHarness(input: {
       trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" }),
       subagentRegistry: registry,
       currentDepth: input.currentDepth,
-      delegationConfig: input.maxSpawnDepth === undefined ? undefined : {
-        maxSpawnDepth: input.maxSpawnDepth,
-        maxConcurrentChildren: 3,
+      delegationConfig: input.maxSpawnDepth === undefined && input.maxConcurrentChildren === undefined && input.maxBatchTasks === undefined && input.childTimeoutSeconds === undefined ? undefined : {
+        maxSpawnDepth: input.maxSpawnDepth ?? 3,
+        maxConcurrentChildren: input.maxConcurrentChildren ?? 3,
         maxDelegateCallsPerTurn: 3,
-        maxBatchTasks: 10,
+        maxBatchTasks: input.maxBatchTasks ?? 10,
         childTimeoutSeconds: input.childTimeoutSeconds ?? 600,
         heartbeatSeconds: 30,
         heartbeatStaleCyclesIdle: 3,

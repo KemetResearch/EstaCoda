@@ -1,5 +1,5 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
+import type { DelegateRole, DelegationConfig, DelegateTaskItem } from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
@@ -16,6 +16,7 @@ import {
   runDelegatedChild,
   timeoutDelegationSummary
 } from "./child-runner.js";
+import { runBoundedBatch } from "./batch-runner.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -70,6 +71,21 @@ export type DelegationSummary = {
   diagnosticPath?: string;
 };
 
+export type BatchDelegationChildStatus = DelegationSummary["status"] | "timeout" | "cancelled";
+
+export type BatchDelegationSummary = {
+  batchId: string;
+  status: DelegationSummary["status"];
+  reason?: "cancelled" | "blocked" | "child-failed" | "child-timeout";
+  summary: string;
+  results: Array<DelegationSummary & {
+    index: number;
+    childStatus: BatchDelegationChildStatus;
+  }>;
+  maxObservedConcurrency: number;
+  recoveredTasksFromJsonString?: boolean;
+};
+
 export type DelegationManagerOptions = {
   sessionDb: SessionDB;
   childFactory: ChildAgentLoopFactory;
@@ -100,6 +116,90 @@ export class DelegationManager {
     this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
     this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
     this.#diagnosticsRoot = options.diagnosticsRoot;
+  }
+
+  async delegateBatch(request: Omit<DelegationRequest, "task" | "batchId" | "taskIndex"> & {
+    tasks: DelegateTaskItem[];
+    recoveredTasksFromJsonString?: boolean;
+  }): Promise<BatchDelegationSummary> {
+    const batchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const maxConcurrency = Math.min(this.#delegationConfig.maxConcurrentChildren, request.tasks.length);
+    const batch = await runBoundedBatch<DelegateTaskItem, DelegationSummary>({
+      tasks: request.tasks,
+      maxConcurrency,
+      signal: request.signal,
+      runTask: async (task, index) => this.delegate({
+        ...request,
+        task: task.task,
+        context: task.context,
+        allowedToolsets: task.allowedToolsets,
+        allowedTools: task.allowedTools,
+        role: task.role,
+        batchId,
+        taskIndex: index
+      }),
+      skipTask: (task, index): DelegationSummary => ({
+        childSessionId: "unavailable",
+        status: "failed",
+        reason: "cancelled",
+        task: task.task,
+        summary: "Delegation cancelled before queued child start.",
+        role: task.role ?? "leaf",
+        depth: this.#currentDepth + 1,
+        batchId,
+        taskIndex: index,
+        allowedToolsets: task.allowedToolsets ?? [],
+        allowedTools: task.allowedTools ?? [],
+        effectiveAllowedToolsets: [],
+        effectiveAllowedTools: [],
+        strippedTools: [],
+        blockedTools: [],
+        rejectedRequestedTools: [],
+        rejectedRequestedToolsets: [],
+        toolExecutions: []
+      })
+    });
+    const results = batch.results.map((result, index) => ({
+      ...result,
+      index,
+      childStatus: childStatus(result)
+    }));
+    const timeoutCount = results.filter((result) => result.childStatus === "timeout").length;
+    const failedCount = results.filter((result) => result.status === "failed").length;
+    const blockedCount = results.filter((result) => result.status === "blocked").length;
+    const cancelledCount = results.filter((result) => result.childStatus === "cancelled").length;
+    const status: DelegationSummary["status"] = failedCount > 0 || timeoutCount > 0
+      ? "failed"
+      : blockedCount > 0
+        ? "blocked"
+        : "completed";
+    const reason = cancelledCount > 0
+      ? "cancelled"
+      : timeoutCount > 0
+        ? "child-timeout"
+        : failedCount > 0
+          ? "child-failed"
+          : blockedCount > 0
+            ? "blocked"
+            : undefined;
+    const summary = [
+      `Delegation batch ${batchId}: ${status}.`,
+      `Completed: ${results.filter((result) => result.status === "completed").length}/${results.length}.`,
+      blockedCount > 0 ? `Blocked: ${blockedCount}.` : undefined,
+      failedCount > 0 ? `Failed: ${failedCount}.` : undefined,
+      timeoutCount > 0 ? `Timed out: ${timeoutCount}.` : undefined,
+      cancelledCount > 0 ? `Cancelled: ${cancelledCount}.` : undefined
+    ].filter((line): line is string => line !== undefined).join(" ");
+
+    return {
+      batchId,
+      status,
+      reason,
+      summary,
+      results,
+      maxObservedConcurrency: batch.maxObservedConcurrency,
+      recoveredTasksFromJsonString: request.recoveredTasksFromJsonString === true ? true : undefined
+    };
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
@@ -571,6 +671,16 @@ export class DelegationManager {
     }
     return { status: "completed" };
   }
+}
+
+function childStatus(result: DelegationSummary): BatchDelegationChildStatus {
+  if (result.reason === "timeout") {
+    return "timeout";
+  }
+  if (result.reason === "cancelled") {
+    return "cancelled";
+  }
+  return result.status;
 }
 
 export function delegatedPrompt(task: string, context: string | undefined): string {
