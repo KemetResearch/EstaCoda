@@ -52,22 +52,25 @@ describe("HttpWhatsAppBridgeClient", () => {
 
   it("exposes send, edit, media, typing, and chat endpoints", async () => {
     const paths: string[] = [];
+    const bodies: unknown[] = [];
     const client = new HttpWhatsAppBridgeClient({
       statePath,
-      fetch: vi.fn(async (url: URL) => {
+      fetch: vi.fn(async (url: URL, init?: RequestInit) => {
         paths.push(url.pathname);
+        if (typeof init?.body === "string") bodies.push(JSON.parse(init.body) as unknown);
         if (url.pathname.startsWith("/chat/")) return jsonResponse({ id: "chat@s.whatsapp.net" });
         return jsonResponse({ ok: true, messageId: "msg-1", messageIds: ["msg-1"] });
       }) as any,
     });
 
-    await client.sendText({ chatId: "chat@s.whatsapp.net", message: "hello" });
+    await client.sendText({ chatId: "chat@s.whatsapp.net", message: "hello", replyTo: "incoming-1" });
     await client.editMessage({ chatId: "chat@s.whatsapp.net", messageId: "msg-1", message: "edited" });
     await client.sendMedia({ chatId: "chat@s.whatsapp.net", filePath: "/tmp/file.txt", mediaType: "document" });
     await client.sendTyping({ chatId: "chat@s.whatsapp.net", state: "composing" });
     await client.getChat("chat@s.whatsapp.net");
 
     expect(paths).toEqual(["/send", "/edit", "/send-media", "/typing", "/chat/chat%40s.whatsapp.net"]);
+    expect(bodies[0]).toMatchObject({ replyTo: "incoming-1" });
   });
 
   it("normalizes structured bridge errors", async () => {

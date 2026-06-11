@@ -172,6 +172,8 @@ estacoda email configure \
 | DM text delivery | `experimental` |
 | Media download/upload | `experimental` |
 | Message chunking | `experimental` |
+| Final-only replies | `experimental` |
+| Voice-bubble delivery | `ffmpeg` optional |
 
 **Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The main runtime talks to a quarantined bridge package under `scripts/whatsapp-bridge/`; that bridge uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
 
@@ -193,11 +195,15 @@ WhatsApp identities are matched canonically: phone numbers and `@s.whatsapp.net`
 
 `mode: "bot"` ignores WhatsApp `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix` (default `EstaCoda: `), and ignores echoed replies by recent sent message ID or that prefix.
 
+WhatsApp is final-only: provider/tool progress is translated only into ephemeral WhatsApp presence, not visible progress messages. Final replies are formatted for WhatsApp's limited markup (`**bold**`/`__bold__` becomes `*bold*`, Markdown links become `text (url)`, headers become bold text, and code spans/blocks are preserved), then chunked by the adapter with a short internal delay between chunks. Where WhatsApp supports it, the first final-answer chunk quotes the inbound message.
+
+Outbound media policy stays in the main runtime. The adapter sends the bridge only validated local file paths under explicit allowed roots such as the trusted workspace and profile-local media/temp roots, enforces upload size limits, and caches explicitly allowed remote media URLs locally before delivery. Converted and cached WhatsApp media is written under profile-local media/temp roots. The bridge does not fetch URLs, run `ffmpeg`, or decide workspace trust. Image, video, normal audio, voice/PTT audio, and documents use separate bridge media types. Voice-hinted incompatible audio converts to OGG/Opus with `ffmpeg` when available; if conversion is unavailable, EstaCoda sends normal audio with an explicit fallback caption.
+
 ## DeliveryRouter
 
 `DeliveryRouter` is the normalized delivery path for all channels.
 
-Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitrary model-emitted path text. `MEDIA:/path` text remains normal text unless an existing non-auto file-delivery path explicitly handles it with its own path checks. Telegram sends compatible `.ogg`, `.opus`, and `audio/ogg` artifacts as voice bubbles; voice-hinted incompatible audio converts through ffmpeg when available and otherwise falls back to normal audio delivery.
+Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitrary model-emitted path text. `MEDIA:/path` text remains normal text unless an existing non-auto file-delivery path explicitly handles it with its own path checks. Telegram and WhatsApp send compatible `.ogg`, `.opus`, and `audio/ogg` artifacts as voice bubbles; voice-hinted incompatible audio converts through ffmpeg when available and otherwise falls back to normal audio delivery.
 
 **Targets:**
 
@@ -227,7 +233,7 @@ Platform message limits belong to channel adapters because formatting and transp
 
 - Telegram formats replies first, then chunks the formatted payload in `telegram-adapter.ts`. Each outgoing `sendMessage` text payload, including suffixes such as `(1/3)`, must fit within Telegram's 4096 UTF-16 code-unit limit. Inline action buttons are sent only on the final chunk. If sending any chunk fails, later chunks are not sent and delivery reports failure.
 - Discord keeps adapter-owned text chunking in `discord-adapter.ts`.
-- WhatsApp keeps adapter-owned text chunking in `whatsapp-adapter.ts`.
+- WhatsApp formats for WhatsApp markdown, preserves code spans/blocks, then chunks in `whatsapp-adapter.ts`. Inter-chunk delay is internal adapter behavior, not a CLI/config option.
 - Email and custom adapters receive full text unless they implement their own limits.
 
 ### Overflow And Hooks

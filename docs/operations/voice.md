@@ -216,20 +216,21 @@ Common readiness cases:
 | `queue full` | faster-whisper queue depth exceeded. | Wait, raise queue depth, or reduce concurrent requests. |
 | `timeout` | STT request exceeded timeout. | Check model/device performance and timeout config. |
 
-## ffmpeg And Telegram Voice Delivery
+## ffmpeg And Channel Voice Delivery
 
 ffmpeg is optional but recommended:
 
 - Local command STT can normalize non-WAV/AIFF input to WAV when ffmpeg is available.
 - Telegram voice-hinted non-OGG/Opus audio converts to Opus OGG with:
+- WhatsApp voice-hinted non-OGG/Opus audio converts to Opus OGG in the main runtime before bridge delivery.
 
 ```bash
 ffmpeg -i input -c:a libopus -b:a 24k output.ogg
 ```
 
-If ffmpeg is missing or conversion fails, Telegram falls back to normal audio delivery instead of voice-bubble delivery.
+If ffmpeg is missing or conversion fails, Telegram and WhatsApp fall back to normal audio delivery instead of voice-bubble delivery. WhatsApp fallback captions state that voice-bubble conversion was unavailable.
 
-Existing `.ogg`, `.opus`, and `audio/ogg` artifacts continue to use Telegram voice-bubble delivery. Arbitrary model-emitted `MEDIA:/path` response text is not treated as auto-TTS or a Telegram voice conversion request.
+Existing `.ogg`, `.opus`, and `audio/ogg` artifacts continue to use voice-bubble delivery where the channel supports it. Arbitrary model-emitted `MEDIA:/path` response text is not treated as auto-TTS or a voice conversion request.
 
 ## Discord Voice Operations
 

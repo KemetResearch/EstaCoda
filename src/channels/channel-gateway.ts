@@ -917,7 +917,12 @@ export class ChannelGateway {
         this.#pendingApprovals.delete(activeTurnKey);
       }
 
-      await this.#deliverText(adapter, normalizedSessionKey, response.text);
+      await this.#deliverText(
+        adapter,
+        normalizedSessionKey,
+        response.text,
+        message.channel === "whatsapp" ? { replyTo: message.id } : undefined
+      );
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,

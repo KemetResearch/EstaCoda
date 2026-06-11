@@ -409,6 +409,33 @@ describe("assembleProviderPrompt", () => {
     expect(JSON.stringify(nonVision.messages)).not.toContain("image_url");
   });
 
+  it("includes bounded text-like document previews without injecting binary document text", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      attachments: [
+        {
+          id: "doc-text",
+          kind: "document",
+          status: "ready",
+          mimeType: "text/plain",
+          originalName: "notes.txt",
+          metadata: { textPreview: "safe notes" }
+        },
+        {
+          id: "doc-binary",
+          kind: "document",
+          status: "ready",
+          mimeType: "application/octet-stream",
+          originalName: "archive.bin",
+          metadata: { textPreview: "binary secret" }
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("text_preview=safe notes");
+    expect(rendered).not.toContain("binary secret");
+  });
+
   it("includes persisted session-history image metadata in the prompt budget", () => {
     const textOnly = assembleProviderPrompt(basePromptInput({
       sessionHistory: [

@@ -950,6 +950,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 bridgePidPath,
                 bridgeLockPath,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "whatsapp"),
+                allowedMediaRoots: [
+                  options.workspaceRoot,
+                  profilePaths.channelMediaPath,
+                  profilePaths.audioCachePath,
+                  profilePaths.imageCachePath,
+                  profilePaths.tempPath,
+                ],
               })
             : new WhatsAppAdapter({
                 authDir,
@@ -964,6 +972,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 bridgePidPath,
                 bridgeLockPath,
                 mediaRoot,
+                voiceTempRoot: join(profilePaths.tempPath, "audio", "whatsapp"),
+                allowedMediaRoots: [
+                  options.workspaceRoot,
+                  profilePaths.channelMediaPath,
+                  profilePaths.audioCachePath,
+                  profilePaths.imageCachePath,
+                  profilePaths.tempPath,
+                ],
               });
           router.registerAdapter(adapter);
           adapters.push(adapter);

@@ -107,7 +107,11 @@ export function createBridgeServer(options) {
       if (method === "POST" && url.pathname === "/send") {
         const body = await readJsonBody(request);
         const input = validateSendText(body);
-        const result = await sendWithTimeout(() => requireSocket(socket).sendMessage(input.chatId, { text: input.message }));
+        const result = await sendWithTimeout(() => requireSocket(socket).sendMessage(
+          input.chatId,
+          { text: input.message },
+          quotedOptions(input.chatId, input.replyTo)
+        ));
         return sendJson(response, 200, normalizeSendResult(result), maxResponseBytes);
       }
 
@@ -260,6 +264,9 @@ function validateSendText(value) {
   if (!isRecord(value) || typeof value.chatId !== "string" || typeof value.message !== "string") {
     throw bridgeError(400, "invalid_request", "Invalid send text request.");
   }
+  if (value.replyTo !== undefined && value.replyTo !== null && typeof value.replyTo !== "string") {
+    throw bridgeError(400, "invalid_request", "Invalid send text request.");
+  }
   return value;
 }
 
@@ -292,6 +299,19 @@ function mediaPayload(input) {
   if (input.mediaType === "video") return { video: file, caption };
   if (input.mediaType === "audio" || input.mediaType === "voice") return { audio: file, ptt: input.mediaType === "voice" };
   return { document: file, caption, fileName };
+}
+
+function quotedOptions(chatId, replyTo) {
+  if (typeof replyTo !== "string" || replyTo.length === 0) return undefined;
+  return {
+    quoted: {
+      key: {
+        id: replyTo,
+        remoteJid: chatId,
+      },
+      message: {},
+    },
+  };
 }
 
 function sendWithTimeout(operation) {

@@ -66,6 +66,8 @@ export type ChannelTextAction = {
 export type ChannelTextOptions = {
   format?: "plain" | "html";
   actions?: ChannelTextAction[][];
+  replyTo?: string | null;
+  editMessageId?: string | null;
 };
 
 export type ChannelSender = {

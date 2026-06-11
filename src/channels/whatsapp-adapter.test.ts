@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WhatsAppAdapter } from "./whatsapp-adapter.js";
@@ -28,6 +28,8 @@ class FakeWhatsAppBridgeClient implements WhatsAppBridgeClient {
   stopped = false;
   sendTextOk = true;
   sendMediaOk = true;
+  editOk = true;
+  hangText = false;
 
   async start(): Promise<void> {
     this.started = true;
@@ -47,6 +49,9 @@ class FakeWhatsAppBridgeClient implements WhatsAppBridgeClient {
 
   async sendText(input: WhatsAppBridgeSendTextInput) {
     this.sentText.push(input);
+    if (this.hangText) {
+      return new Promise<never>(() => {});
+    }
     return this.sendTextOk
       ? { ok: true, messageId: "text-1", messageIds: ["text-1"] }
       : { ok: false, error: { code: "send_failed", message: "Text send failed" } };
@@ -61,7 +66,9 @@ class FakeWhatsAppBridgeClient implements WhatsAppBridgeClient {
 
   async editMessage(input: WhatsAppBridgeEditInput) {
     this.edited.push(input);
-    return { ok: true, messageId: input.messageId, messageIds: [input.messageId] };
+    return this.editOk
+      ? { ok: true, messageId: input.messageId, messageIds: [input.messageId] }
+      : { ok: false, error: { code: "edit_failed", message: "Edit failed" } };
   }
 
   async sendTyping(input: WhatsAppBridgeTypingInput) {
@@ -80,6 +87,7 @@ describe("WhatsAppAdapter", () => {
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "estacoda-wa-test-"));
+    await mkdir(join(tmpDir, "media"), { recursive: true });
     bridge = new FakeWhatsAppBridgeClient();
   });
 
@@ -195,6 +203,45 @@ describe("WhatsAppAdapter", () => {
     expect(received[0]!.sessionKey.chatId).toBe("971501234567");
     expect(received[0]!.sessionKey.userId).toBe("971501234567");
     expect(received[0]!.sender.displayName).toBe("Test User");
+  });
+
+  it("batches rapid messages from the same chat and sender into one handler call", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push(
+      { messageId: "batch-1", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "first" },
+      { messageId: "batch-2", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "second" }
+    );
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    const processed = await adapter.pollOnce();
+
+    expect(processed).toBe(2);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe("first\n\nsecond");
+    expect(received[0]!.metadata).toMatchObject({
+      batchedMessageIds: ["batch-1", "batch-2"],
+      batchSize: 2,
+    });
+  });
+
+  it("does not batch separate chats or senders together", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push(
+      { messageId: "sep-1", chatId: "971501234567@s.whatsapp.net", senderId: "971501234567@s.whatsapp.net", body: "one" },
+      { messageId: "sep-2", chatId: "971509999999@s.whatsapp.net", senderId: "971509999999@s.whatsapp.net", body: "two" },
+      { messageId: "sep-3", chatId: "120363025555555555@g.us", senderId: "971508888888@s.whatsapp.net", body: "three", isGroup: true }
+    );
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received.map((msg) => msg.text)).toEqual(["one", "two", "three"]);
   });
 
   it("persists aliases and uses canonical IDs for allowlist/session matching", async () => {
@@ -459,6 +506,57 @@ describe("WhatsAppAdapter", () => {
     ]);
   });
 
+  it("keeps bounded text previews for text-like inbound documents and skips binary document injection", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push({
+      messageId: "doc-1",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "",
+      attachments: [
+        {
+          id: "text-doc",
+          kind: "document",
+          status: "ready",
+          mimeType: "text/plain",
+          originalName: "notes.txt",
+          metadata: { textPreview: "a".repeat(5000) },
+        },
+        {
+          id: "binary-doc",
+          kind: "document",
+          status: "ready",
+          mimeType: "application/octet-stream",
+          originalName: "archive.bin",
+          metadata: { textPreview: "do not inject" },
+        },
+        {
+          id: "large-doc",
+          kind: "document",
+          status: "too-large",
+          failureCode: "attachment-too-large",
+          failureMessage: "Document is too large.",
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.attachments![0]!.metadata).toMatchObject({
+      textPreview: "a".repeat(4000),
+      textPreviewTruncated: true,
+    });
+    expect(received[0]!.attachments![1]!.metadata).toEqual({ textPreview: "do not inject" });
+    expect(received[0]!.attachments![2]).toMatchObject({
+      status: "too-large",
+      failureCode: "attachment-too-large",
+    });
+  });
+
   it("delivery.sendText delegates to bridge client", async () => {
     const adapter = createAdapter();
     await adapter.start(async () => {});
@@ -471,6 +569,116 @@ describe("WhatsAppAdapter", () => {
     expect(bridge.sentText).toEqual([
       { chatId: "971501234567@s.whatsapp.net", message: "Hello" },
     ]);
+  });
+
+  it("formats Markdown for WhatsApp while preserving code spans and fenced code", async () => {
+    const adapter = createAdapter();
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+      [
+        "# Header",
+        "**bold** __strong__ ~~gone~~ [site](https://example.com)",
+        "`**code**`",
+        "```",
+        "**fenced**",
+        "```",
+      ].join("\n")
+    );
+
+    expect(bridge.sentText[0]!.message).toBe([
+      "*Header*",
+      "*bold* *strong* ~gone~ site (https://example.com)",
+      "`**code**`",
+      "```",
+      "**fenced**",
+      "```",
+    ].join("\n"));
+  });
+
+  it("chunks long WhatsApp text on boundaries and waits between chunks", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = createAdapter({ maxTextLength: 12, chunkDelayMs: 300 });
+      await adapter.start(async () => {});
+
+      const sent = adapter.delivery!.sendText(
+        { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+        "one two three four"
+      );
+      await Promise.resolve();
+
+      expect(bridge.sentText).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(299);
+      expect(bridge.sentText).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await sent;
+
+      expect(bridge.sentText.map((entry) => entry.message)).toEqual(["one two", "three four"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails stalled text chunks through the general send timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = createAdapter({ sendTimeoutMs: 50 });
+      bridge.hangText = true;
+      await adapter.start(async () => {});
+
+      const sent = adapter.delivery!.sendText(
+        { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+        "Hello"
+      );
+      const rejected = expect(sent).rejects.toThrow("WhatsApp bridge text send timed out");
+      await vi.advanceTimersByTimeAsync(50);
+
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("quotes the first final-answer chunk when replyTo is supplied", async () => {
+    const adapter = createAdapter({ maxTextLength: 8, chunkDelayMs: 0 });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+      "first second",
+      { replyTo: "incoming-1" }
+    );
+
+    expect(bridge.sentText).toEqual([
+      expect.objectContaining({ message: "first", replyTo: "incoming-1" }),
+      expect.objectContaining({ message: "second", replyTo: undefined }),
+    ]);
+  });
+
+  it("edits when a message id is available and falls back to send when edit fails", async () => {
+    const adapter = createAdapter();
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+      "Edited",
+      { editMessageId: "sent-1" }
+    );
+    expect(bridge.edited).toEqual([
+      { chatId: "971501234567@s.whatsapp.net", messageId: "sent-1", message: "Edited" },
+    ]);
+    expect(bridge.sentText).toHaveLength(0);
+
+    bridge.editOk = false;
+    await adapter.delivery!.sendText(
+      { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
+      "Fallback",
+      { editMessageId: "sent-2" }
+    );
+
+    expect(bridge.sentText.at(-1)).toMatchObject({ message: "Fallback" });
   });
 
   it("delivery.sendText throws when bridge send fails", async () => {
@@ -486,7 +694,7 @@ describe("WhatsAppAdapter", () => {
     ).rejects.toThrow("Text send failed");
   });
 
-  it("delivery.sendProgress is final-only and sends nothing", async () => {
+  it("delivery.sendProgress is final-only and sends ephemeral typing only", async () => {
     const adapter = createAdapter();
     await adapter.start(async () => {});
 
@@ -497,25 +705,191 @@ describe("WhatsAppAdapter", () => {
 
     expect(bridge.sentText).toHaveLength(0);
     expect(bridge.sentMedia).toHaveLength(0);
+    expect(bridge.typing).toEqual([
+      { chatId: "971501234567@s.whatsapp.net", state: "composing" },
+    ]);
   });
 
   it("delivery.sendArtifact delegates path artifacts to bridge media send", async () => {
     const adapter = createAdapter();
     await adapter.start(async () => {});
+    const reportPath = join(tmpDir, "media", "report.pdf");
+    await writeFile(reportPath, "pdf");
 
     await adapter.delivery!.sendArtifact!(
       { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
-      { id: "art-1", path: "/tmp/report.pdf", mimeType: "application/pdf", kind: "document", bytes: 1024, createdAt: new Date().toISOString() }
+      { id: "art-1", path: reportPath, mimeType: "application/pdf", kind: "document", bytes: 1024, createdAt: new Date().toISOString() }
     );
 
     expect(bridge.sentMedia).toEqual([
       expect.objectContaining({
         chatId: "971501234567@s.whatsapp.net",
-        filePath: "/tmp/report.pdf",
+        filePath: await realpath(reportPath),
         mediaType: "document",
         fileName: "report.pdf",
       }),
     ]);
+  });
+
+  it("sends image, video, audio, voice, and document artifacts with correct bridge media types", async () => {
+    const adapter = createAdapter();
+    await adapter.start(async () => {});
+    const files = {
+      image: join(tmpDir, "media", "image.jpg"),
+      video: join(tmpDir, "media", "video.mp4"),
+      audio: join(tmpDir, "media", "audio.ogg"),
+      document: join(tmpDir, "media", "doc.txt"),
+    };
+    for (const path of Object.values(files)) await writeFile(path, "x");
+
+    await adapter.delivery!.sendArtifact!({ platform: "whatsapp", chatId: "971501234567", chatType: "dm" }, { id: "image", path: files.image, kind: "image", mimeType: "image/jpeg", bytes: 1, createdAt: new Date().toISOString() });
+    await adapter.delivery!.sendArtifact!({ platform: "whatsapp", chatId: "971501234567", chatType: "dm" }, { id: "video", path: files.video, kind: "video", mimeType: "video/mp4", bytes: 1, createdAt: new Date().toISOString() });
+    await adapter.delivery!.sendArtifact!({ platform: "whatsapp", chatId: "971501234567", chatType: "dm" }, { id: "audio", path: files.audio, kind: "audio", mimeType: "audio/ogg", bytes: 1, createdAt: new Date().toISOString() });
+    await adapter.delivery!.sendArtifact!({ platform: "whatsapp", chatId: "971501234567", chatType: "dm" }, { id: "voice", path: files.audio, kind: "audio", mimeType: "audio/ogg", bytes: 1, createdAt: new Date().toISOString(), metadata: { deliveryHint: "voice" } });
+    await adapter.delivery!.sendArtifact!({ platform: "whatsapp", chatId: "971501234567", chatType: "dm" }, { id: "doc", path: files.document, kind: "document", mimeType: "text/plain", bytes: 1, createdAt: new Date().toISOString() });
+
+    expect(bridge.sentMedia.map((entry) => entry.mediaType)).toEqual(["image", "video", "audio", "voice", "document"]);
+  });
+
+  it("converts incompatible voice-hinted audio to ogg/opus in the main runtime when ffmpeg is available", async () => {
+    const ffmpeg = join(tmpDir, "ffmpeg");
+    const logPath = join(tmpDir, "ffmpeg.log");
+    await writeFile(ffmpeg, [
+      "#!/usr/bin/env bash",
+      `echo "$@" >> ${JSON.stringify(logPath)}`,
+      "echo ogg > \"${!#}\"",
+      "",
+    ].join("\n"));
+    await chmod(ffmpeg, 0o755);
+    const source = join(tmpDir, "media", "voice.mp3");
+    await writeFile(source, "mp3");
+    const adapter = createAdapter({ ffmpegPath: ffmpeg });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "voice-art", path: source, kind: "audio", mimeType: "audio/mpeg", bytes: 3, createdAt: new Date().toISOString(), metadata: { deliveryHint: "voice" } }
+    );
+
+    expect(bridge.sentMedia[0]).toMatchObject({ mediaType: "voice" });
+    expect(bridge.sentMedia[0]!.filePath).toContain(join("whatsapp-voice-temp", "opus-"));
+    expect(await readFile(logPath, "utf8")).toContain("-c:a libopus");
+  });
+
+  it("allows voice conversion temp roots outside mediaRoot when they are inside an explicit profile temp root", async () => {
+    const ffmpeg = join(tmpDir, "ffmpeg");
+    const logPath = join(tmpDir, "ffmpeg.log");
+    await writeFile(ffmpeg, [
+      "#!/usr/bin/env bash",
+      `echo "$@" >> ${JSON.stringify(logPath)}`,
+      "echo ogg > \"${!#}\"",
+      "",
+    ].join("\n"));
+    await chmod(ffmpeg, 0o755);
+    const profileTempRoot = join(tmpDir, "profile-temp");
+    await mkdir(profileTempRoot, { recursive: true });
+    const source = join(tmpDir, "media", "voice.mp3");
+    await writeFile(source, "mp3");
+    const adapter = createAdapter({
+      ffmpegPath: ffmpeg,
+      voiceTempRoot: join(profileTempRoot, "audio", "whatsapp"),
+      allowedMediaRoots: [profileTempRoot],
+    });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "voice-art", path: source, kind: "audio", mimeType: "audio/mpeg", bytes: 3, createdAt: new Date().toISOString(), metadata: { deliveryHint: "voice" } }
+    );
+
+    expect(bridge.sentMedia[0]).toMatchObject({ mediaType: "voice" });
+    expect(bridge.sentMedia[0]!.filePath).toContain(join("profile-temp", "audio", "whatsapp", "opus-"));
+    expect(await readFile(logPath, "utf8")).toContain("-c:a libopus");
+  });
+
+  it("rejects voice conversion temp roots outside configured profile media and temp roots", async () => {
+    const ffmpeg = join(tmpDir, "ffmpeg");
+    const logPath = join(tmpDir, "ffmpeg.log");
+    await writeFile(ffmpeg, [
+      "#!/usr/bin/env bash",
+      `echo "$@" >> ${JSON.stringify(logPath)}`,
+      "echo ogg > \"${!#}\"",
+      "",
+    ].join("\n"));
+    await chmod(ffmpeg, 0o755);
+    const profileTempRoot = join(tmpDir, "profile-temp");
+    await mkdir(profileTempRoot, { recursive: true });
+    const source = join(tmpDir, "media", "voice.mp3");
+    await writeFile(source, "mp3");
+    const adapter = createAdapter({
+      ffmpegPath: ffmpeg,
+      voiceTempRoot: join(tmpDir, "untrusted-temp", "whatsapp"),
+      allowedMediaRoots: [profileTempRoot],
+    });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "voice-art", path: source, kind: "audio", mimeType: "audio/mpeg", bytes: 3, createdAt: new Date().toISOString(), metadata: { deliveryHint: "voice" } }
+    );
+
+    expect(bridge.sentMedia[0]).toMatchObject({
+      filePath: await realpath(source),
+      mediaType: "audio",
+    });
+    await expect(readFile(logPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("falls back clearly to normal audio when ffmpeg is unavailable", async () => {
+    const source = join(tmpDir, "media", "voice.mp3");
+    await writeFile(source, "mp3");
+    const adapter = createAdapter({ ffmpegPath: join(tmpDir, "missing-ffmpeg") });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "voice-art", path: source, kind: "audio", mimeType: "audio/mpeg", bytes: 3, createdAt: new Date().toISOString(), metadata: { deliveryHint: "voice" } }
+    );
+
+    expect(bridge.sentMedia[0]).toMatchObject({
+      filePath: await realpath(source),
+      mediaType: "audio",
+    });
+    expect(bridge.sentMedia[0]!.caption).toContain("Voice bubble unavailable; sending as audio.");
+  });
+
+  it("rejects outbound media paths outside configured roots before bridge delivery", async () => {
+    const outside = join(tmpDir, "outside.txt");
+    await writeFile(outside, "outside");
+    const adapter = createAdapter();
+    await adapter.start(async () => {});
+
+    await expect(adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "outside", path: outside, kind: "document", mimeType: "text/plain", bytes: 7, createdAt: new Date().toISOString() }
+    )).rejects.toThrow("outside configured media roots");
+    expect(bridge.sentMedia).toHaveLength(0);
+  });
+
+  it("caches explicitly allowed remote media URLs locally before bridge delivery", async () => {
+    const adapter = createAdapter({
+      allowRemoteMediaUrls: true,
+      fetch: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: async () => new TextEncoder().encode("image").buffer,
+      })) as unknown as typeof fetch,
+    });
+    await adapter.start(async () => {});
+
+    await adapter.delivery!.sendArtifact!(
+      { platform: "whatsapp", chatId: "971501234567", chatType: "dm" },
+      { id: "remote-image", path: "https://example.com/photo.jpg", kind: "image", mimeType: "image/jpeg", bytes: 5, createdAt: new Date().toISOString() }
+    );
+
+    expect(bridge.sentMedia[0]).toMatchObject({ mediaType: "image" });
+    expect(bridge.sentMedia[0]!.filePath).toContain(join("whatsapp-remote-cache", "remote-image.jpg"));
   });
 
   it("delivery.sendArtifact delegates pathless artifacts to bridge text send", async () => {

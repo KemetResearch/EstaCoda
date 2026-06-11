@@ -142,6 +142,12 @@ WhatsApp allowlists use canonical identities. Phone numbers and `@s.whatsapp.net
 
 Use `mode: "self-chat"` only when the linked account is intentionally used as the operator chat. In self-chat mode EstaCoda prefixes replies with `replyPrefix` and suppresses echoes by recent sent message ID or prefix; in `mode: "bot"`, `fromMe` messages are ignored and no reply prefix is applied.
 
+WhatsApp does not stream visible progress. Tool/provider progress is best-effort typing presence only, and users receive the final reply after the turn finishes. Final text is adapted to WhatsApp formatting and chunked by the adapter. Telegram remains richer for live progress and inline action UX; WhatsApp supports final text, quoted first replies where possible, and media delivery through the isolated bridge.
+
+WhatsApp media delivery accepts only main-runtime validated local paths. Profile-local channel media/temp roots are allowed; arbitrary workspace or system paths are rejected before the bridge sees them. Explicitly allowed remote media URLs are downloaded into the profile-local channel media cache first and still obey upload size limits. Text-like inbound document previews are bounded before prompt assembly; binary documents and oversized media surface as structured attachment status rather than injected content.
+
+For WhatsApp voice bubbles, install `ffmpeg` in the operator environment. Voice-hinted audio that is already OGG/Opus is sent as voice/PTT. Incompatible provider audio converts to OGG/Opus in the main runtime under profile-local temp/media roots; if `ffmpeg` is unavailable or conversion fails, EstaCoda falls back to normal audio delivery with a clear fallback caption.
+
 **Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
 
 ## Defaults

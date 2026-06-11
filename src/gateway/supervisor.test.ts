@@ -781,6 +781,8 @@ describe("runGatewaySupervisor", () => {
   it("preserves Telegram config-backed pairing through the channel pairing callback", async () => {
     const configPath = profileConfigPath(tmpDir);
     const whatsappStorePath = defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" });
+    const pairingCreatedAt = new Date(Date.now() - 60_000);
+    const pairingExpiresAt = new Date(Date.now() + 9 * 60_000);
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
@@ -792,8 +794,8 @@ describe("runGatewaySupervisor", () => {
           allowedChatIds: [],
           pairing: {
             code: "TG-1234",
-            createdAt: "2026-06-10T10:00:00.000Z",
-            expiresAt: "2026-06-10T10:10:00.000Z"
+            createdAt: pairingCreatedAt.toISOString(),
+            expiresAt: pairingExpiresAt.toISOString()
           }
         },
       },
@@ -824,7 +826,7 @@ describe("runGatewaySupervisor", () => {
       sessionKey: { platform: "telegram", chatId: "chat-123", userId: "user-123" },
       sender: { id: "user-123" },
       text: "TG 1234",
-      receivedAt: "2026-06-10T10:01:00.000Z"
+      receivedAt: new Date().toISOString()
     })).resolves.toBe("Telegram paired. This chat can now talk to EstaCoda.");
 
     const persisted = JSON.parse(await readFile(configPath, "utf8"));
@@ -837,6 +839,7 @@ describe("runGatewaySupervisor", () => {
   it("wires WhatsApp user-auth redemption into the channel pairing callback", async () => {
     const configPath = profileConfigPath(tmpDir);
     const authDir = join(profilePaths.gatewayStatePath, "whatsapp-auth");
+    const pairingCreatedAt = new Date(Date.now() - 60_000);
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
@@ -855,7 +858,7 @@ describe("runGatewaySupervisor", () => {
       storePath: defaultWhatsAppUserAuthStorePath({ homeDir: tmpDir, profileId: "default" }),
       requesterId: "owner",
       code: () => "12345678",
-      now: () => new Date("2026-06-10T10:00:00.000Z")
+      now: () => pairingCreatedAt
     });
     let pair: any;
 
@@ -880,7 +883,7 @@ describe("runGatewaySupervisor", () => {
       sessionKey: { platform: "whatsapp", chatId: "971501234567", userId: "971501234567" },
       sender: { id: "971501234567@s.whatsapp.net" },
       text: "12345678",
-      receivedAt: "2026-06-10T10:01:00.000Z"
+      receivedAt: new Date().toISOString()
     })).resolves.toBe("WhatsApp paired. This account can now talk to EstaCoda.");
 
     const persisted = JSON.parse(await readFile(configPath, "utf8"));

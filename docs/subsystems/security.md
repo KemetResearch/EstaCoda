@@ -219,6 +219,8 @@ Local faster-whisper STT uses a managed Python environment at `~/.estacoda/pytho
 
 Auto-TTS is text-first and fail-open. Generated auto-TTS media is ephemeral, profile-temp scoped, and not inserted into durable artifact storage, session DB, artifact history, prompt context, or model-visible attachment lists. Arbitrary `MEDIA:/path` response text is not an auto-TTS signal.
 
+WhatsApp media delivery keeps trust and file policy in the main runtime. The root adapter validates outbound paths against configured profile-local media/temp roots, caches explicitly allowed remote media URLs locally, enforces size limits, and performs optional `ffmpeg` voice conversion before sending a local path to the isolated bridge. The bridge does not fetch URLs, inspect workspace trust, or run `ffmpeg`.
+
 Local STT risk classes are:
 
 | Path | Risk |
