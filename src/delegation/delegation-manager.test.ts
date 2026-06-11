@@ -4,6 +4,7 @@ import type { ChildAgentLoopFactory } from "../runtime/agent-loop-factory.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { DelegationManager, delegatedPrompt } from "./delegation-manager.js";
+import { SubagentRegistry } from "./subagent-registry.js";
 
 describe("DelegationManager", () => {
   it("creates a child session through the factory and sends task text once", async () => {
@@ -98,6 +99,7 @@ describe("DelegationManager", () => {
 
     expect(result.status).toBe("blocked");
     expect(result.reason).toBe("blocked");
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
   });
 
   it("returns usage metadata from child provider execution", async () => {
@@ -160,6 +162,44 @@ describe("DelegationManager", () => {
     });
   });
 
+  it("rejects new child spawns before session creation when spawn is paused", async () => {
+    const registry = new SubagentRegistry();
+    registry.pauseSpawns("maintenance window");
+    const harness = await createHarness({ registry });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Paused",
+      trustedWorkspace: true
+    });
+
+    expect(harness.factory.createChild).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-paused",
+      summary: "Delegation spawn is paused: maintenance window"
+    });
+  });
+
+  it("allows child spawns after spawn pause resumes", async () => {
+    const registry = new SubagentRegistry();
+    registry.pauseSpawns("pause");
+    registry.resumeSpawns();
+    const harness = await createHarness({ registry });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "After pause",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(harness.factory.createChild).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects delegation before child construction when spawn depth is exceeded", async () => {
     const harness = await createHarness({ currentDepth: 1, maxSpawnDepth: 1 });
 
@@ -181,10 +221,13 @@ describe("DelegationManager", () => {
     });
   });
 
-  it("propagates parent abort signal into the child handle call", async () => {
+  it("propagates parent abort into the child-owned signal during child execution", async () => {
     const controller = new AbortController();
     const harness = await createHarness({
-      beforeResponse: async () => {
+      beforeResponse: async (_db, registry) => {
+        expect(registry.listActiveSubagents("parent")).toEqual([
+          expect.objectContaining({ subagentId: "child", status: "running", signalAborted: false })
+        ]);
         controller.abort();
       }
     });
@@ -197,9 +240,158 @@ describe("DelegationManager", () => {
       signal: controller.signal
     });
 
-    expect(harness.handleInputs[0]?.signal).toBe(controller.signal);
+    expect(harness.handleInputs[0]?.signal).not.toBe(controller.signal);
+    expect(harness.handleInputs[0]?.signal?.aborted).toBe(true);
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("cancelled");
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
+  });
+
+  it("parent abort interrupts all active children for the same parent", async () => {
+    const controller = new AbortController();
+    const registry = new SubagentRegistry();
+    const siblingController = new AbortController();
+    registry.registerSubagent({
+      subagentId: "sibling",
+      childSessionId: "sibling",
+      parentSessionId: "parent",
+      depth: 1,
+      role: "leaf",
+      goal: "Sibling child",
+      model: "model",
+      provider: "provider",
+      toolCount: 0,
+      abortController: siblingController
+    });
+    const harness = await createHarness({
+      registry,
+      beforeResponse: async () => {
+        controller.abort();
+      }
+    });
+
+    await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Cancel siblings",
+      trustedWorkspace: true,
+      signal: controller.signal
+    });
+
+    expect(siblingController.signal.aborted).toBe(true);
+    expect(registry.listActiveSubagents("parent")).toEqual([
+      expect.objectContaining({ subagentId: "sibling", status: "cancelling", signalAborted: true })
+    ]);
+  });
+
+  it("unregisters active subagents on completion", async () => {
+    const harness = await createHarness({
+      beforeResponse: async (_db, registry) => {
+        expect(registry.listActiveSubagents()).toEqual([
+          expect.objectContaining({ subagentId: "child", status: "running" })
+        ]);
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Complete",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
+  });
+
+  it("unregisters active subagents on provider failure", async () => {
+    const harness = await createHarness({
+      response: response({
+        providerExecution: {
+          ok: false,
+          fallbackUsed: false,
+          attempts: [],
+          toolCalls: [],
+          response: {
+            ok: false,
+            provider: "local",
+            model: "test",
+            content: "provider failed",
+            errorClass: "server"
+          }
+        }
+      })
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Fail",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("provider-error");
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
+  });
+
+  it("unregisters active subagents when child handle throws", async () => {
+    const harness = await createHarness({
+      handleError: new Error("child exploded")
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Throw",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("runtime-error");
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
+  });
+
+  it("spawn pause does not interrupt already-running children", async () => {
+    const registry = new SubagentRegistry();
+    const harness = await createHarness({
+      registry,
+      beforeResponse: async (_db, activeRegistry, handleInput) => {
+        activeRegistry.pauseSpawns("pause future work");
+        expect(handleInput.signal?.aborted).toBe(false);
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Keep running",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(registry.isSpawnPaused()).toBe(true);
+  });
+
+  it("registry interrupt aborts the active child-owned signal", async () => {
+    const registry = new SubagentRegistry();
+    const harness = await createHarness({
+      registry,
+      beforeResponse: async (_db, activeRegistry, handleInput) => {
+        expect(activeRegistry.interruptSubagent("child", "stop child")).toBe(true);
+        expect(handleInput.signal?.aborted).toBe(true);
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Interrupt child",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(registry.listActiveSubagents()).toEqual([]);
   });
 });
 
@@ -211,11 +403,14 @@ describe("delegatedPrompt", () => {
 
 async function createHarness(input: {
   response?: AgentLoopResponse;
-  beforeResponse?: (db: InMemorySessionDB) => Promise<void>;
+  beforeResponse?: (db: InMemorySessionDB, registry: SubagentRegistry, handleInput: { text: string; signal?: AbortSignal }) => Promise<void>;
+  handleError?: Error;
   currentDepth?: number;
   maxSpawnDepth?: number;
+  registry?: SubagentRegistry;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
+  const registry = input.registry ?? new SubagentRegistry();
   await db.createSession({ id: "parent", profileId: "default" });
   const handleInputs: Array<{ text: string; signal?: AbortSignal }> = [];
   const factory: ChildAgentLoopFactory = {
@@ -245,7 +440,10 @@ async function createHarness(input: {
         },
         handle: vi.fn(async (handleInput) => {
           handleInputs.push({ text: handleInput.text, signal: handleInput.signal });
-          await input.beforeResponse?.(db);
+          await input.beforeResponse?.(db, registry, handleInput);
+          if (input.handleError !== undefined) {
+            throw input.handleError;
+          }
           return input.response ?? response();
         }),
         cleanup: vi.fn(async () => undefined)
@@ -254,12 +452,14 @@ async function createHarness(input: {
   };
   return {
     db,
+    registry,
     handleInputs,
     factory,
     manager: new DelegationManager({
       sessionDb: db,
       childFactory: factory,
       trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" }),
+      subagentRegistry: registry,
       currentDepth: input.currentDepth,
       delegationConfig: input.maxSpawnDepth === undefined ? undefined : {
         maxSpawnDepth: input.maxSpawnDepth,

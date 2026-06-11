@@ -7,6 +7,7 @@ import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
+import type { SubagentRegistry } from "../delegation/subagent-registry.js";
 import {
   applyChildToolAccessResult,
   resolveChildToolAccess,
@@ -73,6 +74,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   skillConfig?: Record<string, Record<string, unknown>>;
   ui?: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
+  subagentRegistry?: SubagentRegistry;
   id?: () => string;
 };
 
@@ -86,6 +88,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #skillConfig: Record<string, Record<string, unknown>> | undefined;
   readonly #ui: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
+  readonly #subagentRegistry: SubagentRegistry | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -98,6 +101,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#skillConfig = options.skillConfig;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
+    this.#subagentRegistry = options.subagentRegistry;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -137,6 +141,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         trajectoryRecorder,
         delegationConfig: this.#delegationConfig,
         currentDepth: depth,
+        subagentRegistry: this.#subagentRegistry,
         parentVisibleTools: () => builtSession?.toolRegistry.list() ?? []
       }),
       trustedWorkspace: async () => input.trustedWorkspace,

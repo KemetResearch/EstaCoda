@@ -18,6 +18,7 @@ import { ContextReferenceExpander } from "../context/context-reference-expander.
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
+import { SubagentRegistry } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -758,6 +759,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       currentPlatform: options.currentPlatform
     }
   });
+  const subagentRegistry = new SubagentRegistry();
   const childFactory = new DefaultChildAgentLoopFactory({
     builder,
     sessionDb,
@@ -771,7 +773,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     delegationConfig: options.delegationConfig,
     skillConfig: options.skillConfig,
     ui: options.ui,
-    agentProfile: options.agentProfile
+    agentProfile: options.agentProfile,
+    subagentRegistry
   });
   const builtSession = await builder.buildSession({
     sessionId,
@@ -791,6 +794,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       trajectoryRecorder,
       delegationConfig: options.delegationConfig,
       currentDepth: 0,
+      subagentRegistry,
       parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),

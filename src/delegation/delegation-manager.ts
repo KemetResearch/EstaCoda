@@ -9,6 +9,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
 import type { ChildToolDiagnostic } from "./toolset-security.js";
+import { SubagentRegistry } from "./subagent-registry.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -18,6 +19,8 @@ export type DelegationRequest = {
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
   role?: DelegateRole;
+  batchId?: string;
+  taskIndex?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   signal?: AbortSignal;
@@ -33,11 +36,13 @@ export type DelegationUsageMetadata = {
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
-  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused";
   task: string;
   summary: string;
   role: DelegateRole;
   depth: number;
+  batchId?: string;
+  taskIndex?: number;
   toolExecutions: Array<{
     tool: string;
     decision: string;
@@ -64,6 +69,7 @@ export type DelegationManagerOptions = {
   delegationConfig?: DelegationConfig;
   currentDepth?: number;
   parentVisibleTools?: () => readonly ToolDefinition[];
+  subagentRegistry?: SubagentRegistry;
 };
 
 export class DelegationManager {
@@ -73,6 +79,7 @@ export class DelegationManager {
   readonly #delegationConfig: DelegationConfig;
   readonly #currentDepth: number;
   readonly #parentVisibleTools: () => readonly ToolDefinition[];
+  readonly #subagentRegistry: SubagentRegistry;
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
@@ -81,6 +88,7 @@ export class DelegationManager {
     this.#delegationConfig = options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG;
     this.#currentDepth = options.currentDepth ?? 0;
     this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
+    this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
@@ -89,8 +97,12 @@ export class DelegationManager {
     const role = request.role ?? "leaf";
     const depth = this.#currentDepth + 1;
 
-    if (request.signal?.aborted === true) {
+    if (isSignalAborted(request.signal)) {
       return await this.#cancelledBeforeStart(request, allowedToolsets, allowedTools, role, depth);
+    }
+
+    if (this.#subagentRegistry.isSpawnPaused()) {
+      return this.#spawnPaused(request, allowedToolsets, allowedTools, role, depth);
     }
 
     if (depth > this.#delegationConfig.maxSpawnDepth) {
@@ -99,7 +111,9 @@ export class DelegationManager {
 
     const startedAt = Date.now();
     let childSessionId: string | undefined;
+    let subagentId: string | undefined;
     let child: ChildAgentLoopRuntime | undefined;
+    let parentAbortCleanup: (() => void) | undefined;
     try {
       child = await this.#childFactory.createChild({
         parentSessionId: request.parentSessionId,
@@ -116,6 +130,30 @@ export class DelegationManager {
       });
       childSessionId = child.childSessionId;
 
+      if (isSignalAborted(request.signal)) {
+        return this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId);
+      }
+
+      const childAbortController = new AbortController();
+      subagentId = child.childSessionId;
+      parentAbortCleanup = linkParentAbort(request.signal, childAbortController, () =>
+        this.#subagentRegistry.interruptChildrenForParent(request.parentSessionId, "parent-aborted")
+      );
+      this.#subagentRegistry.registerSubagent({
+        subagentId,
+        childSessionId: child.childSessionId,
+        parentSessionId: request.parentSessionId,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
+        depth,
+        role,
+        goal: request.task,
+        model: childModel(child),
+        provider: childProvider(child),
+        toolCount: child.toolAccess.effectiveAllowedTools.length,
+        abortController: childAbortController
+      });
+
       await this.#recordStarted({
         parentSessionId: request.parentSessionId,
         childSessionId,
@@ -123,14 +161,20 @@ export class DelegationManager {
         allowedToolsets,
         allowedTools,
         role,
-        depth
+        depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex
       });
 
+      this.#subagentRegistry.updateSubagent(subagentId, {
+        status: "running",
+        lastActivityAt: new Date().toISOString()
+      });
       const childResponse = await child.handle({
         text: delegatedPrompt(request.task, request.context),
         channel: request.channel ?? "cli",
         trustedWorkspace: request.trustedWorkspace,
-        signal: request.signal,
+        signal: childAbortController.signal,
         inputMetadata: {
           delegated: true,
           parentSessionId: request.parentSessionId
@@ -146,6 +190,8 @@ export class DelegationManager {
         summary,
         role,
         depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
         allowedToolsets,
         allowedTools,
         effectiveAllowedToolsets: child.toolAccess.effectiveAllowedToolsets,
@@ -161,6 +207,10 @@ export class DelegationManager {
           ok: execution.result?.ok
         }))
       };
+      this.#subagentRegistry.updateSubagent(subagentId, {
+        status: result.status === "completed" ? "completed" : "failed",
+        lastActivityAt: new Date().toISOString()
+      });
       await this.#recordFinished({
         parentSessionId: request.parentSessionId,
         childSessionId: child.childSessionId,
@@ -179,6 +229,8 @@ export class DelegationManager {
         summary,
         role,
         depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
         allowedToolsets,
         allowedTools,
         effectiveAllowedToolsets: [],
@@ -189,6 +241,12 @@ export class DelegationManager {
         rejectedRequestedToolsets: [],
         toolExecutions: []
       };
+      if (subagentId !== undefined) {
+        this.#subagentRegistry.updateSubagent(subagentId, {
+          status: isSignalAborted(request.signal) ? "cancelling" : "failed",
+          lastActivityAt: new Date().toISOString()
+        });
+      }
       if (childSessionId !== undefined) {
         await this.#recordFinished({
           parentSessionId: request.parentSessionId,
@@ -201,6 +259,10 @@ export class DelegationManager {
       }
       return result;
     } finally {
+      parentAbortCleanup?.();
+      if (subagentId !== undefined) {
+        this.#subagentRegistry.unregisterSubagent(subagentId);
+      }
       await child?.cleanup().catch(() => undefined);
     }
   }
@@ -228,6 +290,72 @@ export class DelegationManager {
       summary,
       role,
       depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: []
+    };
+  }
+
+  #cancelledAfterConstruction(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number,
+    childSessionId: string
+  ): DelegationSummary {
+    const summary = "Delegation cancelled before child start.";
+    return {
+      childSessionId,
+      status: "failed",
+      reason: "cancelled",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: []
+    };
+  }
+
+  #spawnPaused(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
+  ): DelegationSummary {
+    const reason = this.#subagentRegistry.spawnPausedReason();
+    const summary = reason === undefined || reason.length === 0
+      ? "Delegation spawn is paused."
+      : `Delegation spawn is paused: ${reason}`;
+    return {
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-paused",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
       allowedToolsets,
       allowedTools,
       effectiveAllowedToolsets: [],
@@ -265,6 +393,8 @@ export class DelegationManager {
       summary,
       role,
       depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
       allowedToolsets,
       allowedTools,
       effectiveAllowedToolsets: [],
@@ -285,6 +415,8 @@ export class DelegationManager {
     allowedTools: string[];
     role: DelegateRole;
     depth: number;
+    batchId?: string;
+    taskIndex?: number;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-started",
@@ -293,7 +425,9 @@ export class DelegationManager {
       allowedToolsets: input.allowedToolsets,
       allowedTools: input.allowedTools,
       role: input.role,
-      depth: input.depth
+      depth: input.depth,
+      batchId: input.batchId,
+      taskIndex: input.taskIndex
     });
     this.#trajectoryRecorder.record("delegation-started", input);
   }
@@ -367,4 +501,46 @@ function usageFromProviderResponse(usage: ProviderUsage | undefined): Delegation
     totalTokens: usage.totalTokens,
     reasoningTokens: usage.reasoningTokens
   };
+}
+
+function childModel(child: ChildAgentLoopRuntime): string {
+  const routes = child.builtSession.providerRoutes as Partial<ChildAgentLoopRuntime["builtSession"]["providerRoutes"]> | undefined;
+  return routes?.primaryModelRoute?.id ??
+    routes?.mainRoute?.id ??
+    routes?.model?.id ??
+    "unknown";
+}
+
+function childProvider(child: ChildAgentLoopRuntime): string {
+  const routes = child.builtSession.providerRoutes as Partial<ChildAgentLoopRuntime["builtSession"]["providerRoutes"]> | undefined;
+  return routes?.primaryModelRoute?.provider ??
+    routes?.mainRoute?.provider ??
+    routes?.model?.provider ??
+    "unknown";
+}
+
+function linkParentAbort(
+  parentSignal: AbortSignal | undefined,
+  childAbortController: AbortController,
+  onAbort: () => void
+): (() => void) | undefined {
+  if (parentSignal === undefined) {
+    return undefined;
+  }
+  const abortChild = () => {
+    onAbort();
+    if (!childAbortController.signal.aborted) {
+      childAbortController.abort(parentSignal.reason ?? "parent-aborted");
+    }
+  };
+  if (parentSignal.aborted) {
+    abortChild();
+    return undefined;
+  }
+  parentSignal.addEventListener("abort", abortChild, { once: true });
+  return () => parentSignal.removeEventListener("abort", abortChild);
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
