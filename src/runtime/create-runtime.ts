@@ -774,7 +774,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillConfig: options.skillConfig,
     ui: options.ui,
     agentProfile: options.agentProfile,
-    subagentRegistry
+    subagentRegistry,
+    diagnosticsRoot: profilePaths.tempPath
   });
   const builtSession = await builder.buildSession({
     sessionId,
@@ -795,6 +796,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       delegationConfig: options.delegationConfig,
       currentDepth: 0,
       subagentRegistry,
+      diagnosticsRoot: profilePaths.tempPath,
       parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),

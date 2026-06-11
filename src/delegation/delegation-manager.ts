@@ -1,5 +1,6 @@
 import type { ChannelKind } from "../contracts/channel.js";
 import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
+import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { ProviderUsage } from "../contracts/provider.js";
@@ -10,6 +11,11 @@ import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
 import type { ChildToolDiagnostic } from "./toolset-security.js";
 import { SubagentRegistry } from "./subagent-registry.js";
+import {
+  appendDiagnosticEvent,
+  runDelegatedChild,
+  timeoutDelegationSummary
+} from "./child-runner.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -24,6 +30,7 @@ export type DelegationRequest = {
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   signal?: AbortSignal;
+  onEvent?: RuntimeEventSink;
 };
 
 export type DelegationUsageMetadata = {
@@ -36,7 +43,7 @@ export type DelegationUsageMetadata = {
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
-  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout";
   task: string;
   summary: string;
   role: DelegateRole;
@@ -60,6 +67,7 @@ export type DelegationSummary = {
     reasons: ChildToolDiagnostic["reasons"];
   }>;
   usage?: DelegationUsageMetadata;
+  diagnosticPath?: string;
 };
 
 export type DelegationManagerOptions = {
@@ -70,6 +78,7 @@ export type DelegationManagerOptions = {
   currentDepth?: number;
   parentVisibleTools?: () => readonly ToolDefinition[];
   subagentRegistry?: SubagentRegistry;
+  diagnosticsRoot?: string;
 };
 
 export class DelegationManager {
@@ -80,6 +89,7 @@ export class DelegationManager {
   readonly #currentDepth: number;
   readonly #parentVisibleTools: () => readonly ToolDefinition[];
   readonly #subagentRegistry: SubagentRegistry;
+  readonly #diagnosticsRoot: string | undefined;
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
@@ -89,6 +99,7 @@ export class DelegationManager {
     this.#currentDepth = options.currentDepth ?? 0;
     this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
     this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
+    this.#diagnosticsRoot = options.diagnosticsRoot;
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
@@ -114,6 +125,7 @@ export class DelegationManager {
     let subagentId: string | undefined;
     let child: ChildAgentLoopRuntime | undefined;
     let parentAbortCleanup: (() => void) | undefined;
+    let childAbortController: AbortController | undefined;
     try {
       child = await this.#childFactory.createChild({
         parentSessionId: request.parentSessionId,
@@ -134,7 +146,7 @@ export class DelegationManager {
         return this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId);
       }
 
-      const childAbortController = new AbortController();
+      childAbortController = new AbortController();
       subagentId = child.childSessionId;
       parentAbortCleanup = linkParentAbort(request.signal, childAbortController, () =>
         this.#subagentRegistry.interruptChildrenForParent(request.parentSessionId, "parent-aborted")
@@ -170,16 +182,101 @@ export class DelegationManager {
         status: "running",
         lastActivityAt: new Date().toISOString()
       });
-      const childResponse = await child.handle({
-        text: delegatedPrompt(request.task, request.context),
-        channel: request.channel ?? "cli",
+      const runnerResult = await runDelegatedChild({
+        child,
+        childAbortController,
+        parentSignal: request.signal,
+        subagentRegistry: this.#subagentRegistry,
+        subagentId,
+        sessionDb: this.#sessionDb,
+        delegationConfig: this.#delegationConfig,
+        diagnosticsRoot: this.#diagnosticsRoot,
+        parentSessionId: request.parentSessionId,
+        childSessionId: child.childSessionId,
+        role,
+        depth,
+        task: request.task,
+        context: request.context,
+        channel: request.channel,
         trustedWorkspace: request.trustedWorkspace,
-        signal: childAbortController.signal,
-        inputMetadata: {
-          delegated: true,
-          parentSessionId: request.parentSessionId
-        }
+        provider: childProvider(child),
+        model: childModel(child),
+        effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+        taskIndex: request.taskIndex,
+        batchId: request.batchId,
+        parentOnEvent: request.onEvent
       });
+      if (runnerResult.kind === "timeout") {
+        await appendDiagnosticEvent({
+          sessionDb: this.#sessionDb,
+          parentSessionId: request.parentSessionId,
+          childSessionId: child.childSessionId,
+          role,
+          depth,
+          taskIndex: request.taskIndex,
+          batchId: request.batchId
+        }, "timeout", runnerResult.diagnostic ?? {
+          taskHash: "",
+          taskPreview: ""
+        });
+        const result = timeoutDelegationSummary({
+          childSessionId: child.childSessionId,
+          task: request.task,
+          summary: runnerResult.summary,
+          role,
+          depth,
+          batchId: request.batchId,
+          taskIndex: request.taskIndex,
+          allowedToolsets,
+          allowedTools,
+          child,
+          diagnostic: runnerResult.diagnostic
+        });
+        await this.#recordFinished({
+          parentSessionId: request.parentSessionId,
+          childSessionId: child.childSessionId,
+          status: result.status,
+          reason: result.reason,
+          summary: result.summary,
+          durationMs: Date.now() - startedAt,
+          error: result.summary,
+          diagnosticPath: result.diagnosticPath
+        });
+        return result;
+      }
+      if (runnerResult.kind === "cancelled") {
+        const result: DelegationSummary = {
+          childSessionId: child.childSessionId,
+          status: "failed",
+          reason: "cancelled",
+          task: request.task,
+          summary: runnerResult.summary,
+          role,
+          depth,
+          batchId: request.batchId,
+          taskIndex: request.taskIndex,
+          allowedToolsets,
+          allowedTools,
+          effectiveAllowedToolsets: child.toolAccess.effectiveAllowedToolsets,
+          effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+          strippedTools: child.toolAccess.strippedTools,
+          blockedTools: child.toolAccess.blockedTools,
+          rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
+          rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
+          toolExecutions: []
+        };
+        await this.#recordFinished({
+          parentSessionId: request.parentSessionId,
+          childSessionId: child.childSessionId,
+          status: result.status,
+          reason: result.reason,
+          summary: result.summary,
+          durationMs: Date.now() - startedAt,
+          error: result.summary
+        });
+        return result;
+      }
+      const childResponse = runnerResult.response;
       const summary = childResponse.text;
       const status = await this.#statusFromChildResponse(child.childSessionId, childResponse, request.signal);
       const result: DelegationSummary = {
@@ -215,6 +312,7 @@ export class DelegationManager {
         parentSessionId: request.parentSessionId,
         childSessionId: child.childSessionId,
         status: result.status,
+        reason: result.reason,
         summary: result.summary,
         durationMs: Date.now() - startedAt
       });
@@ -252,6 +350,7 @@ export class DelegationManager {
           parentSessionId: request.parentSessionId,
           childSessionId,
           status: "failed",
+          reason: result.reason,
           summary,
           durationMs: Date.now() - startedAt,
           error: summary
@@ -436,17 +535,21 @@ export class DelegationManager {
     parentSessionId: string;
     childSessionId: string;
     status: DelegationSummary["status"];
+    reason?: DelegationSummary["reason"];
     summary: string;
     durationMs: number;
     error?: string;
+    diagnosticPath?: string;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-finished",
       childSessionId: input.childSessionId,
       summary: input.summary,
       status: input.status,
+      reason: input.reason,
       durationMs: input.durationMs,
-      error: input.error
+      error: input.error,
+      diagnosticPath: input.diagnosticPath
     });
     this.#trajectoryRecorder.record("delegation-finished", input);
   }

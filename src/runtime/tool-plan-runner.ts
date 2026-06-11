@@ -153,7 +153,8 @@ export class ToolPlanRunner {
       toolCallId: plan.id,
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
-      signal: input.signal
+      signal: input.signal,
+      onEvent: input.onEvent
     });
 
     if (execution === undefined) {

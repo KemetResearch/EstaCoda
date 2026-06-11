@@ -268,8 +268,33 @@ export type SessionEvent =
       childSessionId: string;
       summary: string;
       status: "completed" | "blocked" | "failed";
+      reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout";
       durationMs?: number;
       error?: string;
+      taskIndex?: number;
+      batchId?: string;
+      diagnosticPath?: string;
+    }
+  | {
+      kind: "delegation-heartbeat";
+      childSessionId?: string;
+      activeChildCount: number;
+      completedCount: number;
+      failedCount: number;
+      lastActivityAt: string;
+      stale?: boolean;
+      taskIndex?: number;
+      batchId?: string;
+    }
+  | {
+      kind: "delegation-diagnostic";
+      childSessionId: string;
+      reason: "timeout" | "stale-heartbeat";
+      diagnosticPath: string;
+      taskHash: string;
+      taskPreview: string;
+      role?: DelegateRole;
+      depth?: number;
       taskIndex?: number;
       batchId?: string;
     }

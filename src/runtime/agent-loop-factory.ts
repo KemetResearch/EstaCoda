@@ -75,6 +75,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   ui?: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   subagentRegistry?: SubagentRegistry;
+  diagnosticsRoot?: string;
   id?: () => string;
 };
 
@@ -89,6 +90,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #ui: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   readonly #subagentRegistry: SubagentRegistry | undefined;
+  readonly #diagnosticsRoot: string | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -102,6 +104,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
     this.#subagentRegistry = options.subagentRegistry;
+    this.#diagnosticsRoot = options.diagnosticsRoot;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -142,6 +145,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         delegationConfig: this.#delegationConfig,
         currentDepth: depth,
         subagentRegistry: this.#subagentRegistry,
+        diagnosticsRoot: this.#diagnosticsRoot,
         parentVisibleTools: () => builtSession?.toolRegistry.list() ?? []
       }),
       trustedWorkspace: async () => input.trustedWorkspace,

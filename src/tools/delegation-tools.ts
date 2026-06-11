@@ -66,7 +66,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           allowedTools: input.allowedTools,
           role: input.role ?? "leaf",
           trustedWorkspace: await options.trustedWorkspace(),
-          signal: context?.signal
+          signal: context?.signal,
+          onEvent: context?.onEvent
         });
 
         return {

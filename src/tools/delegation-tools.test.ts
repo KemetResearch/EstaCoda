@@ -33,7 +33,7 @@ describe("createDelegationTools", () => {
     });
   });
 
-  it("passes the tool execution AbortSignal into DelegationManager.delegate", async () => {
+  it("passes tool execution AbortSignal and event sink into DelegationManager.delegate", async () => {
     const delegate = vi.fn(async () => ({
       childSessionId: "child",
       status: "completed",
@@ -58,8 +58,9 @@ describe("createDelegationTools", () => {
       trustedWorkspace: async () => true
     });
     const controller = new AbortController();
+    const onEvent = vi.fn();
 
-    const result = await tool!.run({ task: "Do work" }, { signal: controller.signal });
+    const result = await tool!.run({ task: "Do work" }, { signal: controller.signal, onEvent });
 
     expect(result.ok).toBe(true);
     expect(delegate).toHaveBeenCalledWith(expect.objectContaining({
@@ -68,7 +69,8 @@ describe("createDelegationTools", () => {
       task: "Do work",
       role: "leaf",
       trustedWorkspace: true,
-      signal: controller.signal
+      signal: controller.signal,
+      onEvent
     }));
   });
 

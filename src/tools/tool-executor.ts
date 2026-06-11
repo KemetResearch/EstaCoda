@@ -9,6 +9,7 @@ import {
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -45,6 +46,7 @@ export type NamedToolExecutionRequest = {
   toolCallName?: string;
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
+  onEvent?: RuntimeEventSink;
 };
 
 export type ToolExecutionRecord = {
@@ -228,7 +230,8 @@ export class ToolExecutor {
       try {
         result = await tool.run(request.input, {
           signal: request.signal,
-          environmentType
+          environmentType,
+          onEvent: request.onEvent
         });
       } catch (error) {
         if (request.signal?.aborted) {

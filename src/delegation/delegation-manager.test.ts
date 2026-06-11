@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
-import type { AgentLoopResponse } from "../runtime/agent-loop.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory } from "../runtime/agent-loop-factory.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { DelegationManager, delegatedPrompt } from "./delegation-manager.js";
 import { SubagentRegistry } from "./subagent-registry.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("DelegationManager", () => {
   it("creates a child session through the factory and sends task text once", async () => {
@@ -393,6 +398,73 @@ describe("DelegationManager", () => {
     expect(result.status).toBe("completed");
     expect(registry.listActiveSubagents()).toEqual([]);
   });
+
+  it("returns structured timeout status and cleans the registry", async () => {
+    vi.useFakeTimers();
+    const harness = await createHarness({
+      maxSpawnDepth: 1,
+      childTimeoutSeconds: 0.001,
+      handle: async () => await new Promise<AgentLoopResponse>(() => undefined)
+    });
+
+    const pending = harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Timeout",
+      trustedWorkspace: true
+    });
+    await vi.advanceTimersByTimeAsync(2);
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      childSessionId: "child",
+      status: "failed",
+      reason: "timeout"
+    });
+    expect(harness.registry.listActiveSubagents()).toEqual([]);
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-finished",
+      childSessionId: "child",
+      reason: "timeout",
+      status: "failed"
+    }));
+  });
+
+  it("relays child progress to the parent event sink with subagent metadata", async () => {
+    const events: RuntimeEvent[] = [];
+    const harness = await createHarness({
+      beforeResponse: async (_db, _registry, handleInput) => {
+        await handleInput.onEvent?.({ kind: "provider-attempt", provider: "local", model: "test", fallback: false });
+      }
+    });
+
+    await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Relay progress",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "delegation-progress",
+        subagentId: "child",
+        childSessionId: "child",
+        parentSessionId: "parent",
+        role: "leaf",
+        depth: 1,
+        childEvent: {
+          kind: "provider-attempt",
+          provider: "local",
+          model: "test",
+          fallback: false
+        }
+      })
+    ]);
+  });
 });
 
 describe("delegatedPrompt", () => {
@@ -403,17 +475,19 @@ describe("delegatedPrompt", () => {
 
 async function createHarness(input: {
   response?: AgentLoopResponse;
-  beforeResponse?: (db: InMemorySessionDB, registry: SubagentRegistry, handleInput: { text: string; signal?: AbortSignal }) => Promise<void>;
+  beforeResponse?: (db: InMemorySessionDB, registry: SubagentRegistry, handleInput: AgentLoopInput) => Promise<void>;
+  handle?: (handleInput: AgentLoopInput) => Promise<AgentLoopResponse>;
   handleError?: Error;
   currentDepth?: number;
   maxSpawnDepth?: number;
+  childTimeoutSeconds?: number;
   registry?: SubagentRegistry;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
   const registry = input.registry ?? new SubagentRegistry();
   await db.createSession({ id: "parent", profileId: "default" });
   const handleInputs: Array<{ text: string; signal?: AbortSignal }> = [];
-  const factory: ChildAgentLoopFactory = {
+    const factory: ChildAgentLoopFactory = {
     createChild: vi.fn(async () => {
       await db.createSession({
         id: "child",
@@ -440,6 +514,9 @@ async function createHarness(input: {
         },
         handle: vi.fn(async (handleInput) => {
           handleInputs.push({ text: handleInput.text, signal: handleInput.signal });
+          if (input.handle !== undefined) {
+            return await input.handle(handleInput);
+          }
           await input.beforeResponse?.(db, registry, handleInput);
           if (input.handleError !== undefined) {
             throw input.handleError;
@@ -466,7 +543,7 @@ async function createHarness(input: {
         maxConcurrentChildren: 3,
         maxDelegateCallsPerTurn: 3,
         maxBatchTasks: 10,
-        childTimeoutSeconds: 600,
+        childTimeoutSeconds: input.childTimeoutSeconds ?? 600,
         heartbeatSeconds: 30,
         heartbeatStaleCyclesIdle: 3,
         heartbeatStaleCyclesInTool: 6,

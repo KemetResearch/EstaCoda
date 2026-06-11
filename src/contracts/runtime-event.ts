@@ -152,6 +152,46 @@ export type RuntimeEvent =
   | {
       kind: "agent-final";
       text: string;
+    }
+  | {
+      kind: "delegation-progress";
+      subagentId: string;
+      childSessionId: string;
+      parentSessionId: string;
+      role: "leaf" | "orchestrator";
+      depth: number;
+      taskIndex?: number;
+      batchId?: string;
+      childEvent: {
+        kind:
+          | "agent-start"
+          | "tool-start"
+          | "tool-result"
+          | "provider-attempt"
+          | "provider-result"
+          | "provider-budget-exhausted"
+          | "agent-final"
+          | "agent-cancelled";
+        sessionId?: string;
+        tool?: string;
+        decision?: string;
+        riskClass?: string;
+        ok?: boolean;
+        chars?: number;
+        sentChars?: number;
+        truncated?: boolean;
+        provider?: string;
+        model?: string;
+        fallback?: boolean;
+        willFallback?: boolean;
+        errorClass?: string;
+        finishReason?: ProviderFinishReason;
+        incompleteReason?: string;
+        budget?: string;
+        limit?: number;
+        observed?: number;
+        reason?: string;
+      };
     };
 
 export type RuntimeEventSink = (event: RuntimeEvent) => void | Promise<void>;
