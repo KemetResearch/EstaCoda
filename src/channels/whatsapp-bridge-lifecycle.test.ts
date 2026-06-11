@@ -178,6 +178,37 @@ describe("ManagedWhatsAppBridgeClient", () => {
     expect(await canRead(lockPath)).toBe(false);
     expect(await canRead(statePath)).toBe(false);
   });
+
+  it("passes the profile-local inbound media directory to the bridge process", async () => {
+    const child = new FakeChild();
+    const inboundMediaDir = join(tempDir, "profile", "channel-media", "whatsapp", "inbound");
+    const spawnProcess = vi.fn(() => {
+      setTimeout(() => child.stdout.emit("data", Buffer.from("ESTACODA_WHATSAPP_BRIDGE_READY\n")), 10);
+      return child as any;
+    });
+    const client = new ManagedWhatsAppBridgeClient({
+      authDir,
+      statePath,
+      bridgeDir,
+      inboundMediaDir,
+      inboundMediaParentDir: dirname(dirname(inboundMediaDir)),
+      maxInboundMediaBytes: 1234,
+      spawnProcess: spawnProcess as any,
+      startupTimeoutMs: 1000,
+      port: 38126,
+    });
+
+    await client.start();
+
+    const [, args, options] = spawnProcess.mock.calls[0]! as unknown as [string, string[], { env?: Record<string, string> }];
+    expect(args).toEqual(expect.arrayContaining(["--inbound-media-dir", inboundMediaDir]));
+    expect(args).toEqual(expect.arrayContaining(["--inbound-media-parent-dir", dirname(dirname(inboundMediaDir))]));
+    expect(options?.env).toMatchObject({
+      WHATSAPP_INBOUND_MEDIA_DIR: inboundMediaDir,
+      WHATSAPP_INBOUND_MEDIA_PARENT_DIR: dirname(dirname(inboundMediaDir)),
+      WHATSAPP_INBOUND_MEDIA_MAX_BYTES: "1234",
+    });
+  });
 });
 
 describe("WhatsApp bridge dependency install helpers", () => {

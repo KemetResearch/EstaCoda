@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import type { ChannelAttachmentKind } from "../contracts/channel.js";
 import {
   WhatsAppBridgeRuntimeError,
   type WhatsAppBridgeErrorCode,
@@ -7,6 +6,11 @@ import {
 } from "./whatsapp-bridge-errors.js";
 
 export const EXPECTED_WHATSAPP_BRIDGE_API_VERSION = "whatsapp-bridge.v1";
+const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_INBOUND_ATTACHMENTS = 8;
+const MAX_ATTACHMENT_METADATA_KEYS = 16;
+const MAX_ATTACHMENT_METADATA_STRING = 4096;
+export type WhatsAppBridgeInboundAttachmentKind = "image" | "video" | "audio" | "voice" | "document";
 
 export type WhatsAppBridgeHealth = {
   ok: boolean;
@@ -23,8 +27,8 @@ export type WhatsAppBridgeError = WhatsAppBridgeErrorShape;
 
 export type WhatsAppBridgeInboundAttachment = {
   id?: string;
-  kind: ChannelAttachmentKind;
-  status?: "ready" | "unsupported" | "too-large" | "download-failed" | "missing-file";
+  kind: WhatsAppBridgeInboundAttachmentKind;
+  status?: "ready" | "failed" | "unsupported" | "too-large" | "download-failed" | "missing-file";
   mimeType?: string;
   originalName?: string;
   localPath?: string;
@@ -285,8 +289,95 @@ function validateMessages(value: unknown): WhatsAppBridgeInboundMessage[] {
       typeof message.senderId !== "string") {
       throwInvalidResponse("Invalid WhatsApp bridge message response.");
     }
-    return message as WhatsAppBridgeInboundMessage;
+    return {
+      messageId: message.messageId,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      senderName: typeof message.senderName === "string" ? message.senderName : undefined,
+      chatName: typeof message.chatName === "string" ? message.chatName : undefined,
+      isGroup: typeof message.isGroup === "boolean" ? message.isGroup : undefined,
+      fromMe: typeof message.fromMe === "boolean" ? message.fromMe : undefined,
+      body: typeof message.body === "string" ? message.body : undefined,
+      hasMedia: typeof message.hasMedia === "boolean" ? message.hasMedia : undefined,
+      mediaType: typeof message.mediaType === "string" ? message.mediaType : undefined,
+      attachments: validateInboundAttachments(message.attachments),
+      mentionedIds: Array.isArray(message.mentionedIds) && message.mentionedIds.every((id) => typeof id === "string")
+        ? message.mentionedIds
+        : undefined,
+      quotedMessageId: typeof message.quotedMessageId === "string" || message.quotedMessageId === null ? message.quotedMessageId : undefined,
+      quotedParticipant: typeof message.quotedParticipant === "string" || message.quotedParticipant === null ? message.quotedParticipant : undefined,
+      quotedRemoteJid: typeof message.quotedRemoteJid === "string" || message.quotedRemoteJid === null ? message.quotedRemoteJid : undefined,
+      hasQuotedMessage: typeof message.hasQuotedMessage === "boolean" ? message.hasQuotedMessage : undefined,
+      botIds: Array.isArray(message.botIds) && message.botIds.every((id) => typeof id === "string") ? message.botIds : undefined,
+      timestamp: typeof message.timestamp === "number" ? message.timestamp : undefined,
+      metadata: sanitizeMetadata(message.metadata),
+    } satisfies WhatsAppBridgeInboundMessage;
   });
+}
+
+function validateInboundAttachments(value: unknown): WhatsAppBridgeInboundAttachment[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const attachments = value
+    .slice(0, MAX_INBOUND_ATTACHMENTS)
+    .map(validateInboundAttachment)
+    .filter((attachment): attachment is WhatsAppBridgeInboundAttachment => attachment !== undefined);
+  return attachments.length > 0 ? attachments : undefined;
+}
+
+function validateInboundAttachment(value: unknown): WhatsAppBridgeInboundAttachment | undefined {
+  if (!isRecord(value) || !isKnownAttachmentKind(value.kind)) return undefined;
+  const status = isKnownAttachmentStatus(value.status) ? value.status : undefined;
+  if (status === undefined) return undefined;
+  const bytes = typeof value.bytes === "number" && Number.isFinite(value.bytes) && value.bytes >= 0 && value.bytes <= MAX_INBOUND_ATTACHMENT_BYTES
+    ? value.bytes
+    : undefined;
+  if (status === "ready") {
+    if (typeof value.localPath !== "string" || value.localPath.length === 0) return undefined;
+    if (bytes === undefined) return undefined;
+  }
+  return {
+    id: typeof value.id === "string" ? value.id : undefined,
+    kind: value.kind,
+    status,
+    mimeType: typeof value.mimeType === "string" ? value.mimeType.slice(0, 160) : undefined,
+    originalName: typeof value.originalName === "string" ? value.originalName.slice(0, 160) : undefined,
+    localPath: status === "ready" && typeof value.localPath === "string" ? value.localPath : undefined,
+    bytes,
+    failureCode: typeof value.failureCode === "string" ? value.failureCode.slice(0, 80) : undefined,
+    failureMessage: typeof value.failureMessage === "string" ? value.failureMessage.slice(0, 240) : undefined,
+    metadata: sanitizeMetadata(value.metadata),
+  };
+}
+
+function isKnownAttachmentKind(value: unknown): value is WhatsAppBridgeInboundAttachmentKind {
+  return value === "image" ||
+    value === "audio" ||
+    value === "video" ||
+    value === "voice" ||
+    value === "document";
+}
+
+function isKnownAttachmentStatus(value: unknown): value is NonNullable<WhatsAppBridgeInboundAttachment["status"]> {
+  return value === "ready" ||
+    value === "failed" ||
+    value === "unsupported" ||
+    value === "too-large" ||
+    value === "download-failed" ||
+    value === "missing-file";
+}
+
+function sanitizeMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).slice(0, MAX_ATTACHMENT_METADATA_KEYS);
+  const clean: Record<string, unknown> = {};
+  for (const [key, raw] of entries) {
+    if (!/^[A-Za-z0-9_.:-]{1,80}$/u.test(key)) continue;
+    if (typeof raw === "string") clean[key] = raw.slice(0, MAX_ATTACHMENT_METADATA_STRING);
+    else if (typeof raw === "number" && Number.isFinite(raw)) clean[key] = raw;
+    else if (typeof raw === "boolean") clean[key] = raw;
+  }
+  return Object.keys(clean).length > 0 ? clean : undefined;
 }
 
 function validateSendResult(value: unknown): WhatsAppBridgeSendResult {

@@ -24,6 +24,9 @@ describe("WhatsApp bridge HTTP/security contract", () => {
     expect(source).toContain("MAX_INBOUND_QUEUE = 100");
     expect(source).toContain("MAX_REQUEST_BYTES");
     expect(source).toContain("MAX_RESPONSE_BYTES");
+    expect(source).toContain("DEFAULT_INBOUND_MEDIA_MAX_BYTES");
+    expect(source).toContain("WHATSAPP_INBOUND_MEDIA_DIR");
+    expect(source).toContain("WHATSAPP_INBOUND_MEDIA_MAX_BYTES");
     expect(source).toContain("BRIDGE_API_VERSION");
     expect(source).toContain("SEND_TIMEOUT_MS");
     expect(source).toContain("request_too_large");

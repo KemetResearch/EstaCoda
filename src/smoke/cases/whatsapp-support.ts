@@ -10,6 +10,8 @@ import {
   type WhatsAppPairDeviceOptions,
   type WhatsAppWizardDependencies,
 } from "../../cli/whatsapp-wizard.js";
+import { WhatsAppAdapter } from "../../channels/whatsapp-adapter.js";
+import type { WhatsAppBridgeInboundMessage } from "../../channels/whatsapp-bridge-client.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 
 export const whatsapp_support_case: SmokeCase = {
@@ -24,6 +26,7 @@ export const whatsapp_support_case: SmokeCase = {
       await assertDeclinedInstallLeavesConfigUnchanged(join(tempRoot, "decline"));
       await assertCancellationLeavesConfigUnchanged(join(tempRoot, "cancel"));
       await assertSuccessfulSetupWritesOnlyExpectedKeys(join(tempRoot, "success"));
+      await assertFakeBridgeInboundImageReachesRuntime(join(tempRoot, "inbound-image"));
       await assertArabicWizardCopyPreservesTechnicalTokens(join(tempRoot, "arabic"));
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -67,6 +70,56 @@ function assertRootPackageBoundary(): void {
   }
   if ([...files].some((file) => file.startsWith("scripts/whatsapp-bridge/node_modules"))) {
     throw new Error("Root package files must not include bridge node_modules");
+  }
+}
+
+async function assertFakeBridgeInboundImageReachesRuntime(homeDir: string): Promise<void> {
+  const mediaRoot = join(homeDir, "profile", "channel-media");
+  const inboundRoot = join(mediaRoot, "whatsapp", "inbound");
+  const imagePath = join(inboundRoot, "photo.jpg");
+  await mkdir(inboundRoot, { recursive: true });
+  await writeFile(imagePath, "photo", "utf8");
+  const messages: WhatsAppBridgeInboundMessage[] = [{
+    messageId: "image-1",
+    chatId: "971501234567@s.whatsapp.net",
+    senderId: "971501234567@s.whatsapp.net",
+    body: "caption",
+    attachments: [{
+      id: "photo-1",
+      kind: "image",
+      status: "ready",
+      mimeType: "image/jpeg",
+      localPath: imagePath,
+      bytes: 5,
+    }],
+  }];
+  const adapter = new WhatsAppAdapter({
+    authDir: join(homeDir, "gateway", "whatsapp-auth"),
+    mediaRoot,
+    experimental: true,
+    bridgeClient: {
+      start: async () => undefined,
+      stop: async () => undefined,
+      getHealth: async () => ({ ok: true, apiVersion: "whatsapp-bridge.v1", status: "connected" }),
+      pollMessages: async () => messages.splice(0, messages.length),
+      sendText: async () => ({ ok: true }),
+      editMessage: async () => ({ ok: true }),
+      sendMedia: async () => ({ ok: true }),
+      sendTyping: async () => ({ ok: true }),
+      getChat: async (chatId: string) => ({ id: chatId }),
+    },
+  });
+  let receivedAttachment = false;
+  await adapter.start(async (message) => {
+    receivedAttachment = message.attachments?.[0]?.kind === "image" &&
+      message.attachments[0].status === "ready" &&
+      message.attachments[0].localPath !== undefined &&
+      message.text === "caption";
+  });
+  await adapter.pollOnce();
+  await adapter.stop();
+  if (!receivedAttachment) {
+    throw new Error("Fake WhatsApp bridge image attachment did not reach the runtime handler");
   }
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { WhatsAppAdapter } from "./whatsapp-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
@@ -471,6 +471,11 @@ describe("WhatsAppAdapter", () => {
 
   it("preserves bridge attachments", async () => {
     const adapter = createAdapter();
+    const inboundRoot = join(tmpDir, "media", "whatsapp", "inbound");
+    const photoPath = join(inboundRoot, "photo.jpg");
+    await mkdir(inboundRoot, { recursive: true });
+    await writeFile(photoPath, "photo");
+    const canonicalPhotoPath = await realpath(photoPath);
     bridge.messages.push({
       messageId: "msg-4",
       chatId: "971501234567@s.whatsapp.net",
@@ -483,7 +488,7 @@ describe("WhatsAppAdapter", () => {
           status: "ready",
           mimeType: "image/jpeg",
           originalName: "photo.jpg",
-          localPath: join(tmpDir, "media", "photo.jpg"),
+          localPath: photoPath,
           bytes: 123,
         },
       ],
@@ -501,13 +506,203 @@ describe("WhatsAppAdapter", () => {
         kind: "image",
         status: "ready",
         mimeType: "image/jpeg",
+        localPath: canonicalPhotoPath,
         bytes: 123,
+      }),
+    ]);
+  });
+
+  it("delivers inbound voice attachments with validated profile-local paths", async () => {
+    const adapter = createAdapter();
+    const inboundRoot = join(tmpDir, "media", "whatsapp", "inbound");
+    const voicePath = join(inboundRoot, "voice.ogg");
+    await mkdir(inboundRoot, { recursive: true });
+    await writeFile(voicePath, "voice");
+    const canonicalVoicePath = await realpath(voicePath);
+    bridge.messages.push({
+      messageId: "voice-1",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "",
+      attachments: [
+        {
+          id: "voice-att",
+          kind: "voice",
+          status: "ready",
+          mimeType: "audio/ogg",
+          localPath: voicePath,
+          bytes: 5,
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.attachments).toEqual([
+      expect.objectContaining({
+        id: "voice-att",
+        kind: "voice",
+        status: "ready",
+        localPath: canonicalVoicePath,
+      }),
+    ]);
+  });
+
+  it("drops ready inbound attachment paths outside the WhatsApp inbound media root", async () => {
+    const adapter = createAdapter();
+    const outsidePath = join(tmpDir, "outside", "photo.jpg");
+    await mkdir(dirname(outsidePath), { recursive: true });
+    await writeFile(outsidePath, "photo");
+    bridge.messages.push({
+      messageId: "msg-outside",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "caption",
+      attachments: [
+        {
+          id: "outside",
+          kind: "image",
+          status: "ready",
+          localPath: outsidePath,
+          bytes: 5,
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.text).toBe("caption");
+    expect(received[0]!.attachments).toBeUndefined();
+  });
+
+  it("does not let a symlinked inbound media root authorize outside files", async () => {
+    const mediaRoot = join(tmpDir, "media");
+    const linkRoot = join(mediaRoot, "whatsapp", "inbound");
+    const outsideRoot = join(tmpDir, "outside-media");
+    const outsidePath = join(outsideRoot, "photo.jpg");
+    await mkdir(dirname(linkRoot), { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(outsidePath, "photo");
+    await symlink(outsideRoot, linkRoot, "dir");
+    const adapter = createAdapter({ inboundMediaRoot: linkRoot });
+    bridge.messages.push({
+      messageId: "msg-symlink",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "caption",
+      attachments: [
+        {
+          id: "symlinked",
+          kind: "image",
+          status: "ready",
+          localPath: outsidePath,
+          bytes: 5,
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.text).toBe("caption");
+    expect(received[0]!.attachments).toBeUndefined();
+  });
+
+  it("drops traversal and missing ready inbound attachment files without crashing", async () => {
+    const adapter = createAdapter();
+    const inboundRoot = join(tmpDir, "media", "whatsapp", "inbound");
+    const outsidePath = join(tmpDir, "media", "whatsapp", "outside.jpg");
+    await mkdir(inboundRoot, { recursive: true });
+    await writeFile(outsidePath, "outside");
+    bridge.messages.push({
+      messageId: "msg-traversal",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "caption",
+      attachments: [
+        {
+          id: "traversal",
+          kind: "image",
+          status: "ready",
+          localPath: join(inboundRoot, "..", "outside.jpg"),
+          bytes: 7,
+        },
+        {
+          id: "missing",
+          kind: "image",
+          status: "ready",
+          localPath: join(inboundRoot, "missing.jpg"),
+          bytes: 5,
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.text).toBe("caption");
+    expect(received[0]!.attachments).toBeUndefined();
+  });
+
+  it("preserves failed inbound attachment metadata without local paths", async () => {
+    const adapter = createAdapter();
+    bridge.messages.push({
+      messageId: "msg-failed",
+      chatId: "971501234567@s.whatsapp.net",
+      senderId: "971501234567@s.whatsapp.net",
+      body: "",
+      attachments: [
+        {
+          id: "failed-doc",
+          kind: "document",
+          status: "failed",
+          failureCode: "download_failed",
+          failureMessage: "WhatsApp media could not be downloaded.",
+          localPath: join(tmpDir, "media", "whatsapp", "inbound", "ignored.pdf"),
+          metadata: { whatsappMediaType: "documentMessage" },
+        },
+      ],
+    });
+    const received: ChannelMessage[] = [];
+    await adapter.start(async (msg) => {
+      received.push(msg);
+    });
+
+    await adapter.pollOnce();
+
+    expect(received[0]!.attachments).toEqual([
+      expect.objectContaining({
+        id: "failed-doc",
+        kind: "document",
+        status: "failed",
+        failureCode: "download_failed",
+        metadata: { whatsappMediaType: "documentMessage" },
       }),
     ]);
   });
 
   it("keeps bounded text previews for text-like inbound documents and skips binary document injection", async () => {
     const adapter = createAdapter();
+    const inboundRoot = join(tmpDir, "media", "whatsapp", "inbound");
+    await mkdir(inboundRoot, { recursive: true });
+    const textDocPath = join(inboundRoot, "notes.txt");
+    const binaryDocPath = join(inboundRoot, "archive.bin");
+    await writeFile(textDocPath, "notes");
+    await writeFile(binaryDocPath, "binary");
     bridge.messages.push({
       messageId: "doc-1",
       chatId: "971501234567@s.whatsapp.net",
@@ -520,6 +715,7 @@ describe("WhatsAppAdapter", () => {
           status: "ready",
           mimeType: "text/plain",
           originalName: "notes.txt",
+          localPath: textDocPath,
           metadata: { textPreview: "a".repeat(5000) },
         },
         {
@@ -528,6 +724,7 @@ describe("WhatsAppAdapter", () => {
           status: "ready",
           mimeType: "application/octet-stream",
           originalName: "archive.bin",
+          localPath: binaryDocPath,
           metadata: { textPreview: "do not inject" },
         },
         {

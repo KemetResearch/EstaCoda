@@ -938,6 +938,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           const bridgeInstallLogPath = join(profilePaths.logsPath, "whatsapp-bridge-install.log");
           const bridgePidPath = join(authDir, "bridge.pid");
           const bridgeLockPath = join(authDir, "whatsapp-session.lock");
+          const inboundMediaRoot = join(profilePaths.channelMediaPath, "whatsapp", "inbound");
           adapter = options.factories?.createWhatsAppAdapter
             ? options.factories.createWhatsAppAdapter({
                 authDir,
@@ -952,6 +953,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 bridgePidPath,
                 bridgeLockPath,
                 mediaRoot,
+                inboundMediaRoot,
                 voiceTempRoot: join(profilePaths.tempPath, "audio", "whatsapp"),
                 allowedMediaRoots: [
                   options.workspaceRoot,
@@ -974,6 +976,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 bridgePidPath,
                 bridgeLockPath,
                 mediaRoot,
+                inboundMediaRoot,
                 voiceTempRoot: join(profilePaths.tempPath, "audio", "whatsapp"),
                 allowedMediaRoots: [
                   options.workspaceRoot,

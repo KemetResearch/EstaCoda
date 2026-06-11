@@ -73,6 +73,155 @@ describe("HttpWhatsAppBridgeClient", () => {
     expect(bodies[0]).toMatchObject({ replyTo: "incoming-1" });
   });
 
+  it("validates inbound attachment payloads fail closed", async () => {
+    const client = new HttpWhatsAppBridgeClient({
+      statePath,
+      fetch: vi.fn(async () => jsonResponse([
+        {
+          messageId: "msg-1",
+          chatId: "971501234567@s.whatsapp.net",
+          senderId: "971501234567@s.whatsapp.net",
+          attachments: [
+            {
+              id: "image-1",
+              kind: "image",
+              status: "ready",
+              mimeType: "image/jpeg",
+              localPath: "/profile/channel-media/whatsapp/inbound/image.jpg",
+              bytes: 123,
+              metadata: {
+                safe: "x",
+                long: "a".repeat(5000),
+                nested: { drop: true },
+              },
+            },
+            {
+              id: "bad-generic-file",
+              kind: "file",
+              status: "ready",
+              localPath: "/profile/channel-media/whatsapp/inbound/bad.bin",
+              bytes: 1,
+            },
+            {
+              id: "bad-link",
+              kind: "link",
+              status: "ready",
+              localPath: "/profile/channel-media/whatsapp/inbound/bad.url",
+              bytes: 1,
+            },
+            {
+              id: "bad-unknown",
+              kind: "unknown",
+              status: "ready",
+              localPath: "/profile/channel-media/whatsapp/inbound/bad",
+              bytes: 1,
+            },
+            {
+              id: "ready-missing-path",
+              kind: "image",
+              status: "ready",
+              bytes: 1,
+            },
+            {
+              id: "ready-missing-bytes",
+              kind: "image",
+              status: "ready",
+              localPath: "/profile/channel-media/whatsapp/inbound/missing-bytes.jpg",
+            },
+            {
+              id: "failed-with-path",
+              kind: "document",
+              status: "failed",
+              localPath: "/should/not/pass",
+              failureCode: "download_failed",
+              failureMessage: "WhatsApp media could not be downloaded.",
+            },
+          ],
+        },
+      ])) as any,
+    });
+
+    const messages = await client.pollMessages();
+
+    expect(messages[0]!.attachments).toEqual([
+      expect.objectContaining({
+        id: "image-1",
+        kind: "image",
+        status: "ready",
+        localPath: "/profile/channel-media/whatsapp/inbound/image.jpg",
+        bytes: 123,
+        metadata: {
+          safe: "x",
+          long: "a".repeat(4096),
+        },
+      }),
+      expect.objectContaining({
+        id: "failed-with-path",
+        kind: "document",
+        status: "failed",
+        localPath: undefined,
+        failureCode: "download_failed",
+      }),
+    ]);
+  });
+
+  it("drops ready attachments with oversized byte counts", async () => {
+    const client = new HttpWhatsAppBridgeClient({
+      statePath,
+      fetch: vi.fn(async () => jsonResponse([
+        {
+          messageId: "msg-1",
+          chatId: "971501234567@s.whatsapp.net",
+          senderId: "971501234567@s.whatsapp.net",
+          attachments: [
+            {
+              id: "huge",
+              kind: "image",
+              status: "ready",
+              localPath: "/profile/channel-media/whatsapp/inbound/huge.jpg",
+              bytes: 25 * 1024 * 1024 + 1,
+            },
+          ],
+        },
+      ])) as any,
+    });
+
+    const messages = await client.pollMessages();
+
+    expect(messages[0]!.attachments).toBeUndefined();
+  });
+
+  it("accepts only supported WhatsApp inbound media kinds", async () => {
+    const supported = ["image", "video", "audio", "voice", "document"] as const;
+    const client = new HttpWhatsAppBridgeClient({
+      statePath,
+      fetch: vi.fn(async () => jsonResponse([
+        {
+          messageId: "msg-1",
+          chatId: "971501234567@s.whatsapp.net",
+          senderId: "971501234567@s.whatsapp.net",
+          attachments: supported.map((kind) => ({
+            id: kind,
+            kind,
+            status: "ready",
+            localPath: `/profile/channel-media/whatsapp/inbound/${kind}.bin`,
+            bytes: 1,
+          })),
+        },
+      ])) as any,
+    });
+
+    const messages = await client.pollMessages();
+
+    expect(messages[0]!.attachments?.map((attachment) => attachment.kind)).toEqual([
+      "image",
+      "video",
+      "audio",
+      "voice",
+      "document",
+    ]);
+  });
+
   it("normalizes structured bridge errors", async () => {
     const client = new HttpWhatsAppBridgeClient({
       statePath,

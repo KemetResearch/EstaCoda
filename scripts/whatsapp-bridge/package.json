@@ -6,7 +6,7 @@
   "description": "Isolated WhatsApp transport bridge for EstaCoda.",
   "main": "bridge.js",
   "scripts": {
-    "test": "node --check bridge.js"
+    "test": "node --check bridge.js && node -e \"import('node:fs').then(({existsSync})=>existsSync('bridge.test.js')?import('node:child_process').then(({spawnSync})=>{const result=spawnSync(process.execPath,['--test','bridge.test.js'],{stdio:'inherit'});process.exit(result.status??1);}):undefined)\""
   },
   "dependencies": {
     "@hapi/boom": "^9.1.4",

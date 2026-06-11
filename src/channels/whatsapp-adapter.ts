@@ -51,6 +51,8 @@ export type WhatsAppAdapterOptions = {
   maxTextLength?: number;
   /** Directory to save downloaded media */
   mediaRoot?: string;
+  /** Profile-local directory where the bridge stores inbound WhatsApp media. */
+  inboundMediaRoot?: string;
   /** Profile-local temp root for converted WhatsApp voice notes. */
   voiceTempRoot?: string;
   /** Additional roots from which outbound media may be sent. */
@@ -125,6 +127,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
       pidPath: options.bridgePidPath,
       lockPath: options.bridgeLockPath,
       bridgeDir: options.bridgeDir,
+      inboundMediaDir: this.rawInboundMediaRoot(),
+      inboundMediaParentDir: options.mediaRoot,
     });
   }
 
@@ -188,6 +192,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       const channelMessage = await bridgeMessageToChannelMessage(message, {
         now: this.options.now,
         aliasStorePath: this.options.aliasStorePath,
+        inboundMediaRoot: await this.validatedInboundMediaRoot(),
       });
       if (channelMessage === undefined) continue;
       const batchKey = `${channelMessage.sessionKey.chatId}\0${channelMessage.sender.id}`;
@@ -423,6 +428,18 @@ export class WhatsAppAdapter implements ChannelAdapter {
     return this.allowedMediaRoots();
   }
 
+  private rawInboundMediaRoot(): string | undefined {
+    if (this.options.inboundMediaRoot !== undefined) return this.options.inboundMediaRoot;
+    if (this.options.mediaRoot === undefined) return undefined;
+    return join(this.options.mediaRoot, "whatsapp", "inbound");
+  }
+
+  private async validatedInboundMediaRoot(): Promise<string | undefined> {
+    const root = this.rawInboundMediaRoot();
+    if (root === undefined || this.options.mediaRoot === undefined) return undefined;
+    return ensureDirectoryUnderAllowedRoot(root, [this.options.mediaRoot]);
+  }
+
   private async withBridgeTimeout<T>(operation: () => Promise<T>, message: string): Promise<T> {
     const timeoutMs = this.options.sendTimeoutMs ?? WHATSAPP_SEND_TIMEOUT_MS;
     return new Promise<T>((resolvePromise, reject) => {
@@ -475,6 +492,7 @@ async function bridgeMessageToChannelMessage(
   options: {
     now: (() => Date) | undefined;
     aliasStorePath: string | undefined;
+    inboundMediaRoot: string | undefined;
   }
 ): Promise<ChannelMessage | undefined> {
   await rememberAliasFromInbound(options.aliasStorePath, message);
@@ -483,18 +501,7 @@ async function bridgeMessageToChannelMessage(
     ? normalizeWhatsAppChatId(message.chatId, { isGroup: true })
     : await resolveWhatsAppAlias(options.aliasStorePath, message.chatId);
   if (senderId.length === 0 || chatId.length === 0) return undefined;
-  const attachments = (message.attachments ?? []).map<ChannelAttachment>((attachment) => ({
-    id: attachment.id ?? `${message.messageId}:attachment`,
-    kind: attachment.kind,
-    status: attachment.status,
-    failureCode: attachment.failureCode,
-    failureMessage: attachment.failureMessage,
-    mimeType: attachment.mimeType,
-    originalName: attachment.originalName,
-    localPath: attachment.localPath,
-    bytes: attachment.bytes,
-    metadata: normalizeInboundAttachmentMetadata(attachment),
-  }));
+  const attachments = await normalizeInboundAttachments(message, options.inboundMediaRoot);
 
   return {
     id: message.messageId,
@@ -527,6 +534,47 @@ async function bridgeMessageToChannelMessage(
       ...(message.metadata ?? {}),
     },
   };
+}
+
+async function normalizeInboundAttachments(
+  message: WhatsAppBridgeInboundMessage,
+  inboundMediaRoot: string | undefined
+): Promise<ChannelAttachment[]> {
+  const normalized: ChannelAttachment[] = [];
+  for (const [index, attachment] of (message.attachments ?? []).entries()) {
+    const status = attachment.status ?? "ready";
+    const id = attachment.id ?? `${message.messageId}:attachment:${index}`;
+    if (status === "ready") {
+      if (attachment.localPath === undefined || inboundMediaRoot === undefined) continue;
+      const localPath = await resolveAllowedMediaPath(attachment.localPath, [inboundMediaRoot]).catch(() => undefined);
+      if (localPath === undefined) continue;
+      normalized.push({
+        id,
+        kind: attachment.kind,
+        status,
+        failureCode: attachment.failureCode,
+        failureMessage: attachment.failureMessage,
+        mimeType: attachment.mimeType,
+        originalName: attachment.originalName,
+        localPath,
+        bytes: attachment.bytes,
+        metadata: normalizeInboundAttachmentMetadata(attachment),
+      });
+      continue;
+    }
+    normalized.push({
+      id,
+      kind: attachment.kind,
+      status,
+      failureCode: attachment.failureCode,
+      failureMessage: attachment.failureMessage,
+      mimeType: attachment.mimeType,
+      originalName: attachment.originalName,
+      bytes: attachment.bytes,
+      metadata: normalizeInboundAttachmentMetadata(attachment),
+    });
+  }
+  return normalized;
 }
 
 function batchWhatsAppMessages(messages: ChannelMessage[]): ChannelMessage {
