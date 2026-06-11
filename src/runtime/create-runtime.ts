@@ -20,7 +20,7 @@ import { ProjectContextLoader, renderProjectContext } from "../context/project-c
 import { CronStore } from "../cron/cron-store.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
-import { SubagentRegistry } from "../delegation/subagent-registry.js";
+import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -82,7 +82,7 @@ import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
 import { AgentLoopBuilder } from "./agent-loop-builder.js";
 import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
-import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
+import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel, buildTableViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
 import { collectSetupVerificationReport } from "../setup/verification.js";
 import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
@@ -216,6 +216,7 @@ export type Runtime = {
   }): Promise<CompactResult>;
   inspectMcpServers(): MCPServerSnapshot[];
   hasActiveSubagents?(parentSessionId: string): boolean;
+  activeSubagents?(parentSessionId?: string): OperatorSubagentStatus;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   executeTool?(input: {
     tool: string;
@@ -957,6 +958,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     hasActiveSubagents(parentSessionId) {
       return subagentRegistry.hasActiveSubagents(parentSessionId);
     },
+    activeSubagents(parentSessionId = sessionId) {
+      return subagentRegistry.operatorStatus({ parentSessionId });
+    },
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
@@ -1105,6 +1109,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ].filter((line) => line !== undefined).join("\n");
     },
     getStatus() {
+      const activeSubagents = subagentRegistry.operatorStatus({ parentSessionId: sessionId });
       return buildStatusViewModel({
         agentName: runtimeBranding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
@@ -1120,6 +1125,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
+        sections: activeSubagents.activeCount === 0
+          ? undefined
+          : [
+              buildTableViewModel({
+                title: activeSubagents.omittedCount === 0
+                  ? `Active subagents (${activeSubagents.activeCount})`
+                  : `Active subagents (${activeSubagents.activeCount}, ${activeSubagents.omittedCount} omitted)`,
+                columns: [
+                  { key: "child", header: "Child" },
+                  { key: "parent", header: "Parent" },
+                  { key: "role", header: "Role" },
+                  { key: "depth", header: "Depth", alignment: "right" },
+                  { key: "model", header: "Model" },
+                  { key: "status", header: "Status" },
+                  { key: "duration", header: "Duration" },
+                  { key: "batch", header: "Batch" }
+                ],
+                rows: activeSubagents.subagents.map((subagent) => ({
+                  child: subagent.childSessionId,
+                  parent: subagent.parentSessionId,
+                  role: subagent.role,
+                  depth: subagent.depth,
+                  model: `${subagent.provider}/${subagent.model}`,
+                  status: subagent.cancellationState === undefined
+                    ? subagent.status
+                    : `${subagent.status} (${subagent.cancellationState})`,
+                  duration: formatSubagentDuration(subagent.durationMs),
+                  batch: formatSubagentBatch(subagent.batchId, subagent.taskIndex)
+                }))
+              })
+            ],
       });
     },
     getModelInfo() {
@@ -1200,6 +1236,33 @@ async function resolveCachedStartupUpdateHint(
     installMethod,
     versionStatus
   });
+}
+
+function formatSubagentDuration(durationMs: number): string {
+  const safeMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+  if (safeMs < 1000) {
+    return `${Math.round(safeMs)}ms`;
+  }
+  const seconds = Math.floor(safeMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatSubagentBatch(batchId: string | undefined, taskIndex: number | undefined): string {
+  if (batchId === undefined && taskIndex === undefined) {
+    return "";
+  }
+  if (batchId === undefined) {
+    return `#${taskIndex}`;
+  }
+  if (taskIndex === undefined) {
+    return batchId;
+  }
+  return `${batchId} #${taskIndex}`;
 }
 
 /**

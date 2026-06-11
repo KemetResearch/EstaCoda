@@ -2189,6 +2189,127 @@ describe("ChannelGateway commands", () => {
       const result = await gateway.receive(makeMessage("/status"));
       expect(result.replyText).toContain("independent");
       expect(result.replyText).not.toContain("Attached to:");
+      expect(result.replyText).not.toContain("Active subagents:");
+    });
+
+    it("shows active subagents for the current session without exposing task content", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let firstStarted: (() => void) | undefined;
+      let releaseFirst: (() => void) | undefined;
+      const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve; });
+      const releaseFirstPromise = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          activeSubagents: (parentSessionId = sessionId) => ({
+            activeCount: parentSessionId === sessionId ? 1 : 0,
+            omittedCount: 0,
+            subagents: parentSessionId === sessionId
+              ? [{
+                  childSessionId: "child-operator-1",
+                  parentSessionId: sessionId,
+                  role: "leaf",
+                  depth: 1,
+                  provider: "local",
+                  model: "child-model",
+                  status: "running",
+                  durationMs: 1250,
+                  batchId: "batch-1",
+                  taskIndex: 0
+                }]
+              : []
+          }),
+          handle: async () => {
+            firstStarted?.();
+            await releaseFirstPromise;
+            return runtimeResponse({ text: "done", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const turn = gateway.receive(makeMessage("start a child with token ghp_secret"));
+      try {
+        await firstStartedPromise;
+        const status = await gateway.receive(makeMessage("/status"));
+
+        expect(status.replyText).toContain("Active subagents: 1");
+        expect(status.replyText).toContain("child child-operator-1");
+        expect(status.replyText).toContain("role leaf");
+        expect(status.replyText).toContain("depth 1");
+        expect(status.replyText).toContain("model local/child-model");
+        expect(status.replyText).toContain("status running");
+        expect(status.replyText).toContain("duration 1s");
+        expect(status.replyText).toContain("(batch batch-1 task #0)");
+        expect(status.replyText).not.toContain("ghp_secret");
+        expect(adapter.records.some((record) => record.text === "Queued (position 1)")).toBe(false);
+      } finally {
+        releaseFirst?.();
+        await turn;
+      }
+    });
+
+    it("does not show active subagents from another session", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let firstStarted: (() => void) | undefined;
+      let releaseFirst: (() => void) | undefined;
+      const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve; });
+      const releaseFirstPromise = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          activeSubagents: () => ({
+            activeCount: 1,
+            omittedCount: 0,
+            subagents: [{
+              childSessionId: "child-other-session",
+              parentSessionId: sessionId,
+              role: "leaf",
+              depth: 1,
+              provider: "local",
+              model: "child-model",
+              status: "running",
+              durationMs: 2500
+            }]
+          }),
+          handle: async () => {
+            firstStarted?.();
+            await releaseFirstPromise;
+            return runtimeResponse({ text: "done", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"], allowedChatIds: ["123456", "999"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      const turn = gateway.receive(makeMessage("start"));
+      try {
+        await firstStartedPromise;
+        const status = await gateway.receive(makeMessage("/status", {
+          sessionKey: {
+            platform: "telegram",
+            chatId: "999",
+            userId: "user-1"
+          }
+        }));
+
+        expect(status.replyText).not.toContain("Active subagents:");
+        expect(status.replyText).not.toContain("child-other-session");
+      } finally {
+        releaseFirst?.();
+        await turn;
+      }
     });
   });
 

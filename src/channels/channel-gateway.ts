@@ -80,6 +80,33 @@ function sessionKeyHash(sessionId: string): string {
 
 const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
 
+function formatGatewaySubagentDuration(durationMs: number): string {
+  const safeMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+  if (safeMs < 1000) {
+    return `${Math.round(safeMs)}ms`;
+  }
+  const seconds = Math.floor(safeMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatGatewaySubagentBatch(batchId: string | undefined, taskIndex: number | undefined): string {
+  if (batchId === undefined && taskIndex === undefined) {
+    return "";
+  }
+  if (batchId === undefined) {
+    return `(task #${taskIndex})`;
+  }
+  if (taskIndex === undefined) {
+    return `(batch ${batchId})`;
+  }
+  return `(batch ${batchId} task #${taskIndex})`;
+}
+
 function messageProducedVoiceTranscript(message: ChannelMessage): boolean {
   const metadata = message.metadata?.voiceTranscription;
   if (typeof metadata !== "object" || metadata === null) {
@@ -1136,6 +1163,39 @@ export class ChannelGateway {
     return runtime.hasActiveSubagents(sessionId);
   }
 
+  #activeSubagentStatusLines(message: ChannelMessage, sessionId: string): string[] {
+    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const runtime = this.#activeRuntimeByTurnKey.get(activeTurnKey);
+    const status = runtime?.activeSubagents?.(sessionId);
+    if (status === undefined || status.activeCount === 0) {
+      return [];
+    }
+
+    const lines = [
+      `Active subagents: ${status.activeCount}`,
+      ...status.subagents.map((subagent) => {
+        const state = subagent.cancellationState === undefined
+          ? subagent.status
+          : `${subagent.status}/${subagent.cancellationState}`;
+        const batch = subagent.batchId === undefined && subagent.taskIndex === undefined
+          ? ""
+          : ` ${formatGatewaySubagentBatch(subagent.batchId, subagent.taskIndex)}`;
+        return [
+          `- child ${subagent.childSessionId}`,
+          `role ${subagent.role}`,
+          `depth ${subagent.depth}`,
+          `model ${subagent.provider}/${subagent.model}`,
+          `status ${state}`,
+          `duration ${formatGatewaySubagentDuration(subagent.durationMs)}${batch}`
+        ].join(" | ");
+      })
+    ];
+    if (status.omittedCount > 0) {
+      lines.push(`- ${status.omittedCount} more active subagent(s) omitted`);
+    }
+    return lines;
+  }
+
   async #consumeRuntimeRotation(input: {
     runtime: Runtime | undefined;
     sessionKey: ChannelSessionKey;
@@ -1793,7 +1853,8 @@ export class ChannelGateway {
         `Session: ${sessionId}`,
         pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
         pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
-        `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
+        `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`,
+        ...this.#activeSubagentStatusLines(message, sessionId)
       ].filter((line) => line !== undefined).join("\n");
       await this.#deliverText(adapter, message.sessionKey, text);
 

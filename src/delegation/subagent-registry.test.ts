@@ -135,6 +135,75 @@ describe("SubagentRegistry", () => {
     expect(first.listActiveSubagents()).toHaveLength(1);
     expect(second.listActiveSubagents()).toEqual([]);
   });
+
+  it("returns bounded operator snapshots without mutable internals or goal text", () => {
+    const registry = new SubagentRegistry();
+    const controller = new AbortController();
+    registry.registerSubagent({
+      ...record("sub-1", "parent-1", controller),
+      batchId: "batch-1",
+      taskIndex: 2,
+      depth: 2,
+      role: "orchestrator",
+      provider: "provider-with-a-very-long-name".repeat(8),
+      model: "model-with-a-very-long-name".repeat(8),
+      goal: "Read file excerpt with password=short-secret and report it back",
+      status: "running"
+    });
+
+    const status = registry.operatorStatus({
+      parentSessionId: "parent-1",
+      now: "2026-01-01T00:00:05.250Z"
+    });
+
+    expect(status.activeCount).toBe(1);
+    expect(status.omittedCount).toBe(0);
+    expect(status.subagents[0]).toMatchObject({
+      childSessionId: "child-1",
+      parentSessionId: "parent-1",
+      role: "orchestrator",
+      depth: 2,
+      status: "running",
+      durationMs: 5250,
+      batchId: "batch-1",
+      taskIndex: 2
+    });
+    expect(status.subagents[0]?.provider.length).toBeLessThanOrEqual(120);
+    expect(status.subagents[0]?.model.length).toBeLessThanOrEqual(120);
+    expect(JSON.stringify(status)).not.toContain("abortController");
+    expect(JSON.stringify(status)).not.toContain("signalAborted");
+    expect(JSON.stringify(status)).not.toContain("Read file excerpt");
+    expect(JSON.stringify(status)).not.toContain("short-secret");
+  });
+
+  it("filters and limits operator snapshots while preserving total active count", () => {
+    const registry = new SubagentRegistry();
+    registry.registerSubagent(record("sub-1", "parent-1"));
+    registry.registerSubagent(record("sub-2", "parent-1"));
+    registry.registerSubagent(record("sub-3", "parent-2"));
+
+    const status = registry.operatorStatus({ parentSessionId: "parent-1", limit: 1 });
+
+    expect(status.activeCount).toBe(2);
+    expect(status.subagents).toHaveLength(1);
+    expect(status.omittedCount).toBe(1);
+    expect(status.subagents.map((item) => item.childSessionId)).toEqual(["child-1"]);
+  });
+
+  it("reports timeout and cancellation state in operator snapshots", () => {
+    const registry = new SubagentRegistry();
+    const aborted = new AbortController();
+    aborted.abort("cancelled");
+    registry.registerSubagent({ ...record("sub-1", "parent-1", aborted), status: "running" });
+    registry.registerSubagent({ ...record("sub-2", "parent-1"), status: "cancelling" });
+    registry.registerSubagent({ ...record("sub-3", "parent-1"), status: "timeout" });
+
+    expect(registry.operatorStatus({ parentSessionId: "parent-1" }).subagents.map((item) => item.cancellationState)).toEqual([
+      "aborted",
+      "cancelling",
+      "timeout"
+    ]);
+  });
 });
 
 function record(subagentId: string, parentSessionId: string, abortController = new AbortController()) {

@@ -2639,6 +2639,90 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("exposes bounded active subagent operator status during child execution", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    let providerStarted: (() => void) | undefined;
+    let providerRelease: (() => void) | undefined;
+    const providerStartedPromise = new Promise<void>((resolve) => { providerStarted = resolve; });
+    const providerReleasePromise = new Promise<void>((resolve) => { providerRelease = resolve; });
+    const model: ModelProfile = {
+      id: "local-child",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async () => {
+        providerStarted?.();
+        await providerReleasePromise;
+        return {
+          ok: true,
+          provider: "local",
+          model: "local-child",
+          content: "Child final answer"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const delegated = runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Inspect api_key=sk-secret and do not expose it",
+          context: "Context with token ghp_secret should stay out of status."
+        }
+      });
+      await providerStartedPromise;
+
+      const status = runtime.activeSubagents?.();
+      expect(status).toBeDefined();
+      expect(status?.activeCount).toBe(1);
+      expect(status?.subagents[0]).toMatchObject({
+        parentSessionId: runtime.sessionId,
+        role: "leaf",
+        depth: 1,
+        provider: "local",
+        model: "local-child",
+        status: "running"
+      });
+      expect(status?.subagents[0]).not.toHaveProperty("abortController");
+      expect(JSON.stringify(status)).not.toContain("sk-secret");
+      expect(JSON.stringify(status)).not.toContain("ghp_secret");
+      expect(JSON.stringify(status)).not.toContain("Inspect api_key");
+
+      const runtimeStatus = runtime.getStatus();
+      expect(runtimeStatus.sections?.[0]).toMatchObject({
+        kind: "table",
+        title: "Active subagents (1)"
+      });
+      expect(JSON.stringify(runtimeStatus)).not.toContain("Inspect api_key");
+
+      providerRelease?.();
+      const execution = await delegated;
+      expect(execution?.result?.metadata).toMatchObject({ status: "completed" });
+      expect(runtime.activeSubagents?.().activeCount).toBe(0);
+    } finally {
+      providerRelease?.();
+      await runtime.dispose();
+    }
+  });
+
   it("runs same-provider child model overrides through filtered child tool schemas", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();
