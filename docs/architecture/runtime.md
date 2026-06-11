@@ -110,6 +110,41 @@ The route key is `assessor`. Runtime route construction uses `resolveAuxiliaryMo
 
 Gateway runtime construction receives the gateway-owned security policy and approval controller context. `ChannelGateway` remains the orchestrator for remote approval resolution and runtime-cache invalidation; adapters do not mutate approval state. Gateway global model switching writes profile config only when channel authorization, runtime workspace/profile trust, and profile config path proof are available; otherwise it returns terminal guidance and does not write.
 
+### Delegation Runtime
+
+`createRuntime` owns a runtime-scoped `SubagentRegistry`, `DelegationManager`, and `DefaultChildAgentLoopFactory`. Child loops are built through `AgentLoopBuilder` so the parent and child construction paths share provider registry/executor, MCP registrations, skill metadata, memory stores, process manager, browser backend, artifact store, trust store, and loaded config without restarting parent-owned MCP servers.
+
+Child construction is still session-bound. Each child gets a fresh `SessionRuntimeContext`, `ToolRegistry`, `ToolExecutor`, `ToolCallPlanner`, `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`, and `AgentLoop`. Parent session-bound services that capture session ID, such as recall and memory-file compaction, are created per built session rather than shared from the parent.
+
+The factory creates a child session with `parentSessionId`, role/depth metadata, effective tool metadata, stripped/blocked diagnostics, suppressed runtime features, and `approvalMode: "non-interactive-fail-closed"`. Child runtime suppression defaults disable memory recall, skill learning, and session compression, with bounded project context. Child transcripts are excluded from parent recall/search and prompt packing by default.
+
+Tool authority is resolved before provider schemas are built:
+
+1. Start with tools visible to the parent.
+2. Intersect with child candidate tools.
+3. Keep only default read-only local/network risk classes unless a delegation-depth exception allows `delegate_task` for an orchestrator below `maxSpawnDepth`.
+4. Strip default blocked exact names and prefixes.
+5. Strip excluded toolsets: browser, media, and MCP by default.
+6. Apply explicit `allowedTools` / `allowedToolsets` as further narrowing, not expansion.
+
+The child approval policy evaluates hardline command denies first, then denies anything that would ask, consume parent approval grants, inherit pending approval queues, or depend on persisted/session approval behavior. Parent-mediated child approvals are not shipped.
+
+`DelegationManager` records `delegation-started` / `delegation-finished` events additively, registers active children while they run, relays bounded progress events, and cleans registry state on success, cancellation, timeout, or parent abort. Batch delegation runs children through a bounded concurrency runner and preserves input order. Aggregate batch status may be `failed`, while per-child metadata preserves `timeout` and `cancelled`. Parent-visible result metadata includes structured status/reason fields, child session ids, effective child tools/toolsets, stripped/blocked diagnostics, role/depth, task index/batch id, token usage where the provider reports it, and usage-unavailable flags where it does not.
+
+Gateway interrupt protection is runtime/session scoped. `ChannelGateway` checks the active runtime's `hasActiveSubagents(parentSessionId)` for the active turn; under interrupt busy policy, ordinary messages queue while subagents are active. `/stop`, `/approve`, `/deny`, `/status`, and existing control flows continue to bypass normal blocked-message queues.
+
+Diagnostics for child timeout/stale heartbeat are written only under the configured profile-local diagnostics root. They store bounded task previews, hashes, effective tool names, provider/model labels, last safe event summaries, and timing metadata. Full prompt previews are disabled by default.
+
+Delegation outcome memory is optional and disabled by default. When enabled, it records bounded delegated-task previews and deterministic status/reason summaries such as `completed`, `timeout`, or `failed: provider-error`. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+
+File-state tracking records structured reads and writes performed through tracked file tools. Before delegation, the parent read set is snapshotted with a monotonic tracker cursor. If a child later writes, replaces, or deletes a file the parent had already read, the parent result receives an advisory stale-file warning. The warning is metadata only and does not change delegation status. Shell/process writes are not claimed as tracked unless they flow through the file-state tracker.
+
+Child model overrides are supported for same-provider routes and reviewed cross-provider routes. Cross-provider child routes are derived from normalized target provider config, preserve route fields such as `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs`, and disable fallback routes for the overridden child. Credentials resolve through the existing provider config and `apiKeyEnv` path; credential pools are not introduced. `authMethod: "none"` does not require credentials, and `enableNetwork: false` rejects before child execution.
+
+`terminal.inspect` is shipped as a read-only-local inspection tool and may be visible to children only through the normal parent-visible, read-only child policy. It executes a narrow argv-only command set without a shell and keeps `terminal.run` excluded from default child schemas.
+
+This shipped delegation path completes MVP functional parity and the full delegation capability set described for this branch, with two explicit non-shipped boundaries: parent-mediated child approvals and durable or estimated USD cost accounting. Structured token usage rollup is shipped; session-level spend accounting is deferred until there is a stable cost-accounting contract.
+
 ### Created subsystems
 
 1. `WorkspaceTrustStore`

@@ -1,4 +1,5 @@
 import type { EnvironmentType } from "./security.js";
+import type { RuntimeEventSink } from "./runtime-event.js";
 import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
 
 export type ToolRiskClass =
@@ -52,6 +53,7 @@ export type ToolResult = {
 export type ToolExecutionContext = {
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
+  onEvent?: RuntimeEventSink;
 };
 
 export type ToolHandler<TInput = unknown> = (input: TInput, context?: ToolExecutionContext) => Promise<ToolResult>;

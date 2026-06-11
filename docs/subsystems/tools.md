@@ -148,6 +148,84 @@ The schema exposes result/message-count knobs only: `limit` and `window`. It mus
 
 Output is bounded, redacted, source-labeled, and explicitly marked as untrusted historical reference context. Historical content is useful for locating prior work, but it is not current instruction authority. Current user instructions and runtime policy outrank historical session content. Profile/workspace filtering is applied where available, active/current session exclusion is used where configured or available, and missing sessions/messages return structured diagnostics.
 
+## Delegation Tool
+
+`delegate_task` creates real child agent loops for bounded subtasks. A child is recorded as a session with `parentSessionId` and delegated-child metadata. The parent receives the structured child result and final answer; child transcripts are not pulled into parent recall, session search, memory, or prompt packing by default.
+
+Single-task input:
+
+```json
+{
+  "task": "Inspect the failing test and summarize the likely cause.",
+  "context": "Keep the answer short.",
+  "role": "leaf"
+}
+```
+
+Batch input:
+
+```json
+{
+  "tasks": [
+    { "task": "Inspect config tests." },
+    { "task": "Inspect runtime tests.", "role": "leaf" },
+    { "task": "Inspect gateway tests.", "allowedTools": ["file.read", "file.grep"] }
+  ]
+}
+```
+
+When `recoverJsonStringTasks` is enabled, `tasks` may be a JSON string containing an array of task objects. Recovery is strict: each object must contain only `task`, `context`, `allowedToolsets`, `allowedTools`, `role`, and `modelOverride`; `context` must be a string when present; tool lists must be arrays of strings; `role` must be `leaf` or `orchestrator`; model overrides must be bounded strings.
+
+Default child capability is risk-class based. After intersecting with parent-visible tools, children receive tools with `riskClass: "read-only-local"` or `riskClass: "read-only-network"` unless exact names, prefixes, or excluded toolsets strip them. Browser, media, and MCP toolsets are excluded by default. Workspace-write, shared-state mutation, credential, process-control, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, and dangerous shell/process tools are stripped before provider schemas are built. `terminal.run` is excluded by default. `terminal.inspect` is shipped as a read-only-local inspection tool and may be child-visible only when the parent can see it and the child read-only policy keeps it.
+
+Roles and depth are enforced before child creation and again at tool-schema construction. `leaf` children cannot see `delegate_task`. `orchestrator` children can see `delegate_task` only while their depth remains below `maxSpawnDepth`. Over-depth delegation fails before a child session is created.
+
+Child runtimes use non-interactive fail-closed approval policy. Hardline denies run first. Any action that would ask, consume parent approval grants, inherit pending approval queues, or depend on persisted/session approvals is denied instead of prompting.
+
+Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. Results are returned in input order, while per-child status preserves `timeout` and `cancelled` even when the aggregate batch status is `failed`. `delegate_task` schema text is generated from the active delegation config, including batch size, concurrency, and spawn-depth limits. A per-turn `maxDelegateCallsPerTurn` cap bounds multiple separate `delegate_task` tool calls from one provider turn.
+
+Timeout and heartbeat diagnostics are structured and bounded. Diagnostics default to enabled with `includePromptPreview: false`; timeout files are written under the profile-local diagnostics root when available, include task hashes/previews and safe event summaries, and do not include full prompts by default. Progress relay and heartbeat events are bounded and parent-visible without exposing raw provider token streams.
+
+Delegation results include structured status/reason metadata, child session ids where created, effective child tools/toolsets, stripped/blocked diagnostics, role/depth, batch indexes, timeout/cancelled details, and provider token usage when available. Batch usage rolls up numeric token fields and reports unavailable usage per child. Durable or estimated USD cost accounting is not shipped.
+
+Delegation outcome memory is configurable and disabled by default. When enabled, the memory provider records a bounded delegated-task preview and deterministic status/reason summary only. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+
+Tracked file tools record structured read/write operations. Before delegation, the parent read set is snapshotted; if a child later writes, replaces, or deletes a previously read path, the result includes an advisory stale-file warning. The warning does not change status. Shell/process writes are not detected unless represented through the file-state tracker.
+
+Child model overrides support same-provider model selection and reviewed cross-provider routes. Target provider config is preserved, credentials resolve through the existing `apiKeyEnv` path, `authMethod: "none"` is allowed when configured, `enableNetwork: false` rejects before child execution, and child fallbacks are disabled for overrides. Metadata is bounded/redacted.
+
+## Terminal Inspection Tool
+
+`terminal.inspect` is a read-only-local terminal inspection tool. It is not a general shell and does not replace `terminal.run`.
+
+Input is argv-only:
+
+```json
+{ "argv": ["git", "status", "--short"] }
+```
+
+Allowed commands are:
+
+- `pwd`
+- `ls`
+- `cat`
+- `head`
+- `tail`
+- `wc`
+- `stat`
+- `file`
+- `git status`
+- `git diff`
+- `git log`
+- `git branch`
+- `git remote`
+- `git ls-files`
+- `git grep`
+
+`git show` is not allowed. Git commands are hardened against repo/global/system helper execution, run with disabled prompts/pagers/editors, and reject revision/object path syntax that could escape the workspace.
+
+The tool rejects shell wrappers, command chaining, pipes, redirection, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace root. Output is bounded and redacted before it is returned or persisted. `terminal.inspect` does not make shell/process writes visible to stale-file warnings.
+
 ## Tool Execution
 
 1. Provider requests tool call
@@ -185,6 +263,8 @@ When inspecting tool replay issues, check these fields:
 - Stored-result truncation.
 - Native replay never replays a partial multi-call turn.
 - Native replay diagnostics never record raw arguments or tool results.
+- Delegation child schemas are built after parent intersection and child policy stripping.
+- Delegation child approval policy fails closed and does not inherit parent approval grants.
 
 ## Tool Plan Dependency Model
 

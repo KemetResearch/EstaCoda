@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -12,7 +13,7 @@ import { WorkspaceApprovalController } from "../security/workspace-approval-cont
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
 import type { BrowserBackend } from "../contracts/browser.js";
-import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
+import type { ModelProfile, ProviderAdapter, ProviderCompletionOptions, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionToolContext } from "../contracts/tool-context.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
@@ -312,9 +313,9 @@ async function writeProfileMemoryFixture(
 
 describe("createRuntime provider turn budgets", () => {
   it("passes the expanded default budgets to ProviderTurnLoop", async () => {
-    const source = await readFile(new URL("./create-runtime.ts", import.meta.url), "utf8");
+    const source = await readFile(new URL("./agent-loop-builder.ts", import.meta.url), "utf8");
 
-    expect(source).toMatch(/const providerTurnLoop = new ProviderTurnLoop\(\{[\s\S]*?budgets: \{\s*maxProviderIterations: 45,\s*maxProviderToolCalls: 100,\s*maxRepeatedToolFailures: 5,\s*maxProviderWallClockMs: 300_000\s*\}/u);
+    expect(source).toMatch(/new ProviderTurnLoop\(options\)[\s\S]*?budgets: \{\s*maxProviderIterations: 45,\s*maxProviderToolCalls: 100,\s*maxRepeatedToolFailures: 5,\s*maxProviderWallClockMs: 300_000\s*\}/u);
   });
 });
 
@@ -343,7 +344,7 @@ const providerToolNameGroups = [
       "browser.navigate"
     ]
   },
-  { providerName: "workspace", toolNames: ["file.read", "file.write", "file.replace", "file.search", "terminal.run"] },
+  { providerName: "workspace", toolNames: ["file.read", "file.write", "file.replace", "file.search", "terminal.inspect", "terminal.run"] },
   { providerName: "glob", toolNames: ["file.glob"] },
   { providerName: "grep", toolNames: ["file.grep"] },
   { providerName: "notebook", toolNames: ["notebook.edit"] },
@@ -1155,8 +1156,25 @@ describe("createRuntime MCP trust gating", () => {
           },
           {
             "maxResultSizeChars": 16000,
-            "name": "terminal.run",
+            "name": "terminal.inspect",
             "orderIndex": 25,
+            "providerKind": "session",
+            "providerPhase": "pre-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "argv",
+            ],
+            "toolsets": [
+              "shell-readonly",
+              "coding",
+              "research",
+            ],
+          },
+          {
+            "maxResultSizeChars": 16000,
+            "name": "terminal.run",
+            "orderIndex": 26,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1175,7 +1193,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "file.glob",
-            "orderIndex": 26,
+            "orderIndex": 27,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1197,7 +1215,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 150000,
             "name": "file.grep",
-            "orderIndex": 27,
+            "orderIndex": 28,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1230,7 +1248,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "notebook.edit",
-            "orderIndex": 28,
+            "orderIndex": 29,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1251,7 +1269,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "media.probe-ffmpeg",
-            "orderIndex": 29,
+            "orderIndex": 30,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1265,7 +1283,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "media.inspect",
-            "orderIndex": 30,
+            "orderIndex": 31,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1282,7 +1300,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "media.extract-frame",
-            "orderIndex": 31,
+            "orderIndex": 32,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1300,7 +1318,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "artifact.record",
-            "orderIndex": 32,
+            "orderIndex": 33,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1319,7 +1337,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "voice.speak",
-            "orderIndex": 33,
+            "orderIndex": 34,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1338,7 +1356,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "voice.transcribe",
-            "orderIndex": 34,
+            "orderIndex": 35,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1357,7 +1375,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "image.generate",
-            "orderIndex": 35,
+            "orderIndex": 36,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1376,7 +1394,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "vision.analyze",
-            "orderIndex": 36,
+            "orderIndex": 37,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1395,7 +1413,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "process.start",
-            "orderIndex": 37,
+            "orderIndex": 38,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1412,7 +1430,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "process.list",
-            "orderIndex": 38,
+            "orderIndex": 39,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1427,7 +1445,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "process.logs",
-            "orderIndex": 39,
+            "orderIndex": 40,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1445,7 +1463,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "process.stop",
-            "orderIndex": 40,
+            "orderIndex": 41,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1463,7 +1481,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.status",
-            "orderIndex": 41,
+            "orderIndex": 42,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1478,7 +1496,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.grant",
-            "orderIndex": 42,
+            "orderIndex": 43,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1495,7 +1513,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.revoke",
-            "orderIndex": 43,
+            "orderIndex": 44,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1510,7 +1528,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "config.provider.status",
-            "orderIndex": 44,
+            "orderIndex": 45,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1523,7 +1541,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.security.status",
-            "orderIndex": 45,
+            "orderIndex": 46,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1536,7 +1554,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.compression.status",
-            "orderIndex": 46,
+            "orderIndex": 47,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1549,7 +1567,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.security.setup",
-            "orderIndex": 47,
+            "orderIndex": 48,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1568,7 +1586,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.web.setup",
-            "orderIndex": 48,
+            "orderIndex": 49,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1585,7 +1603,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.browser.setup",
-            "orderIndex": 49,
+            "orderIndex": 50,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1605,7 +1623,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.mcp.status",
-            "orderIndex": 50,
+            "orderIndex": 51,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1619,7 +1637,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.mcp.setup",
-            "orderIndex": 51,
+            "orderIndex": 52,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1654,7 +1672,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.telegram.setup",
-            "orderIndex": 52,
+            "orderIndex": 53,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1675,7 +1693,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.telegram.status",
-            "orderIndex": 53,
+            "orderIndex": 54,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1688,7 +1706,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.image.status",
-            "orderIndex": 54,
+            "orderIndex": 55,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1702,7 +1720,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "config.provider.setup",
-            "orderIndex": 55,
+            "orderIndex": 56,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1723,7 +1741,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.image.setup",
-            "orderIndex": 56,
+            "orderIndex": 57,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1745,7 +1763,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "cronjob",
-            "orderIndex": 57,
+            "orderIndex": 58,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1776,7 +1794,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "memory.curate",
-            "orderIndex": 58,
+            "orderIndex": 59,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1796,7 +1814,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "memory.read",
-            "orderIndex": 59,
+            "orderIndex": 60,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1815,7 +1833,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "memory.search",
-            "orderIndex": 60,
+            "orderIndex": 61,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1834,7 +1852,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "memory.file_compact",
-            "orderIndex": 61,
+            "orderIndex": 62,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1851,7 +1869,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "memory.file_compaction_restore",
-            "orderIndex": 62,
+            "orderIndex": 63,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1868,7 +1886,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "session_search",
-            "orderIndex": 63,
+            "orderIndex": 64,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1891,7 +1909,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.list",
-            "orderIndex": 64,
+            "orderIndex": 65,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -1907,7 +1925,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 24000,
             "name": "skill.view",
-            "orderIndex": 65,
+            "orderIndex": 66,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -1924,22 +1942,6 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "skill.inspect",
-            "orderIndex": 66,
-            "providerKind": "session",
-            "providerPhase": "post-skill-visibility",
-            "requiredConfig": undefined,
-            "riskClass": "read-only-local",
-            "schemaAliasOrder": [
-              "name",
-            ],
-            "toolsets": [
-              "core",
-              "research",
-            ],
-          },
-          {
-            "maxResultSizeChars": 12000,
-            "name": "skill.eval",
             "orderIndex": 67,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
@@ -1955,8 +1957,24 @@ describe("createRuntime MCP trust gating", () => {
           },
           {
             "maxResultSizeChars": 12000,
-            "name": "skill.usage",
+            "name": "skill.eval",
             "orderIndex": 68,
+            "providerKind": "session",
+            "providerPhase": "post-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "name",
+            ],
+            "toolsets": [
+              "core",
+              "research",
+            ],
+          },
+          {
+            "maxResultSizeChars": 12000,
+            "name": "skill.usage",
+            "orderIndex": 69,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -1972,7 +1990,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.observe",
-            "orderIndex": 69,
+            "orderIndex": 70,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -1996,7 +2014,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.propose_patch",
-            "orderIndex": 70,
+            "orderIndex": 71,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2019,7 +2037,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.list_proposals",
-            "orderIndex": 71,
+            "orderIndex": 72,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2036,7 +2054,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "skill.review_proposals",
-            "orderIndex": 72,
+            "orderIndex": 73,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2053,7 +2071,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.review_proposal",
-            "orderIndex": 73,
+            "orderIndex": 74,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2070,7 +2088,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.approve_patch",
-            "orderIndex": 74,
+            "orderIndex": 75,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2088,7 +2106,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.reject_patch",
-            "orderIndex": 75,
+            "orderIndex": 76,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2105,7 +2123,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.promote_patch",
-            "orderIndex": 76,
+            "orderIndex": 77,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2123,7 +2141,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.create",
-            "orderIndex": 77,
+            "orderIndex": 78,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2146,7 +2164,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.patch",
-            "orderIndex": 78,
+            "orderIndex": 79,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2169,7 +2187,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.edit",
-            "orderIndex": 79,
+            "orderIndex": 80,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2187,7 +2205,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.delete",
-            "orderIndex": 80,
+            "orderIndex": 81,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2204,7 +2222,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.rollback",
-            "orderIndex": 81,
+            "orderIndex": 82,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2223,7 +2241,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.reset",
-            "orderIndex": 82,
+            "orderIndex": 83,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2241,7 +2259,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.write_file",
-            "orderIndex": 83,
+            "orderIndex": 84,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2262,7 +2280,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.remove_file",
-            "orderIndex": 84,
+            "orderIndex": 85,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2281,7 +2299,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "skill.import",
-            "orderIndex": 85,
+            "orderIndex": 86,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2298,7 +2316,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.export",
-            "orderIndex": 86,
+            "orderIndex": 87,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2316,7 +2334,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "knowledge.memory.inspect",
-            "orderIndex": 87,
+            "orderIndex": 88,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2336,7 +2354,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "knowledge.memory.deactivate",
-            "orderIndex": 88,
+            "orderIndex": 89,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2352,7 +2370,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "knowledge.code.query",
-            "orderIndex": 89,
+            "orderIndex": 90,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2369,7 +2387,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "delegate_task",
-            "orderIndex": 90,
+            "orderIndex": 91,
             "providerKind": "session",
             "providerPhase": "post-tool-executor",
             "requiredConfig": undefined,
@@ -2378,7 +2396,10 @@ describe("createRuntime MCP trust gating", () => {
               "allowedTools",
               "allowedToolsets",
               "context",
+              "modelOverride",
+              "role",
               "task",
+              "tasks",
             ],
             "toolsets": [
               "core",
@@ -2389,7 +2410,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 48000,
             "name": "execute_code",
-            "orderIndex": 91,
+            "orderIndex": 92,
             "providerKind": "session",
             "providerPhase": "post-tool-executor",
             "requiredConfig": undefined,
@@ -2434,6 +2455,7 @@ describe("createRuntime MCP trust gating", () => {
           "file.write",
           "file.replace",
           "file.search",
+          "terminal.inspect",
           "terminal.run",
           "file.glob",
           "file.grep",
@@ -2521,6 +2543,654 @@ describe("createRuntime MCP trust gating", () => {
         tool: "terminal.run",
         toolInput: { command: "echo hidden" }
       })).resolves.toBeUndefined();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("runs delegate_task through a real child AgentLoop and records child metadata", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-child",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: "local-child",
+          content: "Child final answer",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 5,
+            totalTokens: 17
+          }
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Inspect delegated runtime",
+          context: "Use bounded context only."
+        }
+      });
+      const metadata = execution?.result?.metadata as { childSessionId?: string; status?: string; usage?: Record<string, unknown> } | undefined;
+      const childSessionId = metadata?.childSessionId;
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(metadata).toMatchObject({
+        status: "completed",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 5,
+          totalTokens: 17
+        }
+      });
+      expect(typeof childSessionId).toBe("string");
+      const childSession = await sessionDb.getSession(childSessionId!);
+      expect(childSession).toMatchObject({
+        parentSessionId: runtime.sessionId,
+        metadata: expect.objectContaining({
+          kind: "delegated-child",
+          parentSessionId: runtime.sessionId,
+          role: "leaf",
+          depth: 1,
+          approvalMode: "non-interactive-fail-closed",
+          suppressedRuntimeFeatures: expect.arrayContaining(["memoryRecall", "skillLearning", "sessionCompression"])
+        })
+      });
+      expect(childSession?.metadata?.effectiveAllowedTools).toEqual(expect.arrayContaining(["file.read", "file.search", "terminal.inspect"]));
+      expect(childSession?.metadata?.strippedTools).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "delegate_task" }),
+        expect.objectContaining({ name: "execute_code" }),
+        expect.objectContaining({ name: "terminal.run" }),
+        expect.objectContaining({ name: "file.write" })
+      ]));
+      const childMessages = await sessionDb.listMessages(childSessionId!);
+      expect(childMessages.filter((message) => message.role === "user").map((message) => message.content)).toEqual([
+        [
+          "Delegated task: Inspect delegated runtime",
+          "",
+          "Context: Use bounded context only."
+        ].join("\n")
+      ]);
+      expect(childMessages.some((message) => message.role === "agent" && message.content.includes("Child final answer"))).toBe(true);
+      expect(providerRequests[0]?.messages.some((message) =>
+        typeof message.content === "string" && message.content.includes("Inspect delegated runtime")
+      )).toBe(true);
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search", "terminal_inspect"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining([
+        "delegate_task",
+        "execute_code",
+        "terminal_run",
+        "file_write",
+        "process_start",
+        "process_stop"
+      ]));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("exposes bounded active subagent operator status during child execution", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    let providerStarted: (() => void) | undefined;
+    let providerRelease: (() => void) | undefined;
+    const providerStartedPromise = new Promise<void>((resolve) => { providerStarted = resolve; });
+    const providerReleasePromise = new Promise<void>((resolve) => { providerRelease = resolve; });
+    const model: ModelProfile = {
+      id: "local-child",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async () => {
+        providerStarted?.();
+        await providerReleasePromise;
+        return {
+          ok: true,
+          provider: "local",
+          model: "local-child",
+          content: "Child final answer"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const delegated = runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Inspect api_key=sk-secret and do not expose it",
+          context: "Context with token ghp_secret should stay out of status."
+        }
+      });
+      await providerStartedPromise;
+
+      const status = runtime.activeSubagents?.();
+      expect(status).toBeDefined();
+      expect(status?.activeCount).toBe(1);
+      expect(status?.subagents[0]).toMatchObject({
+        parentSessionId: runtime.sessionId,
+        role: "leaf",
+        depth: 1,
+        provider: "local",
+        model: "local-child",
+        status: "running"
+      });
+      expect(status?.subagents[0]).not.toHaveProperty("abortController");
+      expect(JSON.stringify(status)).not.toContain("sk-secret");
+      expect(JSON.stringify(status)).not.toContain("ghp_secret");
+      expect(JSON.stringify(status)).not.toContain("Inspect api_key");
+
+      const runtimeStatus = runtime.getStatus();
+      expect(runtimeStatus.sections?.[0]).toMatchObject({
+        kind: "table",
+        title: "Active subagents (1)"
+      });
+      expect(JSON.stringify(runtimeStatus)).not.toContain("Inspect api_key");
+
+      providerRelease?.();
+      const execution = await delegated;
+      expect(execution?.result?.metadata).toMatchObject({ status: "completed" });
+      expect(runtime.activeSubagents?.().activeCount).toBe(0);
+    } finally {
+      providerRelease?.();
+      await runtime.dispose();
+    }
+  });
+
+  it("runs same-provider child model overrides through filtered child tool schemas", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel, { ...parentModel, id: "local-child-override" }],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: request.model,
+          content: "Override child answer"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      modelFallbackRoutes: [
+        {
+          provider: "local",
+          id: "local-fallback",
+          profile: { ...parentModel, id: "local-fallback" }
+        }
+      ],
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://configured.deepseek.example/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          apiMode: "custom_openai_compatible",
+          authMethod: "api_key",
+          enableNetwork: true
+        }
+      },
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use override",
+          modelOverride: { provider: "local", model: "local-child-override" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        childSessionId?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+      const childSession = await sessionDb.getSession(metadata?.childSessionId ?? "");
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(providerRequests[0]?.provider).toBe("local");
+      expect(providerRequests[0]?.model).toBe("local-child-override");
+      expect(metadata?.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "local",
+        model: "local-child-override",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(childSession?.metadata?.modelOverride).toEqual(metadata?.modelOverride);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search", "terminal_inspect"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining(["delegate_task", "terminal_run", "file_write"]));
+      expect(JSON.stringify(metadata?.modelOverride)).not.toContain("KEY");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("runs reviewed cross-provider child model overrides with target provider routing", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const providerOptions: ProviderCompletionOptions[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const targetModel: ModelProfile = {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 64_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: request.model,
+          content: "Unexpected parent provider answer"
+        };
+      }
+    });
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: () => [targetModel],
+      complete: async (request, completionOptions) => {
+        providerRequests.push(request);
+        providerOptions.push(completionOptions ?? {});
+        return {
+          ok: true,
+          provider: "deepseek",
+          model: request.model,
+          content: "Cross-provider child answer"
+        };
+      }
+    });
+    const previous = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "secret-deepseek-value";
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      modelFallbackRoutes: [
+        {
+          provider: "local",
+          id: "local-fallback",
+          profile: { ...parentModel, id: "local-fallback" }
+        }
+      ],
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://configured.deepseek.example/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          apiMode: "custom_openai_compatible",
+          authMethod: "api_key",
+          enableNetwork: true
+        }
+      },
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use cross-provider override",
+          modelOverride: { provider: "deepseek", model: "deepseek-chat" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        childSessionId?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+      const childSession = await sessionDb.getSession(metadata?.childSessionId ?? "");
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(providerRequests).toHaveLength(1);
+      expect(providerRequests[0]?.provider).toBe("deepseek");
+      expect(providerRequests[0]?.model).toBe("deepseek-chat");
+      expect(providerOptions[0]?.endpoint).toMatchObject({
+        baseUrl: "https://configured.deepseek.example/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      });
+      expect(metadata?.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(childSession?.metadata?.modelOverride).toEqual(metadata?.modelOverride);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search", "terminal_inspect"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining(["delegate_task", "terminal_run", "file_write"]));
+      expect(JSON.stringify(metadata?.modelOverride)).not.toContain("secret-deepseek-value");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DEEPSEEK_API_KEY;
+      } else {
+        process.env.DEEPSEEK_API_KEY = previous;
+      }
+      await runtime.dispose();
+    }
+  });
+
+  it("blocks cross-provider child model overrides with missing target credentials before execution", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const targetModel: ModelProfile = {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 64_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return { ok: true, provider: "local", model: request.model, content: "parent" };
+      }
+    });
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_MISSING_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: () => [targetModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return { ok: true, provider: "deepseek", model: request.model, content: "child" };
+      }
+    });
+    delete process.env.DEEPSEEK_MISSING_API_KEY;
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_MISSING_API_KEY",
+          enableNetwork: true
+        }
+      },
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use cross-provider override",
+          modelOverride: { provider: "deepseek", model: "deepseek-chat" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        status?: string;
+        reason?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+
+      expect(execution?.result?.ok).toBe(false);
+      expect(metadata).toMatchObject({
+        status: "blocked",
+        reason: "model-override-unsupported",
+        modelOverride: {
+          requested: true,
+          status: "rejected",
+          provider: "deepseek",
+          model: "deepseek-chat",
+          reason: "missing-credentials"
+        }
+      });
+      expect(providerRequests).toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("reflects delegation config limits in delegate_task provider schema descriptions", async () => {
+    const options = await minimalRuntimeOptions();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-schema",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: model.id,
+          content: "ok"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: model.id, profile: model },
+      providerRegistry: registry,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        maxConcurrentChildren: 2,
+        maxBatchTasks: 4,
+        maxSpawnDepth: 3
+      }
+    });
+
+    try {
+      await runtime.handle({ text: "hello", channel: "cli", trustedWorkspace: true });
+      const delegateSchema = (providerRequests[0]?.tools as Array<{ function: { name: string; description: string } }> | undefined)?.find((tool) =>
+        tool.function.name === "delegate_task"
+      );
+      expect(delegateSchema?.function.description).toContain("up to 4 batch tasks");
+      expect(delegateSchema?.function.description).toContain("at most 2 children");
+      expect(delegateSchema?.function.description).toContain("limited to 3");
+      expect(JSON.stringify(delegateSchema)).not.toContain(options.workspaceRoot);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("lets a child provider request a safe tool and receive tool feedback", async () => {
+    const options = await minimalRuntimeOptions();
+    await writeFile(join(options.workspaceRoot, "needle.txt"), "needle-value");
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const model: ModelProfile = {
+      id: "local-child-tools",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const responses = [
+      {
+        ok: true,
+        provider: "local" as const,
+        model: "local-child-tools",
+        content: "",
+        finishReason: "tool_calls" as const,
+        raw: {
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "call-1",
+                    function: {
+                      name: "file.search",
+                      arguments: JSON.stringify({ query: "needle-value" })
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        ok: true,
+        provider: "local" as const,
+        model: "local-child-tools",
+        content: "Tool feedback received."
+      }
+    ];
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [model],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return responses.shift()!;
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model,
+      primaryModelRoute: { provider: "local", id: "local-child-tools", profile: model },
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Find the needle"
+        }
+      });
+
+      expect(execution?.result?.metadata).toMatchObject({
+        status: "completed",
+        summary: "Tool feedback received."
+      });
+      expect(providerRequests.length).toBeGreaterThanOrEqual(2);
+      expect(providerToolNames(providerRequests[0]?.tools)).toContain("file_search");
+      const metadata = execution?.result?.metadata as { childSessionId?: string } | undefined;
+      const childMessages = await sessionDb.listMessages(metadata!.childSessionId!);
+      expect(childMessages.some((message) => message.role === "tool" && message.metadata?.tool === "file.search")).toBe(true);
+      const childEvents = await sessionDb.listEvents(metadata!.childSessionId!);
+      expect(childEvents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "tool-called", tool: "file.search" }),
+        expect.objectContaining({ kind: "tool-result", tool: "file.search" })
+      ]));
     } finally {
       await runtime.dispose();
     }
@@ -3710,3 +4380,14 @@ describe("createRuntime SQLite session lifecycle", () => {
     expect(disposed).toBe(true);
   });
 });
+
+function providerToolNames(tools: unknown[] | undefined): string[] {
+  return (tools ?? []).map((tool) => {
+    const record = tool as { function?: { name?: unknown }; name?: unknown };
+    return typeof record.function?.name === "string"
+      ? record.function.name
+      : typeof record.name === "string"
+        ? record.name
+        : "";
+  }).filter((name) => name.length > 0);
+}

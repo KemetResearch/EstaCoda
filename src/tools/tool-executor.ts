@@ -9,9 +9,11 @@ import {
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
+import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
@@ -45,6 +47,8 @@ export type NamedToolExecutionRequest = {
   toolCallName?: string;
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
+  onEvent?: RuntimeEventSink;
+  delegateCallBudget?: DelegateCallBudget;
 };
 
 export type ToolExecutionRecord = {
@@ -81,6 +85,10 @@ export class ToolExecutor {
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
+  }
+
+  resetPerTurnBudgets(): void {
+    // Kept as a no-op compatibility hook. Provider-turn budgets are owned by ToolPlanRunner.
   }
 
   async executeFirstAvailable(request: ToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {
@@ -138,6 +146,12 @@ export class ToolExecutor {
         toolCallName: request.toolCallName,
         providerNativeToolCall: request.providerNativeToolCall
       };
+    }
+    if (tool.name === "delegate_task" && request.delegateCallBudget !== undefined) {
+      const budget = request.delegateCallBudget.tryConsume();
+      if (budget.allowed === false) {
+        return await this.#blockedDelegateCallLimit(request, tool, riskClass, budget);
+      }
     }
 
     const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
@@ -228,7 +242,8 @@ export class ToolExecutor {
       try {
         result = await tool.run(request.input, {
           signal: request.signal,
-          environmentType
+          environmentType,
+          onEvent: request.onEvent
         });
       } catch (error) {
         if (request.signal?.aborted) {
@@ -352,6 +367,60 @@ export class ToolExecutor {
     }
 
     return undefined;
+  }
+
+  async #blockedDelegateCallLimit(
+    request: NamedToolExecutionRequest,
+    tool: import("../contracts/tool.js").RegisteredTool,
+    riskClass: ToolRiskClass,
+    budget: { limit: number; skippedCount: number; used: number }
+  ): Promise<ToolExecutionRecord> {
+    const result: ToolResult = {
+      ok: false,
+      content: `delegate_task call skipped because this provider turn reached maxDelegateCallsPerTurn (${budget.limit}).`,
+      metadata: {
+        reason: "delegate-call-limit",
+        status: "skipped",
+        limit: budget.limit,
+        skippedCount: budget.skippedCount,
+        used: budget.used
+      }
+    };
+    const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-result",
+      tool: tool.name,
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: persistedCall.providerNativeToolCall
+    });
+    await this.#sessionDb.appendMessage({
+      sessionId: request.sessionId,
+      role: "tool",
+      content: result.content,
+      metadata: {
+        tool: tool.name,
+        tool_call_id: request.toolCallId,
+        tool_call_name: request.toolCallName,
+        provider_native_tool_call: persistedCall.providerNativeToolCall,
+        ok: false,
+        reason: "delegate-call-limit",
+        skippedCount: budget.skippedCount,
+        limit: budget.limit
+      }
+    });
+
+    return {
+      tool: toDefinition(tool),
+      input: request.input,
+      decision: "deny",
+      riskClass,
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    };
   }
 }
 

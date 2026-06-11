@@ -3,10 +3,11 @@ import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import type { DelegationConfig } from "../contracts/delegation.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
-import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "../contracts/tool.js";
-import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
+import type { ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import { createSupervisedLocalCdpBrowserBackend } from "../browser/supervised-local-cdp-backend.js";
@@ -18,6 +19,8 @@ import { ContextReferenceExpander } from "../context/context-reference-expander.
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
+import { FileStateTracker } from "../delegation/file-state-tracker.js";
+import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -28,10 +31,9 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
-import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
-import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
+import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type EstaCodaConfig, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
@@ -41,10 +43,8 @@ import { createOpenAICompatibleProvider } from "../providers/openai-compatible-p
 import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
-import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
@@ -58,7 +58,6 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
-import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 
 // Workflow module v0.8 imports
 import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
@@ -76,24 +75,14 @@ import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.j
 import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
 import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { ManagedFasterWhisperWorker } from "../python-env/managed-faster-whisper-worker.js";
-import { ToolExecutor } from "../tools/tool-executor.js";
-import { ToolRegistry } from "../tools/tool-registry.js";
-import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
 import type { FetchLike as WebFetchLike } from "../tools/web-tools.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
-import { ToolCallPlanner } from "../tools/tool-call-planner.js";
-import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { AgentLoop, type AgentLoopInput, type AgentLoopResponse } from "./agent-loop.js";
-import { IntentRouter } from "./intent-router.js";
-import { RunRecorder } from "./run-recorder.js";
-import { RuntimeRouter } from "./runtime-router.js";
-import { ToolPlanRunner } from "./tool-plan-runner.js";
-import { ProviderTurnLoop } from "./provider-turn-loop.js";
-import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
-import { NativeToolExecutor } from "./native-tool-executor.js";
+import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
+import { AgentLoopBuilder } from "./agent-loop-builder.js";
+import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
-import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
+import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel, buildTableViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
 import { collectSetupVerificationReport } from "../setup/verification.js";
 import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
@@ -119,6 +108,7 @@ export type RuntimeOptions = {
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
+  providerConfigs?: EstaCodaConfig["providers"];
   memoryProvider?: MemoryProvider;
   memory?: LoadedRuntimeConfig["memory"];
   externalMemory?: LoadedRuntimeConfig["externalMemory"];
@@ -177,6 +167,7 @@ export type RuntimeOptions = {
   cronStore?: CronStore;
   disableCronTools?: boolean;
   disabledToolsets?: ToolsetName[];
+  delegationConfig?: DelegationConfig;
   workspaceFsAdapter?: WorkspaceFsAdapter;
   sessionMetadata?: Record<string, unknown>;
 };
@@ -195,135 +186,6 @@ function resolveRuntimeTokens(options: RuntimeOptions): ResolvedTokens {
 
 function resolveRuntimeBranding(options: RuntimeOptions): RuntimeBranding {
   return resolveRuntimeTokens(options).contract.branding;
-}
-
-function buildRuntimeToolContext(input: RuntimeToolContext): RuntimeToolContext {
-  return {
-    workspaceRoot: input.workspaceRoot,
-    homeDir: input.homeDir,
-    profileId: input.profileId,
-    cronStore: input.cronStore,
-    trustStore: input.trustStore,
-    disableCronTools: input.disableCronTools
-  };
-}
-
-function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionToolContext {
-  return {
-    workspaceRoot: input.workspaceRoot,
-    profileId: input.profileId,
-    sessionId: input.sessionId,
-    currentSessionId: input.currentSessionId,
-    homeDir: input.homeDir,
-    channelMediaRoot: input.channelMediaRoot,
-    audioCacheRoot: input.audioCacheRoot,
-    imageCacheRoot: input.imageCacheRoot,
-    browserBackend: input.browserBackend,
-    browserConfig: input.browserConfig,
-    mainRoute: input.mainRoute,
-    visionRoute: input.visionRoute,
-    compressionRoute: input.compressionRoute,
-    providerRegistry: input.providerRegistry,
-    providerExecutor: input.providerExecutor,
-    processManager: input.processManager,
-    artifactStore: input.artifactStore,
-    sessionDb: input.sessionDb,
-    trajectoryRecorder: input.trajectoryRecorder,
-    memoryStore: input.memoryStore,
-    memoryPersistenceService: input.memoryPersistenceService,
-    memoryPersistencePaths: input.memoryPersistencePaths,
-    memoryIndexSync: input.memoryIndexSync,
-    memoryRetrievalService: input.memoryRetrievalService,
-    memoryFileCompactionService: input.memoryFileCompactionService,
-    workspaceFsAdapter: input.workspaceFsAdapter,
-    webFetch: input.webFetch,
-    enableWebNetwork: input.enableWebNetwork,
-    webMaxContentChars: input.webMaxContentChars,
-    webConfig: input.webConfig,
-    securityConfig: input.securityConfig,
-    voiceFetch: input.voiceFetch,
-    localWhisper: input.localWhisper,
-    tts: input.tts,
-    stt: input.stt,
-    imageGen: input.imageGen,
-    imageGenerationFetch: input.imageGenerationFetch,
-    externalMemory: input.externalMemory,
-    externalMemoryProviders: input.externalMemoryProviders
-  };
-}
-
-function buildPostSkillVisibilityToolContext(input: SessionToolContext): SessionToolContext {
-  return {
-    workspaceRoot: input.workspaceRoot,
-    profileId: input.profileId,
-    sessionId: input.sessionId,
-    currentSessionId: input.currentSessionId,
-    skillRegistry: input.skillRegistry,
-    sessionSkillRegistry: input.sessionSkillRegistry,
-    localSkillsRoot: input.localSkillsRoot,
-    bundledSkillsRoot: input.bundledSkillsRoot,
-    skillEvolutionStore: input.skillEvolutionStore,
-    changeManifestStore: input.changeManifestStore
-  };
-}
-
-function buildPostMemoryProviderToolContext(input: SessionToolContext): SessionToolContext {
-  return {
-    workspaceRoot: input.workspaceRoot,
-    profileId: input.profileId,
-    sessionId: input.sessionId,
-    currentSessionId: input.currentSessionId,
-    memoryInspector: input.memoryInspector,
-    memoryRetrievalService: input.memoryRetrievalService
-  };
-}
-
-function buildPostToolExecutorToolContext(input: SessionToolContext): SessionToolContext {
-  return {
-    workspaceRoot: input.workspaceRoot,
-    profileId: input.profileId,
-    sessionId: input.sessionId,
-    currentSessionId: input.currentSessionId,
-    toolExecutor: input.toolExecutor,
-    delegationManager: input.delegationManager,
-    sessionDb: input.sessionDb,
-    trajectoryRecorder: input.trajectoryRecorder,
-    trustedWorkspace: input.trustedWorkspace
-  };
-}
-
-function registerToolRegistrationPhase(input: {
-  registry: ToolRegistry;
-  phase: ToolRegistrationPhase;
-  runtimeCtx: RuntimeToolContext;
-  sessionCtx?: SessionToolContext;
-}): void {
-  for (const entry of toolRegistrationPlan) {
-    if (entry.phase !== input.phase) {
-      continue;
-    }
-    for (const tool of createToolsForProvider(entry.provider, input.runtimeCtx, input.sessionCtx)) {
-      input.registry.register(tool);
-    }
-  }
-}
-
-function createToolsForProvider(
-  provider: ToolProvider,
-  runtimeCtx: RuntimeToolContext,
-  sessionCtx: SessionToolContext | undefined
-): readonly RegisteredTool[] {
-  switch (provider.kind) {
-    case "static":
-      return provider.tools;
-    case "runtime":
-      return provider.createTools(runtimeCtx);
-    case "session":
-      if (sessionCtx === undefined) {
-        throw new TypeError(`${provider.name}ToolProvider requires session context.`);
-      }
-      return provider.createTools(sessionCtx);
-  }
 }
 
 function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
@@ -353,6 +215,8 @@ export type Runtime = {
     signal?: AbortSignal;
   }): Promise<CompactResult>;
   inspectMcpServers(): MCPServerSnapshot[];
+  hasActiveSubagents?(parentSessionId: string): boolean;
+  activeSubagents?(parentSessionId?: string): OperatorSubagentStatus;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   executeTool?(input: {
     tool: string;
@@ -417,7 +281,6 @@ export type Runtime = {
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const runtimeBranding = resolveRuntimeBranding(options);
   const runtimeUiIdentity = resolveRuntimeUiIdentity(options);
-  const toolRegistry = new ToolRegistry();
   const skillRegistry = new SkillRegistry();
   const memoryStore = new MemoryStore();
   const artifactStore = new ArtifactStore();
@@ -558,12 +421,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers
   });
-
-  for (const server of loadedMcpServers) {
-    for (const tool of server.tools) {
-      toolRegistry.register(tool);
-    }
-  }
+  const mcpTools = loadedMcpServers.flatMap((server) => server.tools);
   // Load skills from explicit profile-local and package sources:
   // 1. packs/ under the selected profile (external, lowest priority)
   // 2. package bundled skills (middle priority)
@@ -674,73 +532,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ...createExternalMemoryProvidersFromConfig(externalMemoryConfig, { profileRoot: profileMemoryRoot }),
     ...(options.externalMemoryProviders ?? [])
   ];
-  const memoryFileCompactionService = new MemoryFileCompactionService({
-    store: memoryStore,
-    memoryRoot: profileMemoryRoot,
-    route: memoryFileCompactionRoute,
-    mainRoute,
-    providerExecutor,
-    trajectoryRecorder,
-    sessionDb,
-    sessionId
-  });
-  const runtimeToolContext = buildRuntimeToolContext({
-    workspaceRoot,
-    homeDir: options.homeDir,
-    profileId,
-    cronStore,
-    trustStore,
-    disableCronTools: options.disableCronTools
-  });
-  const preSkillVisibilityToolContext = buildPreSkillVisibilityToolContext({
-    workspaceRoot,
-    profileId,
-    sessionId,
-    currentSessionId: () => sessionRuntimeContext.currentSessionId(),
-    homeDir: options.homeDir,
-    channelMediaRoot,
-    audioCacheRoot,
-    imageCacheRoot,
-    browserBackend,
-    browserConfig: options.browser,
-    mainRoute,
-    visionRoute,
-    compressionRoute,
-    providerRegistry,
-    providerExecutor,
-    processManager,
-    artifactStore,
-    sessionDb,
-    trajectoryRecorder,
-    memoryStore,
-    memoryPersistenceService,
-    memoryPersistencePaths,
-    memoryIndexSync,
-    memoryRetrievalService,
-    memoryFileCompactionService,
-    workspaceFsAdapter: options.workspaceFsAdapter,
-    webFetch: options.webFetch,
-    enableWebNetwork: options.enableWebNetwork,
-    webMaxContentChars: options.webMaxContentChars,
-    webConfig: options.webConfig,
-    securityConfig: options.securityConfig,
-    voiceFetch: options.voiceFetch,
-    localWhisper,
-    tts: options.tts,
-    stt: options.stt,
-    imageGen: options.imageGen,
-    imageGenerationFetch: options.imageGenerationFetch,
-    externalMemory: externalMemoryConfig,
-    externalMemoryProviders
-  });
-  registerToolRegistrationPhase({
-    registry: toolRegistry,
-    phase: "pre-skill-visibility",
-    runtimeCtx: runtimeToolContext,
-    sessionCtx: preSkillVisibilityToolContext
-  });
-  const browserAvailable = await browserBackend.isAvailable();
-  const toolAvailability = await toolRegistry.snapshot();
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(localSkillsRoot, ".usage.json"),
     evolutionRoot: join(localSkillsRoot, ".evolution")
@@ -749,40 +540,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     root: join(localSkillsRoot, ".evolution", "manifests")
   });
   const skillUsageByName = new Map((await skillEvolutionStore.usage()).map((record) => [record.skillName, record]));
-  const skillVisibilityContext = createSkillVisibilityContext({
-    availableTools: toolAvailability.available,
-    browserAvailable,
-    telegramReady: options.telegramReady === true,
-    webEnabled: options.enableWebNetwork === true,
-    platform: options.currentPlatform ?? process.platform
-  });
-  const sessionSkillRegistry = new SkillRegistry();
-  for (const skill of skillRegistry.list()) {
-    if (evaluateSkillVisibility(skill, {
-      ...skillVisibilityContext,
-      lifecycleState: skillUsageByName.get(skill.name)?.state
-    }).visible) {
-      sessionSkillRegistry.register(skill);
-    }
-  }
-  const sessionSkillCatalog = sessionSkillRegistry.catalog();
-  registerToolRegistrationPhase({
-    registry: toolRegistry,
-    phase: "post-skill-visibility",
-    runtimeCtx: runtimeToolContext,
-    sessionCtx: buildPostSkillVisibilityToolContext({
-      workspaceRoot,
-      profileId,
-      sessionId,
-      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
-      skillRegistry,
-      sessionSkillRegistry,
-      localSkillsRoot,
-      bundledSkillsRoot: bundledSkillsDir,
-      skillEvolutionStore,
-      changeManifestStore
-    })
-  });
 
   const [userMemory, soulMemory, profileMemory] = await Promise.all([
     memoryPersistenceService.readFile({
@@ -830,19 +587,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     memorySearchService: memoryRetrievalService,
     profileId
   });
-  registerToolRegistrationPhase({
-    registry: toolRegistry,
-    phase: "post-memory-provider",
-    runtimeCtx: runtimeToolContext,
-    sessionCtx: buildPostMemoryProviderToolContext({
-      workspaceRoot,
-      profileId,
-      sessionId,
-      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
-      memoryInspector: memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined,
-      memoryRetrievalService
-    })
-  });
   const skillAutonomy = options.skillAutonomy ?? "suggest";
   const agentEvolutionPolicy = deriveAgentEvolutionPolicy(skillAutonomy);
   const skillLearningManager = new SkillLearningManager({
@@ -858,15 +602,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     promotionStore: memoryPromotionStore
   });
   const memoryPromptContext = await memoryPromptContextBuilder.build();
-  const sessionRecallService = new SessionRecallService({
-    sessionDb,
-    profileId,
-    workspaceRoot,
-    excludeSessionIds: () => [sessionRuntimeContext.currentSessionId()],
-    route: sessionSearchRoute,
-    mainRoute,
-    providerExecutor
-  });
   const compressionConfig = normalizeSessionCompressionConfig(options.compression);
   const sessionCompressionService = new SessionCompressionService({
     sessionDb,
@@ -891,7 +626,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryId: trajectoryRecorder.snapshot().id
   });
 
-  const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry, model: options.model });
   const configuredSecurityMode = options.securityMode ?? "adaptive";
   let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;
   const effectiveSecurityAssessor = options.securityAssessor === undefined
@@ -946,167 +680,152 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
     }
   };
-  const toolExecutor = new ToolExecutor({
-    registry: toolRegistry,
-    securityPolicy,
-    sessionDb,
-    trajectoryRecorder,
-    workspaceRoot
-  });
-  const delegationManager = new DelegationManager({
-    sessionDb,
-    toolExecutor,
-    trajectoryRecorder
-  });
-  registerToolRegistrationPhase({
-    registry: toolRegistry,
-    phase: "post-tool-executor",
-    runtimeCtx: runtimeToolContext,
-    sessionCtx: buildPostToolExecutorToolContext({
-      workspaceRoot,
-      profileId,
-      sessionId,
-      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
-      toolExecutor,
-      delegationManager,
-      sessionDb,
-      trajectoryRecorder,
-      trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
-    })
-  });
-  const providerToolAvailability = await toolRegistry.snapshot();
-
-  // Remove tools from disabled toolsets (e.g. cron recursion guard)
-  if (options.disabledToolsets !== undefined && options.disabledToolsets.length > 0) {
-    for (const tool of providerToolAvailability.available) {
-      if (tool.toolsets?.some((ts) => options.disabledToolsets!.includes(ts))) {
-        toolRegistry.unregister(tool.name);
-      }
-    }
-  }
-
-  const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
-    tools: providerToolAvailability.available
-      .filter((t) => !options.disabledToolsets?.some((dt) => t.toolsets?.includes(dt)))
-  });
-  const toolCallPlanner = new ToolCallPlanner({
-    registry: toolRegistry,
-    aliases: providerToolSchemaCatalog.aliases
-  });
-
-  const runRecorder = new RunRecorder({
-    sessionDb,
-    sessionId,
-    sessionRuntimeContext,
-    trajectoryRecorder,
-    trajectoryStore: hasTrajectoryStore(sessionDb) ? sessionDb : undefined,
-    profileId,
-    skillEvolutionStore,
-    memoryProvider
-  });
-  const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
-    builder: memoryPromptContextBuilder,
-    sessionRecallService,
-    recorder: runRecorder,
-    externalMemory: externalMemoryConfig,
-    externalMemoryProviders,
-    profileId,
-    sessionId: () => sessionRuntimeContext.currentSessionId(),
-    workspaceRoot
-  });
-
-  const toolPlanRunner = new ToolPlanRunner({
-    toolCallPlanner,
-    toolExecutor,
-    runRecorder,
-    sessionId,
-    sessionRuntimeContext,
-    maxConcurrentSafeTools: 4
-  });
-
-  const providerTurnLoop = new ProviderTurnLoop({
-    providerExecutor,
+  const fileStateTracker = new FileStateTracker();
+  const agentLoopRoutes = {
     model: options.model,
+    mainRoute,
     primaryModelRoute: options.primaryModelRoute,
     modelFallbackRoutes: options.modelFallbackRoutes,
+    visionRoute,
+    compressionRoute,
     providerPreferences: {
       providerOrder: [options.model.provider]
-    },
-    sessionDb,
-    sessionId,
-    sessionRuntimeContext,
-    profileId,
-    trajectoryRecorder,
-    runRecorder,
-    toolPlanRunner,
-    soul: undefined,
-    memoryPromptContext,
-    skillsIndex: sessionSkillCatalog,
-    ui: options.ui,
-    agentProfile: options.agentProfile,
-    budgets: {
-      maxProviderIterations: 45,
-      maxProviderToolCalls: 100,
-      maxRepeatedToolFailures: 5,
-      maxProviderWallClockMs: 300_000
+    }
+  };
+  const builder = new AgentLoopBuilder({
+    substrate: {
+      workspaceRoot,
+      homeDir: options.homeDir,
+      profileId,
+      delegationConfig: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
+      providerRegistry,
+      providerExecutor,
+      routes: agentLoopRoutes,
+      mcpTools,
+      skillRegistry,
+      localSkillsRoot,
+      bundledSkillsRoot: bundledSkillsDir,
+      skillEvolutionStore,
+      changeManifestStore,
+      skillUsageByName,
+      memoryStore,
+      memoryProvider,
+      memoryPromptContextBuilder,
+      memoryPromptContext,
+      memoryRetrievalService,
+      sessionRecallServiceFactory: ({ sessionRuntimeContext, sessionDb }) => new SessionRecallService({
+        sessionDb,
+        profileId,
+        workspaceRoot,
+        excludeSessionIds: () => [sessionRuntimeContext.currentSessionId()],
+        route: sessionSearchRoute,
+        mainRoute,
+        providerExecutor
+      }),
+      memoryFileCompactionServiceFactory: ({ sessionId, sessionDb, trajectoryRecorder }) => new MemoryFileCompactionService({
+        store: memoryStore,
+        memoryRoot: profileMemoryRoot,
+        route: memoryFileCompactionRoute,
+        mainRoute,
+        providerExecutor,
+        trajectoryRecorder,
+        sessionDb,
+        sessionId
+      }),
+      fileStateTracker,
+      memoryPersistenceService,
+      memoryPersistencePaths,
+      memoryIndexSync,
+      sessionCompressionService,
+      compressionConfig,
+      externalMemory: externalMemoryConfig,
+      externalMemoryProviders,
+      processManager,
+      browserBackend,
+      browserConfig: options.browser,
+      artifactStore,
+      trustStore,
+      cronStore,
+      disableCronTools: options.disableCronTools,
+      contextReferenceExpander,
+      projectContext,
+      channelMediaRoot,
+      audioCacheRoot,
+      imageCacheRoot,
+      workspaceFsAdapter: options.workspaceFsAdapter,
+      webFetch: options.webFetch,
+      enableWebNetwork: options.enableWebNetwork,
+      webMaxContentChars: options.webMaxContentChars,
+      webConfig: options.webConfig,
+      securityConfig: options.securityConfig,
+      voiceFetch: options.voiceFetch,
+      localWhisper,
+      tts: options.tts,
+      stt: options.stt,
+      imageGen: options.imageGen,
+      imageGenerationFetch: options.imageGenerationFetch,
+      telegramReady: options.telegramReady,
+      currentPlatform: options.currentPlatform
     }
   });
-
-  const skillPlaybookRunner = new SkillPlaybookRunner({
-    toolExecutor,
-    sessionId,
-    sessionRuntimeContext,
-    runRecorder
-  });
-
-  const nativeToolExecutor = new NativeToolExecutor({
-    toolExecutor,
-    runRecorder,
-    sessionId,
-    sessionRuntimeContext
-  });
-
-  const agentLoop = new AgentLoop({
-    runRecorder,
-    runtimeRouter: new RuntimeRouter({
-      intentRouter,
-      skillConfig: options.skillConfig ?? {}
-    }),
-    toolPlanRunner,
-    providerTurnLoop,
-    skillPlaybookRunner,
-    nativeToolExecutor,
-    responseLabel: runtimeBranding.responseLabel,
-    intentRouter,
-    securityPolicy,
-    trajectoryRecorder,
+  const subagentRegistry = new SubagentRegistry();
+  const childFactory = new DefaultChildAgentLoopFactory({
+    builder,
+    parentRoutes: agentLoopRoutes,
+    providerRegistry,
+    providerConfigs: options.providerConfigs,
+    homeDir: options.homeDir,
     sessionDb,
+    trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({
+      profileId,
+      sessionId,
+      modelId: options.model.id
+    }),
+    responseLabel: runtimeBranding.responseLabel,
+    workspaceRoot,
+    delegationConfig: options.delegationConfig,
+    skillConfig: options.skillConfig,
+    ui: options.ui,
+    agentProfile: options.agentProfile,
+    subagentRegistry,
+    diagnosticsRoot: profilePaths.tempPath,
+    fileStateTracker
+  });
+  const builtSession = await builder.buildSession({
     sessionId,
     sessionRuntimeContext,
-    profileId,
-    toolExecutor,
-    toolCallPlanner,
-    memoryProvider,
-    memoryPromptContext,
-    memoryRecallOrchestrator,
-    sessionCompressionService,
-    compressionConfig,
-    model: options.model,
-    providerPreferences: {
-      providerOrder: [options.model.provider]
-    },
-    contextReferenceExpander,
-    projectContext,
-    providerTools: providerToolSchemaCatalog.tools,
-    soul: undefined,
-    skillsIndex: sessionSkillCatalog,
+    sessionDb,
+    trajectoryRecorder,
     skillConfig: options.skillConfig,
     skillLearningManager,
-    skillEvolutionStore,
     agentEvolutionPolicy,
+    responseLabel: runtimeBranding.responseLabel,
     ui: options.ui,
-    agentProfile: options.agentProfile
+    agentProfile: options.agentProfile,
+    securityPolicy,
+    delegationManagerFactory: ({ toolRegistry }) => new DelegationManager({
+      sessionDb,
+      childFactory,
+      trajectoryRecorder,
+      delegationConfig: options.delegationConfig,
+      currentDepth: 0,
+      subagentRegistry,
+      diagnosticsRoot: profilePaths.tempPath,
+      memoryProvider,
+      fileStateTracker,
+      parentVisibleTools: () => toolRegistry.list()
+    }),
+    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
+    disabledToolsets: options.disabledToolsets
   });
+  const {
+    agentLoop,
+    toolRegistry,
+    toolExecutor,
+    sessionSkillRegistry,
+    sessionSkillCatalog,
+    sessionRecallService
+  } = builtSession;
 
   // ─── Workflow module v0.8 Integration ───
   let workflow: Runtime["workflow"] | undefined;
@@ -1235,6 +954,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     inspectMcpServers() {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
+    },
+    hasActiveSubagents(parentSessionId) {
+      return subagentRegistry.hasActiveSubagents(parentSessionId);
+    },
+    activeSubagents(parentSessionId = sessionId) {
+      return subagentRegistry.operatorStatus({ parentSessionId });
     },
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
@@ -1384,6 +1109,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ].filter((line) => line !== undefined).join("\n");
     },
     getStatus() {
+      const activeSubagents = subagentRegistry.operatorStatus({ parentSessionId: sessionId });
       return buildStatusViewModel({
         agentName: runtimeBranding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
@@ -1399,6 +1125,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
+        sections: activeSubagents.activeCount === 0
+          ? undefined
+          : [
+              buildTableViewModel({
+                title: activeSubagents.omittedCount === 0
+                  ? `Active subagents (${activeSubagents.activeCount})`
+                  : `Active subagents (${activeSubagents.activeCount}, ${activeSubagents.omittedCount} omitted)`,
+                columns: [
+                  { key: "child", header: "Child" },
+                  { key: "parent", header: "Parent" },
+                  { key: "role", header: "Role" },
+                  { key: "depth", header: "Depth", alignment: "right" },
+                  { key: "model", header: "Model" },
+                  { key: "status", header: "Status" },
+                  { key: "duration", header: "Duration" },
+                  { key: "batch", header: "Batch" }
+                ],
+                rows: activeSubagents.subagents.map((subagent) => ({
+                  child: subagent.childSessionId,
+                  parent: subagent.parentSessionId,
+                  role: subagent.role,
+                  depth: subagent.depth,
+                  model: `${subagent.provider}/${subagent.model}`,
+                  status: subagent.cancellationState === undefined
+                    ? subagent.status
+                    : `${subagent.status} (${subagent.cancellationState})`,
+                  duration: formatSubagentDuration(subagent.durationMs),
+                  batch: formatSubagentBatch(subagent.batchId, subagent.taskIndex)
+                }))
+              })
+            ],
       });
     },
     getModelInfo() {
@@ -1460,10 +1217,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   };
 }
 
-function hasTrajectoryStore(db: SessionDB): db is SessionDB & Pick<TrajectoryStore, "saveTrajectory"> {
-  return typeof (db as { saveTrajectory?: unknown }).saveTrajectory === "function";
-}
-
 async function resolveCachedStartupUpdateHint(
   workspaceRoot: string,
   versionStatus: "update-available"
@@ -1485,75 +1238,31 @@ async function resolveCachedStartupUpdateHint(
   });
 }
 
-function createSkillVisibilityContext(input: {
-  availableTools: ToolDefinition[];
-  browserAvailable: boolean;
-  telegramReady: boolean;
-  webEnabled: boolean;
-  platform: string;
-}) {
-  const availableTools = new Set(
-    input.availableTools
-      .filter((tool) => isSkillVisibleToolUsable(tool.name, input))
-      .map((tool) => tool.name)
-  );
-  const availableToolsets = new Set<ToolsetName>();
-
-  for (const tool of input.availableTools) {
-    if (!availableTools.has(tool.name)) {
-      continue;
-    }
-
-    for (const toolset of tool.toolsets) {
-      availableToolsets.add(toolset);
-    }
+function formatSubagentDuration(durationMs: number): string {
+  const safeMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+  if (safeMs < 1000) {
+    return `${Math.round(safeMs)}ms`;
   }
-
-  setToolsetAvailability(availableToolsets, "web", input.webEnabled && availableTools.has("web.extract"));
-  setToolsetAvailability(availableToolsets, "browser", input.browserAvailable && availableTools.has("browser.navigate"));
-  setToolsetAvailability(availableToolsets, "telegram", input.telegramReady);
-  setToolsetAvailability(availableToolsets, "shell-readonly", availableTools.has("terminal.run"));
-  setToolsetAvailability(
-    availableToolsets,
-    "shell-write",
-    availableTools.has("terminal.run") || availableTools.has("process.start") || availableTools.has("execute_code")
-  );
-
-  return {
-    platform: input.platform,
-    availableToolsets,
-    availableTools
-  };
+  const seconds = Math.floor(safeMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
-function isSkillVisibleToolUsable(
-  toolName: string,
-  input: {
-    availableTools: ToolDefinition[];
-    browserAvailable: boolean;
-    telegramReady: boolean;
-    webEnabled: boolean;
-    platform: string;
+function formatSubagentBatch(batchId: string | undefined, taskIndex: number | undefined): string {
+  if (batchId === undefined && taskIndex === undefined) {
+    return "";
   }
-): boolean {
-  if (toolName === "web.extract") {
-    return input.webEnabled;
+  if (batchId === undefined) {
+    return `#${taskIndex}`;
   }
-
-  if (toolName.startsWith("browser.")) {
-    return input.browserAvailable;
+  if (taskIndex === undefined) {
+    return batchId;
   }
-
-  return true;
-}
-
-function setToolsetAvailability(availableToolsets: Set<ToolsetName>, toolset: ToolsetName, available: boolean) {
-  if (available) {
-    availableToolsets.add(toolset);
-    return;
-  }
-
-  availableToolsets.delete(toolset);
+  return `${batchId} #${taskIndex}`;
 }
 
 /**

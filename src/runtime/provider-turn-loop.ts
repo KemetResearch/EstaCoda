@@ -154,6 +154,7 @@ export class ProviderTurnLoop {
     toolExecutions: ToolExecutionRecord[];
     iterations: number;
   }> {
+    this.#toolPlanRunner.resetPerTurnBudgets?.();
     const providerToolExecutions: ToolExecutionRecord[] = [];
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;

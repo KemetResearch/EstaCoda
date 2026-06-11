@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { capabilityFirstDefaults, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { ToolRegistry } from "./tool-registry.js";
@@ -254,6 +255,187 @@ describe("ToolExecutor exception containment", () => {
     expect(record?.result?.ok).toBe(false);
     expect(record?.result?.content).toBe("Tool execution cancelled.");
     expect(record?.result?.metadata).toMatchObject({ reason: "cancelled" });
+  });
+});
+
+describe("ToolExecutor delegate call budget", () => {
+  it("skips excess budgeted delegate_task calls and records skipped metadata", async () => {
+    let calls = 0;
+    const delegateTool: RegisteredTool = {
+      name: "delegate_task",
+      description: "delegate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string" }
+        },
+        required: ["task"]
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core"],
+      progressLabel: "delegating",
+      maxResultSizeChars: 1000,
+      isAvailable: () => true,
+      run: async () => {
+        calls += 1;
+        return { ok: true, content: "delegated" };
+      }
+    };
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [delegateTool]
+    });
+    const delegateCallBudget = new DelegateCallBudget(1);
+
+    const first = await executor.executeTool({
+      tool: "delegate_task",
+      input: { task: "A" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      delegateCallBudget
+    });
+    const second = await executor.executeTool({
+      tool: "delegate_task",
+      input: { task: "B" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      delegateCallBudget
+    });
+
+    expect(calls).toBe(1);
+    expect(first?.result?.ok).toBe(true);
+    expect(second).toMatchObject({
+      decision: "deny",
+      result: {
+        ok: false,
+        metadata: {
+          reason: "delegate-call-limit",
+          status: "skipped",
+          limit: 1,
+          skippedCount: 1
+        }
+      }
+    });
+    await expect(sessionDb.listMessages("test-session")).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "tool",
+        metadata: expect.objectContaining({
+          tool: "delegate_task",
+          reason: "delegate-call-limit",
+          skippedCount: 1,
+          limit: 1
+        })
+      })
+    ]));
+  });
+
+  it("does not consume delegate call budget for invalid delegate_task input", async () => {
+    let calls = 0;
+    const delegateTool: RegisteredTool = {
+      name: "delegate_task",
+      description: "delegate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string" }
+        },
+        required: ["task"]
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core"],
+      progressLabel: "delegating",
+      maxResultSizeChars: 1000,
+      isAvailable: () => true,
+      run: async () => {
+        calls += 1;
+        return { ok: true, content: "delegated" };
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [delegateTool] });
+    const delegateCallBudget = new DelegateCallBudget(1);
+
+    const invalid = await executor.executeTool({
+      tool: "delegate_task",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      delegateCallBudget
+    });
+    const valid = await executor.executeTool({
+      tool: "delegate_task",
+      input: { task: "A" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      delegateCallBudget
+    });
+
+    expect(invalid).toMatchObject({
+      decision: "deny",
+      result: {
+        ok: false,
+        content: "Invalid tool input: missing required field 'task'"
+      }
+    });
+    expect(valid?.result?.ok).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it("does not apply provider-turn delegate budget to direct tool execution", async () => {
+    let calls = 0;
+    const delegateTool: RegisteredTool = {
+      name: "delegate_task",
+      description: "delegate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string" }
+        },
+        required: ["task"]
+      },
+      riskClass: "shared-state-mutation",
+      toolsets: ["core"],
+      progressLabel: "delegating",
+      maxResultSizeChars: 1000,
+      isAvailable: () => true,
+      run: async () => {
+        calls += 1;
+        return { ok: true, content: "delegated" };
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [delegateTool] });
+
+    const first = await executor.executeTool({
+      tool: "delegate_task",
+      input: { task: "A" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+    const second = await executor.executeTool({
+      tool: "delegate_task",
+      input: { task: "B" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(first?.result?.ok).toBe(true);
+    expect(second?.result?.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("does not apply delegate call budget to unrelated tools", async () => {
+    const { executor } = await setupExecutor({
+      tools: [createEchoTool("echo")]
+    });
+    const delegateCallBudget = new DelegateCallBudget(0);
+
+    const result = await executor.executeTool({
+      tool: "echo",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      delegateCallBudget
+    });
+
+    expect(result?.result?.ok).toBe(true);
   });
 });
 

@@ -1,3 +1,6 @@
+import type { DelegateRole } from "./delegation.js";
+import type { ProviderUsage } from "./provider.js";
+
 export type MemoryFileKind = "SHARED.md" | "MEMORY.md" | "USER.md" | "SOUL.md";
 
 export type MemoryBudget = {
@@ -334,12 +337,28 @@ export type SkillOutcome = {
   metadata?: Record<string, unknown>;
 };
 
+export type DelegationOutcome = {
+  taskPreview: string;
+  resultSummary?: string;
+  status: "completed" | "blocked" | "failed" | "timeout" | "cancelled" | "skipped";
+  reason?: string;
+  childSessionId?: string;
+  parentSessionId: string;
+  role: DelegateRole;
+  depth: number;
+  batchId?: string;
+  taskIndex?: number;
+  usage?: ProviderUsage;
+  createdAt: string;
+};
+
 export type MemoryProvider = {
   id: string;
   context(options?: { query?: string }): Promise<MemoryProviderContext> | MemoryProviderContext;
   search(query: string, options?: { limit?: number }): Promise<MemorySearchResult[]> | MemorySearchResult[];
   conclude(conclusion: MemoryConclusion): Promise<void> | void;
   recordSkillOutcome(outcome: SkillOutcome): Promise<void> | void;
+  recordDelegationOutcome?(outcome: DelegationOutcome): Promise<void> | void;
   inspectPromotions?(): Promise<MemoryPromotionRecord[]> | MemoryPromotionRecord[];
   forgetPromotion?(content: string): Promise<MemoryPromotionRecord | undefined> | MemoryPromotionRecord | undefined;
 };

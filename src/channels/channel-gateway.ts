@@ -80,6 +80,33 @@ function sessionKeyHash(sessionId: string): string {
 
 const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
 
+function formatGatewaySubagentDuration(durationMs: number): string {
+  const safeMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+  if (safeMs < 1000) {
+    return `${Math.round(safeMs)}ms`;
+  }
+  const seconds = Math.floor(safeMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatGatewaySubagentBatch(batchId: string | undefined, taskIndex: number | undefined): string {
+  if (batchId === undefined && taskIndex === undefined) {
+    return "";
+  }
+  if (batchId === undefined) {
+    return `(task #${taskIndex})`;
+  }
+  if (taskIndex === undefined) {
+    return `(batch ${batchId})`;
+  }
+  return `(batch ${batchId} task #${taskIndex})`;
+}
+
 function messageProducedVoiceTranscript(message: ChannelMessage): boolean {
   const metadata = message.metadata?.voiceTranscription;
   if (typeof metadata !== "object" || metadata === null) {
@@ -293,6 +320,7 @@ export class ChannelGateway {
   readonly #runtimeCache: RuntimeCache | undefined;
   readonly #runtimeFingerprint: RuntimeFingerprint | undefined;
   readonly #sessionIdByTurnKey = new Map<string, string>();
+  readonly #activeRuntimeByTurnKey = new Map<string, Runtime>();
   readonly #logWarning?: (message: string) => void;
 
   // Stage 6
@@ -761,8 +789,24 @@ export class ChannelGateway {
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
         }
         case "interrupt": {
+          if (this.#hasActiveSubagentsForTurn(activeTurnKey)) {
+            const enqueueResult = this.#sessionMessageQueue.enqueue(
+              activeTurnKey,
+              processedMessage,
+              policy.busyPolicy,
+              policy.queueDepth
+            );
+            if (enqueueResult.accepted) {
+              const position = enqueueResult.position;
+              if (position !== undefined) {
+                await this.#deliverText(adapter, normalizedSessionKey, `Queued (position ${position})`);
+              }
+            } else {
+              await this.#deliverText(adapter, normalizedSessionKey, "Queue is full. Please try again later.");
+            }
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
           this.#sessionMessageQueue.clear(activeTurnKey);
-          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
           this.#sessionMessageQueue.unshift(
             activeTurnKey,
             processedMessage,
@@ -875,6 +919,7 @@ export class ChannelGateway {
 
       // Runtime acquisition
       runtime = await this.#acquireRuntime(sessionId, securityPolicy, message, normalizedSessionKey);
+      this.#activeRuntimeByTurnKey.set(activeTurnKey, runtime);
 
       const trustedWorkspace = typeof this.#trustedWorkspace === "function"
         ? await this.#trustedWorkspace(message)
@@ -1057,6 +1102,7 @@ export class ChannelGateway {
 
       // 2. Release runtime only if it was successfully acquired
       if (runtime !== undefined) {
+        this.#activeRuntimeByTurnKey.delete(activeTurnKey);
         try {
           await runtime.dispose();
         } catch (disposeErr) {
@@ -1098,6 +1144,56 @@ export class ChannelGateway {
       );
       return undefined;
     }
+  }
+
+  #hasActiveSubagentsForTurn(activeTurnKey: string): boolean {
+    const runtime = this.#activeRuntimeByTurnKey.get(activeTurnKey);
+    if (runtime?.hasActiveSubagents === undefined) {
+      return false;
+    }
+
+    const activeSessionId = this.#activeTurnRegistry?.getTurn(activeTurnKey)?.metadata?.sessionId;
+    const sessionId = typeof activeSessionId === "string"
+      ? activeSessionId
+      : this.#sessionIdByTurnKey.get(activeTurnKey);
+    if (sessionId === undefined) {
+      return false;
+    }
+
+    return runtime.hasActiveSubagents(sessionId);
+  }
+
+  #activeSubagentStatusLines(message: ChannelMessage, sessionId: string): string[] {
+    const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const runtime = this.#activeRuntimeByTurnKey.get(activeTurnKey);
+    const status = runtime?.activeSubagents?.(sessionId);
+    if (status === undefined || status.activeCount === 0) {
+      return [];
+    }
+
+    const lines = [
+      `Active subagents: ${status.activeCount}`,
+      ...status.subagents.map((subagent) => {
+        const state = subagent.cancellationState === undefined
+          ? subagent.status
+          : `${subagent.status}/${subagent.cancellationState}`;
+        const batch = subagent.batchId === undefined && subagent.taskIndex === undefined
+          ? ""
+          : ` ${formatGatewaySubagentBatch(subagent.batchId, subagent.taskIndex)}`;
+        return [
+          `- child ${subagent.childSessionId}`,
+          `role ${subagent.role}`,
+          `depth ${subagent.depth}`,
+          `model ${subagent.provider}/${subagent.model}`,
+          `status ${state}`,
+          `duration ${formatGatewaySubagentDuration(subagent.durationMs)}${batch}`
+        ].join(" | ");
+      })
+    ];
+    if (status.omittedCount > 0) {
+      lines.push(`- ${status.omittedCount} more active subagent(s) omitted`);
+    }
+    return lines;
   }
 
   async #consumeRuntimeRotation(input: {
@@ -1757,7 +1853,8 @@ export class ChannelGateway {
         `Session: ${sessionId}`,
         pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
         pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
-        `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
+        `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`,
+        ...this.#activeSubagentStatusLines(message, sessionId)
       ].filter((line) => line !== undefined).join("\n");
       await this.#deliverText(adapter, message.sessionKey, text);
 

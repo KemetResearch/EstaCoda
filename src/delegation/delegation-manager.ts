@@ -1,8 +1,37 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { SessionDB } from "../contracts/session.js";
-import type { ToolsetName } from "../contracts/tool.js";
-import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
+import type {
+  DelegateModelOverride,
+  DelegateModelOverrideMetadata,
+  DelegateRole,
+  DelegationConfig,
+  DelegateTaskItem,
+  DelegationStaleFileWarning
+} from "../contracts/delegation.js";
+import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { SessionDB, SessionEvent } from "../contracts/session.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import type { ProviderUsage } from "../contracts/provider.js";
+import type { DelegationOutcome, MemoryProvider } from "../contracts/memory.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import { redactSensitiveText } from "../utils/redaction.js";
+import type { AgentLoopResponse } from "../runtime/agent-loop.js";
+import {
+  ChildModelOverrideError,
+  type ChildAgentLoopFactory,
+  type ChildAgentLoopRuntime
+} from "../runtime/agent-loop-factory.js";
+import type { ChildToolDiagnostic } from "./toolset-security.js";
+import type { FileStateReadSnapshot, FileStateTracker } from "./file-state-tracker.js";
+import { findStaleParentFileReadWarnings } from "./file-state-guard.js";
+import { SubagentRegistry } from "./subagent-registry.js";
+import {
+  appendDiagnosticEvent,
+  runDelegatedChild,
+  timeoutDelegationSummary
+} from "./child-runner.js";
+import { runBoundedBatch } from "./batch-runner.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -11,15 +40,33 @@ export type DelegationRequest = {
   context?: string;
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
+  role?: DelegateRole;
+  modelOverride?: DelegateModelOverride;
+  batchId?: string;
+  taskIndex?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
+  signal?: AbortSignal;
+  onEvent?: RuntimeEventSink;
+};
+
+export type DelegationUsageMetadata = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
 };
 
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout" | "model-override-unsupported";
   task: string;
   summary: string;
+  role: DelegateRole;
+  depth: number;
+  batchId?: string;
+  taskIndex?: number;
   toolExecutions: Array<{
     tool: string;
     decision: string;
@@ -27,206 +74,1055 @@ export type DelegationSummary = {
   }>;
   allowedToolsets: ToolsetName[];
   allowedTools: string[];
+  effectiveAllowedToolsets: ToolsetName[];
+  effectiveAllowedTools: string[];
+  strippedTools: ChildToolDiagnostic[];
+  blockedTools: ChildToolDiagnostic[];
+  rejectedRequestedTools: ChildToolDiagnostic[];
+  rejectedRequestedToolsets: Array<{
+    name: ToolsetName;
+    reasons: ChildToolDiagnostic["reasons"];
+  }>;
+  usage?: DelegationUsageMetadata;
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable?: boolean;
+  staleFileWarnings?: DelegationStaleFileWarning[];
+  staleFileWarningCount?: number;
+  modelOverride?: DelegateModelOverrideMetadata;
+  diagnosticPath?: string;
+};
+
+export type BatchDelegationChildStatus = DelegationSummary["status"] | "timeout" | "cancelled";
+
+export type BatchDelegationSummary = {
+  batchId: string;
+  status: DelegationSummary["status"];
+  reason?: "cancelled" | "blocked" | "child-failed" | "child-timeout";
+  summary: string;
+  results: Array<DelegationSummary & {
+    index: number;
+    childStatus: BatchDelegationChildStatus;
+  }>;
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable: boolean;
+  usageUnavailableCount: number;
+  staleFileWarningCount: number;
+  maxObservedConcurrency: number;
+  recoveredTasksFromJsonString?: boolean;
 };
 
 export type DelegationManagerOptions = {
   sessionDb: SessionDB;
-  toolExecutor: ToolExecutor;
+  childFactory: ChildAgentLoopFactory;
   trajectoryRecorder: TrajectoryRecorder;
-  id?: () => string;
+  delegationConfig?: DelegationConfig;
+  currentDepth?: number;
+  parentVisibleTools?: () => readonly ToolDefinition[];
+  subagentRegistry?: SubagentRegistry;
+  diagnosticsRoot?: string;
+  memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
+  fileStateTracker?: FileStateTracker;
 };
 
 export class DelegationManager {
   readonly #sessionDb: SessionDB;
-  readonly #toolExecutor: ToolExecutor;
+  readonly #childFactory: ChildAgentLoopFactory;
   readonly #trajectoryRecorder: TrajectoryRecorder;
-  readonly #id: () => string;
+  readonly #delegationConfig: DelegationConfig;
+  readonly #currentDepth: number;
+  readonly #parentVisibleTools: () => readonly ToolDefinition[];
+  readonly #subagentRegistry: SubagentRegistry;
+  readonly #diagnosticsRoot: string | undefined;
+  readonly #memoryProvider: Pick<MemoryProvider, "recordDelegationOutcome"> | undefined;
+  readonly #fileStateTracker: FileStateTracker | undefined;
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
-    this.#toolExecutor = options.toolExecutor;
+    this.#childFactory = options.childFactory;
     this.#trajectoryRecorder = options.trajectoryRecorder;
-    this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
+    this.#delegationConfig = options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG;
+    this.#currentDepth = options.currentDepth ?? 0;
+    this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
+    this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
+    this.#diagnosticsRoot = options.diagnosticsRoot;
+    this.#memoryProvider = options.memoryProvider;
+    this.#fileStateTracker = options.fileStateTracker;
   }
 
-  async delegate(request: DelegationRequest): Promise<DelegationSummary> {
-    const childSession = await this.#sessionDb.createSession({
-      id: this.#id(),
-      profileId: request.profileId,
-      parentSessionId: request.parentSessionId,
-      title: `Delegated: ${request.task.slice(0, 60)}`,
-      metadata: {
-        kind: "delegated-child",
-        allowedToolsets: request.allowedToolsets ?? [],
-        allowedTools: request.allowedTools ?? [],
-        context: request.context ?? ""
+  async delegateBatch(request: Omit<DelegationRequest, "task" | "batchId" | "taskIndex"> & {
+    tasks: DelegateTaskItem[];
+    recoveredTasksFromJsonString?: boolean;
+  }): Promise<BatchDelegationSummary> {
+    const batchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const maxConcurrency = Math.min(this.#delegationConfig.maxConcurrentChildren, request.tasks.length);
+    const skippedIndexes = new Set<number>();
+    const parentReadSnapshot = this.#snapshotParentReads(request.parentSessionId);
+    const batch = await runBoundedBatch<DelegateTaskItem, DelegationSummary>({
+      tasks: request.tasks,
+      maxConcurrency,
+      signal: request.signal,
+      runTask: async (task, index) => this.#delegateWithSnapshot({
+        ...request,
+        task: task.task,
+        context: task.context,
+        allowedToolsets: task.allowedToolsets,
+        allowedTools: task.allowedTools,
+        role: task.role,
+        modelOverride: task.modelOverride ?? request.modelOverride,
+        batchId,
+        taskIndex: index
+      }, parentReadSnapshot),
+      skipTask: (task, index): DelegationSummary => {
+        skippedIndexes.add(index);
+        return {
+          childSessionId: "unavailable",
+          status: "failed",
+          reason: "cancelled",
+          task: task.task,
+          summary: "Delegation cancelled before queued child start.",
+          role: task.role ?? "leaf",
+          depth: this.#currentDepth + 1,
+          batchId,
+          taskIndex: index,
+          allowedToolsets: task.allowedToolsets ?? [],
+          allowedTools: task.allowedTools ?? [],
+          effectiveAllowedToolsets: [],
+          effectiveAllowedTools: [],
+          strippedTools: [],
+          blockedTools: [],
+          rejectedRequestedTools: [],
+          rejectedRequestedToolsets: [],
+          toolExecutions: [],
+          modelOverride: task.modelOverride !== undefined || request.modelOverride !== undefined ? {
+            requested: true,
+            status: "rejected",
+            reason: "cancelled"
+          } : undefined,
+          usageUnavailable: true
+        };
       }
     });
-
-    await this.#sessionDb.appendEvent(request.parentSessionId, {
-      kind: "delegation-started",
-      childSessionId: childSession.id,
-      task: request.task,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? []
-    });
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "system",
-      channel: request.channel,
-      content: [
-        "You are an isolated delegated EstaCoda child session.",
-        "Use only the explicit task/context below.",
-        `Task: ${request.task}`,
-        request.context === undefined ? undefined : `Context:\n${request.context}`,
-        `Allowed toolsets: ${(request.allowedToolsets ?? []).join(", ") || "none"}`,
-        `Allowed tools: ${(request.allowedTools ?? []).join(", ") || "none"}`
-      ]
-        .filter((line) => line !== undefined)
-        .join("\n\n"),
-      metadata: {
-        parentSessionId: request.parentSessionId
+    const results = batch.results.map((result, index) => ({
+      ...result,
+      index,
+      childStatus: childStatus(result)
+    }));
+    const timeoutCount = results.filter((result) => result.childStatus === "timeout").length;
+    const failedCount = results.filter((result) => result.status === "failed").length;
+    const blockedCount = results.filter((result) => result.status === "blocked").length;
+    const cancelledCount = results.filter((result) => result.childStatus === "cancelled").length;
+    const status: DelegationSummary["status"] = failedCount > 0 || timeoutCount > 0
+      ? "failed"
+      : blockedCount > 0
+        ? "blocked"
+        : "completed";
+    const reason = cancelledCount > 0
+      ? "cancelled"
+      : timeoutCount > 0
+        ? "child-timeout"
+        : failedCount > 0
+          ? "child-failed"
+          : blockedCount > 0
+            ? "blocked"
+            : undefined;
+    const summary = [
+      `Delegation batch ${batchId}: ${status}.`,
+      `Completed: ${results.filter((result) => result.status === "completed").length}/${results.length}.`,
+      blockedCount > 0 ? `Blocked: ${blockedCount}.` : undefined,
+      failedCount > 0 ? `Failed: ${failedCount}.` : undefined,
+      timeoutCount > 0 ? `Timed out: ${timeoutCount}.` : undefined,
+      cancelledCount > 0 ? `Cancelled: ${cancelledCount}.` : undefined
+    ].filter((line): line is string => line !== undefined).join(" ");
+    const usageRollup = rollUpChildUsage(results);
+    const staleFileWarningCount = results.reduce((count, result) => count + (result.staleFileWarningCount ?? 0), 0);
+    for (const index of skippedIndexes) {
+      const result = results[index];
+      if (result !== undefined) {
+        await this.#recordDelegationOutcome(request.parentSessionId, result, "skipped");
       }
-    });
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "user",
-      channel: request.channel,
-      content: request.task,
-      metadata: {
-        delegated: true,
-        parentSessionId: request.parentSessionId
-      }
-    });
-    this.#trajectoryRecorder.record("delegation-started", {
-      parentSessionId: request.parentSessionId,
-      childSessionId: childSession.id,
-      task: request.task,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? []
-    });
-
-    const toolExecutions = await this.#runInitialDelegatedTools({
-      childSessionId: childSession.id,
-      task: request.task,
-      context: request.context,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? [],
-      trustedWorkspace: request.trustedWorkspace
-    });
-    const summary = this.#summarize(request.task, toolExecutions);
-    const status: DelegationSummary["status"] = toolExecutions.some((execution) => execution.decision !== "allow")
-      ? "blocked"
-      : "completed";
-
-    await this.#sessionDb.appendMessage({
-      sessionId: childSession.id,
-      role: "agent",
-      channel: request.channel,
-      content: summary,
-      metadata: {
-        toolExecutions: toolExecutions.map((execution) => execution.tool.name)
-      }
-    });
-    await this.#sessionDb.appendEvent(request.parentSessionId, {
-      kind: "delegation-finished",
-      childSessionId: childSession.id,
-      summary,
-      status
-    });
-    this.#trajectoryRecorder.record("delegation-finished", {
-      parentSessionId: request.parentSessionId,
-      childSessionId: childSession.id,
-      status,
-      summary
-    });
+    }
 
     return {
-      childSessionId: childSession.id,
+      batchId,
       status,
-      task: request.task,
+      reason,
       summary,
-      allowedToolsets: request.allowedToolsets ?? [],
-      allowedTools: request.allowedTools ?? [],
-      toolExecutions: toolExecutions.map((execution) => ({
-        tool: execution.tool.name,
-        decision: execution.decision,
-        ok: execution.result?.ok
-      }))
+      results,
+      aggregateUsage: usageRollup.aggregateUsage,
+      usageUnavailable: usageRollup.usageUnavailable,
+      usageUnavailableCount: usageRollup.usageUnavailableCount,
+      staleFileWarningCount,
+      maxObservedConcurrency: batch.maxObservedConcurrency,
+      recoveredTasksFromJsonString: request.recoveredTasksFromJsonString === true ? true : undefined
     };
   }
 
-  async #runInitialDelegatedTools(input: {
-    childSessionId: string;
-    task: string;
-    context?: string;
-    allowedToolsets: ToolsetName[];
-    allowedTools: string[];
-    trustedWorkspace: boolean;
-  }): Promise<ToolExecutionRecord[]> {
-    const records: ToolExecutionRecord[] = [];
-
-    if (
-      isToolAllowed("playbook.plan", input.allowedTools) &&
-      (input.allowedToolsets.includes("research") || input.allowedToolsets.includes("core"))
-    ) {
-      const execution = await this.#toolExecutor.executeTool({
-        tool: "playbook.plan",
-        sessionId: input.childSessionId,
-        trustedWorkspace: input.trustedWorkspace,
-        input: {
-          skill: "delegated-task",
-          intent: ["delegation"],
-          firstStep: input.task
-        }
-      });
-
-      if (execution !== undefined) {
-        records.push(execution);
-      }
-    }
-
-    if (
-      isToolAllowed("file.search", input.allowedTools) &&
-      input.allowedToolsets.includes("files") &&
-      input.context !== undefined
-    ) {
-      const firstSearchTerm = input.context
-        .split(/\s+/)
-        .find((term) => term.length > 5 && /^[a-zA-Z0-9_.-]+$/.test(term));
-
-      if (firstSearchTerm !== undefined) {
-        const execution = await this.#toolExecutor.executeTool({
-          tool: "file.search",
-          sessionId: input.childSessionId,
-          trustedWorkspace: input.trustedWorkspace,
-          input: {
-            query: firstSearchTerm
-          }
-        });
-
-        if (execution !== undefined) {
-          records.push(execution);
-        }
-      }
-    }
-
-    return records;
+  async delegate(request: DelegationRequest): Promise<DelegationSummary> {
+    return await this.#delegateWithSnapshot(request, this.#snapshotParentReads(request.parentSessionId));
   }
 
-  #summarize(task: string, toolExecutions: ToolExecutionRecord[]): string {
-    const lines = [
-      `Delegated task: ${task}`,
-      `Tool steps: ${toolExecutions.length}`,
-      ...toolExecutions.map((execution) =>
-        `- ${execution.tool.name}: ${execution.decision}${execution.result === undefined ? "" : ` / ${execution.result.ok ? "ok" : "error"}`}`
-      )
-    ];
+  async #delegateWithSnapshot(
+    request: DelegationRequest,
+    parentReadSnapshot: FileStateReadSnapshot | undefined
+  ): Promise<DelegationSummary> {
+    const allowedToolsets = request.allowedToolsets ?? [];
+    const allowedTools = request.allowedTools ?? [];
+    const role = request.role ?? "leaf";
+    const depth = this.#currentDepth + 1;
 
-    return lines.join("\n");
+    if (isSignalAborted(request.signal)) {
+      return await this.#cancelledBeforeStart(request, allowedToolsets, allowedTools, role, depth);
+    }
+
+    if (this.#subagentRegistry.isSpawnPaused()) {
+      const result = this.#spawnPaused(request, allowedToolsets, allowedTools, role, depth);
+      await this.#recordDelegationOutcome(request.parentSessionId, result);
+      return result;
+    }
+
+    if (depth > this.#delegationConfig.maxSpawnDepth) {
+      return await this.#spawnDepthExceeded(request, allowedToolsets, allowedTools, role, depth);
+    }
+
+    const startedAt = Date.now();
+    let childSessionId: string | undefined;
+    let subagentId: string | undefined;
+    let child: ChildAgentLoopRuntime | undefined;
+    let parentAbortCleanup: (() => void) | undefined;
+    let childAbortController: AbortController | undefined;
+    try {
+      child = await this.#childFactory.createChild({
+        parentSessionId: request.parentSessionId,
+        profileId: request.profileId,
+        task: request.task,
+        context: request.context,
+        allowedToolsets,
+        allowedTools,
+        role,
+        depth,
+        channel: request.channel,
+        modelOverride: request.modelOverride,
+        trustedWorkspace: request.trustedWorkspace,
+        parentVisibleTools: this.#parentVisibleTools()
+      });
+      childSessionId = child.childSessionId;
+
+	      if (isSignalAborted(request.signal)) {
+	        const result = this.#withStaleFileWarnings(
+	          this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId),
+	          request,
+	          parentReadSnapshot
+	        );
+	        await this.#recordDelegationOutcome(request.parentSessionId, result);
+	        return result;
+	      }
+
+      childAbortController = new AbortController();
+      subagentId = child.childSessionId;
+      parentAbortCleanup = linkParentAbort(request.signal, childAbortController, () =>
+        this.#subagentRegistry.interruptChildrenForParent(request.parentSessionId, "parent-aborted")
+      );
+      this.#subagentRegistry.registerSubagent({
+        subagentId,
+        childSessionId: child.childSessionId,
+        parentSessionId: request.parentSessionId,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
+        depth,
+        role,
+        goal: request.task,
+        model: childModel(child),
+        provider: childProvider(child),
+        toolCount: child.toolAccess.effectiveAllowedTools.length,
+        abortController: childAbortController
+      });
+
+      await this.#recordStarted({
+        parentSessionId: request.parentSessionId,
+        childSessionId,
+        task: request.task,
+        allowedToolsets,
+        allowedTools,
+        role,
+        depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
+        modelOverride: child.modelOverride
+      });
+
+      this.#subagentRegistry.updateSubagent(subagentId, {
+        status: "running",
+        lastActivityAt: new Date().toISOString()
+      });
+      const runnerResult = await runDelegatedChild({
+        child,
+        childAbortController,
+        parentSignal: request.signal,
+        subagentRegistry: this.#subagentRegistry,
+        subagentId,
+        sessionDb: this.#sessionDb,
+        delegationConfig: this.#delegationConfig,
+        diagnosticsRoot: this.#diagnosticsRoot,
+        parentSessionId: request.parentSessionId,
+        childSessionId: child.childSessionId,
+        role,
+        depth,
+        task: request.task,
+        context: request.context,
+        channel: request.channel,
+        trustedWorkspace: request.trustedWorkspace,
+        provider: childProvider(child),
+        model: childModel(child),
+        effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+        taskIndex: request.taskIndex,
+        batchId: request.batchId,
+        parentOnEvent: request.onEvent
+      });
+      if (runnerResult.kind === "timeout") {
+        await appendDiagnosticEvent({
+          sessionDb: this.#sessionDb,
+          parentSessionId: request.parentSessionId,
+          childSessionId: child.childSessionId,
+          role,
+          depth,
+          taskIndex: request.taskIndex,
+          batchId: request.batchId
+        }, "timeout", runnerResult.diagnostic ?? {
+          taskHash: "",
+          taskPreview: ""
+        });
+	        let result = timeoutDelegationSummary({
+	          childSessionId: child.childSessionId,
+	          task: request.task,
+	          summary: runnerResult.summary,
+          role,
+          depth,
+          batchId: request.batchId,
+          taskIndex: request.taskIndex,
+          allowedToolsets,
+          allowedTools,
+          child,
+          diagnostic: runnerResult.diagnostic
+	        });
+	        result.usageUnavailable = true;
+          result.modelOverride = child.modelOverride;
+	        result = this.#withStaleFileWarnings(result, request, parentReadSnapshot);
+	        await this.#recordFinished({
+	          parentSessionId: request.parentSessionId,
+	          childSessionId: child.childSessionId,
+          status: result.status,
+          reason: result.reason,
+          summary: result.summary,
+          durationMs: Date.now() - startedAt,
+	          error: result.summary,
+          diagnosticPath: result.diagnosticPath,
+	          modelOverride: result.modelOverride,
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
+        await this.#recordDelegationOutcome(request.parentSessionId, result);
+        return result;
+      }
+      if (runnerResult.kind === "cancelled") {
+	        const result = this.#withStaleFileWarnings({
+	          childSessionId: child.childSessionId,
+	          status: "failed",
+          reason: "cancelled",
+          task: request.task,
+          summary: runnerResult.summary,
+          role,
+          depth,
+          batchId: request.batchId,
+          taskIndex: request.taskIndex,
+          allowedToolsets,
+          allowedTools,
+          effectiveAllowedToolsets: child.toolAccess.effectiveAllowedToolsets,
+          effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+          strippedTools: child.toolAccess.strippedTools,
+          blockedTools: child.toolAccess.blockedTools,
+          rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
+          rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
+          toolExecutions: [],
+          modelOverride: child.modelOverride,
+	          usageUnavailable: true
+	        }, request, parentReadSnapshot);
+	        await this.#recordFinished({
+          parentSessionId: request.parentSessionId,
+          childSessionId: child.childSessionId,
+          status: result.status,
+          reason: result.reason,
+          summary: result.summary,
+          durationMs: Date.now() - startedAt,
+	          error: result.summary,
+	          modelOverride: result.modelOverride,
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
+        await this.#recordDelegationOutcome(request.parentSessionId, result);
+        return result;
+      }
+      const childResponse = runnerResult.response;
+      const summary = childResponse.text;
+      const status = await this.#statusFromChildResponse(child.childSessionId, childResponse, request.signal);
+      const usage = usageFromProviderResponse(childResponse.providerExecution?.response?.usage);
+      const usageUnavailable = usage === undefined;
+	      const result = this.#withStaleFileWarnings({
+	        childSessionId: child.childSessionId,
+	        status: status.status,
+        reason: status.reason,
+        task: request.task,
+        summary,
+        role,
+        depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
+        allowedToolsets,
+        allowedTools,
+        effectiveAllowedToolsets: child.toolAccess.effectiveAllowedToolsets,
+        effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+        strippedTools: child.toolAccess.strippedTools,
+        blockedTools: child.toolAccess.blockedTools,
+        rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
+        rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
+        usage,
+        aggregateUsage: usage,
+        usageUnavailable,
+        modelOverride: child.modelOverride,
+	        toolExecutions: childResponse.toolExecutions.map((execution) => ({
+	          tool: execution.tool.name,
+	          decision: execution.decision,
+	          ok: execution.result?.ok
+	        }))
+	      }, request, parentReadSnapshot);
+      this.#subagentRegistry.updateSubagent(subagentId, {
+        status: result.status === "completed" ? "completed" : "failed",
+        lastActivityAt: new Date().toISOString()
+      });
+      await this.#recordFinished({
+        parentSessionId: request.parentSessionId,
+        childSessionId: child.childSessionId,
+        status: result.status,
+        reason: result.reason,
+        summary: result.summary,
+        durationMs: Date.now() - startedAt,
+        modelOverride: result.modelOverride,
+        usage: result.usage,
+        aggregateUsage: result.aggregateUsage,
+	        usageUnavailable: result.usageUnavailable,
+	        staleFileWarnings: result.staleFileWarnings,
+	        staleFileWarningCount: result.staleFileWarningCount
+	      });
+      await this.#recordDelegationOutcome(request.parentSessionId, result);
+      return result;
+    } catch (error) {
+      if (error instanceof ChildModelOverrideError) {
+        const result = this.#modelOverrideRejected(request, allowedToolsets, allowedTools, role, depth, error);
+        await this.#recordDelegationOutcome(request.parentSessionId, result);
+        return result;
+      }
+
+      const summary = error instanceof Error ? error.message : "Unknown child delegation error.";
+	      const result = this.#withStaleFileWarnings({
+	        childSessionId: childSessionId ?? "unavailable",
+	        status: "failed",
+        reason: childSessionId === undefined ? "construction-error" : "runtime-error",
+        task: request.task,
+        summary,
+        role,
+        depth,
+        batchId: request.batchId,
+        taskIndex: request.taskIndex,
+        allowedToolsets,
+        allowedTools,
+        effectiveAllowedToolsets: [],
+        effectiveAllowedTools: [],
+        strippedTools: [],
+        blockedTools: [],
+        rejectedRequestedTools: [],
+        rejectedRequestedToolsets: [],
+        toolExecutions: [],
+        modelOverride: child?.modelOverride,
+	        usageUnavailable: true
+	      }, request, parentReadSnapshot);
+      if (subagentId !== undefined) {
+        this.#subagentRegistry.updateSubagent(subagentId, {
+          status: isSignalAborted(request.signal) ? "cancelling" : "failed",
+          lastActivityAt: new Date().toISOString()
+        });
+      }
+      if (childSessionId !== undefined) {
+        await this.#recordFinished({
+          parentSessionId: request.parentSessionId,
+          childSessionId,
+          status: "failed",
+          reason: result.reason,
+          summary,
+          durationMs: Date.now() - startedAt,
+          error: summary,
+          modelOverride: result.modelOverride,
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
+      }
+      await this.#recordDelegationOutcome(request.parentSessionId, result);
+      return result;
+    } finally {
+      parentAbortCleanup?.();
+      if (subagentId !== undefined) {
+        this.#subagentRegistry.unregisterSubagent(subagentId);
+      }
+      await child?.cleanup().catch(() => undefined);
+    }
+  }
+
+  async #cancelledBeforeStart(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
+  ): Promise<DelegationSummary> {
+    const summary = "Delegation cancelled before child start.";
+    this.#trajectoryRecorder.record("delegation-finished", {
+      parentSessionId: request.parentSessionId,
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "cancelled",
+      summary,
+      usageUnavailable: true
+    });
+    const result: DelegationSummary = {
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "cancelled",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "cancelled"
+      },
+      usageUnavailable: true
+    };
+    await this.#recordDelegationOutcome(request.parentSessionId, result);
+    return result;
+  }
+
+  #cancelledAfterConstruction(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number,
+    childSessionId: string
+  ): DelegationSummary {
+    const summary = "Delegation cancelled before child start.";
+    return {
+      childSessionId,
+      status: "failed",
+      reason: "cancelled",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "cancelled"
+      },
+      usageUnavailable: true
+    };
+  }
+
+  #spawnPaused(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
+  ): DelegationSummary {
+    const reason = this.#subagentRegistry.spawnPausedReason();
+    const summary = reason === undefined || reason.length === 0
+      ? "Delegation spawn is paused."
+      : `Delegation spawn is paused: ${reason}`;
+    return {
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-paused",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "spawn-paused"
+      },
+      usageUnavailable: true
+    };
+  }
+
+	  async #spawnDepthExceeded(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
+  ): Promise<DelegationSummary> {
+    const summary = `Delegation spawn depth ${depth} exceeds maxSpawnDepth ${this.#delegationConfig.maxSpawnDepth}.`;
+    this.#trajectoryRecorder.record("delegation-finished", {
+      parentSessionId: request.parentSessionId,
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-depth-exceeded",
+      role,
+      depth,
+      summary,
+      usageUnavailable: true
+    });
+    const result: DelegationSummary = {
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-depth-exceeded",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "spawn-depth-exceeded"
+      },
+      usageUnavailable: true
+    };
+	    await this.#recordDelegationOutcome(request.parentSessionId, result);
+	    return result;
+	  }
+
+  #modelOverrideRejected(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number,
+    error: ChildModelOverrideError
+  ): DelegationSummary {
+    const summary = error.message;
+    this.#trajectoryRecorder.record("delegation-finished", {
+      parentSessionId: request.parentSessionId,
+      childSessionId: "unavailable",
+      status: "blocked",
+      reason: "model-override-unsupported",
+      role,
+      depth,
+      summary,
+      modelOverride: error.metadata,
+      usageUnavailable: true
+    });
+    return {
+      childSessionId: "unavailable",
+      status: "blocked",
+      reason: "model-override-unsupported",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: error.metadata,
+      usageUnavailable: true
+    };
+  }
+
+	  #snapshotParentReads(parentSessionId: string): FileStateReadSnapshot | undefined {
+	    return this.#fileStateTracker?.snapshotReads(parentSessionId);
+	  }
+
+	  #withStaleFileWarnings(
+	    result: DelegationSummary,
+	    request: DelegationRequest,
+	    parentReadSnapshot: FileStateReadSnapshot | undefined
+	  ): DelegationSummary {
+	    const staleFileWarnings = findStaleParentFileReadWarnings({
+	      tracker: this.#fileStateTracker,
+	      parentReadSnapshot,
+	      parentSessionId: request.parentSessionId,
+	      childSessionId: result.childSessionId,
+	      taskIndex: request.taskIndex,
+	      batchId: request.batchId
+	    });
+	    if (staleFileWarnings.length === 0) {
+	      return result;
+	    }
+	    return {
+	      ...result,
+	      staleFileWarnings,
+	      staleFileWarningCount: staleFileWarnings.length
+	    };
+	  }
+
+	  async #recordStarted(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    task: string;
+    allowedToolsets: ToolsetName[];
+    allowedTools: string[];
+    role: DelegateRole;
+    depth: number;
+    batchId?: string;
+    taskIndex?: number;
+    modelOverride?: DelegateModelOverrideMetadata;
+  }): Promise<void> {
+    await this.#sessionDb.appendEvent(input.parentSessionId, {
+      kind: "delegation-started",
+      childSessionId: input.childSessionId,
+      task: input.task,
+      allowedToolsets: input.allowedToolsets,
+      allowedTools: input.allowedTools,
+      role: input.role,
+      depth: input.depth,
+      batchId: input.batchId,
+      taskIndex: input.taskIndex,
+      modelOverride: input.modelOverride
+    });
+    this.#trajectoryRecorder.record("delegation-started", input);
+  }
+
+  async #recordFinished(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    status: DelegationSummary["status"];
+    reason?: DelegationSummary["reason"];
+    summary: string;
+    durationMs: number;
+    error?: string;
+    diagnosticPath?: string;
+	    usage?: DelegationUsageMetadata;
+	    aggregateUsage?: DelegationUsageMetadata;
+	    usageUnavailable?: boolean;
+      modelOverride?: DelegateModelOverrideMetadata;
+	    staleFileWarnings?: DelegationStaleFileWarning[];
+	    staleFileWarningCount?: number;
+	  }): Promise<void> {
+	    await this.#sessionDb.appendEvent(input.parentSessionId, {
+      kind: "delegation-finished",
+      childSessionId: input.childSessionId,
+      summary: input.summary,
+      status: input.status,
+      reason: input.reason,
+      durationMs: input.durationMs,
+      error: input.error,
+      diagnosticPath: input.diagnosticPath,
+	      usage: input.usage,
+	      aggregateUsage: input.aggregateUsage,
+	      usageUnavailable: input.usageUnavailable,
+        modelOverride: input.modelOverride,
+	      staleFileWarnings: input.staleFileWarnings,
+	      staleFileWarningCount: input.staleFileWarningCount
+	    });
+    this.#trajectoryRecorder.record("delegation-finished", input);
+  }
+
+  async #recordDelegationOutcome(
+    parentSessionId: string,
+    result: DelegationSummary,
+    statusOverride?: DelegationOutcome["status"]
+  ): Promise<void> {
+    if (this.#delegationConfig.outcomeMemory.enabled !== true ||
+      this.#memoryProvider?.recordDelegationOutcome === undefined) {
+      return;
+    }
+
+    const status = statusOverride ?? delegationOutcomeStatus(result);
+    const resultSummary = boundedMemoryText(
+      delegationOutcomeResultSummary(status, result.reason),
+      this.#delegationConfig.outcomeMemory.maxResultSummaryChars
+    );
+    const outcome: DelegationOutcome = {
+      taskPreview: boundedMemoryText(result.task, this.#delegationConfig.outcomeMemory.maxTaskPreviewChars) ?? "",
+      status,
+      parentSessionId,
+      role: result.role,
+      depth: result.depth,
+      createdAt: new Date().toISOString(),
+      ...(resultSummary === undefined ? {} : { resultSummary }),
+      ...(result.reason === undefined ? {} : { reason: result.reason }),
+      ...(result.childSessionId === "unavailable" ? {} : { childSessionId: result.childSessionId }),
+      ...(result.batchId === undefined ? {} : { batchId: result.batchId }),
+      ...(result.taskIndex === undefined ? {} : { taskIndex: result.taskIndex }),
+      ...(result.usage === undefined ? {} : { usage: result.usage })
+    };
+
+    try {
+      await this.#memoryProvider.recordDelegationOutcome(outcome);
+    } catch {
+      // Delegation outcomes are best-effort memory observations; never change child result status.
+    }
+  }
+
+  async #statusFromChildResponse(
+    childSessionId: string,
+    response: AgentLoopResponse,
+    signal: AbortSignal | undefined
+  ): Promise<{ status: DelegationSummary["status"]; reason?: DelegationSummary["reason"] }> {
+    if (signal?.aborted === true) {
+      return { status: "failed", reason: "cancelled" };
+    }
+    const events = await this.#sessionDb.listEvents(childSessionId);
+    if (hasStructuredBlock(response.toolExecutions, events)) {
+      return { status: "blocked", reason: "blocked" };
+    }
+    if (response.providerExecution?.ok === false) {
+      return { status: "failed", reason: "provider-error" };
+    }
+    return { status: "completed" };
   }
 }
 
-function isToolAllowed(tool: string, allowedTools: string[]): boolean {
-  return allowedTools.length === 0 || allowedTools.includes(tool);
+function childStatus(result: DelegationSummary): BatchDelegationChildStatus {
+  if (result.reason === "timeout") {
+    return "timeout";
+  }
+  if (result.reason === "cancelled") {
+    return "cancelled";
+  }
+  return result.status;
+}
+
+export function delegatedPrompt(task: string, context: string | undefined): string {
+  if (context === undefined || context.trim().length === 0) {
+    return task;
+  }
+  return [
+    `Delegated task: ${task}`,
+    "",
+    `Context: ${context}`
+  ].join("\n");
+}
+
+function hasStructuredBlock(toolExecutions: ToolExecutionRecord[], events: SessionEvent[]): boolean {
+  if (toolExecutions.some((execution) => execution.decision !== "allow")) {
+    return true;
+  }
+  return events.some((event) =>
+    event.kind === "tool-gated" && event.decision !== "allow" ||
+    event.kind === "security-assessed" && event.assessment.decision !== "allow"
+  );
+}
+
+function usageFromProviderResponse(usage: ProviderUsage | undefined): DelegationUsageMetadata | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  return normalizeUsage(usage);
+}
+
+function rollUpChildUsage(results: readonly DelegationSummary[]): {
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable: boolean;
+  usageUnavailableCount: number;
+} {
+  let usageUnavailableCount = 0;
+  const aggregate: DelegationUsageMetadata = {};
+
+  for (const result of results) {
+    const usage = normalizeUsage(result.usage);
+    if (usage === undefined) {
+      usageUnavailableCount += 1;
+      continue;
+    }
+    addUsage(aggregate, usage);
+  }
+
+  return {
+    aggregateUsage: hasUsage(aggregate) ? aggregate : undefined,
+    usageUnavailable: usageUnavailableCount > 0,
+    usageUnavailableCount
+  };
+}
+
+function normalizeUsage(usage: DelegationUsageMetadata | ProviderUsage | undefined): DelegationUsageMetadata | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  const normalized: DelegationUsageMetadata = {};
+  if (isFiniteNumber(usage.inputTokens)) {
+    normalized.inputTokens = usage.inputTokens;
+  }
+  if (isFiniteNumber(usage.outputTokens)) {
+    normalized.outputTokens = usage.outputTokens;
+  }
+  if (isFiniteNumber(usage.totalTokens)) {
+    normalized.totalTokens = usage.totalTokens;
+  }
+  if (isFiniteNumber(usage.reasoningTokens)) {
+    normalized.reasoningTokens = usage.reasoningTokens;
+  }
+  return hasUsage(normalized) ? normalized : undefined;
+}
+
+function addUsage(target: DelegationUsageMetadata, usage: DelegationUsageMetadata): void {
+  if (usage.inputTokens !== undefined) {
+    target.inputTokens = (target.inputTokens ?? 0) + usage.inputTokens;
+  }
+  if (usage.outputTokens !== undefined) {
+    target.outputTokens = (target.outputTokens ?? 0) + usage.outputTokens;
+  }
+  if (usage.totalTokens !== undefined) {
+    target.totalTokens = (target.totalTokens ?? 0) + usage.totalTokens;
+  }
+  if (usage.reasoningTokens !== undefined) {
+    target.reasoningTokens = (target.reasoningTokens ?? 0) + usage.reasoningTokens;
+  }
+}
+
+function hasUsage(usage: DelegationUsageMetadata): boolean {
+  return usage.inputTokens !== undefined ||
+    usage.outputTokens !== undefined ||
+    usage.totalTokens !== undefined ||
+    usage.reasoningTokens !== undefined;
+}
+
+function isFiniteNumber(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function delegationOutcomeStatus(result: DelegationSummary): DelegationOutcome["status"] {
+  if (result.reason === "timeout") {
+    return "timeout";
+  }
+  if (result.reason === "cancelled") {
+    return "cancelled";
+  }
+  return result.status;
+}
+
+function delegationOutcomeResultSummary(
+  status: DelegationOutcome["status"],
+  reason: DelegationSummary["reason"] | undefined
+): string {
+  if (reason === undefined || reason === status) {
+    return status;
+  }
+  return `${status}: ${reason}`;
+}
+
+function boundedMemoryText(value: string | undefined, maxChars: number): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const redacted = redactSensitiveText(value)
+    .replace(/api[_ -]?key/gi, "credential")
+    .replace(/secret[_ -]?key/gi, "credential")
+    .replace(/private[_ -]?key/gi, "credential")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (redacted.length === 0) {
+    return undefined;
+  }
+  if (redacted.length <= maxChars) {
+    return redacted;
+  }
+  const clipped = redacted.slice(0, Math.max(0, maxChars - " [truncated]".length)).trimEnd();
+  return `${clipped} [truncated]`;
+}
+
+function childModel(child: ChildAgentLoopRuntime): string {
+  const routes = child.builtSession.providerRoutes as Partial<ChildAgentLoopRuntime["builtSession"]["providerRoutes"]> | undefined;
+  return routes?.primaryModelRoute?.id ??
+    routes?.mainRoute?.id ??
+    routes?.model?.id ??
+    "unknown";
+}
+
+function childProvider(child: ChildAgentLoopRuntime): string {
+  const routes = child.builtSession.providerRoutes as Partial<ChildAgentLoopRuntime["builtSession"]["providerRoutes"]> | undefined;
+  return routes?.primaryModelRoute?.provider ??
+    routes?.mainRoute?.provider ??
+    routes?.model?.provider ??
+    "unknown";
+}
+
+function linkParentAbort(
+  parentSignal: AbortSignal | undefined,
+  childAbortController: AbortController,
+  onAbort: () => void
+): (() => void) | undefined {
+  if (parentSignal === undefined) {
+    return undefined;
+  }
+  const abortChild = () => {
+    onAbort();
+    if (!childAbortController.signal.aborted) {
+      childAbortController.abort(parentSignal.reason ?? "parent-aborted");
+    }
+  };
+  if (parentSignal.aborted) {
+    abortChild();
+    return undefined;
+  }
+  parentSignal.addEventListener("abort", abortChild, { once: true });
+  return () => parentSignal.removeEventListener("abort", abortChild);
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
