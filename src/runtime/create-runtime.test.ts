@@ -2378,6 +2378,7 @@ describe("createRuntime MCP trust gating", () => {
               "allowedTools",
               "allowedToolsets",
               "context",
+              "role",
               "task",
             ],
             "toolsets": [
@@ -2601,6 +2602,13 @@ describe("createRuntime MCP trust gating", () => {
           suppressedRuntimeFeatures: expect.arrayContaining(["memoryRecall", "skillLearning", "sessionCompression"])
         })
       });
+      expect(childSession?.metadata?.effectiveAllowedTools).toEqual(expect.arrayContaining(["file.read", "file.search"]));
+      expect(childSession?.metadata?.strippedTools).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "delegate_task" }),
+        expect.objectContaining({ name: "execute_code" }),
+        expect.objectContaining({ name: "terminal.run" }),
+        expect.objectContaining({ name: "file.write" })
+      ]));
       const childMessages = await sessionDb.listMessages(childSessionId!);
       expect(childMessages.filter((message) => message.role === "user").map((message) => message.content)).toEqual([
         [
@@ -2613,6 +2621,16 @@ describe("createRuntime MCP trust gating", () => {
       expect(providerRequests[0]?.messages.some((message) =>
         typeof message.content === "string" && message.content.includes("Inspect delegated runtime")
       )).toBe(true);
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining([
+        "delegate_task",
+        "execute_code",
+        "terminal_run",
+        "file_write",
+        "process_start",
+        "process_stop"
+      ]));
     } finally {
       await runtime.dispose();
     }
@@ -2696,6 +2714,7 @@ describe("createRuntime MCP trust gating", () => {
         summary: "Tool feedback received."
       });
       expect(providerRequests.length).toBeGreaterThanOrEqual(2);
+      expect(providerToolNames(providerRequests[0]?.tools)).toContain("file_search");
       const metadata = execution?.result?.metadata as { childSessionId?: string } | undefined;
       const childMessages = await sessionDb.listMessages(metadata!.childSessionId!);
       expect(childMessages.some((message) => message.role === "tool" && message.metadata?.tool === "file.search")).toBe(true);
@@ -3893,3 +3912,14 @@ describe("createRuntime SQLite session lifecycle", () => {
     expect(disposed).toBe(true);
   });
 });
+
+function providerToolNames(tools: unknown[] | undefined): string[] {
+  return (tools ?? []).map((tool) => {
+    const record = tool as { function?: { name?: unknown }; name?: unknown };
+    return typeof record.function?.name === "string"
+      ? record.function.name
+      : typeof record.name === "string"
+        ? record.name
+        : "";
+  }).filter((name) => name.length > 0);
+}

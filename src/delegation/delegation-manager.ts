@@ -1,11 +1,14 @@
 import type { ChannelKind } from "../contracts/channel.js";
+import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
-import type { ToolsetName } from "../contracts/tool.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { ProviderUsage } from "../contracts/provider.js";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
+import type { ChildToolDiagnostic } from "./toolset-security.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -14,6 +17,7 @@ export type DelegationRequest = {
   context?: string;
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
+  role?: DelegateRole;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   signal?: AbortSignal;
@@ -29,9 +33,11 @@ export type DelegationUsageMetadata = {
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
-  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded";
   task: string;
   summary: string;
+  role: DelegateRole;
+  depth: number;
   toolExecutions: Array<{
     tool: string;
     decision: string;
@@ -39,6 +45,15 @@ export type DelegationSummary = {
   }>;
   allowedToolsets: ToolsetName[];
   allowedTools: string[];
+  effectiveAllowedToolsets: ToolsetName[];
+  effectiveAllowedTools: string[];
+  strippedTools: ChildToolDiagnostic[];
+  blockedTools: ChildToolDiagnostic[];
+  rejectedRequestedTools: ChildToolDiagnostic[];
+  rejectedRequestedToolsets: Array<{
+    name: ToolsetName;
+    reasons: ChildToolDiagnostic["reasons"];
+  }>;
   usage?: DelegationUsageMetadata;
 };
 
@@ -46,25 +61,40 @@ export type DelegationManagerOptions = {
   sessionDb: SessionDB;
   childFactory: ChildAgentLoopFactory;
   trajectoryRecorder: TrajectoryRecorder;
+  delegationConfig?: DelegationConfig;
+  currentDepth?: number;
+  parentVisibleTools?: () => readonly ToolDefinition[];
 };
 
 export class DelegationManager {
   readonly #sessionDb: SessionDB;
   readonly #childFactory: ChildAgentLoopFactory;
   readonly #trajectoryRecorder: TrajectoryRecorder;
+  readonly #delegationConfig: DelegationConfig;
+  readonly #currentDepth: number;
+  readonly #parentVisibleTools: () => readonly ToolDefinition[];
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
     this.#childFactory = options.childFactory;
     this.#trajectoryRecorder = options.trajectoryRecorder;
+    this.#delegationConfig = options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG;
+    this.#currentDepth = options.currentDepth ?? 0;
+    this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
     const allowedToolsets = request.allowedToolsets ?? [];
     const allowedTools = request.allowedTools ?? [];
+    const role = request.role ?? "leaf";
+    const depth = this.#currentDepth + 1;
 
     if (request.signal?.aborted === true) {
-      return await this.#cancelledBeforeStart(request, allowedToolsets, allowedTools);
+      return await this.#cancelledBeforeStart(request, allowedToolsets, allowedTools, role, depth);
+    }
+
+    if (depth > this.#delegationConfig.maxSpawnDepth) {
+      return await this.#spawnDepthExceeded(request, allowedToolsets, allowedTools, role, depth);
     }
 
     const startedAt = Date.now();
@@ -78,10 +108,11 @@ export class DelegationManager {
         context: request.context,
         allowedToolsets,
         allowedTools,
-        role: "leaf",
-        depth: 1,
+        role,
+        depth,
         channel: request.channel,
-        trustedWorkspace: request.trustedWorkspace
+        trustedWorkspace: request.trustedWorkspace,
+        parentVisibleTools: this.#parentVisibleTools()
       });
       childSessionId = child.childSessionId;
 
@@ -90,7 +121,9 @@ export class DelegationManager {
         childSessionId,
         task: request.task,
         allowedToolsets,
-        allowedTools
+        allowedTools,
+        role,
+        depth
       });
 
       const childResponse = await child.handle({
@@ -111,8 +144,16 @@ export class DelegationManager {
         reason: status.reason,
         task: request.task,
         summary,
+        role,
+        depth,
         allowedToolsets,
         allowedTools,
+        effectiveAllowedToolsets: child.toolAccess.effectiveAllowedToolsets,
+        effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+        strippedTools: child.toolAccess.strippedTools,
+        blockedTools: child.toolAccess.blockedTools,
+        rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
+        rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
         usage: usageFromProviderResponse(childResponse.providerExecution?.response?.usage),
         toolExecutions: childResponse.toolExecutions.map((execution) => ({
           tool: execution.tool.name,
@@ -136,8 +177,16 @@ export class DelegationManager {
         reason: childSessionId === undefined ? "construction-error" : "runtime-error",
         task: request.task,
         summary,
+        role,
+        depth,
         allowedToolsets,
         allowedTools,
+        effectiveAllowedToolsets: [],
+        effectiveAllowedTools: [],
+        strippedTools: [],
+        blockedTools: [],
+        rejectedRequestedTools: [],
+        rejectedRequestedToolsets: [],
         toolExecutions: []
       };
       if (childSessionId !== undefined) {
@@ -159,7 +208,9 @@ export class DelegationManager {
   async #cancelledBeforeStart(
     request: DelegationRequest,
     allowedToolsets: ToolsetName[],
-    allowedTools: string[]
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
   ): Promise<DelegationSummary> {
     const summary = "Delegation cancelled before child start.";
     this.#trajectoryRecorder.record("delegation-finished", {
@@ -175,8 +226,53 @@ export class DelegationManager {
       reason: "cancelled",
       task: request.task,
       summary,
+      role,
+      depth,
       allowedToolsets,
       allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: []
+    };
+  }
+
+  async #spawnDepthExceeded(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number
+  ): Promise<DelegationSummary> {
+    const summary = `Delegation spawn depth ${depth} exceeds maxSpawnDepth ${this.#delegationConfig.maxSpawnDepth}.`;
+    this.#trajectoryRecorder.record("delegation-finished", {
+      parentSessionId: request.parentSessionId,
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-depth-exceeded",
+      role,
+      depth,
+      summary
+    });
+    return {
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-depth-exceeded",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
       toolExecutions: []
     };
   }
@@ -187,6 +283,8 @@ export class DelegationManager {
     task: string;
     allowedToolsets: ToolsetName[];
     allowedTools: string[];
+    role: DelegateRole;
+    depth: number;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-started",
@@ -194,8 +292,8 @@ export class DelegationManager {
       task: input.task,
       allowedToolsets: input.allowedToolsets,
       allowedTools: input.allowedTools,
-      role: "leaf",
-      depth: 1
+      role: input.role,
+      depth: input.depth
     });
     this.#trajectoryRecorder.record("delegation-started", input);
   }

@@ -22,7 +22,10 @@ describe("DelegationManager", () => {
       parentSessionId: "parent",
       task: "Summarize this file",
       role: "leaf",
-      depth: 1
+      depth: 1,
+      parentVisibleTools: expect.arrayContaining([
+        expect.objectContaining({ name: "file.read" })
+      ])
     }));
     expect(harness.handleInputs).toHaveLength(1);
     expect(harness.handleInputs[0]?.text).toBe("Summarize this file");
@@ -31,6 +34,7 @@ describe("DelegationManager", () => {
       status: "completed",
       summary: "child answer"
     });
+    expect(result.effectiveAllowedTools).toEqual(["file.read"]);
   });
 
   it("wraps optional context deterministically without pre-appending duplicate child messages", async () => {
@@ -156,6 +160,27 @@ describe("DelegationManager", () => {
     });
   });
 
+  it("rejects delegation before child construction when spawn depth is exceeded", async () => {
+    const harness = await createHarness({ currentDepth: 1, maxSpawnDepth: 1 });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Too deep",
+      role: "orchestrator",
+      trustedWorkspace: true
+    });
+
+    expect(harness.factory.createChild).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      childSessionId: "unavailable",
+      status: "failed",
+      reason: "spawn-depth-exceeded",
+      role: "orchestrator",
+      depth: 2
+    });
+  });
+
   it("propagates parent abort signal into the child handle call", async () => {
     const controller = new AbortController();
     const harness = await createHarness({
@@ -187,6 +212,8 @@ describe("delegatedPrompt", () => {
 async function createHarness(input: {
   response?: AgentLoopResponse;
   beforeResponse?: (db: InMemorySessionDB) => Promise<void>;
+  currentDepth?: number;
+  maxSpawnDepth?: number;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
   await db.createSession({ id: "parent", profileId: "default" });
@@ -208,6 +235,14 @@ async function createHarness(input: {
         suppressedRuntimeFeatures: [],
         enabledRuntimeFeatures: [],
         approvalMode: "non-interactive-fail-closed" as const,
+        toolAccess: {
+          effectiveAllowedToolsets: ["files"],
+          effectiveAllowedTools: ["file.read"],
+          strippedTools: [],
+          blockedTools: [],
+          rejectedRequestedTools: [],
+          rejectedRequestedToolsets: []
+        },
         handle: vi.fn(async (handleInput) => {
           handleInputs.push({ text: handleInput.text, signal: handleInput.signal });
           await input.beforeResponse?.(db);
@@ -224,7 +259,40 @@ async function createHarness(input: {
     manager: new DelegationManager({
       sessionDb: db,
       childFactory: factory,
-      trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" })
+      trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" }),
+      currentDepth: input.currentDepth,
+      delegationConfig: input.maxSpawnDepth === undefined ? undefined : {
+        maxSpawnDepth: input.maxSpawnDepth,
+        maxConcurrentChildren: 3,
+        maxDelegateCallsPerTurn: 3,
+        maxBatchTasks: 10,
+        childTimeoutSeconds: 600,
+        heartbeatSeconds: 30,
+        heartbeatStaleCyclesIdle: 3,
+        heartbeatStaleCyclesInTool: 6,
+        recoverJsonStringTasks: true,
+        diagnostics: { enabled: true, includePromptPreview: false },
+        defaultAllowedRiskClasses: ["read-only-local", "read-only-network"],
+        defaultExcludedToolsets: ["browser", "media", "mcp"],
+        defaultAllowedToolsets: [],
+        blockedToolNames: ["delegate_task"],
+        blockedToolPrefixes: [],
+        childRuntime: {
+          memoryRecall: "disabled",
+          skillLearning: "disabled",
+          sessionCompression: "disabled",
+          projectContext: "bounded"
+        }
+      },
+      parentVisibleTools: () => [{
+        name: "file.read",
+        description: "read",
+        inputSchema: { type: "object" },
+        riskClass: "read-only-local",
+        toolsets: ["files"],
+        progressLabel: "read",
+        maxResultSizeChars: 1000
+      }]
     })
   };
 }

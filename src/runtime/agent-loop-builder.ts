@@ -76,6 +76,28 @@ export type AgentLoopSkillVisibilityStrategy = (
   input: AgentLoopSkillVisibilityInput
 ) => SkillRegistry;
 
+export type AgentLoopToolRegistryFilterInput = {
+  registry: ToolRegistry;
+  availableTools: ToolDefinition[];
+};
+
+export type AgentLoopToolRegistryFilterResult = {
+  effectiveAllowedTools: string[];
+  effectiveAllowedToolsets: ToolsetName[];
+  strippedTools: Array<{
+    name: string;
+    reasons: string[];
+  }>;
+  blockedTools: Array<{
+    name: string;
+    reasons: string[];
+  }>;
+};
+
+export type AgentLoopToolRegistryFilter = (
+  input: AgentLoopToolRegistryFilterInput
+) => AgentLoopToolRegistryFilterResult;
+
 export type AgentLoopRuntimeSubstrate = {
   workspaceRoot: string;
   homeDir: string | undefined;
@@ -154,6 +176,7 @@ export type AgentLoopSessionInput = {
   securityPolicy: SecurityPolicy;
   delegationManagerFactory: (input: {
     toolExecutor: ToolExecutor;
+    toolRegistry: ToolRegistry;
     sessionRuntimeContext: SessionRuntimeContext;
   }) => DelegationManager;
   trustedWorkspace: () => Promise<boolean>;
@@ -162,6 +185,7 @@ export type AgentLoopSessionInput = {
   memoryRecall?: "enabled" | "disabled";
   sessionCompression?: "enabled" | "disabled";
   projectContext?: ProjectContextSnapshot;
+  toolRegistryFilter?: AgentLoopToolRegistryFilter;
 };
 
 export type BuiltAgentLoopSession = {
@@ -184,6 +208,7 @@ export type BuiltAgentLoopSession = {
   delegationManager: DelegationManager;
   sessionRecallService: import("../session/session-recall-service.js").SessionRecallService;
   memoryFileCompactionService: MemoryFileCompactionService;
+  toolFilterResult?: AgentLoopToolRegistryFilterResult;
 };
 
 type AgentLoopBuilderFactories = {
@@ -336,6 +361,7 @@ export class AgentLoopBuilder {
     });
     const delegationManager = input.delegationManagerFactory({
       toolExecutor,
+      toolRegistry,
       sessionRuntimeContext
     });
 
@@ -356,12 +382,20 @@ export class AgentLoopBuilder {
       })
     });
 
-    const providerToolAvailability = await toolRegistry.snapshot();
+    let providerToolAvailability = await toolRegistry.snapshot();
+    const toolFilterResult = input.toolRegistryFilter?.({
+      registry: toolRegistry,
+      availableTools: providerToolAvailability.available
+    });
+    if (toolFilterResult !== undefined) {
+      providerToolAvailability = await toolRegistry.snapshot();
+    }
     applyDisabledToolsets(toolRegistry, providerToolAvailability.available, input.disabledToolsets);
+    if (input.disabledToolsets !== undefined && input.disabledToolsets.length > 0) {
+      providerToolAvailability = await toolRegistry.snapshot();
+    }
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
-      tools: providerToolAvailability.available.filter((tool) =>
-        !input.disabledToolsets?.some((disabled) => tool.toolsets?.includes(disabled))
-      )
+      tools: providerToolAvailability.available
     });
     const toolCallPlanner = new ToolCallPlanner({
       registry: toolRegistry,
@@ -498,7 +532,8 @@ export class AgentLoopBuilder {
       providerRoutes: substrate.routes,
       delegationManager,
       sessionRecallService,
-      memoryFileCompactionService
+      memoryFileCompactionService,
+      toolFilterResult
     };
   }
 

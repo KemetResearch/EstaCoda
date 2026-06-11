@@ -24,6 +24,10 @@ describe("createDelegationTools", () => {
         allowedTools: {
           type: "array",
           items: { type: "string" }
+        },
+        role: {
+          type: "string",
+          enum: ["leaf", "orchestrator"]
         }
       }
     });
@@ -35,8 +39,16 @@ describe("createDelegationTools", () => {
       status: "completed",
       task: "Do work",
       summary: "done",
-      allowedToolsets: ["core", "research"],
+      role: "leaf",
+      depth: 1,
+      allowedToolsets: [],
       allowedTools: [],
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
       toolExecutions: []
     }));
     const [tool] = createDelegationTools({
@@ -54,8 +66,7 @@ describe("createDelegationTools", () => {
       parentSessionId: "parent",
       profileId: "default",
       task: "Do work",
-      allowedToolsets: ["core", "research"],
-      allowedTools: [],
+      role: "leaf",
       trustedWorkspace: true,
       signal: controller.signal
     }));

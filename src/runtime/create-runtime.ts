@@ -785,10 +785,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     securityPolicy,
-    delegationManagerFactory: () => new DelegationManager({
+    delegationManagerFactory: ({ toolRegistry }) => new DelegationManager({
       sessionDb,
       childFactory,
-      trajectoryRecorder
+      trajectoryRecorder,
+      delegationConfig: options.delegationConfig,
+      currentDepth: 0,
+      parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
     disabledToolsets: options.disabledToolsets

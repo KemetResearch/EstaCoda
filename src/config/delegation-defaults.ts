@@ -24,7 +24,8 @@ export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
     "process.start",
     "process.stop",
     "file.write",
-    "file.replace"
+    "file.replace",
+    "session_search"
   ],
   blockedToolPrefixes: [
     "memory.",

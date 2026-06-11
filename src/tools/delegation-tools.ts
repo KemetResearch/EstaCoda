@@ -1,4 +1,5 @@
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
+import type { DelegateRole } from "../contracts/delegation.js";
 import type { DelegationManager } from "../delegation/delegation-manager.js";
 
 export type DelegationToolOptions = {
@@ -13,6 +14,7 @@ type DelegateTaskInput = {
   context?: string;
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
+  role?: DelegateRole;
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
@@ -32,6 +34,10 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           allowedTools: {
             type: "array",
             items: { type: "string" }
+          },
+          role: {
+            type: "string",
+            enum: ["leaf", "orchestrator"]
           }
         },
         required: ["task"]
@@ -56,8 +62,9 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           profileId: options.profileId,
           task,
           context: input.context,
-          allowedToolsets: input.allowedToolsets ?? ["core", "research"],
-          allowedTools: input.allowedTools ?? [],
+          allowedToolsets: input.allowedToolsets,
+          allowedTools: input.allowedTools,
+          role: input.role ?? "leaf",
           trustedWorkspace: await options.trustedWorkspace(),
           signal: context?.signal
         });

@@ -3,9 +3,15 @@ import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js"
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB, SessionRecord } from "../contracts/session.js";
-import type { ToolsetName } from "../contracts/tool.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
+import { DelegationManager } from "../delegation/delegation-manager.js";
+import {
+  applyChildToolAccessResult,
+  resolveChildToolAccess,
+  type ChildToolAccessResult
+} from "../delegation/toolset-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopInput, type AgentLoopResponse } from "./agent-loop.js";
@@ -36,6 +42,7 @@ export type CreateChildAgentLoopInput = {
   depth?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
+  parentVisibleTools: readonly ToolDefinition[];
 };
 
 export type ChildAgentLoopRuntime = {
@@ -47,6 +54,7 @@ export type ChildAgentLoopRuntime = {
   suppressedRuntimeFeatures: ChildRuntimeFeature[];
   enabledRuntimeFeatures: string[];
   approvalMode: typeof CHILD_APPROVAL_MODE;
+  toolAccess: ChildToolAccessResult;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   cleanup(): Promise<void>;
 };
@@ -106,6 +114,66 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       "toolExecution",
       "mcpToolRegistrations"
     ];
+    const trajectoryRecorder = this.#trajectoryRecorderFactory({
+      profileId: input.profileId,
+      sessionId: childSessionId
+    });
+    const sessionRuntimeContext = createSessionRuntimeContext(childSessionId);
+    let toolAccess: ChildToolAccessResult | undefined;
+    let builtSession: BuiltAgentLoopSession | undefined;
+    builtSession = await this.#builder.buildSession({
+      sessionId: childSessionId,
+      sessionRuntimeContext,
+      sessionDb: this.#sessionDb,
+      trajectoryRecorder,
+      skillConfig: this.#skillConfig,
+      responseLabel: this.#responseLabel,
+      ui: this.#ui,
+      agentProfile: this.#agentProfile,
+      securityPolicy: createChildFailClosedSecurityPolicy(),
+      delegationManagerFactory: () => new DelegationManager({
+        sessionDb: this.#sessionDb,
+        childFactory: this,
+        trajectoryRecorder,
+        delegationConfig: this.#delegationConfig,
+        currentDepth: depth,
+        parentVisibleTools: () => builtSession?.toolRegistry.list() ?? []
+      }),
+      trustedWorkspace: async () => input.trustedWorkspace,
+      memoryRecall: "disabled",
+      sessionCompression: "disabled",
+      projectContext: {
+        workspaceRoot: this.#workspaceRoot,
+        files: [],
+        warnings: []
+      },
+      skillLearningManager: undefined,
+      agentEvolutionPolicy: undefined as AgentEvolutionPolicy | undefined,
+      toolRegistryFilter: ({ registry, availableTools }) => {
+        const result = resolveChildToolAccess({
+          parentVisibleTools: input.parentVisibleTools,
+          childCandidateTools: availableTools,
+          config: this.#delegationConfig,
+          request: {
+            allowedToolsets,
+            allowedTools,
+            role,
+            depth
+          }
+        });
+        applyChildToolAccessResult(registry, result);
+        toolAccess = result;
+        return result;
+      }
+    });
+    const effectiveToolAccess = toolAccess ?? {
+      effectiveAllowedTools: builtSession.toolRegistry.list().map((tool) => tool.name),
+      effectiveAllowedToolsets: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: []
+    };
     const childSession = await this.#sessionDb.createSession({
       id: childSessionId,
       profileId: input.profileId,
@@ -118,6 +186,12 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         depth,
         allowedToolsets,
         allowedTools,
+        effectiveAllowedToolsets: effectiveToolAccess.effectiveAllowedToolsets,
+        effectiveAllowedTools: effectiveToolAccess.effectiveAllowedTools,
+        strippedTools: effectiveToolAccess.strippedTools,
+        blockedTools: effectiveToolAccess.blockedTools,
+        rejectedRequestedTools: effectiveToolAccess.rejectedRequestedTools,
+        rejectedRequestedToolsets: effectiveToolAccess.rejectedRequestedToolsets,
         delegationConfigVersion: CHILD_DELEGATION_CONFIG_VERSION,
         suppressedRuntimeFeatures,
         enabledRuntimeFeatures,
@@ -125,33 +199,6 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         workspaceRoot: this.#workspaceRoot,
         context: input.context ?? ""
       }
-    });
-    const trajectoryRecorder = this.#trajectoryRecorderFactory({
-      profileId: input.profileId,
-      sessionId: childSession.id
-    });
-    const sessionRuntimeContext = createSessionRuntimeContext(childSession.id);
-    const builtSession = await this.#builder.buildSession({
-      sessionId: childSession.id,
-      sessionRuntimeContext,
-      sessionDb: this.#sessionDb,
-      trajectoryRecorder,
-      skillConfig: this.#skillConfig,
-      responseLabel: this.#responseLabel,
-      ui: this.#ui,
-      agentProfile: this.#agentProfile,
-      securityPolicy: createChildFailClosedSecurityPolicy(),
-      delegationManagerFactory: () => disabledChildDelegationManager(),
-      trustedWorkspace: async () => input.trustedWorkspace,
-      memoryRecall: "disabled",
-      sessionCompression: "disabled",
-      projectContext: {
-        workspaceRoot: this.#workspaceRoot,
-        files: [],
-        warnings: []
-      },
-      skillLearningManager: undefined,
-      agentEvolutionPolicy: undefined as AgentEvolutionPolicy | undefined
     });
 
     return {
@@ -163,6 +210,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       suppressedRuntimeFeatures,
       enabledRuntimeFeatures,
       approvalMode: CHILD_APPROVAL_MODE,
+      toolAccess: effectiveToolAccess,
       handle: async (handleInput) => await builtSession.agentLoop.handle(handleInput),
       cleanup: async () => {
         await this.#builder.cleanupSession(builtSession);
@@ -234,20 +282,4 @@ function suppressedFeaturesFromConfig(config: DelegationConfig): ChildRuntimeFea
     suppressed.push("projectContext");
   }
   return suppressed;
-}
-
-function disabledChildDelegationManager() {
-  return {
-    async delegate(request: { parentSessionId: string; task: string; allowedToolsets?: ToolsetName[]; allowedTools?: string[] }) {
-      return {
-        childSessionId: request.parentSessionId,
-        status: "failed" as const,
-        task: request.task,
-        summary: "Recursive child delegation is disabled in this runtime phase.",
-        allowedToolsets: request.allowedToolsets ?? [],
-        allowedTools: request.allowedTools ?? [],
-        toolExecutions: []
-      };
-    }
-  } as unknown as import("../delegation/delegation-manager.js").DelegationManager;
 }
