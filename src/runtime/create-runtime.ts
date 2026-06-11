@@ -679,6 +679,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   };
   const fileStateTracker = new FileStateTracker();
+  const agentLoopRoutes = {
+    model: options.model,
+    mainRoute,
+    primaryModelRoute: options.primaryModelRoute,
+    modelFallbackRoutes: options.modelFallbackRoutes,
+    visionRoute,
+    compressionRoute,
+    providerPreferences: {
+      providerOrder: [options.model.provider]
+    }
+  };
   const builder = new AgentLoopBuilder({
     substrate: {
       workspaceRoot,
@@ -687,17 +698,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       delegationConfig: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
       providerRegistry,
       providerExecutor,
-      routes: {
-        model: options.model,
-        mainRoute,
-        primaryModelRoute: options.primaryModelRoute,
-        modelFallbackRoutes: options.modelFallbackRoutes,
-        visionRoute,
-        compressionRoute,
-        providerPreferences: {
-          providerOrder: [options.model.provider]
-        }
-      },
+      routes: agentLoopRoutes,
       mcpTools,
       skillRegistry,
       localSkillsRoot,
@@ -768,6 +769,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const subagentRegistry = new SubagentRegistry();
   const childFactory = new DefaultChildAgentLoopFactory({
     builder,
+    parentRoutes: agentLoopRoutes,
     sessionDb,
     trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({
       profileId,

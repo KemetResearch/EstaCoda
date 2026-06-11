@@ -210,6 +210,61 @@ describe("AgentLoopBuilder", () => {
     ]);
   });
 
+  it("uses per-session provider routes without mutating shared substrate routes", async () => {
+    const parentPrimaryRoute = { ...mainRoute, id: "parent-primary" };
+    const childPrimaryRoute = {
+      ...mainRoute,
+      id: "child-primary",
+      profile: { ...model, id: "child-primary" }
+    };
+    const captured: Array<{
+      primaryModelRoute?: ResolvedModelRoute;
+      modelFallbackRoutes?: ResolvedModelRoute[];
+      model?: { id: string };
+    }> = [];
+    const harness = await createBuilderHarness({
+      routes: {
+        model,
+        mainRoute,
+        primaryModelRoute: parentPrimaryRoute,
+        modelFallbackRoutes: [{ ...mainRoute, id: "parent-fallback" }],
+        providerPreferences: { providerOrder: ["openai"] }
+      },
+      factories: {
+        providerTurnLoop(options) {
+          captured.push({
+            primaryModelRoute: options.primaryModelRoute,
+            modelFallbackRoutes: options.modelFallbackRoutes,
+            model: options.model
+          });
+          return { run: vi.fn() } as never;
+        },
+        agentLoop: () => ({ handle: vi.fn() }) as never
+      }
+    });
+
+    const first = await harness.build("parent-session");
+    const second = await harness.build("child-session", {
+      providerRoutes: {
+        model: childPrimaryRoute.profile,
+        mainRoute: childPrimaryRoute,
+        primaryModelRoute: childPrimaryRoute,
+        modelFallbackRoutes: [],
+        providerPreferences: { providerOrder: ["openai"] }
+      }
+    });
+
+    expect(captured[0]?.primaryModelRoute?.id).toBe("parent-primary");
+    expect(captured[0]?.modelFallbackRoutes?.map((route) => route.id)).toEqual(["parent-fallback"]);
+    expect(captured[0]?.model?.id).toBe(model.id);
+    expect(captured[1]?.primaryModelRoute?.id).toBe("child-primary");
+    expect(captured[1]?.modelFallbackRoutes).toEqual([]);
+    expect(captured[1]?.model?.id).toBe("child-primary");
+    expect(first.providerRoutes.primaryModelRoute?.id).toBe("parent-primary");
+    expect(second.providerRoutes.primaryModelRoute?.id).toBe("child-primary");
+    expect(first.providerRoutes.primaryModelRoute?.id).toBe("parent-primary");
+  });
+
   it("wires security policy and session context from the supplied session id", async () => {
     const captured = {
       toolExecutorSecurityPolicy: undefined as SecurityPolicy | undefined,

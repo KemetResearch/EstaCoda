@@ -2379,6 +2379,7 @@ describe("createRuntime MCP trust gating", () => {
               "allowedTools",
               "allowedToolsets",
               "context",
+              "modelOverride",
               "role",
               "task",
               "tasks",
@@ -2633,6 +2634,84 @@ describe("createRuntime MCP trust gating", () => {
         "process_start",
         "process_stop"
       ]));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("runs same-provider child model overrides through filtered child tool schemas", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel, { ...parentModel, id: "local-child-override" }],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: request.model,
+          content: "Override child answer"
+        };
+      }
+    });
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      modelFallbackRoutes: [
+        {
+          provider: "local",
+          id: "local-fallback",
+          profile: { ...parentModel, id: "local-fallback" }
+        }
+      ],
+      providerRegistry: registry,
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use override",
+          modelOverride: { provider: "local", model: "local-child-override" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        childSessionId?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+      const childSession = await sessionDb.getSession(metadata?.childSessionId ?? "");
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(providerRequests[0]?.provider).toBe("local");
+      expect(providerRequests[0]?.model).toBe("local-child-override");
+      expect(metadata?.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "local",
+        model: "local-child-override",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(childSession?.metadata?.modelOverride).toEqual(metadata?.modelOverride);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining(["delegate_task", "terminal_run", "file_write"]));
+      expect(JSON.stringify(metadata?.modelOverride)).not.toContain("KEY");
     } finally {
       await runtime.dispose();
     }

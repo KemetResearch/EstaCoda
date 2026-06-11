@@ -1,5 +1,6 @@
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
-import type { DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
+import type { DelegateModelOverride, DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
+import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
 import type { BatchDelegationSummary, DelegationManager } from "../delegation/delegation-manager.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
@@ -18,6 +19,7 @@ type DelegateTaskInput = {
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
   role?: DelegateRole;
+  modelOverride?: DelegateModelOverride;
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
@@ -50,7 +52,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
                     context: { type: "string" },
                     allowedToolsets: { type: "array", items: { type: "string" } },
                     allowedTools: { type: "array", items: { type: "string" } },
-                    role: { type: "string", enum: ["leaf", "orchestrator"] }
+                    role: { type: "string", enum: ["leaf", "orchestrator"] },
+                    modelOverride: modelOverrideSchema()
                   },
                   required: ["task"]
                 }
@@ -73,7 +76,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           role: {
             type: "string",
             enum: ["leaf", "orchestrator"]
-          }
+          },
+          modelOverride: modelOverrideSchema()
         },
         anyOf: [
           { required: ["task"] },
@@ -119,7 +123,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           context: input.context,
           allowedToolsets: input.allowedToolsets,
           allowedTools: input.allowedTools,
-          role: input.role ?? "leaf"
+          role: input.role ?? "leaf",
+          modelOverride: parsed.modelOverride
         });
 
         return {
@@ -158,7 +163,7 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 }
 
 type ParsedDelegateTaskInput =
-  | { ok: true; mode: "single"; task: string }
+  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride }
   | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; recoveredTasksFromJsonString?: boolean }
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
@@ -201,10 +206,19 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
     };
   }
 
+  const modelOverride = normalizeModelOverride(input.modelOverride, "delegate_task modelOverride");
+  if (!modelOverride.ok) {
+    return {
+      ok: false,
+      error: structuredValidationError(modelOverride.message, modelOverride.code)
+    };
+  }
+
   return {
     ok: true,
     mode: "single",
-    task
+    task,
+    modelOverride: modelOverride.value
   };
 }
 
@@ -317,19 +331,24 @@ function normalizeTaskItems(
     if (record.role !== undefined && record.role !== "leaf" && record.role !== "orchestrator") {
       return { ok: false, code: "invalid-task-object", message: `delegate_task tasks[${index}].role must be leaf or orchestrator.` };
     }
+    const modelOverride = normalizeModelOverride(record.modelOverride ?? batchDefaults.modelOverride, `delegate_task tasks[${index}].modelOverride`);
+    if (!modelOverride.ok) {
+      return { ok: false, code: modelOverride.code, message: modelOverride.message };
+    }
     tasks.push({
       task,
       context: record.context ?? batchDefaults.context,
       allowedToolsets: record.allowedToolsets ?? batchDefaults.allowedToolsets,
       allowedTools: record.allowedTools ?? batchDefaults.allowedTools,
-      role: record.role ?? batchDefaults.role ?? "leaf"
+      role: record.role ?? batchDefaults.role ?? "leaf",
+      modelOverride: modelOverride.value
     });
   }
 
   return { ok: true, tasks };
 }
 
-const TASK_ITEM_KEYS = new Set(["task", "context", "allowedToolsets", "allowedTools", "role"]);
+const TASK_ITEM_KEYS = new Set(["task", "context", "allowedToolsets", "allowedTools", "role", "modelOverride"]);
 
 function validateBatchDefaults(input: DelegateTaskInput): { ok: false; code: string; message: string } | undefined {
   if (input.context !== undefined && typeof input.context !== "string") {
@@ -344,7 +363,62 @@ function validateBatchDefaults(input: DelegateTaskInput): { ok: false; code: str
   if (input.role !== undefined && input.role !== "leaf" && input.role !== "orchestrator") {
     return { ok: false, code: "invalid-batch-default", message: "delegate_task role must be leaf or orchestrator." };
   }
+  const modelOverride = normalizeModelOverride(input.modelOverride, "delegate_task modelOverride");
+  if (!modelOverride.ok) {
+    return { ok: false, code: modelOverride.code, message: modelOverride.message };
+  }
   return undefined;
+}
+
+function normalizeModelOverride(
+  value: unknown,
+  path: string
+): { ok: true; value?: DelegateModelOverride } | { ok: false; code: string; message: string } {
+  if (value === undefined) {
+    return { ok: true };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, code: "invalid-model-override", message: `${path} must be an object with a model string.` };
+  }
+  const record = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) => key !== "model" && key !== "provider");
+  if (unknownKeys.length > 0) {
+    return { ok: false, code: "invalid-model-override", message: `${path} contains unknown fields: ${unknownKeys.join(", ")}.` };
+  }
+  if (typeof record.model !== "string" || record.model.trim().length === 0) {
+    return { ok: false, code: "invalid-model-override", message: `${path}.model must be a non-empty string.` };
+  }
+  const model = record.model.trim();
+  if (model.length > MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH) {
+    return {
+      ok: false,
+      code: "invalid-model-override",
+      message: `${path}.model must be ${MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH} characters or fewer.`
+    };
+  }
+  if (record.provider !== undefined && (typeof record.provider !== "string" || record.provider.trim().length === 0)) {
+    return { ok: false, code: "invalid-model-override", message: `${path}.provider must be a non-empty string when provided.` };
+  }
+  return {
+    ok: true,
+    value: {
+      model,
+      provider: typeof record.provider === "string" ? record.provider.trim() : undefined
+    }
+  };
+}
+
+function modelOverrideSchema() {
+  return {
+    type: "object",
+    description: "Optional same-provider child model override. provider may be supplied only to assert the parent provider; cross-provider overrides are rejected.",
+    properties: {
+      model: { type: "string" },
+      provider: { type: "string" }
+    },
+    required: ["model"],
+    additionalProperties: false
+  };
 }
 
 function isStringArray(value: unknown): value is string[] {

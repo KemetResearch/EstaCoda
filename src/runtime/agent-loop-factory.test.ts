@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
+import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
+import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionRecord } from "../contracts/session.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -20,6 +22,7 @@ describe("DefaultChildAgentLoopFactory", () => {
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
       builder: builder as never,
+      parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
@@ -74,6 +77,7 @@ describe("DefaultChildAgentLoopFactory", () => {
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
       builder: builder as never,
+      parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
@@ -112,6 +116,7 @@ describe("DefaultChildAgentLoopFactory", () => {
     const builder = fakeBuilder(built, tools);
     const factory = new DefaultChildAgentLoopFactory({
       builder: builder as never,
+      parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
@@ -143,6 +148,7 @@ describe("DefaultChildAgentLoopFactory", () => {
     const builder = fakeBuilder(built, tools);
     const factory = new DefaultChildAgentLoopFactory({
       builder: builder as never,
+      parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
@@ -163,6 +169,167 @@ describe("DefaultChildAgentLoopFactory", () => {
 
     expect(child.builtSession.toolRegistry.get("delegate_task")).toBeDefined();
     expect(child.toolAccess.effectiveAllowedTools).toContain("delegate_task");
+  });
+
+  it("applies same-provider child model overrides and disables child fallbacks", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-override"
+    });
+
+    const child = await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use another model",
+      trustedWorkspace: true,
+      modelOverride: { provider: "local", model: "child-model" },
+      parentVisibleTools: readOnlyParentTools()
+    });
+    const buildInput = builder.buildSession.mock.calls[0]?.[0] as {
+      providerRoutes?: {
+        model: ModelProfile;
+        primaryModelRoute?: ResolvedModelRoute;
+        modelFallbackRoutes?: ResolvedModelRoute[];
+        providerPreferences?: { providerOrder?: string[] };
+      };
+    };
+    const session = await db.getSession("child-override");
+
+    expect(buildInput.providerRoutes?.model.id).toBe("child-model");
+    expect(buildInput.providerRoutes?.primaryModelRoute?.id).toBe("child-model");
+    expect(buildInput.providerRoutes?.primaryModelRoute?.provider).toBe("local");
+    expect(buildInput.providerRoutes?.modelFallbackRoutes).toEqual([]);
+    expect(buildInput.providerRoutes?.providerPreferences?.providerOrder).toEqual(["local"]);
+    expect(child.modelOverride).toEqual({
+      requested: true,
+      status: "applied",
+      provider: "local",
+      model: "child-model",
+      fallbackBehavior: "disabled-for-override"
+    });
+    expect(session?.metadata?.modelOverride).toEqual(child.modelOverride);
+    expect(JSON.stringify(session?.metadata?.modelOverride)).not.toContain("KEY");
+  });
+
+  it("uses exact valid-length model override ids when constructing child routes", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-valid-long-model"
+    });
+    const modelId = `model-${"x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH - "model-".length)}`;
+
+    const child = await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use a long model id",
+      trustedWorkspace: true,
+      modelOverride: { provider: "local", model: modelId },
+      parentVisibleTools: readOnlyParentTools()
+    });
+    const buildInput = builder.buildSession.mock.calls[0]?.[0] as {
+      providerRoutes?: {
+        model: ModelProfile;
+        primaryModelRoute?: ResolvedModelRoute;
+      };
+    };
+
+    expect(modelId).toHaveLength(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH);
+    expect(buildInput.providerRoutes?.model.id).toBe(modelId);
+    expect(buildInput.providerRoutes?.primaryModelRoute?.id).toBe(modelId);
+    expect(child.modelOverride?.model).toBe(modelId);
+    expect(JSON.stringify(child.modelOverride)).not.toContain("[truncated]");
+  });
+
+  it("rejects overlong model override ids without building a child session", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-overlong-model"
+    });
+    const overlongModelId = `model-${"x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1)}`;
+    let error: unknown;
+
+    try {
+      await factory.createChild({
+        parentSessionId: "parent-1",
+        profileId: "default",
+        task: "Use an overlong model id",
+        trustedWorkspace: true,
+        modelOverride: { provider: "local", model: overlongModelId },
+        parentVisibleTools: readOnlyParentTools()
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      metadata: {
+        requested: true,
+        status: "rejected",
+        provider: "local",
+        reason: "invalid-model-override"
+      }
+    });
+    expect(JSON.stringify((error as { metadata?: unknown }).metadata)).not.toContain(overlongModelId);
+    expect(builder.buildSession).not.toHaveBeenCalled();
+    await expect(db.getSession("child-overlong-model")).resolves.toBeUndefined();
+  });
+
+  it("rejects cross-provider child model overrides before building a child session", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-cross-provider"
+    });
+
+    await expect(factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use another provider",
+      trustedWorkspace: true,
+      modelOverride: { provider: "openai", model: "gpt-test" },
+      parentVisibleTools: readOnlyParentTools()
+    })).rejects.toMatchObject({
+      metadata: {
+        requested: true,
+        status: "rejected",
+        provider: "openai",
+        model: "gpt-test",
+        reason: "cross-provider-unsupported"
+      }
+    });
+    expect(builder.buildSession).not.toHaveBeenCalled();
+    await expect(db.getSession("child-cross-provider")).resolves.toBeUndefined();
   });
 
   it("uses a non-interactive fail-closed child approval policy", async () => {
@@ -277,6 +444,35 @@ function parentToolsWithDelegate() {
     ...readOnlyParentTools(),
     tool("delegate_task", "shared-state-mutation", ["core", "research", "coding"])
   ] as const;
+}
+
+function parentRoutes() {
+  const model: ModelProfile = {
+    id: "parent-model",
+    provider: "local",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  };
+  const mainRoute: ResolvedModelRoute = {
+    provider: "local",
+    id: model.id,
+    profile: model
+  };
+  return {
+    model,
+    mainRoute,
+    primaryModelRoute: mainRoute,
+    modelFallbackRoutes: [
+      {
+        provider: "local",
+        id: "fallback-model",
+        profile: { ...model, id: "fallback-model" }
+      }
+    ],
+    providerPreferences: { providerOrder: ["local"] }
+  };
 }
 
 function tool(name: string, riskClass: ToolRiskClass, toolsets: ToolsetName[]) {

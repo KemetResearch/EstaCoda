@@ -1,5 +1,12 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { DelegateRole, DelegationConfig, DelegateTaskItem, DelegationStaleFileWarning } from "../contracts/delegation.js";
+import type {
+  DelegateModelOverride,
+  DelegateModelOverrideMetadata,
+  DelegateRole,
+  DelegationConfig,
+  DelegateTaskItem,
+  DelegationStaleFileWarning
+} from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
@@ -10,7 +17,11 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
-import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
+import {
+  ChildModelOverrideError,
+  type ChildAgentLoopFactory,
+  type ChildAgentLoopRuntime
+} from "../runtime/agent-loop-factory.js";
 import type { ChildToolDiagnostic } from "./toolset-security.js";
 import type { FileStateReadSnapshot, FileStateTracker } from "./file-state-tracker.js";
 import { findStaleParentFileReadWarnings } from "./file-state-guard.js";
@@ -30,6 +41,7 @@ export type DelegationRequest = {
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
   role?: DelegateRole;
+  modelOverride?: DelegateModelOverride;
   batchId?: string;
   taskIndex?: number;
   channel?: ChannelKind;
@@ -48,7 +60,7 @@ export type DelegationUsageMetadata = {
 export type DelegationSummary = {
   childSessionId: string;
   status: "completed" | "blocked" | "failed";
-  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout";
+  reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout" | "model-override-unsupported";
   task: string;
   summary: string;
   role: DelegateRole;
@@ -76,6 +88,7 @@ export type DelegationSummary = {
   usageUnavailable?: boolean;
   staleFileWarnings?: DelegationStaleFileWarning[];
   staleFileWarningCount?: number;
+  modelOverride?: DelegateModelOverrideMetadata;
   diagnosticPath?: string;
 };
 
@@ -155,6 +168,7 @@ export class DelegationManager {
         allowedToolsets: task.allowedToolsets,
         allowedTools: task.allowedTools,
         role: task.role,
+        modelOverride: task.modelOverride ?? request.modelOverride,
         batchId,
         taskIndex: index
       }, parentReadSnapshot),
@@ -179,6 +193,11 @@ export class DelegationManager {
           rejectedRequestedTools: [],
           rejectedRequestedToolsets: [],
           toolExecutions: [],
+          modelOverride: task.modelOverride !== undefined || request.modelOverride !== undefined ? {
+            requested: true,
+            status: "rejected",
+            reason: "cancelled"
+          } : undefined,
           usageUnavailable: true
         };
       }
@@ -282,6 +301,7 @@ export class DelegationManager {
         role,
         depth,
         channel: request.channel,
+        modelOverride: request.modelOverride,
         trustedWorkspace: request.trustedWorkspace,
         parentVisibleTools: this.#parentVisibleTools()
       });
@@ -326,7 +346,8 @@ export class DelegationManager {
         role,
         depth,
         batchId: request.batchId,
-        taskIndex: request.taskIndex
+        taskIndex: request.taskIndex,
+        modelOverride: child.modelOverride
       });
 
       this.#subagentRegistry.updateSubagent(subagentId, {
@@ -384,6 +405,7 @@ export class DelegationManager {
           diagnostic: runnerResult.diagnostic
 	        });
 	        result.usageUnavailable = true;
+          result.modelOverride = child.modelOverride;
 	        result = this.#withStaleFileWarnings(result, request, parentReadSnapshot);
 	        await this.#recordFinished({
 	          parentSessionId: request.parentSessionId,
@@ -393,7 +415,8 @@ export class DelegationManager {
           summary: result.summary,
           durationMs: Date.now() - startedAt,
 	          error: result.summary,
-	          diagnosticPath: result.diagnosticPath,
+          diagnosticPath: result.diagnosticPath,
+	          modelOverride: result.modelOverride,
 	          usageUnavailable: result.usageUnavailable,
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
@@ -421,6 +444,7 @@ export class DelegationManager {
           rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
           rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
           toolExecutions: [],
+          modelOverride: child.modelOverride,
 	          usageUnavailable: true
 	        }, request, parentReadSnapshot);
 	        await this.#recordFinished({
@@ -430,7 +454,8 @@ export class DelegationManager {
           reason: result.reason,
           summary: result.summary,
           durationMs: Date.now() - startedAt,
-          error: result.summary,
+	          error: result.summary,
+	          modelOverride: result.modelOverride,
 	          usageUnavailable: result.usageUnavailable,
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
@@ -464,6 +489,7 @@ export class DelegationManager {
         usage,
         aggregateUsage: usage,
         usageUnavailable,
+        modelOverride: child.modelOverride,
 	        toolExecutions: childResponse.toolExecutions.map((execution) => ({
 	          tool: execution.tool.name,
 	          decision: execution.decision,
@@ -481,6 +507,7 @@ export class DelegationManager {
         reason: result.reason,
         summary: result.summary,
         durationMs: Date.now() - startedAt,
+        modelOverride: result.modelOverride,
         usage: result.usage,
         aggregateUsage: result.aggregateUsage,
 	        usageUnavailable: result.usageUnavailable,
@@ -490,6 +517,12 @@ export class DelegationManager {
       await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
     } catch (error) {
+      if (error instanceof ChildModelOverrideError) {
+        const result = this.#modelOverrideRejected(request, allowedToolsets, allowedTools, role, depth, error);
+        await this.#recordDelegationOutcome(request.parentSessionId, result);
+        return result;
+      }
+
       const summary = error instanceof Error ? error.message : "Unknown child delegation error.";
 	      const result = this.#withStaleFileWarnings({
 	        childSessionId: childSessionId ?? "unavailable",
@@ -510,6 +543,7 @@ export class DelegationManager {
         rejectedRequestedTools: [],
         rejectedRequestedToolsets: [],
         toolExecutions: [],
+        modelOverride: child?.modelOverride,
 	        usageUnavailable: true
 	      }, request, parentReadSnapshot);
       if (subagentId !== undefined) {
@@ -527,6 +561,7 @@ export class DelegationManager {
           summary,
           durationMs: Date.now() - startedAt,
           error: summary,
+          modelOverride: result.modelOverride,
 	          usageUnavailable: result.usageUnavailable,
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
@@ -578,6 +613,11 @@ export class DelegationManager {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
       toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "cancelled"
+      },
       usageUnavailable: true
     };
     await this.#recordDelegationOutcome(request.parentSessionId, result);
@@ -612,6 +652,11 @@ export class DelegationManager {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
       toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "cancelled"
+      },
       usageUnavailable: true
     };
   }
@@ -646,6 +691,11 @@ export class DelegationManager {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
       toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "spawn-paused"
+      },
       usageUnavailable: true
     };
   }
@@ -687,11 +737,60 @@ export class DelegationManager {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
       toolExecutions: [],
+      modelOverride: request.modelOverride === undefined ? undefined : {
+        requested: true,
+        status: "rejected",
+        reason: "spawn-depth-exceeded"
+      },
       usageUnavailable: true
     };
 	    await this.#recordDelegationOutcome(request.parentSessionId, result);
 	    return result;
 	  }
+
+  #modelOverrideRejected(
+    request: DelegationRequest,
+    allowedToolsets: ToolsetName[],
+    allowedTools: string[],
+    role: DelegateRole,
+    depth: number,
+    error: ChildModelOverrideError
+  ): DelegationSummary {
+    const summary = error.message;
+    this.#trajectoryRecorder.record("delegation-finished", {
+      parentSessionId: request.parentSessionId,
+      childSessionId: "unavailable",
+      status: "blocked",
+      reason: "model-override-unsupported",
+      role,
+      depth,
+      summary,
+      modelOverride: error.metadata,
+      usageUnavailable: true
+    });
+    return {
+      childSessionId: "unavailable",
+      status: "blocked",
+      reason: "model-override-unsupported",
+      task: request.task,
+      summary,
+      role,
+      depth,
+      batchId: request.batchId,
+      taskIndex: request.taskIndex,
+      allowedToolsets,
+      allowedTools,
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: [],
+      modelOverride: error.metadata,
+      usageUnavailable: true
+    };
+  }
 
 	  #snapshotParentReads(parentSessionId: string): FileStateReadSnapshot | undefined {
 	    return this.#fileStateTracker?.snapshotReads(parentSessionId);
@@ -730,6 +829,7 @@ export class DelegationManager {
     depth: number;
     batchId?: string;
     taskIndex?: number;
+    modelOverride?: DelegateModelOverrideMetadata;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-started",
@@ -740,7 +840,8 @@ export class DelegationManager {
       role: input.role,
       depth: input.depth,
       batchId: input.batchId,
-      taskIndex: input.taskIndex
+      taskIndex: input.taskIndex,
+      modelOverride: input.modelOverride
     });
     this.#trajectoryRecorder.record("delegation-started", input);
   }
@@ -757,6 +858,7 @@ export class DelegationManager {
 	    usage?: DelegationUsageMetadata;
 	    aggregateUsage?: DelegationUsageMetadata;
 	    usageUnavailable?: boolean;
+      modelOverride?: DelegateModelOverrideMetadata;
 	    staleFileWarnings?: DelegationStaleFileWarning[];
 	    staleFileWarningCount?: number;
 	  }): Promise<void> {
@@ -772,6 +874,7 @@ export class DelegationManager {
 	      usage: input.usage,
 	      aggregateUsage: input.aggregateUsage,
 	      usageUnavailable: input.usageUnavailable,
+        modelOverride: input.modelOverride,
 	      staleFileWarnings: input.staleFileWarnings,
 	      staleFileWarningCount: input.staleFileWarningCount
 	    });

@@ -1,5 +1,12 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
+import type {
+  DelegateModelOverride,
+  DelegateModelOverrideMetadata,
+  DelegateRole,
+  DelegationConfig
+} from "../contracts/delegation.js";
+import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
+import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB, SessionRecord } from "../contracts/session.js";
@@ -19,6 +26,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopInput, type AgentLoopResponse } from "./agent-loop.js";
 import {
   AgentLoopBuilder,
+  type AgentLoopRouteInput,
   type BuiltAgentLoopSession
 } from "./agent-loop-builder.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
@@ -41,6 +49,7 @@ export type CreateChildAgentLoopInput = {
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
   role?: DelegateRole;
+  modelOverride?: DelegateModelOverride;
   depth?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
@@ -57,6 +66,7 @@ export type ChildAgentLoopRuntime = {
   enabledRuntimeFeatures: string[];
   approvalMode: typeof CHILD_APPROVAL_MODE;
   toolAccess: ChildToolAccessResult;
+  modelOverride?: DelegateModelOverrideMetadata;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   cleanup(): Promise<void>;
 };
@@ -65,8 +75,19 @@ export type ChildAgentLoopFactory = {
   createChild(input: CreateChildAgentLoopInput): Promise<ChildAgentLoopRuntime>;
 };
 
+export class ChildModelOverrideError extends Error {
+  readonly metadata: DelegateModelOverrideMetadata;
+
+  constructor(message: string, metadata: DelegateModelOverrideMetadata) {
+    super(message);
+    this.name = "ChildModelOverrideError";
+    this.metadata = metadata;
+  }
+}
+
 export type DefaultChildAgentLoopFactoryOptions = {
   builder: AgentLoopBuilder;
+  parentRoutes: AgentLoopRouteInput;
   sessionDb: SessionDB;
   trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   responseLabel: string;
@@ -83,6 +104,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
 
 export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #builder: AgentLoopBuilder;
+  readonly #parentRoutes: AgentLoopRouteInput;
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   readonly #responseLabel: string;
@@ -98,6 +120,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
     this.#builder = options.builder;
+    this.#parentRoutes = options.parentRoutes;
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorderFactory = options.trajectoryRecorderFactory;
     this.#responseLabel = options.responseLabel;
@@ -118,6 +141,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     const role = input.role ?? "leaf";
     const allowedToolsets = input.allowedToolsets ?? [];
     const allowedTools = input.allowedTools ?? [];
+    const modelOverride = deriveSameProviderChildRoutes(this.#parentRoutes, input.modelOverride);
     const suppressedRuntimeFeatures = suppressedFeaturesFromConfig(this.#delegationConfig);
     const enabledRuntimeFeatures = [
       "agentLoop",
@@ -164,6 +188,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       },
       skillLearningManager: undefined,
       agentEvolutionPolicy: undefined as AgentEvolutionPolicy | undefined,
+      providerRoutes: modelOverride.routes,
       toolRegistryFilter: ({ registry, availableTools }) => {
         const result = resolveChildToolAccess({
           parentVisibleTools: input.parentVisibleTools,
@@ -207,6 +232,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         blockedTools: effectiveToolAccess.blockedTools,
         rejectedRequestedTools: effectiveToolAccess.rejectedRequestedTools,
         rejectedRequestedToolsets: effectiveToolAccess.rejectedRequestedToolsets,
+        modelOverride: modelOverride.metadata,
         delegationConfigVersion: CHILD_DELEGATION_CONFIG_VERSION,
         suppressedRuntimeFeatures,
         enabledRuntimeFeatures,
@@ -226,12 +252,99 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       enabledRuntimeFeatures,
       approvalMode: CHILD_APPROVAL_MODE,
       toolAccess: effectiveToolAccess,
+      modelOverride: modelOverride.metadata,
       handle: async (handleInput) => await builtSession.agentLoop.handle(handleInput),
       cleanup: async () => {
         await this.#builder.cleanupSession(builtSession);
       }
     };
   }
+}
+
+function deriveSameProviderChildRoutes(
+  parentRoutes: AgentLoopRouteInput,
+  override: DelegateModelOverride | undefined
+): { routes?: AgentLoopRouteInput; metadata?: DelegateModelOverrideMetadata } {
+  if (override === undefined) {
+    return {};
+  }
+
+  const requestedModel = override.model.trim();
+  const parentPrimaryRoute = parentRoutes.primaryModelRoute ?? parentRoutes.mainRoute;
+  const parentProvider = parentPrimaryRoute.provider;
+  const requestedProvider = (override.provider ?? parentProvider).trim();
+  const metadataModel = boundRouteMetadataText(requestedModel);
+  const metadataProvider = boundRouteMetadataText(requestedProvider);
+
+  if (requestedModel.length === 0) {
+    throw new ChildModelOverrideError("Child model override requires a non-empty model.", {
+      requested: true,
+      status: "rejected",
+      provider: metadataProvider,
+      reason: "invalid-model-override"
+    });
+  }
+
+  if (requestedModel.length > MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH) {
+    throw new ChildModelOverrideError(`Child model override model must be ${MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH} characters or fewer.`, {
+      requested: true,
+      status: "rejected",
+      provider: metadataProvider,
+      model: metadataModel,
+      reason: "invalid-model-override"
+    });
+  }
+
+  if (requestedProvider !== parentProvider) {
+    throw new ChildModelOverrideError("Child model override cannot change providers in this commit.", {
+      requested: true,
+      status: "rejected",
+      provider: metadataProvider,
+      model: metadataModel,
+      reason: "cross-provider-unsupported"
+    });
+  }
+
+  const route = cloneRouteForModel(parentPrimaryRoute, requestedModel);
+  return {
+    routes: {
+      ...parentRoutes,
+      model: route.profile,
+      mainRoute: route,
+      primaryModelRoute: route,
+      modelFallbackRoutes: [],
+      providerPreferences: {
+        ...parentRoutes.providerPreferences,
+        providerOrder: [parentProvider]
+      }
+    },
+    metadata: {
+      requested: true,
+      status: "applied",
+      provider: parentProvider,
+      model: metadataModel,
+      fallbackBehavior: "disabled-for-override"
+    }
+  };
+}
+
+function cloneRouteForModel(route: ResolvedModelRoute, modelId: string): ResolvedModelRoute {
+  const profile: ModelProfile = {
+    ...route.profile,
+    id: modelId,
+    provider: route.provider
+  };
+  return {
+    ...route,
+    id: modelId,
+    profile
+  };
+}
+
+function boundRouteMetadataText(value: string): string {
+  return value.length <= MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH
+    ? value
+    : `${value.slice(0, MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH - " [truncated]".length)} [truncated]`;
 }
 
 export function createChildFailClosedSecurityPolicy(): SecurityPolicy {

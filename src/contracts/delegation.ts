@@ -2,6 +2,22 @@ import type { ToolRiskClass, ToolsetName } from "./tool.js";
 
 export type DelegateRole = "leaf" | "orchestrator";
 
+export const MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH = 200;
+
+export type DelegateModelOverride = {
+  model: string;
+  provider?: string;
+};
+
+export type DelegateModelOverrideMetadata = {
+  requested: boolean;
+  status: "applied" | "rejected";
+  provider?: string;
+  model?: string;
+  reason?: string;
+  fallbackBehavior?: "parent" | "disabled-for-override";
+};
+
 export type DelegationConfig = {
   maxSpawnDepth: number;
   maxConcurrentChildren: number;
@@ -40,6 +56,7 @@ export type DelegateTaskItem = {
   allowedToolsets?: ToolsetName[];
   allowedTools?: string[];
   role?: DelegateRole;
+  modelOverride?: DelegateModelOverride;
 };
 
 export type DelegationStaleFileWarning = {

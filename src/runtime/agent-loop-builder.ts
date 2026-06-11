@@ -65,6 +65,8 @@ export type AgentLoopRouteInput = {
   providerPreferences: ProviderRoutePreferences;
 };
 
+export type AgentLoopSessionRouteOverride = AgentLoopRouteInput;
+
 export type AgentLoopSkillVisibilityInput = {
   skillRegistry: SkillRegistry;
   toolAvailability: ToolDefinition[];
@@ -191,6 +193,7 @@ export type AgentLoopSessionInput = {
   memoryRecall?: "enabled" | "disabled";
   sessionCompression?: "enabled" | "disabled";
   projectContext?: ProjectContextSnapshot;
+  providerRoutes?: AgentLoopSessionRouteOverride;
   toolRegistryFilter?: AgentLoopToolRegistryFilter;
 };
 
@@ -242,6 +245,7 @@ export class AgentLoopBuilder {
 
   async buildSession(input: AgentLoopSessionInput): Promise<BuiltAgentLoopSession> {
     const substrate = this.#substrate;
+    const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
     const toolRegistry = new ToolRegistry();
     const runtimeToolContext = buildRuntimeToolContext({
@@ -282,9 +286,9 @@ export class AgentLoopBuilder {
         imageCacheRoot: substrate.imageCacheRoot,
         browserBackend: substrate.browserBackend,
         browserConfig: substrate.browserConfig,
-        mainRoute: substrate.routes.mainRoute,
-        visionRoute: substrate.routes.visionRoute,
-        compressionRoute: substrate.routes.compressionRoute,
+        mainRoute: routes.mainRoute,
+        visionRoute: routes.visionRoute,
+        compressionRoute: routes.compressionRoute,
         providerRegistry: substrate.providerRegistry,
         providerExecutor: substrate.providerExecutor,
         processManager: substrate.processManager,
@@ -444,10 +448,10 @@ export class AgentLoopBuilder {
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,
-      model: substrate.routes.model,
-      primaryModelRoute: substrate.routes.primaryModelRoute,
-      modelFallbackRoutes: substrate.routes.modelFallbackRoutes,
-      providerPreferences: substrate.routes.providerPreferences,
+      model: routes.model,
+      primaryModelRoute: routes.primaryModelRoute,
+      modelFallbackRoutes: routes.modelFallbackRoutes,
+      providerPreferences: routes.providerPreferences,
       sessionDb: input.sessionDb,
       sessionId: input.sessionId,
       sessionRuntimeContext,
@@ -481,7 +485,7 @@ export class AgentLoopBuilder {
     });
     const intentRouter = new IntentRouter({
       skillRegistry: sessionSkillRegistry,
-      model: substrate.routes.model
+      model: routes.model
     });
     const runtimeRouter = (this.#factories.runtimeRouter ?? ((options) => new RuntimeRouter(options)))({
       intentRouter,
@@ -509,8 +513,8 @@ export class AgentLoopBuilder {
       memoryRecallOrchestrator,
       sessionCompressionService: input.sessionCompression === "disabled" ? undefined : substrate.sessionCompressionService,
       compressionConfig: input.sessionCompression === "disabled" ? undefined : substrate.compressionConfig,
-      model: substrate.routes.model,
-      providerPreferences: substrate.routes.providerPreferences,
+      model: routes.model,
+      providerPreferences: routes.providerPreferences,
       contextReferenceExpander: substrate.contextReferenceExpander,
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
@@ -540,7 +544,7 @@ export class AgentLoopBuilder {
       sessionSkillRegistry,
       sessionSkillCatalog,
       providerTools: providerToolSchemaCatalog.tools,
-      providerRoutes: substrate.routes,
+      providerRoutes: routes,
       delegationManager,
       sessionRecallService,
       memoryFileCompactionService,

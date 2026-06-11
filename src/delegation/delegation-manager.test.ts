@@ -3,8 +3,8 @@ import type { DelegationOutcome, MemoryProvider } from "../contracts/memory.js";
 import type { ProviderUsage } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
-import type { ChildAgentLoopFactory } from "../runtime/agent-loop-factory.js";
-import type { DelegationConfig } from "../contracts/delegation.js";
+import { ChildModelOverrideError, type ChildAgentLoopFactory } from "../runtime/agent-loop-factory.js";
+import type { DelegateModelOverrideMetadata, DelegationConfig } from "../contracts/delegation.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
@@ -180,6 +180,80 @@ describe("DelegationManager", () => {
       childSessionId: "child",
       usageUnavailable: true
     }));
+  });
+
+  it("passes model overrides to child construction and preserves safe metadata", async () => {
+    const harness = await createHarness({
+      childModelOverrideMetadata: {
+        requested: true,
+        status: "applied",
+        provider: "local",
+        model: "child-model",
+        fallbackBehavior: "disabled-for-override"
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Use a child model",
+      modelOverride: { provider: "local", model: "child-model" },
+      trustedWorkspace: true
+    });
+
+    expect(harness.factory.createChild).toHaveBeenCalledWith(expect.objectContaining({
+      modelOverride: { provider: "local", model: "child-model" }
+    }));
+    expect(result.modelOverride).toEqual({
+      requested: true,
+      status: "applied",
+      provider: "local",
+      model: "child-model",
+      fallbackBehavior: "disabled-for-override"
+    });
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-started",
+      modelOverride: result.modelOverride
+    }));
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-finished",
+      modelOverride: result.modelOverride
+    }));
+    expect(JSON.stringify(result.modelOverride)).not.toContain("KEY");
+  });
+
+  it("returns structured blocked results for unsupported cross-provider overrides", async () => {
+    const harness = await createHarness({
+      rejectModelOverride: {
+        requested: true,
+        status: "rejected",
+        provider: "openai",
+        model: "gpt-test",
+        reason: "cross-provider-unsupported"
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Use another provider",
+      modelOverride: { provider: "openai", model: "gpt-test" },
+      trustedWorkspace: true
+    });
+
+    expect(result).toMatchObject({
+      childSessionId: "unavailable",
+      status: "blocked",
+      reason: "model-override-unsupported",
+      modelOverride: {
+        requested: true,
+        status: "rejected",
+        provider: "openai",
+        model: "gpt-test",
+        reason: "cross-provider-unsupported"
+      }
+    });
+    expect(harness.handleInputs).toEqual([]);
   });
 
   it("adds stale-file warnings when a child writes a file the parent read before delegation", async () => {
@@ -1056,6 +1130,32 @@ describe("DelegationManager", () => {
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
   });
 
+  it("applies batch model overrides and lets task-level overrides win", async () => {
+    const harness = await createHarness({
+      maxConcurrentChildren: 2
+    });
+
+    await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [
+        { task: "batch default" },
+        { task: "task override", modelOverride: { model: "task-model" } }
+      ],
+      modelOverride: { model: "batch-model" },
+      trustedWorkspace: true
+    });
+
+    expect(harness.factory.createChild).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      task: "batch default",
+      modelOverride: { model: "batch-model" }
+    }));
+    expect(harness.factory.createChild).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      task: "task override",
+      modelOverride: { model: "task-model" }
+    }));
+  });
+
   it("preserves per-child batch stale-file warnings and aggregate warning count", async () => {
     const tracker = new FileStateTracker();
     tracker.recordOperation({
@@ -1251,6 +1351,8 @@ async function createHarness(input: {
   memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
   outcomeMemory?: Partial<DelegationConfig["outcomeMemory"]>;
   fileStateTracker?: FileStateTracker;
+  childModelOverrideMetadata?: DelegateModelOverrideMetadata;
+  rejectModelOverride?: DelegateModelOverrideMetadata;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
   const registry = input.registry ?? new SubagentRegistry();
@@ -1259,6 +1361,9 @@ async function createHarness(input: {
   let childSequence = 0;
   const factory: ChildAgentLoopFactory = {
     createChild: vi.fn(async () => {
+      if (input.rejectModelOverride !== undefined) {
+        throw new ChildModelOverrideError("Child model override cannot change providers in this commit.", input.rejectModelOverride);
+      }
       childSequence += 1;
       const childSessionId = childSequence === 1 ? "child" : `child-${childSequence}`;
       await db.createSession({
@@ -1276,6 +1381,7 @@ async function createHarness(input: {
         suppressedRuntimeFeatures: [],
         enabledRuntimeFeatures: [],
         approvalMode: "non-interactive-fail-closed" as const,
+        modelOverride: input.childModelOverrideMetadata,
         toolAccess: {
           effectiveAllowedToolsets: ["files"],
           effectiveAllowedTools: ["file.read"],

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { createDelegationTools } from "./delegation-tools.js";
 
@@ -35,6 +36,10 @@ describe("createDelegationTools", () => {
         role: {
           type: "string",
           enum: ["leaf", "orchestrator"]
+        },
+        modelOverride: {
+          type: "object",
+          required: ["model"]
         }
       }
     });
@@ -75,10 +80,76 @@ describe("createDelegationTools", () => {
       profileId: "default",
       task: "Do work",
       role: "leaf",
+      modelOverride: undefined,
       trustedWorkspace: true,
       signal: controller.signal,
       onEvent
     }));
+  });
+
+  it("passes normalized same-provider model overrides into single delegation", async () => {
+    const delegate = vi.fn(async () => ({
+      childSessionId: "child",
+      status: "completed",
+      task: "Do work",
+      summary: "done",
+      role: "leaf",
+      depth: 1,
+      allowedToolsets: [],
+      allowedTools: [],
+      effectiveAllowedToolsets: [],
+      effectiveAllowedTools: [],
+      strippedTools: [],
+      blockedTools: [],
+      rejectedRequestedTools: [],
+      rejectedRequestedToolsets: [],
+      toolExecutions: []
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+
+    await tool!.run({
+      task: "Do work",
+      modelOverride: { provider: " local ", model: " child-model " }
+    });
+
+    expect(delegate).toHaveBeenCalledWith(expect.objectContaining({
+      modelOverride: {
+        provider: "local",
+        model: "child-model"
+      }
+    }));
+  });
+
+  it("rejects overlong model overrides before launching delegation", async () => {
+    const delegate = vi.fn();
+    const [tool] = createDelegationTools({
+      manager: { delegate } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+    const overlongModelId = `model-${"x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1)}`;
+
+    const result = await tool!.run({
+      task: "Do work",
+      modelOverride: { model: overlongModelId }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-model-override"
+      }
+    });
+    expect(result.content).toContain(`${MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH}`);
+    expect(JSON.stringify(result)).not.toContain(overlongModelId);
+    expect(delegate).not.toHaveBeenCalled();
   });
 
   it("keeps task required for single-task mode", async () => {
@@ -192,6 +263,13 @@ describe("createDelegationTools", () => {
         code: "invalid-task-object"
       }
     });
+    await expect(enabledTool!.run({ tasks: JSON.stringify([{ task: "A", modelOverride: { model: "m", extra: true } }]) })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-model-override"
+      }
+    });
 
     const [disabledTool] = createDelegationTools({
       manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
@@ -256,12 +334,13 @@ describe("createDelegationTools", () => {
     await tool!.run({
       tasks: [
         { task: "A" },
-        { task: "B", context: "task context", allowedTools: ["web.search"], role: "leaf" }
+        { task: "B", context: "task context", allowedTools: ["web.search"], role: "leaf", modelOverride: { model: "task-model" } }
       ],
       context: "batch context",
       allowedTools: ["file.read"],
       allowedToolsets: ["research"],
-      role: "orchestrator"
+      role: "orchestrator",
+      modelOverride: { model: "batch-model" }
     });
 
     expect(delegateBatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -271,14 +350,16 @@ describe("createDelegationTools", () => {
           context: "batch context",
           allowedTools: ["file.read"],
           allowedToolsets: ["research"],
-          role: "orchestrator"
+          role: "orchestrator",
+          modelOverride: { model: "batch-model" }
         },
         {
           task: "B",
           context: "task context",
           allowedTools: ["web.search"],
           allowedToolsets: ["research"],
-          role: "leaf"
+          role: "leaf",
+          modelOverride: { model: "task-model" }
         }
       ]
     }));
