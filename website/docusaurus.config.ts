@@ -89,9 +89,14 @@ const config: Config = {
       items: [
         {
           to: '/getting-started/',
-          label: 'Docs',
+          label: '/docs',
           position: 'left',
           activeBaseRegex: '^/$|^/(?!ar(?:/|$)).*$',
+        },
+        {
+          href: 'https://estacoda.kemetresearch.com/skills',
+          label: '/skills',
+          position: 'left',
         },
         {
           href: 'https://github.com/KemetResearch/EstaCoda',

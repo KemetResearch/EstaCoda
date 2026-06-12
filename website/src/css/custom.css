@@ -17,7 +17,7 @@
   --estacoda-kemet-soft:   #2a64b8;
   --estacoda-ink:          #1f2230;
   --estacoda-ink-soft:     rgba(31, 34, 48, 0.64);
-  --estacoda-ink-faint:    rgba(31, 34, 48, 0.34);
+  --estacoda-ink-faint:    rgba(31, 34, 48, 0.48);
   --estacoda-rule:         rgba(31, 34, 48, 0.12);
   --estacoda-paper:        #ffffff;
   --estacoda-paper-soft:   #f6f6f7;
@@ -69,6 +69,7 @@
   --ifm-code-background:                rgba(27, 76, 157, 0.08);
   --ifm-pre-background:                 var(--estacoda-paper-soft);
   --ifm-pre-color:                      var(--estacoda-ink);
+  --ifm-pre-padding:                    1.05rem 1.3rem;
   --docusaurus-highlighted-code-line-bg: rgba(27, 76, 157, 0.12);
 
   /* Navbar */
@@ -96,7 +97,7 @@
 [data-theme='dark'] {
   --estacoda-ink:          #e8eaf0;
   --estacoda-ink-soft:     rgba(232, 234, 240, 0.66);
-  --estacoda-ink-faint:    rgba(232, 234, 240, 0.36);
+  --estacoda-ink-faint:    rgba(232, 234, 240, 0.5);
   --estacoda-rule:         rgba(232, 234, 240, 0.12);
   --estacoda-paper:        #0b0c11;
   --estacoda-paper-soft:   #14161c;
@@ -167,7 +168,14 @@ pre, .theme-code-block, div[class*='codeBlockContainer'] {
   background-color: var(--ifm-pre-background) !important;
   color: var(--ifm-pre-color) !important;
   border: 1px solid var(--estacoda-rule);
-  border-radius: 8px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+/* Give the code line(s) breathing room so single-line commands aren't cramped */
+.theme-code-block pre,
+div[class*='codeBlockContainer'] pre,
+pre.prism-code {
+  padding: var(--ifm-pre-padding);
 }
 pre code,
 .theme-code-block code,
@@ -177,6 +185,13 @@ div[class*='codeBlockContainer'] code {
   padding: 0 !important;
   color: inherit !important;
   font-family: var(--estacoda-mono);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+/* The copy button sits flush in the padded corner */
+.theme-code-block button[class*='copyButton'] {
+  top: 0.55rem;
+  right: 0.55rem;
 }
 
 /* Headings — Playfair Display, ink (accent reserved for links) */
@@ -227,13 +242,37 @@ h3, .markdown h3 { font-weight: 600; }
   letter-spacing: 0.2em;
   color: var(--estacoda-ink-faint);
 }
-.navbar__logo img { height: 1.85rem; width: auto; }
+.navbar__logo img { height: 2.31rem; width: auto; }
 .navbar__link {
+  display: inline-flex;
+  align-items: center;
   font-family: var(--estacoda-mono);
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+/* Vertically center every navbar item so the GitHub link + its external-link
+   glyph sit on the same baseline as the locale dropdown and toggles. */
+.navbar__items { align-items: center; }
+.navbar__link svg { vertical-align: middle; }
+
+/* Left nav items mirror the marketing-site nav: lowercase slash labels,
+   mono bold, ink (never the blue active state), quiet opacity hover. */
+.navbar__items:not(.navbar__items--right) .navbar__link,
+.navbar__items:not(.navbar__items--right) .navbar__link--active {
+  text-transform: none;
+  letter-spacing: 0.1em;
+  color: var(--estacoda-ink);
+}
+.navbar__items:not(.navbar__items--right) .navbar__link:hover {
+  color: var(--estacoda-ink);
+  opacity: 0.5;
+}
+/* No external-link glyph on the slash nav items */
+.navbar__items:not(.navbar__items--right) .navbar__link svg {
+  display: none;
 }
 
 /* Sidebar */
