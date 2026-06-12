@@ -10,9 +10,9 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
-• /tools: Browse available tools grouped by toolset
+• /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse commands and available skills
+• /skills: Browse available skills
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -43,9 +43,9 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /compact: Compact this in-session context
 - /reset: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect memory state
-- /tools: Browse available tools grouped by toolset
+- /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
-- /skills: Browse commands and available skills
+- /skills: Browse available skills
 - /packs: Manage packs (install, enable, disable, uninstall)
 - /reload-mcp: Reload MCP config and refresh MCP tools for this session
 - /resume: Show the latest interrupted-turn resume note
@@ -76,9 +76,9 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
-• /tools: Browse available tools grouped by toolset
+• /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse commands and available skills
+• /skills: Browse available skills
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -109,9 +109,9 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /compact: Compact this in-session context
 - /reset: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect memory state
-- /tools: Browse available tools grouped by toolset
+- /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
-- /skills: Browse commands and available skills
+- /skills: Browse available skills
 - /packs: Manage packs (install, enable, disable, uninstall)
 - /reload-mcp: Reload MCP config and refresh MCP tools for this session
 - /resume: Show the latest interrupted-turn resume note
@@ -142,9 +142,9 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
-• /tools: Browse available tools grouped by toolset
+• /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse commands and available skills
+• /skills: Browse available skills
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -175,9 +175,9 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /compact: Compact this in-session context
 • /reset: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
-• /tools: Browse available tools grouped by toolset
+• /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse commands and available skills
+• /skills: Browse available skills
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -312,17 +312,17 @@ exports[`Session surfaces — /status > renders in standard light > status-stand
 │ workflow run: [2minactive[0m"
 `;
 
-exports[`Session surfaces — /tools > renders in narrow width > tools-narrow width 1`] = `"• No tools match ""."`;
+exports[`Session surfaces — /tools > renders in narrow width > tools-narrow width 1`] = `"• No tools are available."`;
 
-exports[`Session surfaces — /tools > renders in no Unicode > tools-no Unicode 1`] = `"- No tools match ""."`;
+exports[`Session surfaces — /tools > renders in no Unicode > tools-no Unicode 1`] = `"- No tools are available."`;
 
-exports[`Session surfaces — /tools > renders in no color > tools-no color 1`] = `"• No tools match ""."`;
+exports[`Session surfaces — /tools > renders in no color > tools-no color 1`] = `"• No tools are available."`;
 
-exports[`Session surfaces — /tools > renders in plain > tools-plain 1`] = `"- No tools match ""."`;
+exports[`Session surfaces — /tools > renders in plain > tools-plain 1`] = `"- No tools are available."`;
 
-exports[`Session surfaces — /tools > renders in standard dark > tools-standard dark 1`] = `"• No tools match ""."`;
+exports[`Session surfaces — /tools > renders in standard dark > tools-standard dark 1`] = `"• No tools are available."`;
 
-exports[`Session surfaces — /tools > renders in standard light > tools-standard light 1`] = `"• No tools match ""."`;
+exports[`Session surfaces — /tools > renders in standard light > tools-standard light 1`] = `"• No tools are available."`;
 
 exports[`Session surfaces — assistant response > renders in narrow width > assistant-response-narrow width 1`] = `
 "
@@ -487,9 +487,9 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -522,9 +522,9 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -557,9 +557,9 @@ Name                     Description
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -592,9 +592,9 @@ Name                     Description
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -627,9 +627,9 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -662,9 +662,9 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /compact                 Compact this in-session context
 /reset                   Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
-/tools                   Browse available tools grouped by toolset
+/tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse commands and available skills
+/skills                  Browse available skills
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note

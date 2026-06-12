@@ -471,7 +471,8 @@ export class StandardRenderer {
       const cells = vm.columns.map((col, i) => {
         const raw = row[col.key];
         const text = raw === undefined ? "" : String(raw);
-        return padVisibleAlign(text, widths[i], col.alignment ?? "left");
+        const aligned = padVisibleAlign(text, widths[i], col.alignment ?? "left");
+        return col.emphasis === "strong" ? this.#bold(aligned) : aligned;
       });
       lines.push(cells.join("  "));
     }

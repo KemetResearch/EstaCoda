@@ -18,6 +18,7 @@ import { chromeCopy } from "../ui/cli-ui-copy.js";
 // ─────────────────────────────────────────────────────────────
 
 const DEFAULT_COMPLETION_LIMIT = 6;
+const MENU_DESCRIPTION_MAX_WIDTH = 88;
 
 const implementedSlashCommands = new Set([
   "help",
@@ -205,46 +206,89 @@ export function buildSlashMenuViewModel(runtime: Runtime, filter = ""): ViewMode
 
 export function buildToolsMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
   const normalizedFilter = normalizeFilter(filter);
-  const grouped = new Map<string, Array<{ name: string; description: string }>>();
+  const rows = runtime
+    .tools()
+    .filter((tool) => matches(normalizedFilter, tool.name, tool.description, ...tool.toolsets))
+    .map((tool) => ({
+      name: tool.name,
+      description: truncateMenuDescription(`${tool.description} [${tool.toolsets.join(", ")}]`),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  for (const tool of runtime.tools()) {
-    if (!matches(normalizedFilter, tool.name, tool.description, ...tool.toolsets)) {
-      continue;
-    }
-
-    for (const toolset of tool.toolsets) {
-      grouped.set(toolset, [
-        ...(grouped.get(toolset) ?? []),
-        { name: tool.name, description: tool.description },
-      ]);
-    }
-  }
-
-  const blocks: ViewModel[] = [];
-
-  for (const [toolset, rows] of [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    blocks.push(
-      buildTableViewModel({
-        title: `${toolset} tools`,
-        columns: [
-          { key: "name", header: "Name", alignment: "left" },
-          { key: "description", header: "Description", alignment: "left" },
-        ],
-        rows: rows.sort((a, b) => a.name.localeCompare(b.name)),
-      })
-    );
-  }
-
-  if (blocks.length === 0) {
+  if (rows.length === 0) {
     return buildListViewModel({
-      items: [listItem(`No tools match "${normalizedFilter}".`)],
+      items: [
+        listItem(
+          normalizedFilter.length === 0
+            ? "No tools are available."
+            : `No tools match "${normalizedFilter}".`
+        )
+      ],
     });
   }
 
   return buildCommandResultViewModel({
     ok: true,
-    title: `Tools: ${runtime.tools().length}`,
-    blocks,
+    title: `Tools: ${rows.length}`,
+    blocks: [
+      buildTableViewModel({
+        title: "Available tools",
+        columns: [
+          { key: "name", header: "Name", alignment: "left", emphasis: "strong" },
+          { key: "description", header: "Description", alignment: "left" },
+        ],
+        rows,
+      })
+    ],
+  });
+}
+
+export function buildSkillsMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
+  const normalizedFilter = normalizeFilter(filter);
+  const rows = runtime
+    .skills()
+    .filter((skill) =>
+      matches(
+        normalizedFilter,
+        skill.name,
+        skill.description,
+        skill.category ?? "general",
+        skill.sourceKind ?? "runtime"
+      )
+    )
+    .map((skill) => ({
+      name: `/${skill.name}`,
+      description: truncateMenuDescription(
+        `${skill.description} [${skill.category ?? "general"}/${skill.sourceKind ?? "runtime"}]`
+      ),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (rows.length === 0) {
+    return buildListViewModel({
+      items: [
+        listItem(
+          normalizedFilter.length === 0
+            ? "No skills are available."
+            : `No skills match "${normalizedFilter}".`
+        )
+      ],
+    });
+  }
+
+  return buildCommandResultViewModel({
+    ok: true,
+    title: `Skills: ${rows.length}`,
+    blocks: [
+      buildTableViewModel({
+        title: "Available skills",
+        columns: [
+          { key: "name", header: "Name", alignment: "left", emphasis: "strong" },
+          { key: "description", header: "Description", alignment: "left" },
+        ],
+        rows,
+      })
+    ],
   });
 }
 
@@ -278,6 +322,13 @@ function matches(filter: string, ...values: string[]): boolean {
 
 function normalizeFilter(value: string): string {
   return value.trim().replace(/^\//u, "").toLowerCase();
+}
+
+function truncateMenuDescription(value: string): string {
+  if (value.length <= MENU_DESCRIPTION_MAX_WIDTH) {
+    return value;
+  }
+  return `${value.slice(0, MENU_DESCRIPTION_MAX_WIDTH - 3).trimEnd()}...`;
 }
 
 function clampIndex(index: number, total: number): number {

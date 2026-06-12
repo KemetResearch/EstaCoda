@@ -183,7 +183,7 @@ function registerAll(): void {
     name: "tools",
     aliases: [],
     category: "Info",
-    description: "Browse available tools grouped by toolset",
+    description: "Browse available tools",
     visibility: "public",
     scope: "both",
   });
@@ -199,7 +199,7 @@ function registerAll(): void {
     name: "skills",
     aliases: [],
     category: "Info",
-    description: "Browse commands and available skills",
+    description: "Browse available skills",
     visibility: "public",
     scope: "both",
   });

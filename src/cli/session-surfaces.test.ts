@@ -5,6 +5,7 @@ import type { ViewModel } from "../contracts/view-model.js";
 import {
   buildSlashMenuViewModel,
   buildSlashCompletionViewModel,
+  buildSkillsMenuViewModel,
   buildToolsMenuViewModel,
   renderSlashCompletion,
   renderSlashMenu,
@@ -169,6 +170,50 @@ const fakeRuntime = {
   skills: () => [],
 } as unknown as Parameters<typeof buildSlashMenuViewModel>[0];
 
+const fakeToolsRuntime = {
+  tools: () => [
+    {
+      name: "workspace_search",
+      description: "Search files in the current workspace for code, documentation, and configuration references.",
+      toolsets: ["files", "coding", "research"],
+    },
+    {
+      name: "apply_patch",
+      description: "Apply a focused patch to files in the trusted workspace.",
+      toolsets: ["files", "coding"],
+    },
+    {
+      name: "terminal_inspect",
+      description: "Inspect terminal output and command state without mutating the workspace.",
+      toolsets: ["shell-readonly", "coding", "research"],
+    },
+  ],
+} as unknown as Parameters<typeof buildToolsMenuViewModel>[0];
+
+const fakeSkillsRuntime = {
+  tools: () => [],
+  skills: () => [
+    {
+      name: "batch",
+      description: "Research and plan a large-scale codebase change with verification recipes.",
+      category: "software-development",
+      sourceKind: "bundled",
+    },
+    {
+      name: "ascii-video",
+      description: "Create ASCII art videos and generative terminal-style motion pieces.",
+      category: "media",
+      sourceKind: "bundled",
+    },
+    {
+      name: "remember",
+      description: "Review memory entries and propose cleanup, deduplication, and conflict fixes.",
+      category: "productivity",
+      sourceKind: "local",
+    },
+  ],
+} as unknown as Parameters<typeof buildSkillsMenuViewModel>[0];
+
 // ──────────────────────────────────────
 // Snapshot helpers
 // ──────────────────────────────────────
@@ -228,6 +273,93 @@ describe("Session surfaces — /tools", () => {
       expect(snapshotOutput(output)).toMatchSnapshot(`tools-${ctx.name}`);
     });
   }
+
+  it("renders one alphabetic tools table without grouping duplicates", () => {
+    const output = renderPlain(buildToolsMenuViewModel(fakeToolsRuntime, ""));
+    const applyPatchIndex = output.indexOf("apply_patch");
+    const terminalIndex = output.indexOf("terminal_inspect");
+    const workspaceSearchIndex = output.indexOf("workspace_search");
+
+    expect(output).toContain("[OK] Tools: 3");
+    expect(output).toContain("Available tools");
+    expect(output).toContain("Name");
+    expect(output).toContain("Description");
+    expect(output).toContain("[files, coding]");
+    expect(output).toContain("...");
+    expect(output).not.toContain("files tools");
+    expect(output).not.toContain("coding tools");
+    expect(output.match(/workspace_search/g)).toHaveLength(1);
+    expect(applyPatchIndex).toBeGreaterThan(-1);
+    expect(terminalIndex).toBeGreaterThan(applyPatchIndex);
+    expect(workspaceSearchIndex).toBeGreaterThan(terminalIndex);
+  });
+
+  it("renders tool names bold in the standard renderer without bolding descriptions", () => {
+    const output = standardDarkRenderer().render(buildToolsMenuViewModel(fakeToolsRuntime, "apply"));
+
+    expect(output).toContain("\x1b[1mapply_patch");
+    expect(output).not.toContain("\x1b[1mApply a focused");
+  });
+
+  it("filters tools by name, description, and toolset", () => {
+    const byToolset = renderPlain(buildToolsMenuViewModel(fakeToolsRuntime, "shell-readonly"));
+    expect(byToolset).toContain("terminal_inspect");
+    expect(byToolset).not.toContain("workspace_search");
+
+    const byDescription = renderPlain(buildToolsMenuViewModel(fakeToolsRuntime, "trusted workspace"));
+    expect(byDescription).toContain("apply_patch");
+    expect(byDescription).not.toContain("terminal_inspect");
+  });
+
+  it("renders distinct empty states for missing tools and missing matches", () => {
+    expect(renderPlain(buildToolsMenuViewModel(fakeRuntime, ""))).toBe("- No tools are available.");
+    expect(renderPlain(buildToolsMenuViewModel(fakeToolsRuntime, "nonexistent"))).toBe('- No tools match "nonexistent".');
+  });
+});
+
+describe("Session surfaces — /skills", () => {
+  it("renders only skills in the same table style as tools", () => {
+    const output = renderPlain(buildSkillsMenuViewModel(fakeSkillsRuntime, ""));
+
+    expect(output).toContain("[OK] Skills: 3");
+    expect(output).toContain("Available skills");
+    expect(output).toContain("Name");
+    expect(output).toContain("Description");
+    expect(output).toContain("/ascii-video");
+    expect(output).toContain("/batch");
+    expect(output).toContain("[media/bundled]");
+    expect(output).toContain("...");
+    expect(output).not.toContain("verification recipes. [software-development/bundled]");
+    expect(output).not.toContain("Commands");
+    expect(output).not.toContain("/help");
+    expect(output).not.toContain("/exit");
+  });
+
+  it("renders skill names bold in the standard renderer without bolding descriptions", () => {
+    const output = standardDarkRenderer().render(buildSkillsMenuViewModel(fakeSkillsRuntime, "media"));
+
+    expect(output).toContain("\x1b[1m/ascii-video");
+    expect(output).not.toContain("\x1b[1mCreate ASCII");
+  });
+
+  it("filters skills by name, description, category, and source", () => {
+    const byCategory = renderPlain(buildSkillsMenuViewModel(fakeSkillsRuntime, "media"));
+    expect(byCategory).toContain("/ascii-video");
+    expect(byCategory).not.toContain("/batch");
+
+    const bySource = renderPlain(buildSkillsMenuViewModel(fakeSkillsRuntime, "local"));
+    expect(bySource).toContain("/remember");
+    expect(bySource).not.toContain("/ascii-video");
+
+    const byDescription = renderPlain(buildSkillsMenuViewModel(fakeSkillsRuntime, "verification"));
+    expect(byDescription).toContain("/batch");
+    expect(byDescription).not.toContain("/remember");
+  });
+
+  it("renders distinct empty states for missing skills and missing matches", () => {
+    expect(renderPlain(buildSkillsMenuViewModel(fakeRuntime, ""))).toBe("- No skills are available.");
+    expect(renderPlain(buildSkillsMenuViewModel(fakeSkillsRuntime, "nonexistent"))).toBe('- No skills match "nonexistent".');
+  });
 });
 
 describe("Session surfaces — slash menu", () => {
@@ -308,7 +440,7 @@ describe("Session surfaces — slash completion list", () => {
     const toolsOutput = renderPlain(buildToolsMenuViewModel(fakeRuntime, ""));
     expect(completion).toContain("/tools");
     expect(completion).toContain("Browse runtime tools");
-    expect(toolsOutput).toContain("No tools match");
+    expect(toolsOutput).toContain("No tools are available.");
   });
 
   it("renders no-color and no-Unicode fallbacks without ANSI or ceremonial chrome", () => {

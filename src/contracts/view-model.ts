@@ -40,6 +40,7 @@ export interface TableColumn {
   readonly key: string;
   readonly header: string;
   readonly alignment?: TableAlignment;
+  readonly emphasis?: "strong";
 }
 
 export interface TableViewModel {

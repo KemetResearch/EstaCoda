@@ -20,7 +20,7 @@ import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt, type PromptOptions, type PromptSpecialKeyControl } from "./readline-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
+import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
@@ -1526,7 +1526,7 @@ export async function handleSlashCommand(input: {
       input.output.write(`${await renderMemoryPromotions(input.runtime)}\n\n`);
       return false;
     case "skills":
-      input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
+      input.output.write(`${input.renderer.render(buildSkillsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
     case "reload-mcp":
       if (input.refreshRuntime === undefined) {

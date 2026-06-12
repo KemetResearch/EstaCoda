@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
-import { runSessionLoop } from "./session-loop.js";
+import { handleSlashCommand, runSessionLoop } from "./session-loop.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -13,6 +13,7 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
@@ -260,6 +261,39 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("renders /skills as a skills-only table", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime({
+      skills: () => ([
+        {
+          name: "code-review",
+          description: "Review changed code for regressions and missing tests.",
+          category: "software-development",
+          sourceKind: "bundled",
+        },
+      ] as ReturnType<Runtime["skills"]>),
+    });
+
+    await handleSlashCommand({
+      text: "/skills",
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      renderer: { render: renderPlain },
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("[OK] Skills: 1");
+    expect(rendered).toContain("Available skills");
+    expect(rendered).toContain("/code-review");
+    expect(rendered).not.toContain("Commands");
+    expect(rendered).not.toContain("/help");
+  });
+
   it("hides assistant response progress by default", async () => {
     const outputChunks: string[] = [];
     const runtime = {
