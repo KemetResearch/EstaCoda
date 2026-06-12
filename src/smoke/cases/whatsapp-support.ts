@@ -222,14 +222,25 @@ async function assertDeclinedInstallLeavesConfigUnchanged(homeDir: string): Prom
 
 async function assertCancellationLeavesConfigUnchanged(homeDir: string): Promise<void> {
   await mkdir(homeDir, { recursive: true });
+  let pairAttempts = 0;
+  const installedDeps = installedBridgeDeps();
   const result = await runWhatsAppWizard({
     workspaceRoot: homeDir,
     homeDir,
     prompt: fakePrompt(["cancel"]),
-    dependencies: installedBridgeDeps(),
+    dependencies: {
+      ...installedDeps,
+      pairDevice: async (options) => {
+        pairAttempts += 1;
+        return installedDeps.pairDevice?.(options) ?? { ok: true };
+      },
+    },
   });
-  if (result.exitCode === 0 || !result.output.includes("Enter bot or self")) {
+  if (result.exitCode === 0 || result.failureReason !== "invalid_mode") {
     throw new Error(`Expected wizard cancellation before QR pairing, got: ${result.output}`);
+  }
+  if (pairAttempts !== 0) {
+    throw new Error(`Cancelled WhatsApp wizard must not start QR pairing, got ${pairAttempts} attempt(s)`);
   }
   if (await configLoaded(homeDir)) {
     throw new Error("Cancelled WhatsApp wizard must not create profile config");
@@ -284,7 +295,10 @@ async function assertArabicWizardCopyPreservesTechnicalTokens(homeDir: string): 
     prompt: fakePrompt(["cancel"]),
     dependencies: installedBridgeDeps(),
   });
-  for (const token of ["WhatsApp", "Baileys", "scripts/whatsapp-bridge/", "estacoda whatsapp"]) {
+  if (result.failureReason !== "invalid_mode") {
+    throw new Error(`Arabic WhatsApp wizard cancellation should fail before pairing, got: ${result.output}`);
+  }
+  for (const token of ["WhatsApp", "estacoda whatsapp"]) {
     if (!result.output.includes(token)) {
       throw new Error(`Arabic WhatsApp wizard output must preserve ${token}`);
     }
