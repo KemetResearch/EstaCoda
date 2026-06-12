@@ -132,6 +132,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
 
   say(copy.introBlock);
   say("");
+  flushLinesToOutput();
 
   const deps = options.dependencies ?? {};
   const bridgeDir = defaultWhatsAppBridgeDir();
@@ -169,19 +170,21 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
     say(copy.modeInvalid);
     return finish(1, lines, [], "invalid_mode");
   }
-  say(mode === "bot" ? copy.modeSelectedDedicated : copy.modeSelectedPersonal);
-  say(mode === "bot" ? copy.dedicatedGuidance : copy.personalGuidance);
-  say("");
+  const selectedModeCopy = mode === "bot" ? copy.modeSelectedDedicated : copy.modeSelectedPersonal;
+  const guidanceCopy = mode === "bot" ? copy.dedicatedGuidance : copy.personalGuidance;
 
   const allowedUsers = normalizeAllowedUsers(await ask(options.prompt, copy.allowlistQuestion));
   const dmPolicy: WhatsAppDmPolicy = allowedUsers.length > 0 ? "allowlist" : "pairing";
 
+  say(selectedModeCopy);
   if (allowedUsers.length > 0) {
     say(copy.allowlistSelected(allowedUsers.join(", ")));
   } else {
     say(copy.allowlistEmpty);
   }
   say(copy.dependenciesReady);
+  say("");
+  say(guidanceCopy);
   say("");
   say(copy.pairingInstructions);
   say("");
@@ -406,13 +409,21 @@ function waitForPairBridgeReady(
     const timer = setTimeout(() => finish(() => reject(new Error("WhatsApp QR pairing timed out."))), timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      output.write(text);
+      const visibleText = stripPairBridgeReadySentinel(text);
+      if (visibleText.length > 0) output.write(visibleText);
       if (text.includes("ESTACODA_WHATSAPP_BRIDGE_READY")) finish(resolve);
     });
     child.stderr.on("data", (chunk: Buffer) => output.write(chunk.toString("utf8")));
     child.on("error", (error) => finish(() => reject(error)));
     child.on("exit", (code, signal) => finish(() => reject(new Error(`WhatsApp bridge exited during pairing (${code ?? signal ?? "unknown"}).`))));
   });
+}
+
+export function stripPairBridgeReadySentinel(text: string): string {
+  return text
+    .split(/\r?\n/u)
+    .filter((line) => !line.includes("ESTACODA_WHATSAPP_BRIDGE_READY"))
+    .join("\n");
 }
 
 async function reserveLoopbackPort(): Promise<number> {

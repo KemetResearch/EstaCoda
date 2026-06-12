@@ -659,8 +659,12 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Choose [1/2]:");
     expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Dedicated WhatsApp number");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("Leave blank to link WhatsApp now");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("international format");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("Example: 00201234567890");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).not.toContain("*");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.selected")).toContain("Allowed senders");
+    expect(rawSetupCopy("en", "whatsappWizard.dedicated.guidance")).toContain("with the dedicated number");
+    expect(rawSetupCopy("en", "whatsappWizard.pairing.instructions")).toContain("using the dedicated number");
     expect(rawSetupCopy("en", "whatsappWizard.success.linked")).toContain("linked");
     expect(rawSetupCopy("en", "whatsappWizard.success.sessionSaved")).toContain("Session saved");
     expect(rawSetupCopy("en", "whatsappWizard.success.restricted")).toContain("Incoming messages restricted to");
@@ -671,6 +675,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp"));
     expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp Business"));
     expect(resolveSetupCopy("ar", "whatsappWizard.dedicated.guidance")).toContain(isolateLtr("eSIM"));
+    expect(rawSetupCopy("ar", "whatsappWizard.allowlist.question")).toContain("الصيغة الدولية");
+    expect(rawSetupCopy("ar", "whatsappWizard.allowlist.question")).toContain("00201234567890");
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("npm ci"));
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("scripts/whatsapp-bridge/"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.failed")).toContain(isolateLtr("QR"));

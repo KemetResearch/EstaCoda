@@ -92,6 +92,7 @@ describe("runWhatsAppWizard", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Pairing timed out - run estacoda whatsapp to try again.");
+    expect(result.output).toContain("⌘ WhatsApp Setup");
     expect(await configLoaded(tempDir)).toBe(false);
   });
 
@@ -114,8 +115,12 @@ describe("runWhatsAppWizard", () => {
     const streamed = writes.join("");
 
     expect(result.exitCode).toBe(1);
+    expect(streamed.startsWith("⌘ WhatsApp Setup\n")).toBe(true);
     expect(streamed).toContain("WhatsApp pairing");
     expect(streamed).toContain("Scan this code with WhatsApp on your phone:");
+    expect(streamed.indexOf("✓ Mode: dedicated WhatsApp number")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
+    expect(streamed.indexOf("✓ Allowed senders: 971501234567")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
+    expect(streamed.indexOf("✓ WhatsApp bridge dependencies ready")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
     expect(streamed.indexOf("Scan this code with WhatsApp on your phone:")).toBeLessThan(streamed.indexOf("[QR]"));
     expect(result.output).toContain("Pairing timed out - run estacoda whatsapp to try again.");
     expect(await configLoaded(tempDir)).toBe(false);
@@ -387,7 +392,10 @@ describe("runWhatsAppWizard", () => {
 
     expect(result.exitCode).toBe(0);
     const promptText = JSON.stringify((prompt as unknown as { mock: { calls: unknown[][] } }).mock.calls);
+    expect(result.output).toContain("⌘ WhatsApp Setup");
     expect(promptText).toContain("Who can message this agent?");
+    expect(promptText).toContain("international format");
+    expect(promptText).toContain("00201234567890");
     expect(promptText).not.toContain("*");
   });
 });
