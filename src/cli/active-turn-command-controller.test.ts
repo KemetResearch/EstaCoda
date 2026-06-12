@@ -6,11 +6,11 @@ type ActiveInputPreview = { kind: "message" | "command"; text: string } | undefi
 
 function makeInput(): NodeJS.ReadStream & {
   readonly rawModes: boolean[];
-  press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+  press(chunk: unknown, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
 } {
   const input = new PassThrough() as unknown as NodeJS.ReadStream & {
     rawModes: boolean[];
-    press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+    press(chunk: unknown, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
   };
   input.isTTY = true;
   input.isRaw = false;
@@ -110,6 +110,59 @@ describe("ActiveTurnCommandController", () => {
       { kind: "command", text: "/i" },
       { kind: "command", text: "/in" },
     ]);
+  });
+
+  it("ignores undefined chunks from unsupported special keys while buffering active commands", () => {
+    const { input, controller, previews, inputLines, queuedTexts, statuses, abort, steer } = createController();
+    controller.start();
+
+    input.press("/", { sequence: "/" });
+    input.press(undefined, { name: "down" });
+    input.press(undefined, { name: "up" });
+    input.press(undefined, { name: "pagedown" });
+    input.press(undefined, { name: "pageup" });
+    input.press(undefined, { name: "tab" });
+    input.press(undefined);
+
+    expect(previews).toEqual([{ kind: "command", text: "/" }]);
+    expect(inputLines).toEqual(["/"]);
+    expect(queuedTexts).toEqual([]);
+    expect(statuses).toEqual([]);
+    expect(abort).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-string keypress chunks while buffering active commands", () => {
+    const { input, controller, previews, inputLines, queuedTexts, statuses } = createController();
+    controller.start();
+
+    input.press("/", { sequence: "/" });
+    input.press(null, { name: "unknown-special" });
+    input.emit("keypress", Buffer.from([0x1b]), { name: "unknown-special" });
+
+    expect(previews).toEqual([{ kind: "command", text: "/" }]);
+    expect(inputLines).toEqual(["/"]);
+    expect(queuedTexts).toEqual([]);
+    expect(statuses).toEqual([]);
+  });
+
+  it("ignores undefined chunks from unsupported special keys while buffering follow-up text", () => {
+    const { input, controller, previews, inputLines, queuedTexts, statuses } = createController();
+    controller.start();
+
+    input.press("h", { name: "h" });
+    input.press(undefined, { name: "down" });
+    input.press(undefined, { name: "tab" });
+    input.press(undefined);
+    input.press("i", { name: "i" });
+
+    expect(previews).toEqual([
+      { kind: "message", text: "h" },
+      { kind: "message", text: "hi" },
+    ]);
+    expect(inputLines).toEqual(["h", "hi"]);
+    expect(queuedTexts).toEqual([]);
+    expect(statuses).toEqual([]);
   });
 
   it("backspace edits the command buffer", () => {

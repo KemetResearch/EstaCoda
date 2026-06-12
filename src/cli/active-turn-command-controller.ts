@@ -32,7 +32,7 @@ export class ActiveTurnCommandController {
   readonly #onSteer?: (note: string) => void;
   readonly #onStatusMessage?: (message: string) => void;
   readonly #emitSigint: () => void;
-  readonly #onKeypress = (chunk: string, key: Keypress = {}) => this.#handleKeypress(chunk, key);
+  readonly #onKeypress = (chunk: unknown, key: Keypress = {}) => this.#handleKeypress(chunk, key);
   #buffer: string | undefined;
   #attached = false;
   #disposed = false;
@@ -74,7 +74,7 @@ export class ActiveTurnCommandController {
     this.#attached = false;
   }
 
-  #handleKeypress(chunk: string, key: Keypress): void {
+  #handleKeypress(chunk: unknown, key: Keypress): void {
     if (this.#disposed) return;
     if (key.ctrl === true && key.name === "c") {
       this.#emitSigint();
@@ -107,10 +107,12 @@ export class ActiveTurnCommandController {
       this.#submit(command);
       return;
     }
-    if (isPrintableInput(chunk)) {
-      this.#buffer = `${this.#buffer ?? ""}${chunk}`;
-      this.#renderBuffer();
+    if (!isPrintableInput(chunk)) {
+      return;
     }
+
+    this.#buffer = `${this.#buffer ?? ""}${chunk}`;
+    this.#renderBuffer();
   }
 
   #submit(command: string): void {
@@ -162,6 +164,8 @@ export class ActiveTurnCommandController {
   }
 }
 
-function isPrintableInput(value: string): boolean {
-  return value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value);
+function isPrintableInput(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    !/[\u0000-\u001f\u007f]/u.test(value);
 }
