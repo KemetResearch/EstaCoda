@@ -22,6 +22,8 @@
   --estacoda-paper:        #ffffff;
   --estacoda-paper-soft:   #f6f6f7;
   --estacoda-paper-sunk:   #f0f0f1;
+  /* Elegant neutral grey for recessed surfaces (code boxes, TOC bar) */
+  --estacoda-surface:      #ededee;
 
   --estacoda-serif-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --estacoda-sans-body:     'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -67,9 +69,9 @@
 
   /* Code blocks */
   --ifm-code-background:                rgba(27, 76, 157, 0.08);
-  --ifm-pre-background:                 var(--estacoda-paper-soft);
+  --ifm-pre-background:                 var(--estacoda-surface);
   --ifm-pre-color:                      var(--estacoda-ink);
-  --ifm-pre-padding:                    1.05rem 1.3rem;
+  --ifm-pre-padding:                    1.1rem;
   --docusaurus-highlighted-code-line-bg: rgba(27, 76, 157, 0.12);
 
   /* Navbar */
@@ -102,6 +104,7 @@
   --estacoda-paper:        #0b0c11;
   --estacoda-paper-soft:   #14161c;
   --estacoda-paper-sunk:   #0f1117;
+  --estacoda-surface:      #14161c;
 
   --ifm-color-primary:          #6aa3f0;
   --ifm-color-primary-dark:     #4a8be4;
@@ -127,7 +130,7 @@
   --ifm-table-border-color:  var(--estacoda-rule);
 
   --ifm-code-background:                rgba(106, 163, 240, 0.12);
-  --ifm-pre-background:                 #14161c;
+  --ifm-pre-background:                 var(--estacoda-surface);
   --ifm-pre-color:                      var(--estacoda-ink);
   --docusaurus-highlighted-code-line-bg: rgba(106, 163, 240, 0.16);
 
@@ -163,11 +166,11 @@ code {
   padding: 0.05rem 0.35rem;
 }
 
-/* Code blocks — clean editorial surface, brand hairline border */
+/* Code blocks — clean editorial grey surface, borderless */
 pre, .theme-code-block, div[class*='codeBlockContainer'] {
   background-color: var(--ifm-pre-background) !important;
   color: var(--ifm-pre-color) !important;
-  border: 1px solid var(--estacoda-rule);
+  border: none;
   border-radius: 10px;
   box-shadow: none;
 }
@@ -175,7 +178,7 @@ pre, .theme-code-block, div[class*='codeBlockContainer'] {
 .theme-code-block pre,
 div[class*='codeBlockContainer'] pre,
 pre.prism-code {
-  padding: var(--ifm-pre-padding);
+  padding: 1.05rem 1.3rem;
 }
 pre code,
 .theme-code-block code,
@@ -188,11 +191,23 @@ div[class*='codeBlockContainer'] code {
   font-size: 0.875rem;
   line-height: 1.65;
 }
-/* The copy button sits flush in the padded corner */
-.theme-code-block button[class*='copyButton'] {
-  top: 0.55rem;
-  right: 0.55rem;
+/* The copy-button group sits flush in the padded top-right corner.
+   (Docusaurus positions this group via calc(var(--ifm-pre-padding)/2), so the
+   pre-padding var MUST stay single-valued — pin top/right here to be safe.) */
+.theme-code-block div[class*='buttonGroup'],
+div[class*='codeBlockContainer'] div[class*='buttonGroup'] {
+  top: 0.6rem;
+  right: 0.6rem;
 }
+
+/* "On this page" collapsible bar — match the command-box grey, drop blue tint.
+   Docusaurus ships these as hashed CSS-module classes (tocCollapsible_<hash>),
+   so target by attribute substring and override the blue --ifm-menu active bg. */
+div[class*='tocCollapsible'] {
+  background-color: var(--estacoda-surface) !important;
+  border: none !important;
+}
+button[class*='tocCollapsibleButton'] { color: var(--estacoda-ink) !important; }
 
 /* Headings — Playfair Display, ink (accent reserved for links) */
 h1, h2, h3, h4, h5, h6,
