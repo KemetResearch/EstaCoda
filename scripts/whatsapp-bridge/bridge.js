@@ -12,6 +12,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { isBoom } from "@hapi/boom";
 import pino from "pino";
+import qrcode from "qrcode-terminal";
 
 export const DEFAULT_BROWSER = ["EstaCoda", "Chrome", "120.0"];
 export const BRIDGE_API_VERSION = "whatsapp-bridge.v1";
@@ -35,12 +36,19 @@ export async function createWhatsAppSocket(options) {
     getMessage: async () => undefined,
     logger,
     markOnlineOnConnect: false,
-    printQRInTerminal: options?.printQRInTerminal === true,
     syncFullHistory: false,
     version,
   });
+  if (options?.printQRInTerminal === true) {
+    socket.ev.on("connection.update", (update) => renderQrForTerminal(update.qr));
+  }
   socket.ev.on("creds.update", saveCreds);
   return socket;
+}
+
+export function renderQrForTerminal(qr, write = (chunk) => process.stdout.write(chunk)) {
+  if (typeof qr !== "string" || qr.length === 0) return;
+  qrcode.generate(qr, { small: true }, (terminalQr) => write(`${terminalQr}\n`));
 }
 
 export function classifyDisconnect(error) {
@@ -717,9 +725,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   validateBindHost(host);
   const bridge = createBridgeServer({ authDir, token, printQRInTerminal: pairOnly, inboundMediaDir, inboundMediaParentDir, maxInboundMediaBytes });
   bridge.server.listen(port, host.replace(/^\[(.*)\]$/u, "$1"), async () => {
-    console.log("ESTACODA_WHATSAPP_BRIDGE_READY");
     try {
       await bridge.startSocket();
+      console.log("ESTACODA_WHATSAPP_BRIDGE_READY");
     } catch (error) {
       console.error(`WhatsApp bridge socket start failed: ${error instanceof Error ? error.message : String(error)}`);
     }

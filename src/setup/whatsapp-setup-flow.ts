@@ -124,6 +124,11 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
     }
   };
   const say = (line = "") => lines.push(line);
+  const flushLinesToOutput = () => {
+    if (options.output === undefined || lines.length === 0) return;
+    options.output.write(`${lines.join("\n")}\n`);
+    lines.splice(0, lines.length);
+  };
 
   say(copy.introBlock);
   say("");
@@ -181,6 +186,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   say(copy.pairingInstructions);
   say("");
   say(copy.pairingBlock(authDir));
+  flushLinesToOutput();
   const qrOutput: string[] = [];
   const pairResult = await pairDevice({
     authDir,

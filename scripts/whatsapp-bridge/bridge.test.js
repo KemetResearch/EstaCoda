@@ -3,7 +3,18 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import test from "node:test";
-import { createBridgeServer, normalizeInboundMessage } from "./bridge.js";
+import { createBridgeServer, normalizeInboundMessage, renderQrForTerminal } from "./bridge.js";
+
+test("QR rendering is handled by the bridge without writing the raw QR string", () => {
+  const rawQr = "1@raw-whatsapp-qr-payload,example";
+  const chunks = [];
+
+  renderQrForTerminal(rawQr, (chunk) => chunks.push(chunk));
+
+  const rendered = chunks.join("");
+  assert.ok(rendered.length > 0);
+  assert.doesNotMatch(rendered, /raw-whatsapp-qr-payload/u);
+});
 
 test("image messages download into the inbound media directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "estacoda-wa-bridge-media-"));

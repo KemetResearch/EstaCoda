@@ -95,6 +95,32 @@ describe("runWhatsAppWizard", () => {
     expect(await configLoaded(tempDir)).toBe(false);
   });
 
+  it("streams pairing instructions before foreground bridge QR output", async () => {
+    const writes: string[] = [];
+    const deps = depsWithInstalledBridge({
+      pairDevice: vi.fn(async (options) => {
+        options.output.write("[QR]\n");
+        return { ok: false as const, reason: "timeout" as const };
+      }),
+    });
+
+    const result = await runWhatsAppWizard({
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt: fakePrompt(["1", "971501234567"]),
+      output: { write: (chunk) => writes.push(chunk) },
+      dependencies: deps,
+    });
+    const streamed = writes.join("");
+
+    expect(result.exitCode).toBe(1);
+    expect(streamed).toContain("WhatsApp pairing");
+    expect(streamed).toContain("Scan this code with WhatsApp on your phone:");
+    expect(streamed.indexOf("Scan this code with WhatsApp on your phone:")).toBeLessThan(streamed.indexOf("[QR]"));
+    expect(result.output).toContain("Pairing timed out - run estacoda whatsapp to try again.");
+    expect(await configLoaded(tempDir)).toBe(false);
+  });
+
   it("fails QR pairing without writing config", async () => {
     const deps = depsWithInstalledBridge({
       pairDevice: vi.fn(async () => ({ ok: false as const, reason: "failed" as const, message: "socket closed" })),
