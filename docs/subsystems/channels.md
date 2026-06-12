@@ -192,7 +192,7 @@ estacoda email configure \
 estacoda whatsapp
 ```
 
-The wizard renders the WhatsApp QR code in the terminal. If no allowed user is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes in profile-local state; plaintext codes are shown once and are not written to config.
+The wizard renders the WhatsApp QR code in the terminal. If no allowed sender is configured during setup, the channel is left in `dmPolicy: "pairing"` and is not reported as fully ready until user authorization is completed. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes in profile-local state; plaintext codes are shown once and are not written to config.
 
 QR pairing is foreground and times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` A logged-out state requires explicit re-pair/reset, and reset is constrained to the selected profile's dedicated WhatsApp auth directory.
 

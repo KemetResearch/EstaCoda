@@ -36,6 +36,9 @@ export type WhatsAppBridgePidContent = {
 export type WhatsAppBridgeLifecycleOptions = {
   authDir: string;
   statePath: string;
+  inboundMediaDir?: string;
+  inboundMediaParentDir?: string;
+  maxInboundMediaBytes?: number;
   bridgeDir?: string;
   logPath?: string;
   installLogPath?: string;
@@ -68,12 +71,15 @@ export type WhatsAppBridgeInstallOptions = {
 };
 
 export class ManagedWhatsAppBridgeClient implements WhatsAppBridgeClient {
-  readonly #options: Required<Omit<WhatsAppBridgeLifecycleOptions, "port" | "bridgeDir" | "logPath" | "installLogPath" | "pidPath" | "lockPath" | "spawnProcess" | "now">> & {
+  readonly #options: Required<Omit<WhatsAppBridgeLifecycleOptions, "port" | "bridgeDir" | "logPath" | "installLogPath" | "pidPath" | "lockPath" | "inboundMediaDir" | "inboundMediaParentDir" | "maxInboundMediaBytes" | "spawnProcess" | "now">> & {
     bridgeDir: string;
     logPath: string;
     installLogPath: string;
     pidPath: string;
     lockPath: string;
+    inboundMediaDir?: string;
+    inboundMediaParentDir?: string;
+    maxInboundMediaBytes?: number;
     port?: number;
     spawnProcess: typeof spawn;
     now: () => Date;
@@ -87,6 +93,9 @@ export class ManagedWhatsAppBridgeClient implements WhatsAppBridgeClient {
     this.#options = {
       authDir: options.authDir,
       statePath: options.statePath,
+      inboundMediaDir: options.inboundMediaDir,
+      inboundMediaParentDir: options.inboundMediaParentDir,
+      maxInboundMediaBytes: options.maxInboundMediaBytes,
       bridgeDir: options.bridgeDir ?? defaultWhatsAppBridgeDir(),
       logPath: options.logPath ?? join(dirname(options.statePath), "bridge.log"),
       installLogPath: options.installLogPath ?? join(dirname(options.statePath), "bridge-install.log"),
@@ -129,11 +138,16 @@ export class ManagedWhatsAppBridgeClient implements WhatsAppBridgeClient {
         "--auth-dir", this.#options.authDir,
         "--host", this.#options.host,
         "--port", String(port),
+        ...(this.#options.inboundMediaDir === undefined ? [] : ["--inbound-media-dir", this.#options.inboundMediaDir]),
+        ...(this.#options.inboundMediaParentDir === undefined ? [] : ["--inbound-media-parent-dir", this.#options.inboundMediaParentDir]),
       ], {
         cwd: this.#options.bridgeDir,
         env: {
           ...process.env,
           ESTACODA_WHATSAPP_BRIDGE_TOKEN: token,
+          ...(this.#options.inboundMediaDir === undefined ? {} : { WHATSAPP_INBOUND_MEDIA_DIR: this.#options.inboundMediaDir }),
+          ...(this.#options.inboundMediaParentDir === undefined ? {} : { WHATSAPP_INBOUND_MEDIA_PARENT_DIR: this.#options.inboundMediaParentDir }),
+          ...(this.#options.maxInboundMediaBytes === undefined ? {} : { WHATSAPP_INBOUND_MEDIA_MAX_BYTES: String(this.#options.maxInboundMediaBytes) }),
         },
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],

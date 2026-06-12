@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import http from "node:http";
+import { randomUUID } from "node:crypto";
+import { mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { URL } from "node:url";
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
@@ -15,6 +19,8 @@ export const MAX_INBOUND_QUEUE = 100;
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const MAX_RESPONSE_BYTES = 1024 * 1024;
 export const SEND_TIMEOUT_MS = 60_000;
+export const DEFAULT_INBOUND_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_INBOUND_MEDIA_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -67,6 +73,19 @@ export function createBridgeServer(options) {
   const authDir = requireString(options?.authDir, "authDir");
   const logger = options?.logger ?? pino({ level: "silent" });
   const printQRInTerminal = options?.printQRInTerminal === true;
+  const inboundMediaDir = typeof options?.inboundMediaDir === "string" && options.inboundMediaDir.length > 0
+    ? resolve(options.inboundMediaDir)
+    : undefined;
+  const inboundMediaParentDir = typeof options?.inboundMediaParentDir === "string" && options.inboundMediaParentDir.length > 0
+    ? resolve(options.inboundMediaParentDir)
+    : undefined;
+  const maxInboundMediaBytes = typeof options?.maxInboundMediaBytes === "number" && options.maxInboundMediaBytes > 0
+    ? options.maxInboundMediaBytes
+    : DEFAULT_INBOUND_MEDIA_MAX_BYTES;
+  const mediaDownloader = options?.mediaDownloader ?? ((message) => downloadMediaMessage(message, "buffer", {}, {
+    logger,
+    reuploadRequest: socket?.updateMediaMessage?.bind(socket),
+  }));
   const maxResponseBytes = typeof options?.maxResponseBytes === "number" && options.maxResponseBytes > 0
     ? options.maxResponseBytes
     : MAX_RESPONSE_BYTES;
@@ -76,6 +95,7 @@ export function createBridgeServer(options) {
   let lastError;
   let socket;
   const startedAt = Date.now();
+  let validatedInboundMediaDir;
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -161,10 +181,21 @@ export function createBridgeServer(options) {
 
   async function startSocket() {
     try {
+      if (inboundMediaDir !== undefined) {
+        validatedInboundMediaDir = await ensureDirectoryUnderAllowedRoot(inboundMediaDir, inboundMediaParentDir);
+        if (validatedInboundMediaDir === undefined) {
+          throw bridgeError(500, "invalid_inbound_media_dir", "WhatsApp inbound media directory is not profile-local.");
+        }
+        await cleanupInboundMediaDir(validatedInboundMediaDir, DEFAULT_INBOUND_MEDIA_RETENTION_MS);
+      }
       socket = await createWhatsAppSocket({ authDir, logger, printQRInTerminal });
-      socket.ev.on("messages.upsert", (event) => {
+      socket.ev.on("messages.upsert", async (event) => {
         for (const message of event.messages ?? []) {
-          const normalized = normalizeInboundMessage(message);
+          const normalized = await normalizeInboundMessage(message, {
+            inboundMediaDir: validatedInboundMediaDir,
+            maxInboundMediaBytes,
+            mediaDownloader,
+          });
           if (normalized === undefined) continue;
           if (queue.length >= MAX_INBOUND_QUEUE) {
             queue.shift();
@@ -330,17 +361,27 @@ function sendWithTimeout(operation) {
   });
 }
 
-function normalizeInboundMessage(message) {
+export async function normalizeInboundMessage(message, options = {}) {
   const key = message?.key;
   const messageId = key?.id;
   const chatId = key?.remoteJid;
   if (typeof messageId !== "string" || typeof chatId !== "string") return undefined;
+  const content = unwrapMessageContent(message.message);
+  const media = detectInboundMedia(content);
   const senderId = key.participant ?? chatId;
-  const body = message.message?.conversation ??
-    message.message?.extendedTextMessage?.text ??
-    message.message?.imageMessage?.caption ??
-    message.message?.videoMessage?.caption ??
+  const body = content?.conversation ??
+    content?.extendedTextMessage?.text ??
+    content?.imageMessage?.caption ??
+    content?.videoMessage?.caption ??
+    content?.documentMessage?.caption ??
     "";
+  const attachments = media === undefined
+    ? undefined
+    : [await normalizeInboundAttachment(message, media, {
+      inboundMediaDir: options.inboundMediaDir,
+      maxInboundMediaBytes: options.maxInboundMediaBytes ?? DEFAULT_INBOUND_MEDIA_MAX_BYTES,
+      mediaDownloader: options.mediaDownloader ?? ((value) => downloadMediaMessage(value, "buffer", {})),
+    })];
   return {
     messageId,
     chatId,
@@ -349,8 +390,171 @@ function normalizeInboundMessage(message) {
     isGroup: chatId.endsWith("@g.us"),
     fromMe: key.fromMe === true,
     body,
+    hasMedia: media !== undefined,
+    mediaType: media?.kind,
+    attachments,
     timestamp: typeof message.messageTimestamp === "number" ? message.messageTimestamp : undefined,
   };
+}
+
+function unwrapMessageContent(content) {
+  return content?.ephemeralMessage?.message ??
+    content?.viewOnceMessage?.message ??
+    content?.viewOnceMessageV2?.message ??
+    content?.documentWithCaptionMessage?.message ??
+    content;
+}
+
+function detectInboundMedia(content) {
+  if (!isRecord(content)) return undefined;
+  if (isRecord(content.imageMessage)) return { kind: "image", source: content.imageMessage, baileysType: "imageMessage" };
+  if (isRecord(content.videoMessage)) return { kind: "video", source: content.videoMessage, baileysType: "videoMessage" };
+  if (isRecord(content.audioMessage)) {
+    return {
+      kind: content.audioMessage.ptt === true ? "voice" : "audio",
+      source: content.audioMessage,
+      baileysType: "audioMessage",
+    };
+  }
+  if (isRecord(content.documentMessage)) return { kind: "document", source: content.documentMessage, baileysType: "documentMessage" };
+  if (isRecord(content.stickerMessage)) return { kind: "image", source: content.stickerMessage, baileysType: "stickerMessage", unsupported: true };
+  return undefined;
+}
+
+async function normalizeInboundAttachment(message, media, options) {
+  const id = `${message.key?.id ?? "message"}:${media.baileysType}`;
+  const base = {
+    id,
+    kind: media.kind,
+    mimeType: typeof media.source.mimetype === "string" ? media.source.mimetype : undefined,
+    originalName: safeOriginalName(media.source.fileName),
+    metadata: {
+      whatsappMediaType: media.baileysType,
+    },
+  };
+  if (media.unsupported === true) {
+    return failedAttachment(base, "unsupported_media", "WhatsApp media could not be downloaded.");
+  }
+  if (typeof options.inboundMediaDir !== "string" || options.inboundMediaDir.length === 0) {
+    return failedAttachment(base, "download_failed", "WhatsApp media could not be downloaded.");
+  }
+  const declaredBytes = mediaByteLength(media.source.fileLength);
+  if (declaredBytes !== undefined && declaredBytes > options.maxInboundMediaBytes) {
+    return failedAttachment({ ...base, bytes: declaredBytes }, "media_too_large", "WhatsApp media could not be downloaded.");
+  }
+  try {
+    const bytes = await options.mediaDownloader(message);
+    const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    if (buffer.length > options.maxInboundMediaBytes) {
+      return failedAttachment({ ...base, bytes: buffer.length }, "media_too_large", "WhatsApp media could not be downloaded.");
+    }
+    const localPath = await writeInboundMedia(buffer, {
+      inboundMediaDir: options.inboundMediaDir,
+      messageId: message.key?.id,
+      kind: media.kind,
+      mimeType: base.mimeType,
+      originalName: base.originalName,
+    });
+    return {
+      ...base,
+      status: "ready",
+      localPath,
+      bytes: buffer.length,
+    };
+  } catch {
+    return failedAttachment(base, "download_failed", "WhatsApp media could not be downloaded.");
+  }
+}
+
+async function writeInboundMedia(buffer, input) {
+  const root = resolve(input.inboundMediaDir);
+  await mkdir(root, { recursive: true });
+  const extension = safeExtension(input.originalName) || extensionForMime(input.mimeType) || extensionForKind(input.kind);
+  const filename = [
+    sanitizePathPart(String(input.messageId ?? "message")),
+    sanitizePathPart(input.kind),
+    randomUUID(),
+  ].join("-") + extension;
+  const target = resolve(root, filename);
+  if (!isPathInside(target, root)) {
+    throw new Error("Resolved inbound media path escaped the media directory.");
+  }
+  await writeFile(target, buffer, { mode: 0o600 });
+  return target;
+}
+
+async function cleanupInboundMediaDir(rootPath, maxAgeMs) {
+  const root = resolve(rootPath);
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const cutoff = Date.now() - maxAgeMs;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const target = resolve(root, entry.name);
+    if (!isPathInside(target, root)) continue;
+    const info = await stat(target).catch(() => undefined);
+    if (info !== undefined && info.mtimeMs < cutoff) {
+      await rm(target, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+function failedAttachment(base, failureCode, failureMessage) {
+  return {
+    ...base,
+    status: "failed",
+    failureCode,
+    failureMessage,
+  };
+}
+
+function mediaByteLength(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && /^\d+$/u.test(value)) return Number(value);
+  if (isRecord(value) && typeof value.low === "number") {
+    const high = typeof value.high === "number" ? value.high : 0;
+    if (!Number.isFinite(high) || high < 0) return Number.POSITIVE_INFINITY;
+    if (high > 0) {
+      const low = value.low >>> 0;
+      const computed = high * 2 ** 32 + low;
+      return Number.isSafeInteger(computed) ? computed : Number.POSITIVE_INFINITY;
+    }
+    return value.low;
+  }
+  return undefined;
+}
+
+function safeOriginalName(value) {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const name = basename(value).replace(/[\u0000-\u001f]+/gu, "").slice(0, 160);
+  return name.length > 0 ? name : undefined;
+}
+
+function safeExtension(value) {
+  if (typeof value !== "string") return "";
+  const extension = extname(value).toLowerCase();
+  return /^\.[a-z0-9]{1,12}$/u.test(extension) ? extension : "";
+}
+
+function extensionForMime(mimeType) {
+  const mime = typeof mimeType === "string" ? mimeType.toLowerCase() : "";
+  if (mime === "image/jpeg") return ".jpg";
+  if (mime === "image/png") return ".png";
+  if (mime === "image/webp") return ".webp";
+  if (mime === "video/mp4") return ".mp4";
+  if (mime === "audio/ogg") return ".ogg";
+  if (mime === "audio/mpeg") return ".mp3";
+  if (mime === "audio/mp4") return ".m4a";
+  if (mime === "application/pdf") return ".pdf";
+  if (mime.startsWith("text/")) return ".txt";
+  return "";
+}
+
+function extensionForKind(kind) {
+  if (kind === "image") return ".img";
+  if (kind === "video") return ".mp4";
+  if (kind === "audio" || kind === "voice") return ".ogg";
+  return ".bin";
 }
 
 function normalizeSendResult(result) {
@@ -425,6 +629,52 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function sanitizePathPart(value) {
+  const sanitized = value.toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 64);
+  return sanitized.length > 0 ? sanitized : "media";
+}
+
+function isPathInside(candidate, root) {
+  const relativePath = relative(root, candidate);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+async function ensureDirectoryUnderAllowedRoot(path, root) {
+  if (typeof root !== "string" || root.length === 0) return undefined;
+  await mkdir(root, { recursive: true }).catch(() => undefined);
+  const allowedRoot = await realpathSafe(root);
+  if (allowedRoot === undefined) return undefined;
+  const candidatePath = resolve(path);
+  const ancestor = await nearestExistingAncestor(candidatePath);
+  if (ancestor === undefined) return undefined;
+  const canonicalCandidatePath = join(ancestor.realpath, relative(ancestor.path, candidatePath));
+  if (!isPathInside(canonicalCandidatePath, allowedRoot) || !isPathInside(ancestor.realpath, allowedRoot)) {
+    return undefined;
+  }
+  await mkdir(candidatePath, { recursive: true });
+  const candidate = await realpathSafe(candidatePath);
+  return candidate !== undefined && isPathInside(candidate, allowedRoot) ? candidate : undefined;
+}
+
+async function nearestExistingAncestor(path) {
+  let current = path;
+  for (;;) {
+    const resolved = await realpathSafe(current);
+    if (resolved !== undefined) return { path: current, realpath: resolved };
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+async function realpathSafe(path) {
+  try {
+    return await realpath(path);
+  } catch {
+    return undefined;
+  }
+}
+
 function requireString(value, name) {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${name} is required`);
@@ -461,8 +711,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(args.get("port") ?? "0");
   const pairOnly = args.get("pair-only") === "true";
   const token = requireString(process.env.ESTACODA_WHATSAPP_BRIDGE_TOKEN, "ESTACODA_WHATSAPP_BRIDGE_TOKEN");
+  const inboundMediaDir = args.get("inbound-media-dir") ?? process.env.WHATSAPP_INBOUND_MEDIA_DIR;
+  const inboundMediaParentDir = args.get("inbound-media-parent-dir") ?? process.env.WHATSAPP_INBOUND_MEDIA_PARENT_DIR;
+  const maxInboundMediaBytes = Number(process.env.WHATSAPP_INBOUND_MEDIA_MAX_BYTES ?? DEFAULT_INBOUND_MEDIA_MAX_BYTES);
   validateBindHost(host);
-  const bridge = createBridgeServer({ authDir, token, printQRInTerminal: pairOnly });
+  const bridge = createBridgeServer({ authDir, token, printQRInTerminal: pairOnly, inboundMediaDir, inboundMediaParentDir, maxInboundMediaBytes });
   bridge.server.listen(port, host.replace(/^\[(.*)\]$/u, "$1"), async () => {
     console.log("ESTACODA_WHATSAPP_BRIDGE_READY");
     try {

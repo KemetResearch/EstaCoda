@@ -27,6 +27,7 @@ export type ChannelAttachmentKind =
 
 export type ChannelAttachmentStatus =
   | "ready"
+  | "failed"
   | "unsupported"
   | "too-large"
   | "download-failed"

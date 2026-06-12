@@ -65,10 +65,13 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.labels.agentEvolution",
   "onboarding.summary.labels.optionalCapabilities",
   "onboarding.summary.labels.channelsTelegram",
+  "onboarding.summary.labels.channelsWhatsApp",
   "onboarding.summary.labels.voiceStt",
   "onboarding.summary.labels.voiceTts",
   "onboarding.summary.labels.browser",
   "onboarding.summary.status.notSet",
+  "onboarding.summary.status.skipped",
+  "onboarding.summary.status.incomplete",
   "onboarding.summary.status.trusted",
   "onboarding.summary.status.untrusted",
   "onboarding.summary.status.configured",
@@ -336,6 +339,35 @@ const SETUP_MODULE_KEYS = [
   "setupModules.browser.review",
   "setupModules.browser.draft",
   "setupModules.{moduleId}.blocked",
+] as const;
+
+const WHATSAPP_WIZARD_KEYS = [
+  "whatsappWizard.intro.block",
+  "whatsappWizard.dependencies.missingQuestion",
+  "whatsappWizard.dependencies.ready",
+  "whatsappWizard.dependencies.declined",
+  "whatsappWizard.dependencies.failed",
+  "whatsappWizard.repair.question",
+  "whatsappWizard.repair.declined",
+  "whatsappWizard.mode.block",
+  "whatsappWizard.mode.invalid",
+  "whatsappWizard.mode.selectedDedicated",
+  "whatsappWizard.mode.selectedPersonal",
+  "whatsappWizard.dedicated.guidance",
+  "whatsappWizard.personal.guidance",
+  "whatsappWizard.allowlist.question",
+  "whatsappWizard.allowlist.selected",
+  "whatsappWizard.allowlist.empty",
+  "whatsappWizard.pairing.instructions",
+  "whatsappWizard.pairing.block",
+  "whatsappWizard.pairing.timeout",
+  "whatsappWizard.pairing.failed",
+  "whatsappWizard.success.linked",
+  "whatsappWizard.success.sessionSaved",
+  "whatsappWizard.success.restricted",
+  "whatsappWizard.success.pairingPending",
+  "whatsappWizard.success.ready",
+  "whatsappWizard.cancelled",
 ] as const;
 
 const REVIEW_MANIFEST_KEYS = [
@@ -620,6 +652,32 @@ describe("setup copy", () => {
     assertKeys(FIRST_RUN_KEYS);
     assertKeys(SETUP_EDITOR_KEYS);
     assertKeys(SETUP_MODULE_KEYS);
+    assertKeys(WHATSAPP_WIZARD_KEYS);
+  });
+
+  it("contains standalone WhatsApp wizard copy with safe default wording", () => {
+    expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Choose [1/2]:");
+    expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Dedicated WhatsApp number");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("Leave blank to link WhatsApp now");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).not.toContain("*");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.selected")).toContain("Allowed senders");
+    expect(rawSetupCopy("en", "whatsappWizard.success.linked")).toContain("linked");
+    expect(rawSetupCopy("en", "whatsappWizard.success.sessionSaved")).toContain("Session saved");
+    expect(rawSetupCopy("en", "whatsappWizard.success.restricted")).toContain("Incoming messages restricted to");
+  });
+
+  it("isolates standalone WhatsApp wizard Arabic technical tokens", () => {
+    expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp Business"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.dedicated.guidance")).toContain(isolateLtr("eSIM"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("npm ci"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("scripts/whatsapp-bridge/"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.pairing.failed")).toContain(isolateLtr("QR"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.pairing.block")).toContain(isolateLtr("{authDir}"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.success.pairingPending")).toContain(isolateLtr("pairing-pending"));
+    expect(rawSetupCopy("ar", "whatsappWizard.allowlist.selected")).toContain("المرسلون المسموحون");
+    expect(rawSetupCopy("ar", "whatsappWizard.allowlist.question")).not.toContain("*");
   });
 
   it("contains Phase 1 setup editor foundation copy", () => {

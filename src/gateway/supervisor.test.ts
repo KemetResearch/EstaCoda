@@ -721,6 +721,7 @@ describe("runGatewaySupervisor", () => {
       bridgeInstallLogPath: join(profilePaths.logsPath, "whatsapp-bridge-install.log"),
       bridgePidPath: join(authDir, "bridge.pid"),
       bridgeLockPath: join(authDir, "whatsapp-session.lock"),
+      inboundMediaRoot: join(profilePaths.channelMediaPath, "whatsapp", "inbound"),
       experimental: true,
     });
   });

@@ -185,11 +185,11 @@ npm ci
 
 **العرض:** تعرض التشخيصات pairing-pending أو waiting for user authorization بعد نجاح QR pairing.
 
-**السبب المحتمل:** لم تُدخل `allowedUsers` أثناء الإعداد، لذلك يستخدم config القيمة `dmPolicy: "pairing"` بدلاً من الوصول المفتوح.
+**السبب المحتمل:** لم تُدخل مرسلين مسموحين أثناء الإعداد، لذلك يستخدم config القيمة `dmPolicy: "pairing"` بدلاً من الوصول المفتوح.
 
 **الإصلاح:**
 
-استبدل رمز تفويض مستخدم WhatsApp الآمن من حساب WhatsApp المقصود، أو أعد تشغيل `estacoda whatsapp` وأدخل `allowedUsers` صريحة. `dmPolicy: "pairing"` ليست سياسة مفتوحة.
+استبدل رمز تفويض مستخدم WhatsApp الآمن من حساب WhatsApp المقصود، أو أعد تشغيل `estacoda whatsapp` وأدخل مرسلين مسموحين صراحةً. `dmPolicy: "pairing"` ليست سياسة مفتوحة.
 
 ## WhatsApp voice bubble غير متاحة
 

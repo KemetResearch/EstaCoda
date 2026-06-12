@@ -512,6 +512,9 @@ export type WhatsAppChannelConfig = {
   pairingMode?: "qr";
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  textDebounceMs?: number;
+  textDebounceMaxMessages?: number;
+  textDebounceMaxChars?: number;
 };
 
 export type LoadedRuntimeConfig = {
@@ -987,7 +990,10 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ready: whatsapp.enabled === true && whatsappMissing.length === 0,
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
         busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(whatsapp.queueDepth)
+        queueDepth: normalizeQueueDepth(whatsapp.queueDepth),
+        textDebounceMs: normalizeWhatsAppTextDebounceMs(whatsapp.textDebounceMs),
+        textDebounceMaxMessages: normalizeWhatsAppTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
+        textDebounceMaxChars: normalizeWhatsAppTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
       }
     }
   };
@@ -3078,6 +3084,9 @@ export async function addWhatsAppAllowedUser(options: {
   if (whatsapp.pairingMode === "qr") whatsappPatch.pairingMode = "qr";
   if (whatsapp.busyPolicy !== undefined) whatsappPatch.busyPolicy = whatsapp.busyPolicy;
   if (whatsapp.queueDepth !== undefined) whatsappPatch.queueDepth = whatsapp.queueDepth;
+  if (whatsapp.textDebounceMs !== undefined) whatsappPatch.textDebounceMs = whatsapp.textDebounceMs;
+  if (whatsapp.textDebounceMaxMessages !== undefined) whatsappPatch.textDebounceMaxMessages = whatsapp.textDebounceMaxMessages;
+  if (whatsapp.textDebounceMaxChars !== undefined) whatsappPatch.textDebounceMaxChars = whatsapp.textDebounceMaxChars;
   const config: EstaCodaConfig = {
     ...existing.config,
     channels: {
@@ -3709,4 +3718,16 @@ function normalizeChannelBusyPolicy(
 
 function normalizeQueueDepth(value: unknown): number {
   return coercePositiveInteger(value, { default: 3, max: 10 });
+}
+
+function normalizeWhatsAppTextDebounceMs(value: unknown): number {
+  return coerceNonNegativeInteger(value, { default: 5_000, max: 60_000 });
+}
+
+function normalizeWhatsAppTextDebounceMaxMessages(value: unknown): number {
+  return coercePositiveInteger(value, { default: 10, max: 100 });
+}
+
+function normalizeWhatsAppTextDebounceMaxChars(value: unknown): number {
+  return coercePositiveInteger(value, { default: 8_000, max: 100_000 });
 }

@@ -1356,6 +1356,35 @@ describe("loadRuntimeConfig channel readiness", () => {
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
     expect(loaded.channels.whatsapp.dmPolicy).toBe("allowlist");
     expect(loaded.channels.whatsapp.groupPolicy).toBe("disabled");
+    expect(loaded.channels.whatsapp.textDebounceMs).toBe(5_000);
+    expect(loaded.channels.whatsapp.textDebounceMaxMessages).toBe(10);
+    expect(loaded.channels.whatsapp.textDebounceMaxChars).toBe(8_000);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes WhatsApp rapid text debounce config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        whatsapp: {
+          enabled: true,
+          experimental: true,
+          authDir: whatsappAuthDir(workspace),
+          allowedUsers: ["971501234567"],
+          textDebounceMs: 0,
+          textDebounceMaxMessages: 4,
+          textDebounceMaxChars: 1200
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.whatsapp.textDebounceMs).toBe(0);
+    expect(loaded.channels.whatsapp.textDebounceMaxMessages).toBe(4);
+    expect(loaded.channels.whatsapp.textDebounceMaxChars).toBe(1200);
     await rm(workspace, { recursive: true, force: true });
   });
 

@@ -185,11 +185,11 @@ Run `estacoda whatsapp` again from a terminal that can render the QR code. QR st
 
 **Symptom:** Diagnostics show pairing-pending or waiting for user authorization after successful QR pairing.
 
-**Likely cause:** No `allowedUsers` were entered during setup, so config uses `dmPolicy: "pairing"` instead of open access.
+**Likely cause:** No allowed senders were entered during setup, so config uses `dmPolicy: "pairing"` instead of open access.
 
 **Repair:**
 
-Redeem a secure WhatsApp user authorization code from the intended WhatsApp account, or rerun `estacoda whatsapp` and enter explicit `allowedUsers`. `dmPolicy: "pairing"` is not an open policy.
+Redeem a secure WhatsApp user authorization code from the intended WhatsApp account, or rerun `estacoda whatsapp` and enter explicit allowed senders. `dmPolicy: "pairing"` is not an open policy.
 
 ## WhatsApp voice bubble unavailable
 
