@@ -257,13 +257,24 @@ h3, .markdown h3 { font-weight: 600; }
   letter-spacing: 0.2em;
   color: var(--estacoda-ink-faint);
 }
-.navbar__logo img { height: 2.31rem; width: auto; }
+.navbar__inner,
+.navbar__items,
+.navbar__brand,
+.navbar__item,
+.navbar__link {
+  align-items: center;
+}
+.navbar__brand,
+.navbar__item,
 .navbar__link {
   display: inline-flex;
-  align-items: center;
+}
+.navbar__logo img { height: 2.31rem; width: auto; }
+.navbar__link {
   font-family: var(--estacoda-mono);
   font-size: 0.78rem;
   font-weight: 700;
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   transition: opacity 0.15s ease, color 0.15s ease;
@@ -271,7 +282,16 @@ h3, .markdown h3 { font-weight: 600; }
 /* Vertically center every navbar item so the GitHub link + its external-link
    glyph sit on the same baseline as the locale dropdown and toggles. */
 .navbar__items { align-items: center; }
-.navbar__link svg { vertical-align: middle; }
+.navbar__link svg {
+  display: inline-block;
+  margin-top: 0;
+  vertical-align: middle;
+}
+.navbar__items--right > *,
+.navbar__items--right div[class*='navbarSearchContainer'],
+.navbar__items--right div[class*='searchBox'] {
+  align-items: center;
+}
 
 /* Left nav items mirror the marketing-site nav: lowercase slash labels,
    mono bold, ink (never the blue active state), quiet opacity hover. */
@@ -364,6 +384,18 @@ table th, table td { border: 1px solid var(--estacoda-rule); }
   background-color: var(--ifm-footer-background-color);
   color: var(--ifm-footer-color);
   border-top: 1px solid var(--estacoda-rule);
+}
+.footer__links {
+  justify-content: center;
+  text-align: center;
+  gap: 4rem;
+}
+.footer__col {
+  flex: 0 1 14rem;
+  max-width: 14rem;
+}
+.footer__items {
+  padding-inline-start: 0;
 }
 .footer__title {
   font-family: var(--estacoda-mono);

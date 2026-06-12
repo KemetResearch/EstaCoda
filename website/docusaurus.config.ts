@@ -143,7 +143,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} KemetResearch. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} KemetResearch.`,
     },
     prism: {
       theme: prismThemes.github,
