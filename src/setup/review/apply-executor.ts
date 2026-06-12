@@ -38,6 +38,7 @@ import {
   type UiFlavor,
   type UiLanguage,
   type VoiceSetupInput,
+  type BrowserSnapshotSummarizeMode,
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
@@ -47,7 +48,7 @@ import {
   setPreferredModelRoute,
   storeProviderCredential,
 } from "../../config/provider-config-mutations.js";
-import type { BrowserBackendKind } from "../../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import type { AuxiliaryModelTask, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
@@ -699,12 +700,19 @@ async function applyBrowserCapability(
     ...target,
     input: {
       backend: browserBackendValue(operation.review.values.backend ?? operation.review.values.browserBackend) ?? "local-cdp",
+      cloudProvider: browserCloudProviderValue(operation.review.values.cloudProvider),
       cdpUrl: stringValue(operation.review.values.cdpUrl),
       launchCommand: stringValue(operation.review.values.launchCommand),
       launchExecutable: stringValue(operation.review.values.launchExecutable),
       launchArgs: optionalArrayValue(operation.review.values.launchArgs),
       chromeFlags: optionalArrayValue(operation.review.values.chromeFlags),
-      autoLaunch: false,
+      autoLaunch: booleanValue(operation.review.values.autoLaunch ?? operation.review.values.autoLaunchRequested),
+      supervised: booleanValue(operation.review.values.supervised),
+      hybridRouting: booleanValue(operation.review.values.hybridRouting),
+      cloudFallback: booleanValue(operation.review.values.cloudFallback),
+      cloudSpendApproved: booleanValue(operation.review.values.cloudSpendApproved),
+      summarizeSnapshots: snapshotSummarizeModeValue(operation.review.values.summarizeSnapshots),
+      snapshotSummarizeThreshold: numberValue(operation.review.values.snapshotSummarizeThreshold),
     },
   });
 }
@@ -867,6 +875,14 @@ function imageProviderValue(value: unknown): ImageGenerationProvider | undefined
 
 function browserBackendValue(value: unknown): BrowserBackendKind | undefined {
   return stringValue(value) as BrowserBackendKind | undefined;
+}
+
+function browserCloudProviderValue(value: unknown): BrowserCloudProviderKind | undefined {
+  return stringValue(value) as BrowserCloudProviderKind | undefined;
+}
+
+function snapshotSummarizeModeValue(value: unknown): BrowserSnapshotSummarizeMode | undefined {
+  return value === "auto" || typeof value === "boolean" ? value : undefined;
 }
 
 export async function applyReviewedUiPreferences(

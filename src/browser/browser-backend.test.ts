@@ -231,40 +231,54 @@ describe("browser backend baselines", () => {
     );
   });
 
-  it("surfaces cloud provider missing env and cloud approval reasons", async () => {
+  it("keeps unconfigured backend disabled even with stale Browserbase fields", async () => {
     const missing = createBrowserBackendFromConfig({
       backend: "unconfigured",
-      cloudProvider: "browserbase"
+      cloudProvider: "browserbase",
+      hybridRouting: true,
+      cloudSpendApproved: true,
+      cdpUrl: "http://127.0.0.1:9222",
+      browserbase: {
+        apiKey: "bb_test_key",
+        projectId: "project_123",
+        createClient: () => {
+          throw new Error("Browserbase client should not be created.");
+        }
+      }
     });
 
-    await expect(missing.status()).resolves.toMatchObject({
-      backend: "browserbase",
+    expect(missing.kind).toBe("unconfigured");
+    expect(missing.status()).toEqual({
+      backend: "unconfigured",
       available: false,
-      reason: "BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID are missing."
+      reason: "No browser backend is configured."
     });
+    await expect(missing.navigate({ url: "https://example.com" })).rejects.toThrow("No browser backend is configured");
 
     vi.stubEnv("BROWSERBASE_API_KEY", "test-key");
     vi.stubEnv("BROWSERBASE_PROJECT_ID", "test-project");
     const configured = createBrowserBackendFromConfig({
       backend: "unconfigured",
-      cloudProvider: "browserbase"
+      cloudProvider: "browserbase",
+      cdpUrl: "http://127.0.0.1:9222",
+      cloudSpendApproved: true,
     });
 
-    await expect(configured.status()).resolves.toMatchObject({
-      backend: "browserbase",
+    expect(configured.status()).toEqual({
+      backend: "unconfigured",
       available: false,
-      reason: expect.stringContaining("may incur charges")
+      reason: "No browser backend is configured."
     });
   });
 
   it("surfaces unknown cloud provider status", async () => {
     const backend = createBrowserBackendFromConfig({
-      backend: "unconfigured",
+      backend: "firecrawl",
       cloudProvider: "unknown-cloud"
     });
 
     await expect(backend.status()).resolves.toEqual({
-      backend: "unconfigured",
+      backend: "firecrawl",
       available: false,
       reason: "Unknown browser provider: unknown-cloud."
     });
@@ -286,7 +300,7 @@ describe("browser backend baselines", () => {
       emergencyCleanup: () => undefined
     });
     const backend = createBrowserBackendFromConfig({
-      backend: "unconfigured",
+      backend: "firecrawl",
       cloudProvider: "offline-provider"
     });
 

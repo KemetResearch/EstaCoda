@@ -2711,6 +2711,7 @@ describe("runConfigEditor", () => {
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
       autoLaunch: false,
+      supervised: true,
     });
     expect(config.channels).toBeUndefined();
     expect(config.tts).toBeUndefined();

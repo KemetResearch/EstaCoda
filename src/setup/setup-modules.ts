@@ -85,6 +85,8 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly hybridRouting?: boolean;
     readonly cloudFallback?: boolean;
     readonly cloudSpendApproved?: boolean;
+    readonly summarizeSnapshots?: "auto" | boolean;
+    readonly snapshotSummarizeThreshold?: number;
     readonly credentialSurface?: "browserbase";
     readonly credentialEnvVars?: readonly string[];
     readonly credentialReady?: boolean;
@@ -459,6 +461,8 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     hybridRouting: context.browser?.hybridRouting,
     cloudFallback: context.browser?.cloudFallback,
     cloudSpendApproved: context.browser?.cloudSpendApproved,
+    summarizeSnapshots: context.browser?.summarizeSnapshots,
+    snapshotSummarizeThreshold: context.browser?.snapshotSummarizeThreshold,
     credentialSurface: context.browser?.credentialSurface,
     envVars: context.browser?.credentialEnvVars,
     credentialReady: context.browser?.credentialReady,

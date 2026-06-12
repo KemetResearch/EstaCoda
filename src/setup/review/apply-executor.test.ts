@@ -953,7 +953,7 @@ describe("reviewed setup apply executor", () => {
     expect(config.auxiliaryModels?.vision).toBeUndefined();
   });
 
-  it("applies reviewed browser capability without enabling auto-launch", async () => {
+  it("applies reviewed browser capability fields without overriding auto-launch", async () => {
     const plan = modulePlan({
       configPath: profileConfigPath(tempDir),
       workspaceRoot,
@@ -963,12 +963,19 @@ describe("reviewed setup apply executor", () => {
       securityMode: "adaptive",
       workflowLearning: "suggest",
       browser: {
-        backend: "local-cdp",
+        backend: "browserbase",
+        cloudProvider: "browserbase",
         cdpUrl: "http://127.0.0.1:9222",
         launchExecutable: "/usr/bin/chromium",
         launchArgs: ["--headless=new"],
         chromeFlags: ["--no-first-run", "--disable-gpu"],
         autoLaunch: true,
+        supervised: true,
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 16_000,
       },
       skippedModules: ["telegram", "voice", "vision"],
     });
@@ -982,21 +989,35 @@ describe("reviewed setup apply executor", () => {
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       browser?: {
         backend?: string;
+        cloudProvider?: string;
         cdpUrl?: string;
         launchExecutable?: string;
         launchArgs?: string[];
         chromeFlags?: string[];
         autoLaunch?: boolean;
+        supervised?: boolean;
+        hybridRouting?: boolean;
+        cloudFallback?: boolean;
+        cloudSpendApproved?: boolean | string;
+        summarizeSnapshots?: boolean | string;
+        snapshotSummarizeThreshold?: number;
       };
     };
 
     expect(config.browser).toEqual({
-      backend: "local-cdp",
+      backend: "browserbase",
+      cloudProvider: "browserbase",
       cdpUrl: "http://127.0.0.1:9222",
       launchExecutable: "/usr/bin/chromium",
       launchArgs: ["--headless=new"],
       chromeFlags: ["--no-first-run", "--disable-gpu"],
-      autoLaunch: false,
+      autoLaunch: true,
+      supervised: true,
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+      summarizeSnapshots: false,
+      snapshotSummarizeThreshold: 16_000,
     });
   });
 

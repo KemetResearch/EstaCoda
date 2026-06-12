@@ -146,7 +146,7 @@ describe("Browserbase provider", () => {
     expect(calls).toEqual(["createSession"]);
   });
 
-  it("factory returns a Browserbase-capable backend for cloudProvider: browserbase", async () => {
+  it("factory keeps backend: unconfigured disabled even with stale cloudProvider: browserbase", async () => {
     const calls: string[] = [];
     const backend = createBrowserBackendFromConfig({
       backend: "unconfigured",
@@ -160,9 +160,22 @@ describe("Browserbase provider", () => {
       }
     });
 
-    expect(backend.kind).toBe("browserbase");
-    await expect(backend.navigate({ url: "https://example.com" })).resolves.toHaveProperty("session.backend", "browserbase");
-    expect(calls).toEqual(["createSession"]);
+    expect(backend.kind).toBe("unconfigured");
+    await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("No browser backend is configured");
+    expect(calls).toEqual([]);
+  });
+
+  it("missing cloudSpendApproved blocks session creation and makes no API call", async () => {
+    const calls: string[] = [];
+    const backend = createBrowserbaseBrowserBackend({
+      apiKey: "bb_test_key",
+      projectId: "project_123",
+      client: createClient({ calls }),
+      createSupervisedBackend: () => createFakeBackend()
+    });
+
+    await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow(/may incur charges/);
+    expect(calls).toEqual([]);
   });
 
   it("cloudSpendApproved pending blocks session creation and makes no API call", async () => {
