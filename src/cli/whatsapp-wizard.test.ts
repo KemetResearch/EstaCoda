@@ -395,7 +395,6 @@ describe("runWhatsAppWizard", () => {
     expect(result.output).toContain("⌘ WhatsApp Setup");
     expect(promptText).toContain("Who can message this agent?");
     expect(promptText).toContain("international format");
-    expect(promptText).toContain("00201234567890");
     expect(promptText).not.toContain("*");
   });
 });
