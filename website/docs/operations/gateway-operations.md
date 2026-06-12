@@ -153,7 +153,7 @@ estacoda whatsapp
 
 WhatsApp setup uses one shared QR flow. It can be launched from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. Each surface warns about the experimental unofficial Baileys transport, keeps dependencies inside `scripts/whatsapp-bridge/`, checks bridge package readiness, asks before dependency repair, renders a QR code in the terminal, and writes config/session state only after QR pairing succeeds. Dependency decline/failure and QR timeout/failure leave WhatsApp config unchanged. WhatsApp pairing-code setup is not exposed.
 
-If no `allowedUsers` are entered, the wizard writes `dmPolicy: "pairing"` so the device is linked but waiting for secure user authorization. Logged-out state requires explicit re-pair/reset of only the selected profile's WhatsApp auth directory.
+If no allowed senders are entered, the wizard writes `dmPolicy: "pairing"` so the device is linked but waiting for secure user authorization. Logged-out state requires explicit re-pair/reset of only the selected profile's WhatsApp auth directory.
 
 ## Channel maturity
 
@@ -242,7 +242,7 @@ In foreground mode (`gateway run`), logs also appear in the terminal. In managed
 | Symptom | Likely cause | Repair |
 |---------|-------------|--------|
 | Gateway fails to start | Missing token or env var | Add token to profile `.env`, run `gateway diagnose` |
-| Channel not ready | Unauthorized user or missing allowlist | Configure `allowedUsers` or `allowedSenders` |
+| Channel not ready | Unauthorized user or missing allowlist | Configure the channel allowlist (`allowedUsers`/`allowedGroups`; WhatsApp setup calls them allowed senders) |
 | Wrong profile behavior | Gateway started against a different profile | Check `active-profile.json` or use `--profile` |
 | Stale runtime cache | Old session data | Restart gateway or run `gateway restart` |
 | Approval expiry | Pending approval timed out | Re-issue the command; approvals have a TTL |

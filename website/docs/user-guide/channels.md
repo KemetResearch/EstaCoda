@@ -220,7 +220,7 @@ estacoda whatsapp
 
 WhatsApp setup can run from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. All three surfaces use the same shared QR setup flow: they ask before repairing bridge dependencies, render a QR code in the terminal, and write profile config/session state only after successful QR pairing. Dependency decline/failure or QR timeout/failure records WhatsApp as skipped or incomplete in setup and leaves WhatsApp config unchanged. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` WhatsApp device pairing-code setup is not exposed.
 
-If no `allowedUsers` are entered, setup writes `dmPolicy: "pairing"`. That is a waiting state for secure user authorization, not open access. WhatsApp authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes. Telegram pairing remains config-backed and unchanged.
+If no allowed senders are entered, setup writes `dmPolicy: "pairing"`. That is a waiting state for secure user authorization, not open access. WhatsApp authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes. Telegram pairing remains config-backed and unchanged.
 
 `mode: "bot"` ignores `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix`, and suppresses echoes. `groupPolicy` defaults to `"disabled"`; `"allowlist"` requires `allowedGroups`, and `"open"` must be configured explicitly.
 
