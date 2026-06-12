@@ -48,7 +48,6 @@ const config: Config = {
         docs: {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/KemetResearch/EstaCoda/tree/main/website/',
         },
         blog: false,
         theme: {
@@ -88,7 +87,7 @@ const config: Config = {
       },
       items: [
         {
-          to: '/getting-started/',
+          to: '/getting-started/quickstart/',
           label: '/docs',
           position: 'left',
           activeBaseRegex: '^/$|^/(?!ar(?:/|$)).*$',
@@ -117,7 +116,7 @@ const config: Config = {
           items: [
             {
               label: 'Getting Started',
-              to: '/getting-started/',
+              to: '/getting-started/quickstart/',
             },
             {
               label: 'User Guide',
