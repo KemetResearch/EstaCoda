@@ -35,6 +35,8 @@ export interface UpdateManagedRegionAboveReadlineInput {
   readonly promptLineCount?: number;
 }
 
+type WritableWrite = (chunk: unknown, ...args: unknown[]) => boolean;
+
 export class BottomChromeController {
   readonly #output: NodeJS.WritableStream;
   readonly #capabilities: TerminalCapabilities;
@@ -52,6 +54,7 @@ export class BottomChromeController {
   #stateFactory?: () => BottomChromeState;
   #readlinePromptLineCountFactory?: () => number;
   #isDrawing = false;
+  #writingAboveChrome = false;
   #disposed = false;
 
   constructor(options: BottomChromeControllerOptions) {
@@ -98,11 +101,24 @@ export class BottomChromeController {
     if (!this.#enabled || this.#disposed) {
       return fn();
     }
+    if (this.#writingAboveChrome) {
+      return fn();
+    }
     this.#clearForOutput();
+    this.#writingAboveChrome = true;
+    const tracker = this.#trackOutputWrites();
     try {
       return fn();
     } finally {
-      this.#drawManagedRegion();
+      try {
+        tracker.restore();
+        if (tracker.wroteOutput() && !tracker.lastWriteEndedWithNewline()) {
+          this.#output.write("\n");
+        }
+        this.#drawManagedRegion();
+      } finally {
+        this.#writingAboveChrome = false;
+      }
     }
   }
 
@@ -125,11 +141,24 @@ export class BottomChromeController {
     if (!this.#enabled || this.#disposed) {
       return await fn();
     }
+    if (this.#writingAboveChrome) {
+      return await fn();
+    }
     this.#clearForOutput();
+    this.#writingAboveChrome = true;
+    const tracker = this.#trackOutputWrites();
     try {
       return await fn();
     } finally {
-      this.#drawManagedRegion();
+      try {
+        tracker.restore();
+        if (tracker.wroteOutput() && !tracker.lastWriteEndedWithNewline()) {
+          this.#output.write("\n");
+        }
+        this.#drawManagedRegion();
+      } finally {
+        this.#writingAboveChrome = false;
+      }
     }
   }
 
@@ -409,6 +438,48 @@ export class BottomChromeController {
 
   #managedLineCount(): number {
     return this.#renderedTransientLineCount + this.#activeLineCount;
+  }
+
+  #trackOutputWrites(): {
+    restore(): void;
+    wroteOutput(): boolean;
+    lastWriteEndedWithNewline(): boolean;
+  } {
+    const writable = this.#output as NodeJS.WritableStream & { write: WritableWrite };
+    const originalWrite = writable.write;
+    const callOriginalWrite = originalWrite.bind(writable);
+    let wrote = false;
+    let endedWithNewline = true;
+
+    writable.write = ((chunk: unknown, ...args: unknown[]) => {
+      if (typeof chunk === "string") {
+        if (chunk.length > 0) {
+          wrote = true;
+          endedWithNewline = chunk.endsWith("\n");
+        }
+      } else if (Buffer.isBuffer(chunk) || chunk instanceof Uint8Array) {
+        if (chunk.length > 0) {
+          wrote = true;
+          endedWithNewline = chunk[chunk.length - 1] === 0x0A;
+        }
+      } else {
+        const text = String(chunk);
+        if (text.length > 0) {
+          wrote = true;
+          endedWithNewline = text.endsWith("\n");
+        }
+      }
+
+      return callOriginalWrite(chunk, ...args);
+    }) as WritableWrite;
+
+    return {
+      restore: () => {
+        writable.write = originalWrite;
+      },
+      wroteOutput: () => wrote,
+      lastWriteEndedWithNewline: () => endedWithNewline,
+    };
   }
 
   #boundedTransientLines(lines: readonly string[]): string[] {

@@ -100,6 +100,160 @@ describe("BottomChromeController", () => {
     ]);
   });
 
+  it("restores chrome on a fresh line after callback output without trailing newline", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("frame with no newline");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "frame with no newline",
+      "\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("does not insert an extra newline when callback output already ends with newline", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("frame with newline\n");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "frame with newline\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("does not insert a corrective newline when callback writes nothing", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.writeAboveChromeSync(() => {});
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("keeps restored chrome off the assistant frame border row", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("╰────────────────────────╯");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "╰────────────────────────╯",
+      "\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+    expect(chunks.join("")).not.toContain("╯status");
+    expect(chunks.join("")).toContain("╯\nstatus | idle");
+  });
+
+  it("restores chrome on a fresh line when callback output throws", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    expect(() => {
+      ctrl.writeAboveChromeSync(() => {
+        stream.write("frame with no newline");
+        throw new Error("boom");
+      });
+    }).toThrow("boom");
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "frame with no newline",
+      "\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("restores chrome on a fresh line after async callback output without trailing newline", async () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    await ctrl.writeAboveChrome(async () => {
+      stream.write("async frame with no newline");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "async frame with no newline",
+      "\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("restores chrome on a fresh line when async callback output rejects", async () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    await expect(ctrl.writeAboveChrome(async () => {
+      stream.write("async frame with no newline");
+      throw new Error("boom");
+    })).rejects.toThrow("boom");
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "async frame with no newline",
+      "\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
+  it("treats nested write-above calls as one chrome transaction", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    const expectedClearSequence = "\x1b[2A\x1b[1G\x1b[0J";
+    const expectedManagedChrome = "status | idle\n────────────────────────────────────────\n";
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("outer");
+      ctrl.writeAboveChromeSync(() => {
+        stream.write("inner");
+      });
+    });
+
+    expect(chunks.filter((chunk) => chunk === expectedClearSequence)).toHaveLength(1);
+    expect(chunks.filter((chunk) => chunk === expectedManagedChrome)).toHaveLength(1);
+    expect(chunks).toEqual([
+      expectedClearSequence,
+      "outer",
+      "inner",
+      "\n",
+      expectedManagedChrome,
+    ]);
+    expect(chunks.join("")).toContain("outerinner\n");
+  });
+
   it("updates transient lines above chrome without redrawing chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
