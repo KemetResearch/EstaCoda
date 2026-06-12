@@ -9,6 +9,7 @@ import {
   setupCopy,
   type SetupCopyKey,
 } from "./setup-copy.js";
+import { formatSetupCopy, setupTechnicalToken } from "./setup-prompts.js";
 import { setupVerificationCopy } from "./setup-verification-copy.js";
 
 const FIRST_RUN_KEYS = [
@@ -324,6 +325,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.browser.cloud.body",
   "setupEditor.prompt.browser.hybridRouting.description",
   "setupEditor.prompt.browser.cloudFallback.description",
+  "setupEditor.prompt.browser.browserbaseCredential",
   "setupEditor.actions.verifyBrowser.description",
   "setupEditor.prompt.browser.noAutoLaunch",
 ] as const;
@@ -565,6 +567,16 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.existingCdp")).toContain(isolateLtr("CDP"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("Browserbase"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("security.allowPrivateUrls"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{serviceName}"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_API_KEY"),
+      serviceName: setupTechnicalToken("ar", "Browserbase"),
+    })).toContain(isolateLtr("BROWSERBASE_API_KEY"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_PROJECT_ID"),
+      serviceName: setupTechnicalToken("ar", "Browserbase"),
+    })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));

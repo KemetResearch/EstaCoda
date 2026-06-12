@@ -731,6 +731,9 @@ function ensureCredentialReferenceCanApply(
   if (arrayValue(operation.review.values.envVars).length === 0) {
     throw new Error("Credential reference apply requires env-var review values.");
   }
+  if (operation.review.values.credentialSurface === "browserbase") {
+    return;
+  }
   if (context.provider === undefined || context.model === undefined) {
     throw new Error("Credential reference apply requires provider/model context.");
   }

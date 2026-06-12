@@ -105,6 +105,7 @@ describe("setup modules", () => {
 
     expect(drafts[0]?.review.values.envVars).toEqual(["OPENAI_API_KEY"]);
     expect(drafts[0]?.review.values.credentialValuesIncluded).toBe(false);
+    expect(drafts[0]?.review.values.credentialSurface).toBeUndefined();
     expect(json).not.toContain("sk-do-not-render");
     expect(json).not.toContain("secretValue");
   });
@@ -217,6 +218,56 @@ describe("setup modules", () => {
       autoLaunchRequested: false,
       autoLaunchWillRunNow: false,
     });
+  });
+
+  it("browser module drafts Browserbase credential refs with a non-provider credential surface", () => {
+    const drafts = browserSetupModule.toDrafts(context({
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+        credentialSurface: "browserbase",
+        credentialEnvVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
+      },
+    }));
+    const credentialDraft = drafts.find((draft) => draft.id === "setup-module.browser.browserbase-credentials");
+    const json = JSON.stringify(drafts);
+
+    expect(credentialDraft?.kind).toBe("credential-reference");
+    expect(credentialDraft?.target.kind).toBe("diagnostic-only");
+    expect(credentialDraft?.review.values).toMatchObject({
+      credentialSurface: "browserbase",
+      envVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+      credentialValuesIncluded: false,
+    });
+    expect(json).not.toContain("bb-api-secret");
+    expect(json).not.toContain("bb-project-secret");
+  });
+
+  it("browser module blocks Browserbase credential refs when no real source exists", () => {
+    const drafts = browserSetupModule.toDrafts(context({
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        credentialSurface: "browserbase",
+        credentialEnvVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+        credentialReady: false,
+        credentialValuesIncluded: false,
+        credentialBlockers: [
+          "Browserbase requires BROWSERBASE_API_KEY from the environment, profile secret store, or reviewed setup entry.",
+        ],
+      },
+    }));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.id).toBe("setup-module.browser.capability");
+    expect(drafts[0]?.blockers).toEqual([
+      "Browserbase requires BROWSERBASE_API_KEY from the environment, profile secret store, or reviewed setup entry.",
+    ]);
   });
 
   it("voice module does not print hosted secrets", () => {

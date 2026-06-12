@@ -18,7 +18,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
-import type { SetupApplyMode } from "../setup-apply-plan.js";
+import type { SetupApplyMode, SetupDeferredSecretWrite } from "../setup-apply-plan.js";
 import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
 
@@ -49,6 +49,8 @@ describe("runConfigEditor", () => {
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.DISCORD_BOT_TOKEN;
+    delete process.env.BROWSERBASE_API_KEY;
+    delete process.env.BROWSERBASE_PROJECT_ID;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -2718,6 +2720,102 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
+  it("configures Browserbase credentials through reviewed deferred secret writes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: ["bb-api-secret", "bb-project-secret"],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+    const browserCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.browserbase-credentials"));
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-browser");
+    expect(browserCredentialLine?.review.values).toMatchObject({
+      credentialSurface: "browserbase",
+      envVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+      credentialValuesIncluded: false,
+    });
+    expect(envFile).toContain('BROWSERBASE_API_KEY="bb-api-secret"');
+    expect(envFile).toContain('BROWSERBASE_PROJECT_ID="bb-project-secret"');
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-api-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-project-secret");
+    expect(JSON.stringify(result)).not.toContain("bb-api-secret");
+    expect(JSON.stringify(result)).not.toContain("bb-project-secret");
+  });
+
+  it("reuses existing Browserbase environment secrets without deferred writes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    process.env.BROWSERBASE_API_KEY = "env-browserbase-api";
+    process.env.BROWSERBASE_PROJECT_ID = "env-browserbase-project";
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: "should-not-be-read",
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const browserCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.browserbase-credentials"));
+
+    expect(result.completed).toBe(true);
+    expect(browserCredentialLine?.review.values.envVars).toEqual(["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"]);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("env-browserbase-api");
+    expect(JSON.stringify(result)).not.toContain("env-browserbase-project");
+    expect(JSON.stringify(result)).not.toContain("should-not-be-read");
+  });
+
+  it("blocks Browserbase setup when credentials are skipped without an existing source", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: ["", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    const blockerText = JSON.stringify(result.reviewManifest?.blockers);
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toEqual([]);
+    expect(blockerText).toContain("BROWSERBASE_API_KEY");
+    expect(blockerText).toContain("BROWSERBASE_PROJECT_ID");
+    expect(applyCalled).toBe(false);
+  });
+
   it("renders broken config as a repair-first diagnostic surface", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
@@ -2834,10 +2932,11 @@ function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewMa
   };
 }
 
-function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
+function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string | readonly string[] } = {}): Prompt {
   const values = [...(options.values ?? [])];
+  const secretValues = Array.isArray(options.secret) ? [...options.secret] : undefined;
   const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) => {
-    if (promptOptions?.secret === true) return options.secret ?? "";
+    if (promptOptions?.secret === true) return secretValues?.shift() ?? (typeof options.secret === "string" ? options.secret : "");
     const next = values.shift();
     return next === undefined ? "" : String(next);
   }) as Prompt;

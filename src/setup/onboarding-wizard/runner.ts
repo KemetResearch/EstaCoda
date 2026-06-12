@@ -886,9 +886,7 @@ async function collectOnboardingOptionalCapability(
       kind: "configured",
       context: collected.context,
       drafts: module.toDrafts(collected.context, configuration),
-      pendingCredentialWrites: collected.pendingCredentialWrite === undefined
-        ? []
-        : [collected.pendingCredentialWrite],
+      pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
     };
   }
 
@@ -924,9 +922,7 @@ async function collectOnboardingOptionalCapability(
     kind: "configured",
     context: collectedContext,
     drafts: module.toDrafts(collectedContext, configuration),
-    pendingCredentialWrites: collected.pendingCredentialWrite === undefined
-      ? []
-      : [collected.pendingCredentialWrite],
+    pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
   };
 }
 

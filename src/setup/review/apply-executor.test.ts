@@ -555,6 +555,71 @@ describe("reviewed setup apply executor", () => {
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 
+  it("rejects unreviewed Browserbase deferred secret writes", async () => {
+    const plan: SetupApplyPlan = {
+      kind: "setup-save-apply-plan",
+      manifestSourceBundleIds: ["browserbase-credential-test"],
+      operations: [{
+        id: "browserbase-credentials",
+        kind: "credential-reference",
+        sourceLineIds: ["browserbase-credential-line"],
+        review: {
+          copyKey: "setupDrafts.review",
+          summaryKey: "setupModules.credentials.draft",
+          redacted: true,
+          values: {
+            credentialSurface: "browserbase",
+            envVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+            credentialValuesIncluded: false,
+          },
+        },
+        writesConfig: false,
+        writesTrustStore: false,
+        dryRunOnly: true,
+      }],
+      eligibility: {
+        eligible: true,
+        blockers: [],
+        repairIntents: [],
+      },
+      preservesUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+      metadata: {
+        operationCount: 1,
+        configOperationCount: 0,
+        trustOperationCount: 0,
+        credentialOperationCount: 1,
+      },
+    };
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    const reviewedResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "BROWSERBASE_API_KEY",
+      value: "bb-reviewed-secret",
+    }]);
+    const unreviewedResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "BROWSERBASE_UNREVIEWED_KEY",
+      value: "bb-unreviewed-secret",
+    }]);
+
+    expect(reviewedResult).toEqual({
+      ok: true,
+      appliedSecretCount: 1,
+    });
+    expect(unreviewedResult.ok).toBe(false);
+    expect(unreviewedResult.appliedSecretCount).toBe(0);
+    expect(unreviewedResult.error).toContain("BROWSERBASE_UNREVIEWED_KEY");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toContain(
+      'BROWSERBASE_API_KEY="bb-reviewed-secret"'
+    );
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.not.toContain("bb-unreviewed-secret");
+  });
+
   it("applies custom provider baseUrl and contextWindowTokens from review values", async () => {
     const plan = onboardingPlan({
       homeDir: tempDir,

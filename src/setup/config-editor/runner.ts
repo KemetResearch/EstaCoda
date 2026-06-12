@@ -485,8 +485,8 @@ async function handleOptionalCapabilityAction(
     }
 
     if (collected.kind === "configured") {
-      if (collected.pendingCredentialWrite !== undefined) {
-        pendingCredentialWrites.push(collected.pendingCredentialWrite);
+      if (collected.pendingCredentialWrites !== undefined) {
+        pendingCredentialWrites.push(...collected.pendingCredentialWrites);
       }
       const configuration = promptContext.module.configure(collected.context);
       selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
