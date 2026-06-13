@@ -229,6 +229,194 @@ describe("runUpdateCommand install-method routing", () => {
     expect(seenModes).toEqual(["force", "skip"]);
   });
 
+  it("default managed-source changed update restarts a managed gateway service", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      homeDir: "/tmp/estacoda-home",
+      profileId: "gateway-profile",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: true,
+        message: "Update applied."
+      }),
+      restartGatewayService: async (options: GatewayRestartHandoffOptions) => {
+        restarted = true;
+        expect(options.profileId).toBe("gateway-profile");
+        expect(options.manualGuidance).toBe(false);
+        return {
+          restarted: true,
+          message: "Gateway service restarted (user scope, profile: gateway-profile)."
+        };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Update applied.");
+    expect(result.output).toContain("Gateway service restarted");
+    expect(restarted).toBe(true);
+  });
+
+  it("default managed-source changed update stays quiet when no managed gateway service is detected", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: true,
+        message: "Update applied."
+      }),
+      restartGatewayService: async (options: GatewayRestartHandoffOptions) => {
+        restarted = true;
+        expect(options.manualGuidance).toBe(false);
+        return {
+          restarted: false,
+          message: ""
+        };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Update applied.");
+    expect(result.output).not.toContain("Gateway restart:");
+    expect(result.output).not.toContain("estacoda gateway restart");
+    expect(restarted).toBe(true);
+  });
+
+  it("managed-source --no-restart-gateway skips restart after changed update", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      gatewayRestart: "never",
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: true,
+        message: "Update applied."
+      }),
+      restartGatewayService: async () => {
+        restarted = true;
+        return { restarted: true, message: "should not restart" };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Update applied.");
+    expect(result.output).toContain("Gateway restart skipped by --no-restart-gateway.");
+    expect(restarted).toBe(false);
+  });
+
+  it("managed-source --no-restart-gateway stays quiet for unchanged updates", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      gatewayRestart: "never",
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: false,
+        message: "Already up to date.\nNo files were modified."
+      }),
+      restartGatewayService: async () => {
+        restarted = true;
+        return { restarted: true, message: "should not restart" };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Already up to date.");
+    expect(result.output).not.toContain("Gateway restart skipped by --no-restart-gateway.");
+    expect(restarted).toBe(false);
+  });
+
+  it("managed-source unchanged success does not restart the gateway", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: false,
+        message: "Already up to date.\nNo files were modified."
+      }),
+      restartGatewayService: async () => {
+        restarted = true;
+        return { restarted: true, message: "should not restart" };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Already up to date.");
+    expect(result.output).not.toContain("Gateway service restarted");
+    expect(result.output).not.toContain("Gateway restart:");
+    expect(restarted).toBe(false);
+  });
+
+  it("managed-source success without changed metadata does not restart the gateway", async () => {
+    let restarted = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      gatewayMode: true,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        message: "Legacy success without changed metadata."
+      }),
+      restartGatewayService: async () => {
+        restarted = true;
+        return { restarted: true, message: "should not restart" };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Legacy success without changed metadata.");
+    expect(result.output).not.toContain("Gateway service restarted");
+    expect(restarted).toBe(false);
+  });
+
   it("managed-source --gateway uses the non-interactive resilience path and appends restart handoff on success", async () => {
     let restarted = false;
     let usedResilience = false;
@@ -255,6 +443,7 @@ describe("runUpdateCommand install-method routing", () => {
       },
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
         kind: "success",
+        changed: true,
         message: "Update applied."
       }),
       restartGatewayService: async (options: GatewayRestartHandoffOptions) => {
@@ -276,33 +465,39 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("managed-source --gateway falls back to manual restart guidance when no service handoff is available", async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
-    try {
-      const result = await runUpdateCommand({
-        dryRun: false,
-        apply: true,
-        gatewayMode: true,
-        homeDir,
-        profileId: "gateway-profile",
-        installMethodInfo: installInfo("managed-source", {
-          source: "stamp",
-          installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
-          expectedBranch: "main"
-        }),
-        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
-          kind: "success",
-          message: "Update applied."
-        })
-      });
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      gatewayMode: true,
+      homeDir: "/tmp/estacoda-home",
+      profileId: "gateway-profile",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        changed: true,
+        message: "Update applied."
+      }),
+      restartGatewayService: async (options: GatewayRestartHandoffOptions) => {
+        expect(options.manualGuidance).toBe(true);
+        return {
+          restarted: false,
+          message: [
+            "Gateway restart: no managed gateway service was detected.",
+            "Restart the gateway manually with: estacoda gateway restart"
+          ].join("\n")
+        };
+      }
+    });
 
-      expect(result.exitCode).toBe(0);
-      expect(result.output).toContain("Update applied.");
-      expect(result.output).toContain("Gateway restart:");
-      expect(result.output).toContain("estacoda gateway restart");
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-    }
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Update applied.");
+    expect(result.output).toContain("Gateway restart: no managed gateway service was detected.");
+    expect(result.output).toContain("Restart the gateway manually with: estacoda gateway restart");
   });
 
   it("managed-source --gateway failure does not restart the gateway", async () => {

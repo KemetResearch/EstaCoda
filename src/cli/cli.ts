@@ -552,6 +552,7 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
   const backup = hasFlag(args, "--backup");
   const noBackup = hasFlag(args, "--no-backup");
   const gatewayMode = hasFlag(args, "--gateway");
+  const noRestartGateway = hasFlag(args, "--no-restart-gateway");
   if (backup && noBackup) {
     return {
       handled: true,
@@ -566,6 +567,11 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
     explicitApply,
     backupMode: noBackup ? "skip" : backup ? "force" : "default",
     gatewayMode,
+    gatewayRestart: noRestartGateway
+      ? "never"
+      : gatewayMode
+        ? "always"
+        : "auto",
     homeDir: options.homeDir,
     profileId: options.profileId,
     workspaceRoot: options.workspaceRoot

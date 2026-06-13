@@ -24,7 +24,7 @@ export type ArtifactTestResult = {
 };
 
 export type UpdateApplyResult =
-  | { kind: "success"; message: string }
+  | { kind: "success"; message: string; changed?: boolean }
   | { kind: "error"; message: string };
 
 export type SourceUpdateCommandRunner = (
@@ -215,6 +215,7 @@ export async function applyUpdate(options: {
 
     return {
       kind: "success",
+      changed: true,
       message: [
         "Update applied.",
         `Backup: ${backup.backupPath}`,
@@ -345,6 +346,7 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
     await writeCache(options.homeDir, "up-to-date").catch(() => {});
     return {
       kind: "success",
+      changed: false,
       message: [
         "Already up to date.",
         renderBackupSummary(backup.result),
@@ -425,6 +427,7 @@ export async function applyManagedSourceUpdate(options: ManagedSourceUpdateOptio
 
   return {
     kind: "success",
+    changed: true,
     message: [
       `Update applied: fast-forwarded ${commitsBehind} commit${commitsBehind === 1 ? "" : "s"} from origin/${expectedBranch}.`,
       renderBackupSummary(backup.result),
