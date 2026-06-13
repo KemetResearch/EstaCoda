@@ -286,7 +286,10 @@ describe("applyManagedSourceUpdate", () => {
       }
     });
 
-    expect(result.kind).toBe("success");
+    if (result.kind !== "success") {
+      throw new Error(result.message);
+    }
+    expect(result.changed).toBe(false);
     expect(result.message).toContain("Already up to date.");
     expect(calls).not.toContain("git pull --ff-only origin main");
     expect(calls.some((call) => call.startsWith("pnpm "))).toBe(false);
@@ -320,7 +323,10 @@ describe("applyManagedSourceUpdate", () => {
       }
     });
 
-    expect(result.kind).toBe("success");
+    if (result.kind !== "success") {
+      throw new Error(result.message);
+    }
+    expect(result.changed).toBe(true);
     expect(result.message).toContain("Update applied: fast-forwarded 2 commits");
     expect(result.message).toContain("Bundled skill sync: no-op");
     expect(calls).toEqual([
@@ -869,7 +875,10 @@ describe("applyManagedSourceUpdate", () => {
       }
     });
 
-    expect(result.kind).toBe("success");
+    if (result.kind !== "success") {
+      throw new Error(result.message);
+    }
+    expect(result.changed).toBe(true);
     expect(result.message).toContain("Update applied");
   });
 });

@@ -35,6 +35,7 @@ export type UpdateOptions = {
   explicitApply?: boolean;
   backupMode?: "default" | "force" | "skip";
   gatewayMode?: boolean;
+  gatewayRestart?: "auto" | "always" | "never";
   homeDir?: string;
   profileId?: string;
   workspaceRoot?: string;
@@ -57,6 +58,7 @@ export type UpdateResult = {
 export type GatewayRestartHandoffOptions = {
   homeDir: string;
   profileId: string;
+  manualGuidance?: boolean;
 };
 
 export type GatewayRestartHandoffResult = {
@@ -66,6 +68,7 @@ export type GatewayRestartHandoffResult = {
 
 export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateResult> {
   const homeDir = resolveHomeDir(options.homeDir);
+  const gatewayRestart = options.gatewayRestart ?? (options.gatewayMode === true ? "always" : "auto");
 
   if (homeDir.length === 0) {
     return {
@@ -99,11 +102,13 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
           backupMode: options.backupMode ?? "default"
         });
 
-        if (options.gatewayMode === true && result.kind === "success") {
-          const handoff = await (options.restartGatewayService ?? restartManagedGatewayService)({
-            homeDir,
-            profileId: options.profileId ?? "default"
-          });
+        const handoff = await resolveManagedGatewayRestart({
+          result,
+          options,
+          gatewayRestart,
+          homeDir
+        });
+        if (handoff !== undefined) {
           return {
             kind: "success",
             message: [result.message, "", handoff.message].join("\n")
@@ -213,10 +218,12 @@ async function restartManagedGatewayService(
   if (detected === undefined) {
     return {
       restarted: false,
-      message: [
-        "Gateway restart: no managed gateway service was detected.",
-        "Restart the gateway manually with: estacoda gateway restart"
-      ].join("\n")
+      message: options.manualGuidance === true
+        ? [
+            "Gateway restart: no managed gateway service was detected.",
+            "Restart the gateway manually with: estacoda gateway restart"
+          ].join("\n")
+        : ""
     };
   }
 
@@ -241,6 +248,42 @@ async function restartManagedGatewayService(
     restarted: true,
     message: `Gateway service restarted (${detected.scope} scope, profile: ${options.profileId}).`
   };
+}
+
+async function resolveManagedGatewayRestart(input: {
+  result: UpdateApplyResult;
+  options: UpdateOptions;
+  gatewayRestart: NonNullable<UpdateOptions["gatewayRestart"]>;
+  homeDir: string;
+}): Promise<GatewayRestartHandoffResult | undefined> {
+  if (
+    input.result.kind !== "success" ||
+    input.result.changed !== true ||
+    !input.options.apply ||
+    input.options.check === true ||
+    input.options.dryRun === true
+  ) {
+    return undefined;
+  }
+
+  if (input.gatewayRestart === "never") {
+    return {
+      restarted: false,
+      message: "Gateway restart skipped by --no-restart-gateway."
+    };
+  }
+
+  const handoff = await (input.options.restartGatewayService ?? restartManagedGatewayService)({
+    homeDir: input.homeDir,
+    profileId: input.options.profileId ?? "default",
+    manualGuidance: input.gatewayRestart === "always"
+  });
+
+  if (handoff.message.trim().length === 0) {
+    return undefined;
+  }
+
+  return handoff;
 }
 
 async function detectManagedGatewayService(options: GatewayRestartHandoffOptions): Promise<(ServiceManagerState & { scope: ServiceScope }) | undefined> {

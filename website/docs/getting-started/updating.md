@@ -20,9 +20,42 @@ An agent system that cannot update itself safely becomes a liability. EstaCoda t
 | `estacoda update` | Default behavior depends on install method. See below. | `0` on success/routing, `1` on error, `3` on dirty worktree |
 | `estacoda update --backup` | Accepted for explicitness. Default behavior already backs up user state before mutation. | Same as default |
 | `estacoda update --no-backup` | Skip user-state backup. Not recommended. | Same as default |
-| `estacoda update --gateway` | Non-interactive mode. Logs to `~/.estacoda/logs/update.log`. Restarts managed gateway service on success, or prints manual restart instruction. | Same as default |
+| `estacoda update --no-restart-gateway` | Apply the update without restarting an installed managed gateway service. | Same as default |
+| `estacoda update --gateway` | Explicit operator compatibility mode. After a successful changed managed-source update, restarts a detected managed gateway service or prints manual restart guidance. | Same as default |
 
 `--dry-run` is accepted as an alias for `--check` on non-managed-source installs. On managed-source installs, `estacoda update` without flags performs the actual update.
+
+### Gateway restart behavior
+
+When `estacoda update` applies a real code update to a managed-source installation, EstaCoda restarts the installed managed gateway service automatically when one is detected.
+
+This only applies to EstaCoda-managed services. It does not kill PIDs, stop foreground gateway processes, or restart manually launched gateway sessions.
+
+No gateway restart is attempted when:
+
+- the installation is already up to date
+- `--check` is used
+- `--dry-run` is used
+- the update fails or is refused
+- the install method is Homebrew, npm, pnpm, Docker, or manual source
+
+If no managed gateway service is installed, default update mode stays quiet.
+
+Use `--no-restart-gateway` to disable the automatic managed-service restart:
+
+```bash
+estacoda update --no-restart-gateway
+```
+
+This is useful when the operator wants to restart the gateway later during a maintenance window.
+
+Use `--gateway` for explicit operator compatibility mode:
+
+```bash
+estacoda update --gateway
+```
+
+In this mode, EstaCoda restarts the managed gateway service after a successful changed managed-source update. If no managed service is detected, it prints manual restart guidance.
 
 ## Install-method routing
 
@@ -77,7 +110,7 @@ For source installs (managed and manual), the prefetch uses git remote checks wi
 - **Dirty worktree refusal.** Managed-source updates refuse to proceed if the worktree has uncommitted changes. Exit code `3`.
 - **User state is preserved.** `~/.estacoda/profiles/`, `memory/`, `sessions.sqlite`, `trust.json`, and other protected paths are never destroyed by update.
 - **Rollback on failure.** Build or validation failure after a pull triggers automatic rollback to the pre-pull SHA.
-- **Gateway mode does not guess.** `--gateway` restarts only managed gateway services detected through the service-manager abstraction. If no managed service is found, it prints a manual restart instruction. It never restarts arbitrary user processes.
+- **Gateway restart stays service-bound.** EstaCoda restarts only managed gateway services detected through the service-manager abstraction after successful changed managed-source self-updates. It does not kill PIDs, stop foreground gateway processes, or restart manually launched gateway sessions. Manual gateway processes remain the operator's responsibility.
 
 ## State paths
 
@@ -115,4 +148,4 @@ The pull succeeded but `pnpm install` or `pnpm run build` failed. The repository
 The background prefetch runs only in interactive sessions with no arguments. If you always run with arguments or in a non-TTY environment, the prefetch does not fire. Run `estacoda update --check` manually.
 
 **Gateway service not restarted after `--gateway` update**
-The gateway restart only attempts managed services registered through `estacoda gateway install-service`. If you run the gateway manually, restart it with `estacoda gateway restart`.
+The gateway restart only attempts managed services registered through `estacoda gateway install-service`, and only after a successful changed managed-source update. If you run the gateway manually, restart it yourself with `estacoda gateway restart`.

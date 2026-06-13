@@ -11,12 +11,76 @@ const readlineMock = vi.hoisted(() => ({
   createReadlinePrompt: vi.fn(),
 }));
 
+const updateCommandMock = vi.hoisted(() => ({
+  runUpdateCommand: vi.fn(),
+}));
+
 vi.mock("./readline-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./readline-prompt.js")>();
   return {
     ...actual,
     createReadlinePrompt: readlineMock.createReadlinePrompt,
   };
+});
+
+vi.mock("./update-command.js", () => ({
+  runUpdateCommand: updateCommandMock.runUpdateCommand,
+}));
+
+describe("runCliCommand update dispatch", () => {
+  beforeEach(() => {
+    updateCommandMock.runUpdateCommand.mockReset();
+    updateCommandMock.runUpdateCommand.mockResolvedValue({
+      exitCode: 0,
+      output: "update ok"
+    });
+  });
+
+  it("passes default gateway restart mode to estacoda update", async () => {
+    const result = await runCliCommand({
+      argv: ["update"],
+      workspaceRoot: "/tmp/workspace",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toBe("update ok");
+    expect(updateCommandMock.runUpdateCommand).toHaveBeenCalledWith(expect.objectContaining({
+      dryRun: false,
+      apply: true,
+      explicitApply: false,
+      gatewayMode: false,
+      gatewayRestart: "auto",
+    }));
+  });
+
+  it("passes explicit gateway restart mode to estacoda update --gateway", async () => {
+    await runCliCommand({
+      argv: ["update", "--gateway"],
+      workspaceRoot: "/tmp/workspace",
+      homeDir: "/tmp/home",
+    });
+
+    expect(updateCommandMock.runUpdateCommand).toHaveBeenCalledWith(expect.objectContaining({
+      gatewayMode: true,
+      gatewayRestart: "always",
+    }));
+  });
+
+  it("lets --no-restart-gateway override estacoda update --gateway", async () => {
+    await runCliCommand({
+      argv: ["update", "--apply", "--gateway", "--no-restart-gateway"],
+      workspaceRoot: "/tmp/workspace",
+      homeDir: "/tmp/home",
+    });
+
+    expect(updateCommandMock.runUpdateCommand).toHaveBeenCalledWith(expect.objectContaining({
+      apply: true,
+      explicitApply: true,
+      gatewayMode: true,
+      gatewayRestart: "never",
+    }));
+  });
 });
 
 describe("runCliCommand WhatsApp dispatch", () => {
