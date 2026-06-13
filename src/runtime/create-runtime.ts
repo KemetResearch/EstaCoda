@@ -696,6 +696,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     substrate: {
       workspaceRoot,
       homeDir: options.homeDir,
+      stateRoot: globalPaths.stateRoot,
       profileId,
       delegationConfig: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
       providerRegistry,

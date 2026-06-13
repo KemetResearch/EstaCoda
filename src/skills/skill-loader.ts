@@ -7,6 +7,7 @@ import type {
   SkillDefinition,
   SkillEvaluation,
   SkillPattern,
+  SkillPythonCapabilityRequirement,
   SkillPermissionExpectation,
   SkillRouting,
   SkillResourceEntry,
@@ -17,6 +18,7 @@ import type {
 } from "../contracts/skill.js";
 import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
+import { getRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
 import {
   assertKnownToolsetName,
   MAX_SKILL_FILES,
@@ -227,6 +229,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     trigger_patterns?: string[];
     negative_patterns?: string[];
     optional_toolsets?: string[];
+    python_capabilities?: unknown;
     visibility?: Record<string, unknown>;
     routing?: unknown;
   };
@@ -273,6 +276,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     optionalToolsets: toolsetArrayOrEmpty(definition.optionalToolsets ?? definition.optional_toolsets, "optionalToolsets"),
     requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
     requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
+    pythonCapabilities: normalizePythonCapabilities(definition.pythonCapabilities ?? definition.python_capabilities),
     configFields: inferredConfigFields,
     visibility: inferredVisibility,
     inputs: definition.inputs,
@@ -499,6 +503,70 @@ function normalizeEvaluations(value: unknown): SkillEvaluation[] {
       expectedOutcome: firstNonEmptyString(entry.expectedOutcome, entry.expected_outcome)
     };
   });
+}
+
+function normalizePythonCapabilities(value: unknown): SkillPythonCapabilityRequirement[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Skill field pythonCapabilities must be an array of objects");
+  }
+
+  const byId = new Map<string, SkillPythonCapabilityRequirement>();
+  value.forEach((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Skill pythonCapabilities[${index}] must be an object`);
+    }
+    assertAllowedPythonCapabilityFields(entry, index);
+    assertString(entry.id, `pythonCapabilities[${index}].id`);
+    const spec = getRegisteredPythonCapabilitySpec(entry.id);
+    if (spec === undefined) {
+      throw new Error(`Skill pythonCapabilities[${index}].id references unknown managed Python capability '${entry.id}'`);
+    }
+    if (entry.required !== undefined && typeof entry.required !== "boolean") {
+      throw new Error(`Skill pythonCapabilities[${index}].required must be a boolean`);
+    }
+    const groups = normalizePythonCapabilityGroups(entry.groups, index).sort();
+    const uniqueGroups = dedupeStrings(groups);
+    for (const groupId of uniqueGroups) {
+      if (spec.optionalGroups?.[groupId] === undefined) {
+        throw new Error(`Skill pythonCapabilities[${index}].groups references unknown optional group '${groupId}' for managed Python capability '${entry.id}'`);
+      }
+    }
+    const existing = byId.get(entry.id);
+    byId.set(entry.id, {
+      id: entry.id,
+      required: (existing?.required ?? false) || entry.required !== false,
+      groups: dedupeStrings([...(existing?.groups ?? []), ...uniqueGroups]).sort()
+    });
+  });
+
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function normalizePythonCapabilityGroups(value: unknown, index: number): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Skill pythonCapabilities[${index}].groups must be an array of strings`);
+  }
+  return value.map((group, groupIndex) => {
+    if (typeof group !== "string" || group.trim().length === 0) {
+      throw new Error(`Skill pythonCapabilities[${index}].groups[${groupIndex}] must be a non-empty string`);
+    }
+    return group.trim();
+  });
+}
+
+function assertAllowedPythonCapabilityFields(entry: Record<string, unknown>, index: number): void {
+  const allowedFields = new Set(["id", "required", "groups"]);
+  for (const field of Object.keys(entry)) {
+    if (!allowedFields.has(field)) {
+      throw new Error(`Skill pythonCapabilities[${index}] must not define unsupported field '${field}'`);
+    }
+  }
 }
 
 function assertString(value: unknown, field: string): asserts value is string {
@@ -747,10 +815,10 @@ function parseSimpleYaml(input: string): Record<string, unknown> {
 }
 
 function collectIndentedArray(lines: string[], startIndex: number, parentIndent: number): {
-  values: string[];
+  values: unknown[];
   endIndex: number;
 } {
-  const values: string[] = [];
+  const values: unknown[] = [];
   let endIndex = startIndex;
 
   for (let index = startIndex + 1; index < lines.length; index++) {
@@ -768,7 +836,11 @@ function collectIndentedArray(lines: string[], startIndex: number, parentIndent:
     }
 
     if (/^-\s*[A-Za-z0-9_-]+:(?:\s|$)/u.test(line)) {
-      throw new Error("YAML object arrays are not supported in skill frontmatter yet; use JSON frontmatter for playbook/evaluations.");
+      const collected = collectYamlObjectArrayEntry(lines, index, indent);
+      values.push(collected.value);
+      index = collected.endIndex;
+      endIndex = collected.endIndex;
+      continue;
     }
 
     values.push(stripYamlQuotes(line.slice(2).trim()));
@@ -776,6 +848,42 @@ function collectIndentedArray(lines: string[], startIndex: number, parentIndent:
   }
 
   return { values, endIndex };
+}
+
+function collectYamlObjectArrayEntry(lines: string[], startIndex: number, itemIndent: number): {
+  value: Record<string, unknown>;
+  endIndex: number;
+} {
+  const value: Record<string, unknown> = {};
+  let endIndex = startIndex;
+  const firstLine = lines[startIndex]!.trim().slice(2).trim();
+  assignYamlObjectProperty(value, firstLine);
+
+  for (let index = startIndex + 1; index < lines.length; index++) {
+    const raw = lines[index];
+    const indent = raw.match(/^\s*/u)?.[0].length ?? 0;
+    const line = raw.trim();
+
+    if (line.length === 0) {
+      endIndex = index;
+      continue;
+    }
+    if (indent <= itemIndent || line.startsWith("- ")) {
+      break;
+    }
+    assignYamlObjectProperty(value, line);
+    endIndex = index;
+  }
+
+  return { value, endIndex };
+}
+
+function assignYamlObjectProperty(target: Record<string, unknown>, line: string): void {
+  const match = /^(?<key>[A-Za-z0-9_-]+):(?:\s*(?<value>.*))?$/u.exec(line);
+  if (match?.groups === undefined) {
+    throw new Error("YAML object arrays support only simple key/value entries.");
+  }
+  target[camelize(match.groups.key)] = parseYamlScalar(match.groups.value ?? "");
 }
 
 function parseYamlScalar(value: string): unknown {

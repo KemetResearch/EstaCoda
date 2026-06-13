@@ -54,6 +54,7 @@ import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
+import { resolveCapabilityPythonEnv, type CapabilityPythonEnvResolveResult } from "../python-env/capability-resolver.js";
 
 export type AgentLoopRouteInput = {
   model: ModelProfile;
@@ -106,6 +107,7 @@ export type AgentLoopToolRegistryFilter = (
 export type AgentLoopRuntimeSubstrate = {
   workspaceRoot: string;
   homeDir: string | undefined;
+  stateRoot: string;
   profileId: string;
   loadedConfig?: LoadedRuntimeConfig;
   delegationConfig?: DelegationConfig;
@@ -322,7 +324,7 @@ export class AgentLoopBuilder {
     const browserAvailable = await substrate.browserBackend.isAvailable();
     const toolAvailability = await toolRegistry.snapshot();
     const visibilityStrategy = input.skillVisibilityStrategy ?? defaultSkillVisibilityStrategy;
-    const sessionSkillRegistry = visibilityStrategy({
+    const visibilityFilteredSkillRegistry = visibilityStrategy({
       skillRegistry: substrate.skillRegistry,
       toolAvailability: toolAvailability.available,
       browserAvailable,
@@ -330,6 +332,10 @@ export class AgentLoopBuilder {
       telegramReady: substrate.telegramReady === true,
       webEnabled: substrate.enableWebNetwork === true,
       platform: substrate.currentPlatform ?? process.platform
+    });
+    const sessionSkillRegistry = await applyPythonCapabilityAvailability({
+      skillRegistry: visibilityFilteredSkillRegistry,
+      stateRoot: substrate.stateRoot
     });
     const sessionSkillCatalog = sessionSkillRegistry.catalog();
 
@@ -575,6 +581,50 @@ export function defaultSkillVisibilityStrategy(input: AgentLoopSkillVisibilityIn
     }
   }
   return sessionSkillRegistry;
+}
+
+async function applyPythonCapabilityAvailability(input: {
+  skillRegistry: SkillRegistry;
+  stateRoot: string;
+}): Promise<SkillRegistry> {
+  const registry = new SkillRegistry();
+  for (const skill of input.skillRegistry.list()) {
+    const capabilities = skill.pythonCapabilities ?? [];
+    if (capabilities.length === 0) {
+      registry.register(skill);
+      continue;
+    }
+
+    const unavailable: Array<{ id: string; result: Exclude<CapabilityPythonEnvResolveResult, { ok: true }> }> = [];
+    for (const capability of capabilities) {
+      const result = await resolveCapabilityPythonEnv(capability.id, {
+        groups: capability.groups,
+        install: false,
+        stateRoot: input.stateRoot
+      });
+      if (!result.ok) {
+        unavailable.push({ id: capability.id, result });
+      }
+    }
+
+    const requiredUnavailable = unavailable.filter(({ id }) =>
+      capabilities.find((capability) => capability.id === id)?.required !== false
+    );
+    if (requiredUnavailable.length > 0) {
+      continue;
+    }
+
+    const optionalWarnings = unavailable.map(({ id, result }) =>
+      `Optional Python capability '${id}' is unavailable: ${result.reason}${result.repairCommand === undefined ? "" : `; repair with ${result.repairCommand}`}`
+    );
+    registry.register(optionalWarnings.length === 0
+      ? skill
+      : {
+          ...skill,
+          loadWarnings: [...("loadWarnings" in skill ? skill.loadWarnings ?? [] : []), ...optionalWarnings]
+        });
+  }
+  return registry;
 }
 
 function buildRuntimeToolContext(input: RuntimeToolContext): RuntimeToolContext {
