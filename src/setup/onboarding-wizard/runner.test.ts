@@ -16,6 +16,7 @@ import {
 import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
+import { renderOnboardingWizardSummary } from "./summary.js";
 import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
@@ -44,6 +45,21 @@ function profileEnvPath(homeDir: string): string {
 
 function activeProfilePath(homeDir: string): string {
   return resolveGlobalStateHome({ homeDir }).activeProfilePath;
+}
+
+async function readProfileConfig(homeDir: string): Promise<Record<string, unknown>> {
+  const raw = await readFile(profileConfigPath(homeDir), "utf8").catch(() => "{}");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function browserPromptOverrides(modeLabel: string, extra: Record<string, FakePromptOverrideValue> = {}): Record<string, FakePromptOverrideValue> {
+  return {
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Configure browser",
+    [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: modeLabel,
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+    ...extra,
+  };
 }
 
 function localReadyConfigObject(): Record<string, unknown> {
@@ -441,6 +457,8 @@ describe("runFirstRunSetup", () => {
   afterEach(async () => {
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.ESTACODA_DISCORD_BOT_TOKEN;
+    delete process.env.BROWSERBASE_API_KEY;
+    delete process.env.BROWSERBASE_PROJECT_ID;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -1414,6 +1432,8 @@ describe("runFirstRunSetup", () => {
         "Optional capabilities": "Yes",
         "Configure optional capability": ["Configure channels", "Configure browser"],
         "Configure other capabilities now": ["Yes", "Skip"],
+        [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
+        [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
         __prompt: ["", "", "12345", "", "", ""],
         __secret: "",
       }),
@@ -1438,7 +1458,9 @@ describe("runFirstRunSetup", () => {
         "Optional capabilities": "Yes",
         "Configure optional capability": ["Configure browser", "Skip"],
         "Configure other capabilities now": "Yes",
-        __prompt: ["", ""],
+        [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
+        [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
+        __prompt: ["", "", "", ""],
       }, seenOptions),
       flowEngine: flowEngine(),
     });
@@ -1449,6 +1471,214 @@ describe("runFirstRunSetup", () => {
       "Configure voice",
       "Skip",
     ]);
+  });
+
+  it("offers the setup-editor browser mode choices during onboarding", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.disable")
+      ), seenOptions),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(seenOptions[resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]).toEqual([
+      "Local supervised browser",
+      "Existing CDP browser",
+      "Browserbase cloud browser",
+      "Disable browser tools",
+    ]);
+  });
+
+  it("maps local supervised browser setup through onboarding to flat config fields", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
+        {
+          [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
+          __prompt: ["", "", "", "--user-data-dir=/tmp/browser-profile", "--disable-gpu"],
+        }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as {
+      browser?: {
+        backend?: string;
+        supervised?: boolean;
+        autoLaunch?: boolean;
+        launchArgs?: string[];
+        chromeFlags?: string[];
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("configured");
+    expect(config.browser).toEqual(expect.objectContaining({
+      backend: "local-cdp",
+      supervised: true,
+      autoLaunch: true,
+      launchArgs: ["--user-data-dir=/tmp/browser-profile"],
+      chromeFlags: ["--disable-gpu"],
+    }));
+  });
+
+  it("maps existing local CDP browser setup through onboarding to flat config fields", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.existingCdp"),
+        { __prompt: ["", "http://localhost:9222"] }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as {
+      browser?: {
+        backend?: string;
+        supervised?: boolean;
+        autoLaunch?: boolean;
+        cdpUrl?: string;
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("configured");
+    expect(config.browser).toEqual(expect.objectContaining({
+      backend: "local-cdp",
+      supervised: true,
+      autoLaunch: false,
+      cdpUrl: "http://localhost:9222",
+    }));
+  });
+
+  it("maps Browserbase setup through onboarding and writes complete reviewed credential sources", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.browserbase"),
+        { __secret: ["bb-api-key", "bb-project-id"] }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as {
+      browser?: {
+        backend?: string;
+        cloudProvider?: string;
+        hybridRouting?: boolean;
+        cloudFallback?: boolean;
+        cloudSpendApproved?: boolean;
+      };
+    };
+    const env = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("configured");
+    expect(config.browser).toEqual(expect.objectContaining({
+      backend: "browserbase",
+      cloudProvider: "browserbase",
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+    }));
+    expect(env).toContain("BROWSERBASE_API_KEY=\"bb-api-key\"");
+    expect(env).toContain("BROWSERBASE_PROJECT_ID=\"bb-project-id\"");
+    expect(JSON.stringify(result.reviewManifest)).toContain("BROWSERBASE_API_KEY");
+    expect(JSON.stringify(result.reviewManifest)).toContain("BROWSERBASE_PROJECT_ID");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-api-key");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-project-id");
+  });
+
+  it("drops incomplete Browserbase onboarding setup without writing partial secrets", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.browserbase"),
+        { __secret: ["bb-api-key", ""] }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { browser?: unknown };
+    const env = await readFile(profileEnvPath(tempDir), "utf8").catch(() => "");
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).not.toBe("blocked");
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("incomplete");
+    expect(result.selections.optionalCapabilities).toEqual([]);
+    expect(config.browser).toBeUndefined();
+    expect(env).not.toContain("bb-api-key");
+    expect(env).not.toContain("BROWSERBASE_API_KEY");
+    expect(env).not.toContain("BROWSERBASE_PROJECT_ID");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-api-key");
+  });
+
+  it("drops existing CDP onboarding setup with a missing URL and still completes", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.existingCdp"),
+        { __prompt: ["", ""] }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { browser?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).not.toBe("blocked");
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("incomplete");
+    expect(result.selections.optionalCapabilities).toEqual([]);
+    expect(config.browser).toBeUndefined();
+  });
+
+  it("drops existing CDP onboarding setup with a non-local URL and still completes", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.existingCdp"),
+        { __prompt: ["", "http://example.com:9222"] }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { browser?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).not.toBe("blocked");
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("incomplete");
+    expect(config.browser).toBeUndefined();
+  });
+
+  it("writes disabled browser setup as unconfigured and summarizes it as disabled", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.disable")
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { browser?: { backend?: string } };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("disabled");
+    expect(result.selections.optionalCapabilities).toEqual(["browser"]);
+    expect(config.browser).toEqual(expect.objectContaining({ backend: "unconfigured" }));
+    expect(renderOnboardingWizardSummary(result.wizardState)).toContain("  - Browser: Disabled");
   });
 
   it("skips the onboarding optional capability flow cleanly", async () => {

@@ -38,7 +38,7 @@ describe("onboarding wizard summary", () => {
           stt: "configured",
           tts: "not_set",
         },
-        browser: "configured",
+        browser: "disabled",
       },
     };
 
@@ -58,7 +58,7 @@ describe("onboarding wizard summary", () => {
       "  - Channels / WhatsApp: Configured",
       "  - Voice STT: Configured",
       "  - Voice TTS: Not set",
-      "  - Browser: Configured",
+      "  - Browser: Disabled",
     ].join("\n"));
   });
 
@@ -91,7 +91,7 @@ describe("onboarding wizard summary", () => {
           stt: "configured",
           tts: "not_set",
         },
-        browser: "configured",
+        browser: "disabled",
       },
     };
 
@@ -111,7 +111,7 @@ describe("onboarding wizard summary", () => {
     expect(rendered).toContain(`القنوات / ${isolateLtr("WhatsApp")}: الإعداد غير مكتمل`);
     expect(rendered).toContain(`الصوت ${isolateLtr("STT")}: مهيأ`);
     expect(rendered).toContain(`الصوت ${isolateLtr("TTS")}: غير مهيأ`);
-    expect(rendered).toContain("المتصفح: مهيأ");
+    expect(rendered).toContain("المتصفح: غير مفعّل");
     expect(rendered).not.toContain("Configuration summary");
     expect(rendered).not.toContain("Credential status");
   });
@@ -175,6 +175,7 @@ describe("onboarding wizard summary", () => {
     expect(optionalCapabilityStatusLabel("configured")).toBe("Configured");
     expect(optionalCapabilityStatusLabel("skipped")).toBe("Skipped");
     expect(optionalCapabilityStatusLabel("incomplete")).toBe("Setup incomplete");
+    expect(optionalCapabilityStatusLabel("disabled")).toBe("Disabled");
     expect(optionalCapabilityStatusLabel("not_set")).toBe("Not set");
     expect(optionalCapabilityStatusLabel(undefined)).toBe("Not set");
     expect(workspaceTrustStatusLabel("trusted")).toBe("trusted");
@@ -183,6 +184,7 @@ describe("onboarding wizard summary", () => {
     expect(optionalCapabilityStatusLabel("configured", "ar")).toBe("مهيأ");
     expect(optionalCapabilityStatusLabel("skipped", "ar")).toBe("تم التخطي");
     expect(optionalCapabilityStatusLabel("incomplete", "ar")).toBe("الإعداد غير مكتمل");
+    expect(optionalCapabilityStatusLabel("disabled", "ar")).toBe("غير مفعّل");
     expect(optionalCapabilityStatusLabel("not_set", "ar")).toBe("غير مهيأ");
     expect(workspaceTrustStatusLabel("trusted", "ar")).toBe("موثوقة");
     expect(workspaceTrustStatusLabel("untrusted", "ar")).toBe("غير موثوقة");

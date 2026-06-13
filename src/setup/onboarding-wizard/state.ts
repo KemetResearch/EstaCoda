@@ -11,7 +11,7 @@ export type OnboardingCredentialSummaryStatus =
 
 export type OnboardingWorkspaceTrustStatus = "trusted" | "untrusted";
 
-export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set" | "skipped" | "incomplete";
+export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set" | "skipped" | "incomplete" | "disabled";
 
 export type OnboardingSupportedOptionalCapabilityId = "channels" | "voice" | "browser";
 

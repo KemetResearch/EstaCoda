@@ -232,6 +232,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.summary.status.notSet", "Not set", "غير مهيأ", [], "config-summary"),
   copy("onboarding.summary.status.skipped", "Skipped", "تم التخطي", [], "config-summary"),
   copy("onboarding.summary.status.incomplete", "Setup incomplete", "الإعداد غير مكتمل", [], "config-summary"),
+  copy("onboarding.summary.status.disabled", "Disabled", "غير مفعّل", [], "config-summary"),
   copy("onboarding.summary.status.trusted", "trusted", "موثوقة", [], "config-summary"),
   copy("onboarding.summary.status.untrusted", "untrusted", "غير موثوقة", [], "config-summary"),
   copy("onboarding.summary.status.configured", "Configured", "مهيأ", [], "config-summary"),

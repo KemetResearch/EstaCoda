@@ -73,6 +73,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.status.notSet",
   "onboarding.summary.status.skipped",
   "onboarding.summary.status.incomplete",
+  "onboarding.summary.status.disabled",
   "onboarding.summary.status.trusted",
   "onboarding.summary.status.untrusted",
   "onboarding.summary.status.configured",
