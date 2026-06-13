@@ -78,6 +78,42 @@ estacoda verify
 
 ---
 
+## بيئات Python
+
+```bash
+estacoda python-env list
+estacoda python-env status <id>
+estacoda python-env setup <id>
+estacoda python-env verify <id>
+estacoda python-env upgrade <id>
+estacoda python-env reset <id>
+```
+
+تدير هذه الأوامر بيئات Python التي يملكها وقت التشغيل للقدرات التي تحتاج إلى حزم Python مثبتة بإصدارات محددة.
+
+| الأمر | السلوك |
+|---|---|
+| `python-env list` | يعرض قدرات Python المسجلة وحالة بيئة كل قدرة. |
+| `python-env status <id>` | يعرض مسار البيئة، ومسار Python عند توفره، وحالة ملف البيان، والمجموعات المثبتة، وتلميح الإصلاح. |
+| `python-env setup <id>` | ينشئ البيئة، ويثبت الحزم المحددة في مواصفة وقت التشغيل المسجلة، ويتحقق من الاستيرادات، ويكتب ملف البيان. |
+| `python-env verify <id>` | يتحقق من الاستيرادات المضبوطة فقط. لا يثبت الحزم. |
+| `python-env upgrade <id>` | يحدث بيئة مثبتة عندما تتغير المواصفة المسجلة، ثم يتحقق منها. |
+| `python-env reset <id>` | يحذف البيئة المدارة لهذه القدرة بعد التأكيد. |
+
+يتطلب `setup` و`upgrade` موافقة محلية صريحة قبل تثبيت الحزم عبر الشبكة. أمر `reset` تدميري.
+
+يمكن اختيار المجموعات الاختيارية بأعلام المجموعات عندما تعرفها القدرة:
+
+```bash
+estacoda python-env setup <id> --group <name>
+estacoda python-env setup <id> --groups <a,b>
+estacoda python-env status <id> --group <name>
+```
+
+لا تثبت المهارات الحزم أثناء التنفيذ العادي. إذا كانت بيئة قدرة مفقودة، يعرض النظام أمر إصلاح للمشغل المحلي.
+
+---
+
 ## النموذج والمزود
 
 ### `estacoda model`

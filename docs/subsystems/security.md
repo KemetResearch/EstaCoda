@@ -41,6 +41,16 @@ Default: `adaptive`
 | `external-side-effect` | Network POSTs, external APIs | Usually gated |
 | `irreversible` | Deletes, deployments, sends | Always gated |
 
+## Python Dependency Boundary
+
+Managed Python environments are a local operator-controlled dependency surface.
+
+Skills may request a registered capability by ID, but skills cannot define packages, imports, install commands, paths, or versions. Provider output and generated shell text are never accepted as package installation instructions.
+
+Package installation is explicit through `estacoda python-env setup` or `estacoda python-env upgrade`. Normal skill execution and gateway-triggered execution do not auto-install dependencies.
+
+Diagnostics from Python environment setup and verification are bounded and redacted before they are printed.
+
 ## Hard Floor
 
 The unconditional hardline floor is based on `assessCommandSafety(...).hardBlock`. Any `hardBlock` is non-overridable. Severity is metadata and must not be used to decide whether a command can be approved.

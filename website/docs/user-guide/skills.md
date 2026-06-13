@@ -55,6 +55,51 @@ The skill name must be unique within the visible catalog. The description is use
 
 ---
 
+## Skills that need Python capabilities
+
+Some skills need Python packages. EstaCoda handles those through registered Python capabilities.
+
+A skill can declare a capability:
+
+```yaml
+pythonCapabilities:
+  - id: example-capability
+    required: true
+    groups: []
+```
+
+For example, a future registered capability could expose an optional group:
+
+```yaml
+pythonCapabilities:
+  - id: ocr-and-documents
+    required: true
+    groups: []
+  - id: ocr-and-documents
+    required: false
+    groups: ["advancedOcr"]
+```
+
+The declaration is intentionally small. A skill can name a registered capability and selected groups. It cannot define packages, imports, paths, versions, or install commands.
+
+If a required capability is missing, the skill is unavailable until the operator sets up the environment. If an optional capability is missing, the skill can remain available with reduced behavior.
+
+Set up a capability from the terminal:
+
+```bash
+estacoda python-env setup <id>
+```
+
+Check status:
+
+```bash
+estacoda python-env status <id>
+```
+
+Normal skill execution does not install Python packages automatically.
+
+---
+
 ## Official Skills Catalog
 
 The following official skills are bundled for v0.1.0:

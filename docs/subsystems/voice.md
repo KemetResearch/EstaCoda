@@ -97,6 +97,12 @@ Managed environment paths:
 
 The virtual environment and model cache are separate. The Hugging Face/model cache does not live inside the venv.
 
+### faster-whisper environment
+
+Local faster-whisper STT keeps its existing managed environment path for compatibility.
+
+The generic capability environment system uses `<stateRoot>/python-envs/<capability-id>/`, but faster-whisper is not silently migrated to that path in this change.
+
 Config shape:
 
 ```json

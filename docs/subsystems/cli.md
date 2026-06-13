@@ -50,6 +50,25 @@ estacoda -p work doctor
 
 `--profile` / `-p` selects a profile for the current command only. It does not change `active-profile.json`; only `estacoda profile use <name>` changes the active profile.
 
+## Python Environment Commands
+
+`estacoda python-env` manages runtime-owned Python capability environments.
+
+Use it for capabilities that need pinned Python packages:
+
+```bash
+estacoda python-env list
+estacoda python-env status <id>
+estacoda python-env setup <id>
+estacoda python-env verify <id>
+estacoda python-env upgrade <id>
+estacoda python-env reset <id>
+```
+
+`list` and `status` are read-only. `setup` and `upgrade` require explicit local approval before package installation. `reset` is destructive and removes only the managed capability environment path.
+
+Normal skill execution does not run these commands and does not install packages automatically.
+
 ## Installability
 
 Local source checkouts validate the compiled entrypoint directly:
