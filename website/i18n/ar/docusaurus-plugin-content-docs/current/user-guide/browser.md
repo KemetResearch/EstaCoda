@@ -12,16 +12,16 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 ## ما هو مُنفّذ
 
-| الواجهة الخلفية | الحالة | ملاحظات |
+| المحرك | الحالة | ملاحظات |
 |---|---|---|
 | **local-cdp** | `live-proven` | يتصل بـ Chrome/Chromium محلي عبر CDP. يمكن للوضع المُشرف عليه تشغيل Chrome/Chromium تلقائيًا. |
 | **mock** | `implemented` | واجهة اختبار لاختبارات الدخان. لا متصفح حقيقي. |
-| **Browserbase** | `implemented` | يتطلب بيانات اعتماد وموافقة صريحة على إنفاق السحابة قبل إنشاء جلسات قابلة للفوترة. |
+| **Browserbase** | `implemented` | يتطلب بيانات اعتماد وموافقة صريحة على إنفاق السحابة قبل إنشاء جلسات قد تترتب عليها تكلفة. |
 | **browser-use** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Firecrawl (browser)** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Camofox** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 
-تُنشأ جلسات Browserbase فقط عبر واجهة المتصفح الخلفية حتى يمكن فرض `browser.cloudSpendApproved`. تبقى browser-use وFirecrawl وCamofox مزودات مؤجلة.
+تُنشأ جلسات Browserbase فقط عبر محرك المتصفح حتى يمكن فرض `browser.cloudSpendApproved`. تبقى browser-use وFirecrawl وCamofox مزودات مؤجلة.
 
 ---
 
@@ -109,7 +109,7 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 ## بوابة الموافقة
 
-`browser.cdp` محمي بوابة موافقة افتراضيًا. يمكن لأمر CDP الخام تنفيذ أوامر متصفح عشوائية، لذا يتطلب موافقة صريحة ما لم يكن وضع الأمان `open` ويمر الأمر عبر الأرضية الصلبة.
+`browser.cdp` محمي بوابة موافقة افتراضيًا. يمكن لأمر CDP الخام تنفيذ أوامر متصفح غير مقيدة، لذا يتطلب موافقة صريحة ما لم يكن وضع الأمان `open` ويمر الأمر عبر الأرضية الصلبة.
 
 عمليات المتصفح القياسية (`navigate`، `click`، `type`، `scroll`) تتبع سياسة موافقة الأداة العادية. لا يتم حمايتها بنفس درجة CDP الخام.
 
@@ -117,7 +117,16 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 ## الإعداد
 
-إعداد المتصفح يقع تحت `browser` في إعداد الملف الشخصي:
+إعداد المتصفح يقع تحت `browser` في إعداد الملف الشخصي.
+
+يدعم محرر الإعداد أربعة أوضاع للمتصفح ويكتب شكل الإعداد المسطح نفسه:
+
+- **متصفح محلي مُشرف عليه** يكتب `backend: "local-cdp"`، و`supervised: true`، وقيمة `autoLaunch` التي تمت مراجعتها، و`cdpUrl` الاختياري، وخيارات التشغيل التي تمت مراجعتها.
+- **متصفح CDP موجود** يكتب `backend: "local-cdp"`، و`supervised: true`، و`autoLaunch: false`، و`cdpUrl` الذي تمت مراجعته.
+- **متصفح Browserbase السحابي** يكتب `backend: "browserbase"`، و`cloudProvider: "browserbase"`، و`hybridRouting: true`، و`cloudFallback: true`، و`cloudSpendApproved: false`.
+- **تعطيل أدوات المتصفح / محرك غير مهيأ** يكتب `backend: "unconfigured"`.
+
+التحقق الثابت في الإعداد لا يفتح صفحات، ولا يتصل بـ CDP، ولا يستدعي Browserbase، ولا ينشئ جلسات سحابية. وضع CDP الموجود يحظر روابط CDP المفقودة وغير المحلية؛ المضيفون المقبولون هم `localhost` و`127.0.0.1` و`::1`.
 
 ```json
 {
@@ -137,13 +146,13 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 | المفتاح | الافتراضي | الوصف |
 |---|---|---|
-| `backend` | `unconfigured` | الواجهة الخلفية للمتصفح المُستخدمة. |
+| `backend` | `unconfigured` | محرك المتصفح المستخدم. |
 | `cdpUrl` | غير مضبوط | نقطة نهاية CDP لمتصفح يعمل يدويًا. |
 | `supervised` | `true` | استخدام CDP المحلي المُشرف عليه عندما يكون `backend` هو `local-cdp`. |
 | `autoLaunch` | `false` | ما إذا كان CDP المحلي المُشرف عليه قد يشغّل Chrome/Chromium تلقائيًا. |
 | `launchExecutable` | غير مضبوط | مسار Chrome/Chromium الصريح والمفضل. |
 | `launchArgs` | غير مضبوط | مصفوفة وسائط تشغيل منظمة. |
-| `chromeFlags` | غير مضبوط | مصفوفة أعلام Chrome منظمة. |
+| `chromeFlags` | غير مضبوط | مصفوفة خيارات Chrome المتقدمة. |
 | `launchCommand` | غير مضبوط | بيانات توافق مهملة فقط. لا تُقسم ولا تُحلل كـ shell. |
 | `summarizeSnapshots` | `"auto"` | ما إذا كان يمكن تلخيص اللقطات المعروضة الضخمة. |
 | `snapshotSummarizeThreshold` | `8000` | عتبة أحرف عرض اللقطة للتلخيص. |
@@ -166,14 +175,14 @@ estacoda browser setup --backend local-cdp --launch-executable /path/to/chrome -
   "browser": {
     "backend": "browserbase",
     "cloudProvider": "browserbase",
-    "cloudSpendApproved": "pending",
+    "cloudSpendApproved": false,
     "cloudFallback": true,
     "hybridRouting": true
   }
 }
 ```
 
-يتطلب Browserbase كلًا من `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`. الحالة الافتراضية/المعلقة للموافقة تمنع الجلسات القابلة للفوترة. شغّل `estacoda browser approve-cloud` للسماح بإنشاء جلسات متصفح سحابية، و`estacoda browser revoke-cloud` لحظرها مرة أخرى. قد تُسبب جلسات Browserbase رسومًا. الإعداد وحده لا ينشئ جلسات؛ الإنشاء كسول عندما تحتاج عملية متصفح إلى الخلفية السحابية. تستخدم EstaCoda شكل API المُتحقق منه في `docs/browserbase-api-notes.md`.
+يتطلب Browserbase كلًا من `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`. بيانات الاعتماد وحدها لا توافق على الإنفاق. يكتب الإعداد الإنفاق المعلق أو غير الموافق عليه كـ `cloudSpendApproved: false`؛ وتظل الإعدادات القديمة التي تحتوي `cloudSpendApproved: "pending"` قابلة للتحميل ومحظورة. شغّل `estacoda browser approve-cloud` للسماح بإنشاء جلسات متصفح سحابية، و`estacoda browser revoke-cloud` لحظرها مرة أخرى. قد تترتب على جلسات Browserbase تكلفة. الإعداد وحده لا ينشئ جلسات؛ الإنشاء كسول عندما تحتاج عملية متصفح إلى المحرك السحابي. تستخدم EstaCoda شكل API المُتحقق منه في `docs/browserbase-api-notes.md`.
 
 ```bash
 estacoda browser setup --backend browserbase --cloud-provider browserbase
@@ -182,7 +191,9 @@ estacoda browser approve-cloud
 estacoda browser revoke-cloud
 ```
 
-يضبط الأمر الأول Browserbase كخلفية المتصفح دون تفعيل `browser.hybridRouting`. ويفعّل الثاني التوجيه الهجين حتى تستخدم عناوين URL العامة السحابة وتستخدم العناوين الخاصة/الداخلية المسموحة المحلي. مطلوب `approve-cloud` قبل إنشاء جلسات قابلة للفوترة. يحظر `revoke-cloud` إنشاء جلسات سحابية مستقبلية دون حذف بيانات الاعتماد.
+يضبط الأمر الأول Browserbase كمحرك المتصفح دون تفعيل `browser.hybridRouting`. ويفعّل الثاني التوجيه الهجين حتى تستخدم عناوين URL العامة السحابة وتستخدم العناوين الخاصة/الداخلية المسموحة المحلي. مطلوب `approve-cloud` قبل إنشاء جلسات قد تترتب عليها تكلفة. يحظر `revoke-cloud` إنشاء جلسات سحابية مستقبلية دون حذف بيانات الاعتماد.
+
+`backend: "unconfigured"` تعطيل صارم في وقت التشغيل. تبقى أدوات المتصفح معطلة حتى إذا بقيت روابط CDP قديمة، أو إعدادات Browserbase، أو خيارات تشغيل، أو بيانات اعتماد Browserbase في الملف الشخصي أو البيئة.
 
 ---
 
@@ -210,9 +221,9 @@ estacoda browser revoke-cloud
 
 **فشل التشغيل التلقائي:** لم يُعثر على ثنائي Chrome، أو لا توجد صلاحيات كافية للتشغيل. تحقق من `which google-chrome` أو `which chromium-browser`.
 
-**موافقة إنفاق Browserbase مفقودة:** تبلغ الواجهة الخلفية أن الجلسات السحابية قد تُسبب رسومًا وتبقى محظورة حتى تشغيل `estacoda browser approve-cloud`.
+**موافقة إنفاق Browserbase مفقودة:** يبلغ محرك المتصفح أن الجلسات السحابية قد تترتب عليها تكلفة وتبقى محظورة حتى تشغيل `estacoda browser approve-cloud`.
 
-**فشل إنشاء جلسة Browserbase:** مع `browser.cloudFallback: true`، يمكن لبعض إخفاقات السحابة الرجوع إلى المحلي. إخفاقات موافقة الإنفاق لا ترجع إلى المحلي.
+**فشل إنشاء جلسة Browserbase:** مع `browser.cloudFallback: true`، يمكن لبعض إخفاقات السحابة الرجوع إلى المحلي. عدم الموافقة على الإنفاق لا يؤدي إلى الرجوع إلى المحلي.
 
 **حُظر تحويل هجين:** خالف عنوان URL النهائي سياسة أمان المسار. تحاول EstaCoda تفريغ الجلسة إلى `about:blank`؛ وإذا فشل التفريغ، تُغلق الجلسة غير الآمنة.
 
