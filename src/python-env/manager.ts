@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import type { CronJobLock } from "../cron/cron-lock.js";
-import { redactString } from "../utils/redaction.js";
 import {
   FASTER_WHISPER_CAPABILITY_ID,
   requireRegisteredPythonCapabilitySpec
 } from "./capability-registry.js";
 import { venvPythonBinary } from "./capability-paths.js";
+import { boundDiagnostic } from "./diagnostics.js";
 
 export type PythonEnvironmentStatus =
   | { kind: "missing" }
@@ -38,7 +38,6 @@ const INSTALL_LOCK_ID = "managed-python-env";
 const COMMAND_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 30_000;
 const INSTALL_LOCK_POLL_INTERVAL_MS = 500;
-const DIAGNOSTIC_LIMIT_CHARS = 1_200;
 
 const createPromises = new Map<string, Promise<ManagedEnvironmentResult>>();
 
@@ -304,13 +303,5 @@ function looksLikeMissingVenvSupport(diagnostic: string): boolean {
 }
 
 function truncateDiagnostic(value: string): string {
-  const redacted = redactSensitive(value);
-  if (redacted.length <= DIAGNOSTIC_LIMIT_CHARS) {
-    return redacted;
-  }
-  return `${redacted.slice(0, DIAGNOSTIC_LIMIT_CHARS)}...[truncated]`;
-}
-
-function redactSensitive(value: string): string {
-  return redactString(value, { strict: true, additionalKeys: ["key"] });
+  return boundDiagnostic(value);
 }
