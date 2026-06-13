@@ -38,6 +38,22 @@ The managed local STT venv and model cache are intentionally separate:
 
 The model cache does not live inside the venv. Removing one does not repair the other; rerun `estacoda voice setup --stt-provider local` to recreate the managed Python environment.
 
+## Managed Python environments
+
+Managed Python capability environments live under the EstaCoda state root.
+
+```text
+<stateRoot>/python-envs/<capability-id>/
+<stateRoot>/python-envs/<capability-id>/env.json
+<stateRoot>/cache/pip/<capability-id>/
+```
+
+The virtualenv path stores the Python environment for one registered capability. The manifest records the installed spec hash, package list, optional groups, paths, timestamps, and verification status. The pip cache is scoped per capability.
+
+These paths are not profile-local. Profile-local skill state, temporary caches, and user-facing artifacts are separate concerns.
+
+Local faster-whisper STT keeps its existing managed environment path for compatibility. It is not silently moved to the generic capability path.
+
 ## Install-local state
 
 Source install directories may contain an `.install-method.json` stamp that proves install ownership. EstaCoda uses this stamp to decide whether a checkout is `managed-source` (installer-owned, may be mutated by update) or `manual-source` (contributor-owned, never self-mutated).

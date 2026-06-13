@@ -1,7 +1,7 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserBackend } from "../contracts/browser.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { MemoryProvider } from "../contracts/memory.js";
@@ -34,6 +34,14 @@ import { SkillLearningManager } from "../skills/skill-learning.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
+import {
+  registerPythonCapabilitySpecForTest,
+  resetPythonCapabilityRegistryForTest
+} from "../python-env/capability-registry.js";
+import { resolveManagedPythonCapabilityPaths } from "../python-env/capability-paths.js";
+import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js";
+import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
+import * as capabilityManager from "../python-env/capability-manager.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { AgentLoopBuilder, defaultSkillVisibilityStrategy, type AgentLoopRuntimeSubstrate } from "./agent-loop-builder.js";
 
@@ -59,6 +67,11 @@ const securityPolicy: SecurityPolicy = {
 };
 
 describe("AgentLoopBuilder", () => {
+  afterEach(() => {
+    resetPythonCapabilityRegistryForTest();
+    vi.restoreAllMocks();
+  });
+
   it("creates fresh session-bound instances for each session build", async () => {
     const harness = await createBuilderHarness();
     const first = await harness.build("session-a");
@@ -165,6 +178,108 @@ describe("AgentLoopBuilder", () => {
     });
 
     expect(sessionSkills.catalog().map((entry) => entry.name)).toEqual(["web-visible"]);
+  });
+
+  it("hides skills with unavailable required Python capabilities without installing", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("needs-python", {
+      pythonCapabilities: [{ id: spec.id, required: true, groups: [] }]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+
+    const built = await harness.build("session-python-missing");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("needs-python");
+    expect(installSpy).not.toHaveBeenCalled();
+  });
+
+  it("hides a skill when the required base Python capability declaration is unavailable even if a same-id optional group is present", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("needs-python-base", {
+      pythonCapabilities: [
+        { id: spec.id, required: true, groups: [] },
+        { id: spec.id, required: false, groups: ["extra"] }
+      ]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+
+    const built = await harness.build("session-python-base-missing");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("needs-python-base");
+    expect(installSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps skills with verified required Python capabilities visible", async () => {
+    const spec = registerRuntimePythonCapability();
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("ready-python", {
+      pythonCapabilities: [{ id: spec.id, required: true, groups: ["extra"] }]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+    await writeVerifiedCapability(harness.stateRoot, spec, ["extra"]);
+
+    const built = await harness.build("session-python-ready");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("ready-python");
+  });
+
+  it("keeps optional unavailable Python capabilities as degraded load warnings", async () => {
+    const spec = registerRuntimePythonCapability();
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("optional-python", {
+      pythonCapabilities: [{ id: spec.id, required: false, groups: [] }]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+
+    const built = await harness.build("session-python-optional");
+    const loaded = built.sessionSkillRegistry.get("optional-python");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("optional-python");
+    expect(loaded).toMatchObject({
+      loadWarnings: [expect.stringContaining("Optional Python capability")]
+    });
+  });
+
+  it("keeps a skill visible when a same-id required base capability is verified and an optional group is unavailable", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("optional-python-group", {
+      pythonCapabilities: [
+        { id: spec.id, required: true, groups: [] },
+        { id: spec.id, required: false, groups: ["extra"] }
+      ]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+    await writeVerifiedCapability(harness.stateRoot, spec, []);
+
+    const built = await harness.build("session-python-optional-group");
+    const loaded = built.sessionSkillRegistry.get("optional-python-group");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("optional-python-group");
+    expect(loaded).toMatchObject({
+      loadWarnings: [expect.stringContaining("Optional Python capability")]
+    });
+    expect(installSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-install Python capabilities for gateway-style session builds", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("gateway-python", {
+      pythonCapabilities: [{ id: spec.id, required: true, groups: [] }]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+
+    const built = await harness.build("telegram-session");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("gateway-python");
+    expect(installSpy).not.toHaveBeenCalled();
   });
 
   it("passes explicit provider routes to the provider turn loop", async () => {
@@ -418,6 +533,7 @@ async function createBuilderHarness(input: {
   const substrate: AgentLoopRuntimeSubstrate = {
     workspaceRoot,
     homeDir,
+    stateRoot: join(homeDir, ".estacoda"),
     profileId,
     providerRegistry,
     providerExecutor,
@@ -505,6 +621,7 @@ async function createBuilderHarness(input: {
     builder,
     fileStateTracker,
     workspaceRoot,
+    stateRoot: join(homeDir, ".estacoda"),
     async build(sessionId: string, overrides: Partial<Parameters<AgentLoopBuilder["buildSession"]>[0]> = {}) {
       return await builder.buildSession({
         sessionId,
@@ -520,6 +637,49 @@ async function createBuilderHarness(input: {
       });
     }
   };
+}
+
+function registerRuntimePythonCapability() {
+  const spec = {
+    id: "fake-runtime-python",
+    version: "0.1.0",
+    packages: ["demo-package==1.2.3"],
+    verifyImports: ["json"],
+    optionalGroups: {
+      extra: {
+        packages: ["demo-extra==2.0.0"],
+        verifyImports: ["email"]
+      }
+    }
+  };
+  registerPythonCapabilitySpecForTest(spec);
+  return spec;
+}
+
+async function writeVerifiedCapability(
+  stateRoot: string,
+  spec: ReturnType<typeof registerRuntimePythonCapability>,
+  groups: string[]
+): Promise<void> {
+  const paths = resolveManagedPythonCapabilityPaths({ stateRoot, capabilityId: spec.id });
+  await mkdir(join(paths.envPath, "bin"), { recursive: true });
+  await writeFile(paths.pythonPath, "", "utf8");
+  await writeManagedPythonCapabilityManifest({
+    stateRoot,
+    capabilityId: spec.id
+  }, {
+    id: spec.id,
+    version: spec.version,
+    specHash: fingerprintManagedPythonCapabilitySpec(spec, groups),
+    installedPackages: ["demo-package==1.2.3"],
+    installedGroups: [...groups],
+    pythonPath: paths.pythonPath,
+    envPath: paths.envPath,
+    createdAt: "2026-06-13T00:00:00.000Z",
+    updatedAt: "2026-06-13T00:00:00.000Z",
+    verifiedAt: "2026-06-13T00:00:00.000Z",
+    status: "verified"
+  });
 }
 
 function registeredTool(name: string, toolsets: string[]): RegisteredTool {

@@ -40,6 +40,35 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 
 **Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand. `smoke-tested`
 
+## Python Capabilities
+
+A skill can declare that it needs a runtime-registered Python capability:
+
+```yaml
+pythonCapabilities:
+  - id: example-capability
+    required: true
+    groups: []
+```
+
+For example, a future registered capability could expose an optional group:
+
+```yaml
+pythonCapabilities:
+  - id: ocr-and-documents
+    required: true
+    groups: []
+  - id: ocr-and-documents
+    required: false
+    groups: ["advancedOcr"]
+```
+
+The skill declaration is not a package manifest. Each entry may contain only `id`, `required`, and `groups`.
+
+The runtime registry owns package names, package versions, import checks, install paths, and optional group definitions. Unknown capability IDs, unknown groups, and unknown metadata keys fail validation according to the skill loader rules.
+
+Normal skill execution resolves only already-installed and verified environments. It does not run `pip`, create virtualenvs, or repair missing dependencies.
+
 ## Visibility
 
 - Visibility is **session-stable**. Once a session starts, the visible skill catalog does not change.

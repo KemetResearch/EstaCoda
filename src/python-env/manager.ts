@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import type { CronJobLock } from "../cron/cron-lock.js";
-import { redactString } from "../utils/redaction.js";
+import {
+  FASTER_WHISPER_CAPABILITY_ID,
+  requireRegisteredPythonCapabilitySpec
+} from "./capability-registry.js";
+import { venvPythonBinary } from "./capability-paths.js";
+import { boundDiagnostic } from "./diagnostics.js";
 
 export type PythonEnvironmentStatus =
   | { kind: "missing" }
@@ -24,14 +29,15 @@ type CommandResult =
   | { ok: true; stdout: string; stderr: string }
   | { ok: false; stdout: string; stderr: string; reason: string };
 
-const PINNED_FASTER_WHISPER = "faster-whisper==1.2.1";
+const FASTER_WHISPER_SPEC = requireRegisteredPythonCapabilitySpec(FASTER_WHISPER_CAPABILITY_ID);
+const PINNED_FASTER_WHISPER = FASTER_WHISPER_SPEC.packages[0] ?? "faster-whisper==1.2.1";
+const FASTER_WHISPER_IMPORT = FASTER_WHISPER_SPEC.verifyImports[0] ?? "faster_whisper";
 const VENV_DIR_NAME = "python-env";
 const INSTALL_LOCK_STALE_TIMEOUT_MS = 1_800_000;
 const INSTALL_LOCK_ID = "managed-python-env";
 const COMMAND_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 30_000;
 const INSTALL_LOCK_POLL_INTERVAL_MS = 500;
-const DIAGNOSTIC_LIMIT_CHARS = 1_200;
 
 const createPromises = new Map<string, Promise<ManagedEnvironmentResult>>();
 
@@ -184,14 +190,8 @@ async function waitForConcurrentInstall(
   return { ok: false, reason: "Timed out waiting for another EstaCoda process to finish Python environment setup." };
 }
 
-function venvPythonBinary(venvPath: string): string {
-  return process.platform === "win32"
-    ? join(venvPath, "Scripts", "python.exe")
-    : join(venvPath, "bin", "python");
-}
-
 async function verifyFasterWhisperImport(pythonBinary: string): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const result = await runCommand(pythonBinary, ["-c", "import faster_whisper"], {
+  const result = await runCommand(pythonBinary, ["-c", `import ${FASTER_WHISPER_IMPORT}`], {
     timeoutMs: VERIFY_TIMEOUT_MS
   });
   if (result.ok) {
@@ -303,13 +303,5 @@ function looksLikeMissingVenvSupport(diagnostic: string): boolean {
 }
 
 function truncateDiagnostic(value: string): string {
-  const redacted = redactSensitive(value);
-  if (redacted.length <= DIAGNOSTIC_LIMIT_CHARS) {
-    return redacted;
-  }
-  return `${redacted.slice(0, DIAGNOSTIC_LIMIT_CHARS)}...[truncated]`;
-}
-
-function redactSensitive(value: string): string {
-  return redactString(value, { strict: true, additionalKeys: ["key"] });
+  return boundDiagnostic(value);
 }

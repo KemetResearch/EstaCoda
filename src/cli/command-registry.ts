@@ -497,6 +497,14 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
+    name: "python-env",
+    aliases: [],
+    category: "Setup",
+    description: "Manage registered Python capability environments",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
     name: "trace",
     aliases: [],
     category: "Development",

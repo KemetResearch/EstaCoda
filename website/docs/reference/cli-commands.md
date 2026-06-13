@@ -80,6 +80,42 @@ Checks:
 
 ---
 
+## Python environments
+
+```bash
+estacoda python-env list
+estacoda python-env status <id>
+estacoda python-env setup <id>
+estacoda python-env verify <id>
+estacoda python-env upgrade <id>
+estacoda python-env reset <id>
+```
+
+These commands manage runtime-owned Python environments for capabilities that need pinned Python packages.
+
+| Command | Behavior |
+|---|---|
+| `python-env list` | Lists registered Python capabilities and their environment status. |
+| `python-env status <id>` | Shows the environment path, Python path when available, manifest state, installed groups, and repair hint. |
+| `python-env setup <id>` | Creates the environment, installs pinned packages from the registered runtime spec, verifies imports, and writes the manifest. |
+| `python-env verify <id>` | Verifies configured imports only. It does not install packages. |
+| `python-env upgrade <id>` | Updates an installed environment when the registered spec changes, then verifies it. |
+| `python-env reset <id>` | Deletes the managed environment for that capability after confirmation. |
+
+`setup` and `upgrade` require explicit local approval before network package installation. `reset` is destructive.
+
+Optional groups can be selected with group flags when a capability defines them:
+
+```bash
+estacoda python-env setup <id> --group <name>
+estacoda python-env setup <id> --groups <a,b>
+estacoda python-env status <id> --group <name>
+```
+
+Skills do not install packages during normal execution. Missing capability environments are reported with a repair command for the local operator.
+
+---
+
 ## Model and provider
 
 ### `estacoda model`

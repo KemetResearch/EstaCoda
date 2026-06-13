@@ -110,6 +110,12 @@ export type SkillConfigField = {
   defaultValue?: unknown;
 };
 
+export type SkillPythonCapabilityRequirement = {
+  id: string;
+  required: boolean;
+  groups: string[];
+};
+
 export type SkillDefinition = {
   name: string;
   description: string;
@@ -127,6 +133,7 @@ export type SkillDefinition = {
   optionalToolsets?: ToolsetName[];
   requiredEnvironmentVariables?: string[];
   requiredCredentialFiles?: string[];
+  pythonCapabilities?: SkillPythonCapabilityRequirement[];
   configFields?: SkillConfigField[];
   visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;
