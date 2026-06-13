@@ -176,6 +176,7 @@ import {
 } from "./model-setup.js";
 import { runModelSetupCodex } from "./model-setup-codex.js";
 import { profileCommand } from "./profile-commands.js";
+import { runPythonEnvCommand } from "./python-env-commands.js";
 import type { ProfileContextGenerator } from "./profile-state.js";
 import { runWhatsAppWizard, type WhatsAppWizardDependencies } from "./whatsapp-wizard.js";
 
@@ -300,6 +301,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return settings(options, args);
     case "profile":
       return profileCommand(options, args);
+    case "python-env":
+      return runPythonEnvCommand(options, args);
     case "trace":
       return trace(options, args);
     case "workflow":

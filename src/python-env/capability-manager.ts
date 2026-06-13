@@ -225,6 +225,55 @@ export async function installManagedPythonCapabilityEnvironment(
   }
 }
 
+export async function verifyManagedPythonCapabilityEnvironment(
+  options: ManagedPythonCapabilityInstallOptions
+): Promise<ManagedPythonCapabilityInstallResult> {
+  const effective = resolveEffectiveSpec(options.capabilityId, options.groups ?? []);
+  if (!effective.ok) {
+    return { ok: false, capabilityId: options.capabilityId, ...effective.failure };
+  }
+  const status = await checkManagedPythonCapabilityStatus(options);
+  if (!status.ok) {
+    const { ok: _ok, capabilityId: _capabilityId, ...failure } = status;
+    return { ok: false, capabilityId: options.capabilityId, ...failure };
+  }
+  const runner = options.runner ?? runCommand;
+  const verified = await verifyImports(status.pythonPath, effective.value.verifyImports, runner);
+  if (!verified.ok) {
+    return {
+      ok: false,
+      capabilityId: options.capabilityId,
+      ...commandFailure(
+        "import_verify_failed",
+        "Managed Python capability import verification failed.",
+        verified
+      )
+    };
+  }
+  const now = options.now ?? (() => new Date());
+  const verifiedAt = now().toISOString();
+  const manifest = await writeManifest(options, effective.value, {
+    envPath: status.envPath,
+    pythonPath: status.pythonPath
+  }, {
+    createdAt: status.manifest.createdAt,
+    updatedAt: verifiedAt,
+    verifiedAt,
+    status: "verified"
+  });
+  return {
+    ok: true,
+    capabilityId: options.capabilityId,
+    version: manifest.version,
+    specHash: manifest.specHash,
+    installedGroups: [...manifest.installedGroups],
+    installedPackages: [...manifest.installedPackages],
+    pythonPath: status.pythonPath,
+    envPath: status.envPath,
+    manifest
+  };
+}
+
 async function doInstallManagedPythonCapabilityEnvironment(
   options: ManagedPythonCapabilityInstallOptions
 ): Promise<ManagedPythonCapabilityInstallResult> {

@@ -9,7 +9,8 @@ import {
 } from "./capability-registry.js";
 import {
   checkManagedPythonCapabilityStatus,
-  installManagedPythonCapabilityEnvironment
+  installManagedPythonCapabilityEnvironment,
+  verifyManagedPythonCapabilityEnvironment
 } from "./capability-manager.js";
 import { resolveManagedPythonCapabilityPaths } from "./capability-paths.js";
 import { boundDiagnostic, redactPythonEnvDiagnostic } from "./diagnostics.js";
@@ -551,6 +552,55 @@ describe("managed Python capability manager", () => {
     expect(redactPythonEnvDiagnostic(raw)).not.toContain("secret-value");
     expect(boundDiagnostic(raw, 80)).toContain("[truncated]");
     expect(boundDiagnostic(raw, 80).length).toBeLessThanOrEqual(95);
+  });
+
+  it("verifies an installed capability without creating a venv or invoking pip", async () => {
+    const spec = {
+      id: "fake-verify-only",
+      version: "0.1.0",
+      packages: ["demo-package==1.2.3"],
+      verifyImports: ["json"]
+    };
+    registerPythonCapabilitySpecForTest(spec);
+    const paths = resolveManagedPythonCapabilityPaths({
+      stateRoot: tempDir,
+      capabilityId: "fake-verify-only"
+    });
+    await writeFakePython(paths.pythonPath);
+    await writeManagedPythonCapabilityManifest({
+      stateRoot: tempDir,
+      capabilityId: "fake-verify-only"
+    }, {
+      id: "fake-verify-only",
+      version: "0.1.0",
+      specHash: fingerprintManagedPythonCapabilitySpec(spec),
+      installedPackages: ["demo-package==1.2.3"],
+      installedGroups: [],
+      pythonPath: paths.pythonPath,
+      envPath: paths.envPath,
+      createdAt: "2026-06-13T00:00:00.000Z",
+      updatedAt: "2026-06-13T00:00:00.000Z",
+      status: "installed"
+    });
+    const runner = createRunner(tempDir);
+
+    const result = await verifyManagedPythonCapabilityEnvironment({
+      stateRoot: tempDir,
+      capabilityId: "fake-verify-only",
+      runner,
+      now: fixedNow()
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.status).toBe("verified");
+      expect(result.manifest.verifiedAt).toBe("2026-06-13T00:00:00.000Z");
+    }
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]).toMatchObject({
+      command: paths.pythonPath,
+      args: expect.arrayContaining(["-c"])
+    });
   });
 });
 
