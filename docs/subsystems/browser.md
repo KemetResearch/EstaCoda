@@ -44,6 +44,17 @@ Browserbase setup collects references for `BROWSERBASE_API_KEY` and `BROWSERBASE
 
 `backend: "unconfigured"` is a hard disable. Browser tools remain disabled even when stale `cloudProvider`, `cdpUrl`, launch settings, Browserbase settings, or Browserbase credentials are still present in old config or the environment.
 
+## Onboarding Behavior
+
+Browser setup is optional during first-run onboarding. Onboarding offers the same shared browser mode flow as the setup editor, but incomplete browser setup does not block core onboarding. If Browserbase credentials are skipped, an existing CDP URL is missing, or browser setup otherwise produces browser-specific blockers, onboarding marks the browser capability incomplete, drops the blocked browser draft, drops any partial Browserbase deferred secret writes, and lets the user finish onboarding.
+
+Users can proceed through onboarding and configure browser tools later in the setup editor. The split is intentional:
+
+- Setup editor remains strict: invalid browser configuration blocks the reviewed browser change.
+- Onboarding remains tolerant: incomplete browser configuration is visible in the onboarding summary but does not make first-run setup fail.
+
+Disabled browser tools are an intentional onboarding outcome. Selecting disabled writes `backend: "unconfigured"` and appears as disabled in the onboarding summary, not as a failed browser setup.
+
 Local CDP has two paths:
 
 - Unsupervised local CDP keeps the compatibility behavior: users provide `browser.cdpUrl`, and EstaCoda connects to an already-running browser.

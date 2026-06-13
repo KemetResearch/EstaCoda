@@ -128,6 +128,15 @@ The setup editor supports four browser modes and writes the same flat config sha
 
 Static setup verification does not open pages, connect to CDP, call Browserbase, or create cloud sessions. Existing CDP mode blocks missing CDP URLs and non-local CDP URLs; accepted CDP hosts are `localhost`, `127.0.0.1`, and `::1`.
 
+Browser setup is optional during onboarding. First-run onboarding uses the same browser mode flow as the setup editor, but browser setup failure or incompletion does not block core onboarding. If the browser step is incomplete, onboarding records that status in the summary, drops the incomplete browser draft and any partial Browserbase secret writes, and lets the user proceed. The user can configure browser tools later from the setup editor.
+
+This split is deliberate:
+
+- Setup editor remains strict. Invalid browser configuration blocks the reviewed browser change.
+- Onboarding remains tolerant. Incomplete optional browser setup does not make first-run setup fail.
+
+Choosing disabled browser tools is intentional. It writes `backend: "unconfigured"` and appears as disabled, not as a browser setup failure.
+
 ```json
 {
   "browser": {
