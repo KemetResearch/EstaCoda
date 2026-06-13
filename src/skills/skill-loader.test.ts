@@ -210,31 +210,51 @@ describe("loadSkillsFromDirectory", () => {
   it.each([
     {
       field: "requirements",
+      unsupportedField: "requirements",
       lines: ["    requirements:", "      - httpx"]
     },
     {
       field: "installCommand",
+      unsupportedField: "installCommand",
       lines: ["    installCommand: \"pip install httpx\""]
     },
     {
-      field: "verifyImports",
+      field: "verify_imports",
+      unsupportedField: "verifyImports",
       lines: ["    verify_imports:", "      - httpx"]
     },
     {
-      field: "pythonPath",
+      field: "verifyImports",
+      unsupportedField: "verifyImports",
+      lines: ["    verifyImports:", "      - httpx"]
+    },
+    {
+      field: "python_path",
+      unsupportedField: "pythonPath",
       lines: ["    python_path: \"/tmp/python\""]
     },
     {
+      field: "pythonPath",
+      unsupportedField: "pythonPath",
+      lines: ["    pythonPath: \"/tmp/python\""]
+    },
+    {
+      field: "version",
+      unsupportedField: "version",
+      lines: ["    version: \"3.12\""]
+    },
+    {
       field: "futureRuntimeOwnedField",
+      unsupportedField: "futureRuntimeOwnedField",
       lines: ["    futureRuntimeOwnedField: true"]
     }
-  ])("rejects pythonCapabilities entries with unsupported field $field", async ({ field, lines }) => {
+  ])("rejects pythonCapabilities entries with unsupported field $field", async ({ unsupportedField, lines }) => {
     registerMockBasicPythonCapability();
 
     const result = await loadSkillWithPythonCapabilityYaml(lines);
 
     expect(result.skills).toHaveLength(0);
-    expect(result.errors[0].message).toContain(`must not define unsupported field '${field}'`);
+    expect(result.errors[0].message).toContain(`must not define unsupported field '${unsupportedField}'`);
   });
 });
 

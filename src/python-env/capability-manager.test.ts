@@ -182,6 +182,48 @@ describe("managed Python capability manager", () => {
     }));
   });
 
+  it("reuses an existing verified capability environment without creating a venv or invoking pip", async () => {
+    const spec = {
+      id: "fake-reuse",
+      version: "0.1.0",
+      packages: ["demo-package==1.2.3"],
+      verifyImports: ["json"]
+    };
+    registerPythonCapabilitySpecForTest(spec);
+    const paths = resolveManagedPythonCapabilityPaths({
+      stateRoot: tempDir,
+      capabilityId: "fake-reuse"
+    });
+    await writeFakePython(paths.pythonPath);
+    await writeManagedPythonCapabilityManifest({
+      stateRoot: tempDir,
+      capabilityId: "fake-reuse"
+    }, manifestFor({
+      id: "fake-reuse",
+      envPath: paths.envPath,
+      pythonPath: paths.pythonPath,
+      specHash: fingerprintManagedPythonCapabilitySpec(spec),
+      status: "verified",
+      installedPackages: ["demo-package==1.2.3"]
+    }));
+    const runner = createRunner(tempDir);
+
+    const result = await installManagedPythonCapabilityEnvironment({
+      stateRoot: tempDir,
+      capabilityId: "fake-reuse",
+      runner,
+      now: fixedNow()
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      capabilityId: "fake-reuse",
+      installedPackages: ["demo-package==1.2.3"]
+    });
+    expect(runner.calls).toHaveLength(0);
+    expect(lockMock.state.acquireCalls).toEqual(["python-env:fake-reuse"]);
+  });
+
   it("fails structurally for unknown optional groups", async () => {
     registerPythonCapabilitySpecForTest({
       id: "fake-group-missing",
@@ -546,10 +588,28 @@ describe("managed Python capability manager", () => {
   });
 
   it("redacts and bounds Python environment diagnostics directly", () => {
-    const raw = `Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456\napi_key=secret-value\n${"x".repeat(2_000)}`;
+    const raw = [
+      "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+      "Bearer zyxwvutsrqponmlkjihgfedcba987654",
+      "api_key=secret-value",
+      "PIP_INDEX_URL=https://user:password@example.com/simple?api_key=query-secret",
+      "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456",
+      "SERVICE_TOKEN=env-token-value",
+      "SECRET_OUTPUT=secret-looking-env-value",
+      "plain text",
+      "x".repeat(2_000)
+    ].join("\n");
+    const redacted = redactPythonEnvDiagnostic(raw);
 
-    expect(redactPythonEnvDiagnostic(raw)).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
-    expect(redactPythonEnvDiagnostic(raw)).not.toContain("secret-value");
+    expect(redacted).toContain("Authorization: [REDACTED]");
+    expect(redacted).toContain("Bearer [REDACTED]");
+    expect(redacted).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(redacted).not.toContain("zyxwvutsrqponmlkjihgfedcba987654");
+    expect(redacted).not.toContain("secret-value");
+    expect(redacted).not.toContain("password");
+    expect(redacted).not.toContain("query-secret");
+    expect(redacted).not.toContain("env-token-value");
+    expect(redacted).not.toContain("secret-looking-env-value");
     expect(boundDiagnostic(raw, 80)).toContain("[truncated]");
     expect(boundDiagnostic(raw, 80).length).toBeLessThanOrEqual(95);
   });
@@ -684,12 +744,13 @@ function manifestFor(input: {
   envPath: string;
   pythonPath: string;
   status: ManagedPythonCapabilityEnvManifest["status"];
+  installedPackages?: string[];
 }): ManagedPythonCapabilityEnvManifest {
   return {
     id: input.id,
     version: "0.1.0",
     specHash: input.specHash,
-    installedPackages: [],
+    installedPackages: input.installedPackages ?? [],
     installedGroups: [],
     pythonPath: input.pythonPath,
     envPath: input.envPath,

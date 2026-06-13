@@ -9,7 +9,11 @@ import {
 } from "./capability-registry.js";
 import { resolveManagedPythonCapabilityPaths } from "./capability-paths.js";
 import { resolveCapabilityPythonEnv } from "./capability-resolver.js";
-import { writeManagedPythonCapabilityManifest, type ManagedPythonCapabilityEnvManifest } from "./manifest.js";
+import {
+  readManagedPythonCapabilityManifest,
+  writeManagedPythonCapabilityManifest,
+  type ManagedPythonCapabilityEnvManifest
+} from "./manifest.js";
 import { fingerprintManagedPythonCapabilitySpec } from "./spec-hash.js";
 
 describe("managed Python capability resolver", () => {
@@ -81,6 +85,34 @@ describe("managed Python capability resolver", () => {
       reason: "upgrade_required",
       repairCommand: `estacoda python-env upgrade ${spec.id}`
     });
+  });
+
+  it("returns unavailable for installed but unverified envs without mutating the manifest", async () => {
+    const spec = registerFakeCapability();
+    const paths = resolveManagedPythonCapabilityPaths({ stateRoot: tempDir, capabilityId: spec.id });
+    await writeFakePython(paths.pythonPath);
+    const manifest = manifestFor({
+      id: spec.id,
+      specHash: fingerprintManagedPythonCapabilitySpec(spec),
+      envPath: paths.envPath,
+      pythonPath: paths.pythonPath,
+      status: "installed"
+    });
+    await writeManifest(manifest);
+
+    const result = await resolveCapabilityPythonEnv(spec.id, { stateRoot: tempDir });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "unverified",
+      repairCommand: `estacoda python-env verify ${spec.id}`
+    });
+    expect("pythonPath" in result).toBe(false);
+    expect("envPath" in result).toBe(false);
+    await expect(readManagedPythonCapabilityManifest({
+      stateRoot: tempDir,
+      capabilityId: spec.id
+    })).resolves.toEqual(manifest);
   });
 
   it("rejects unknown capability ids and optional groups", async () => {

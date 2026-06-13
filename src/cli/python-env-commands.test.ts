@@ -259,6 +259,26 @@ describe("python-env CLI commands", () => {
     expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).toHaveBeenCalledTimes(1);
   });
 
+  it("requires explicit approval before upgrade package installation", async () => {
+    capabilityManagerMock.checkManagedPythonCapabilityStatus.mockResolvedValue({
+      ok: false,
+      capabilityId: "fake-capability",
+      reason: "upgrade_required",
+      message: "Spec changed.",
+      manifest: manifest(homeDir, { specHash: "old-hash" })
+    });
+
+    const result = await runCliCommand({
+      argv: ["python-env", "upgrade", "fake-capability"],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("--yes");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+  });
+
   it("requires confirmation before reset and deletes only the generic capability env path", async () => {
     const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
     const genericPaths = resolveManagedPythonCapabilityPaths({ stateRoot, capabilityId: "fake-capability" });

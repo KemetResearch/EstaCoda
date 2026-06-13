@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,12 +116,23 @@ describe("managed Python capability substrate", () => {
       stateRoot: tempDir,
       capabilityId: FASTER_WHISPER_CAPABILITY_ID
     }, manifest);
+    await writeManagedPythonCapabilityManifest({
+      stateRoot: tempDir,
+      capabilityId: FASTER_WHISPER_CAPABILITY_ID
+    }, {
+      ...manifest,
+      updatedAt: "2026-06-13T00:00:02.000Z"
+    });
 
     await expect(readManagedPythonCapabilityManifest({
       stateRoot: tempDir,
       capabilityId: FASTER_WHISPER_CAPABILITY_ID
-    })).resolves.toEqual(manifest);
+    })).resolves.toEqual({
+      ...manifest,
+      updatedAt: "2026-06-13T00:00:02.000Z"
+    });
     expect(await readdir(paths.envPath)).toEqual(["env.json"]);
+    expect(existsSync(paths.manifestPath)).toBe(true);
   });
 
   it("rejects manifest writes when the manifest id does not match the registered capability path", async () => {
@@ -189,6 +200,58 @@ describe("managed Python capability substrate", () => {
     expect(firstOrder).toMatch(/^[a-f0-9]{64}$/);
     expect(firstOrder).toBe(secondOrder);
     expect(firstOrder).not.toBe(baseOnly);
+  });
+
+  it("fingerprints all meaningful spec fields without machine-local paths or timestamps", () => {
+    const base: ManagedPythonCapabilityEnvSpec = {
+      id: "example",
+      version: "0.1.0",
+      pythonVersion: "3.12",
+      packages: ["base-a==1"],
+      verifyImports: ["base_a"],
+      estimatedInstallSizeMb: 10,
+      optionalGroups: {
+        alpha: {
+          verifyImports: ["alpha"],
+          packages: ["alpha==1"],
+          estimatedInstallSizeMb: 20
+        }
+      }
+    };
+    const reorderedKeys: ManagedPythonCapabilityEnvSpec = {
+      optionalGroups: {
+        alpha: {
+          estimatedInstallSizeMb: 20,
+          packages: ["alpha==1"],
+          verifyImports: ["alpha"]
+        }
+      },
+      estimatedInstallSizeMb: 10,
+      verifyImports: ["base_a"],
+      packages: ["base-a==1"],
+      pythonVersion: "3.12",
+      version: "0.1.0",
+      id: "example"
+    };
+    const baseline = fingerprintManagedPythonCapabilitySpec(base, ["alpha"]);
+
+    expect(fingerprintManagedPythonCapabilitySpec(reorderedKeys, ["alpha"])).toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({ ...base, version: "0.2.0" }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({ ...base, pythonVersion: "3.13" }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({ ...base, packages: ["base-a==2"] }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({ ...base, verifyImports: ["base_b"] }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({ ...base, estimatedInstallSizeMb: 11 }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec({
+      ...base,
+      optionalGroups: {
+        alpha: {
+          packages: ["alpha==2"],
+          verifyImports: ["alpha"],
+          estimatedInstallSizeMb: 20
+        }
+      }
+    }, ["alpha"])).not.toBe(baseline);
+    expect(fingerprintManagedPythonCapabilitySpec(base)).not.toBe(baseline);
   });
 
   it("rejects unknown optional groups while fingerprinting", () => {
