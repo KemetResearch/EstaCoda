@@ -119,6 +119,24 @@ Standard browser operations (`navigate`, `click`, `type`, `scroll`) follow the n
 
 Browser configuration lives under `browser` in profile config:
 
+The setup editor supports four browser modes and writes the same flat config shape:
+
+- **Local supervised browser** writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, optional `cdpUrl`, and reviewed launch settings.
+- **Existing CDP browser** writes `backend: "local-cdp"`, `supervised: true`, `autoLaunch: false`, and the reviewed `cdpUrl`.
+- **Browserbase cloud browser** writes `backend: "browserbase"`, `cloudProvider: "browserbase"`, `hybridRouting: true`, `cloudFallback: true`, and `cloudSpendApproved: false`.
+- **Disabled / unconfigured browser tools** writes `backend: "unconfigured"`.
+
+Static setup verification does not open pages, connect to CDP, call Browserbase, or create cloud sessions. Existing CDP mode blocks missing CDP URLs and non-local CDP URLs; accepted CDP hosts are `localhost`, `127.0.0.1`, and `::1`.
+
+Browser setup is optional during onboarding. First-run onboarding uses the same browser mode flow as the setup editor, but browser setup failure or incompletion does not block core onboarding. If the browser step is incomplete, onboarding records that status in the summary, drops the incomplete browser draft and any partial Browserbase secret writes, and lets the user proceed. The user can configure browser tools later from the setup editor.
+
+This split is deliberate:
+
+- Setup editor remains strict. Invalid browser configuration blocks the reviewed browser change.
+- Onboarding remains tolerant. Incomplete optional browser setup does not make first-run setup fail.
+
+Choosing disabled browser tools is intentional. It writes `backend: "unconfigured"` and appears as disabled, not as a browser setup failure.
+
 ```json
 {
   "browser": {
@@ -166,14 +184,14 @@ Browserbase configuration:
   "browser": {
     "backend": "browserbase",
     "cloudProvider": "browserbase",
-    "cloudSpendApproved": "pending",
+    "cloudSpendApproved": false,
     "cloudFallback": true,
     "hybridRouting": true
   }
 }
 ```
 
-Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`. The default/pending approval state blocks billable sessions. Run `estacoda browser approve-cloud` to allow cloud browser session creation, and `estacoda browser revoke-cloud` to block it again. Browserbase sessions may incur charges. Config alone does not create sessions; creation is lazy when a browser operation needs the cloud backend. EstaCoda uses the verified API shape recorded in `docs/browserbase-api-notes.md`.
+Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`. Credentials alone do not approve spend. Setup writes pending/unapproved cloud spend as `cloudSpendApproved: false`; legacy configs with `cloudSpendApproved: "pending"` still load safely and remain blocked. Run `estacoda browser approve-cloud` to allow cloud browser session creation, and `estacoda browser revoke-cloud` to block it again. Browserbase sessions may incur charges. Config alone does not create sessions; creation is lazy when a browser operation needs the cloud backend. EstaCoda uses the verified API shape recorded in `docs/browserbase-api-notes.md`.
 
 ```bash
 estacoda browser setup --backend browserbase --cloud-provider browserbase
@@ -183,6 +201,8 @@ estacoda browser revoke-cloud
 ```
 
 The first command configures Browserbase as the browser backend without enabling hybrid routing. The second enables hybrid routing so public URLs can use cloud and allowed private/internal URLs can use local. `approve-cloud` is required before billable sessions can be created. `revoke-cloud` blocks future cloud session creation without removing credentials.
+
+`backend: "unconfigured"` is a hard runtime disable. Browser tools stay disabled even if stale CDP URLs, Browserbase settings, launch settings, or Browserbase credentials remain in the profile or environment.
 
 ---
 

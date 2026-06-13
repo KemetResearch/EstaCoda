@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
-import { promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import { promptBrowserCapability, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
@@ -18,7 +18,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
-import type { SetupApplyMode } from "../setup-apply-plan.js";
+import type { SetupApplyMode, SetupDeferredSecretWrite } from "../setup-apply-plan.js";
 import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
 
@@ -49,6 +49,8 @@ describe("runConfigEditor", () => {
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.DISCORD_BOT_TOKEN;
+    delete process.env.BROWSERBASE_API_KEY;
+    delete process.env.BROWSERBASE_PROJECT_ID;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -2088,7 +2090,7 @@ describe("runConfigEditor", () => {
       },
       {
         actionId: "configure-browser" as const,
-        values: ["enable", "local", "http://127.0.0.1:9222", "google-chrome --remote-debugging-port=9222", true],
+        values: ["enable", "existing-cdp", "http://127.0.0.1:9222", true],
       },
     ]) {
       await rm(tempDir, { recursive: true, force: true });
@@ -2563,7 +2565,101 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
-  it("configures browser without drafting other optional capabilities or auto-launching", async () => {
+  it("browser mode picker includes the four browser modes", async () => {
+    const seenOptions: string[] = [];
+    const prompt = fakePrompt({ values: ["disabled"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Browser mode") {
+        seenOptions.push(...input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const values = await promptBrowserCapability(prompt, {});
+
+    expect(values.backend).toBe("unconfigured");
+    expect(seenOptions).toEqual([
+      "Local supervised browser",
+      "Existing CDP browser",
+      "Browserbase cloud browser",
+      "Disable browser tools",
+    ]);
+  });
+
+  it("maps local supervised browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: [
+        "local-supervised",
+        true,
+        "",
+        "/usr/bin/chromium",
+        "--headless=new",
+        "--no-first-run, --disable-gpu",
+      ],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "local-cdp",
+      cdpUrl: undefined,
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
+      launchCommand: undefined,
+      autoLaunch: true,
+      supervised: true,
+    });
+  });
+
+  it("maps existing CDP browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["existing-cdp", "http://127.0.0.1:9222"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "local-cdp",
+      cdpUrl: "http://127.0.0.1:9222",
+      launchArgs: [],
+      chromeFlags: [],
+      launchCommand: undefined,
+      autoLaunch: false,
+      supervised: true,
+    });
+  });
+
+  it("maps Browserbase browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["browserbase"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "browserbase",
+      cloudProvider: "browserbase",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+    });
+  });
+
+  it("maps disabled browser mode to unconfigured backend", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["disabled"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "unconfigured",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+    });
+  });
+
+  it("configures existing CDP browser without drafting other optional capabilities or auto-launching", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -2573,11 +2669,8 @@ describe("runConfigEditor", () => {
       prompt: fakePrompt({
         values: [
           "enable",
-          "local-cdp",
+          "existing-cdp",
           "http://127.0.0.1:1",
-          "/usr/bin/chromium",
-          "--headless=new",
-          "--no-first-run, --disable-gpu",
           true,
         ],
       }),
@@ -2601,6 +2694,7 @@ describe("runConfigEditor", () => {
         chromeFlags?: string[];
         launchCommand?: string;
         autoLaunch?: boolean;
+        supervised?: boolean;
       };
     };
     const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
@@ -2616,10 +2710,8 @@ describe("runConfigEditor", () => {
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
-      launchExecutable: "/usr/bin/chromium",
-      launchArgs: ["--headless=new"],
-      chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: false,
+      supervised: true,
     });
     expect(config.channels).toBeUndefined();
     expect(config.tts).toBeUndefined();
@@ -2627,6 +2719,174 @@ describe("runConfigEditor", () => {
     expect(config.imageGen).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("blocks existing CDP browser setup when the CDP URL is missing", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "existing-cdp", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain("Existing CDP browser requires a CDP URL.");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks existing CDP browser setup when the CDP URL is non-local", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "existing-cdp", "http://example.com:9222"],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain(
+      "Existing CDP browser requires a local CDP URL: localhost, 127.0.0.1, or ::1."
+    );
+  });
+
+  it("blocks local supervised browser setup without auto-launch or CDP URL", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "local-supervised", false, "", "", "", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain(
+      "Local supervised browser requires auto-launch or a local CDP URL."
+    );
+  });
+
+  it("configures Browserbase credentials through reviewed deferred secret writes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: ["bb-api-secret", "bb-project-secret"],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+    const browserCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.browserbase-credentials"));
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-browser");
+    expect(browserCredentialLine?.review.values).toMatchObject({
+      credentialSurface: "browserbase",
+      envVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+      credentialValuesIncluded: false,
+    });
+    expect(envFile).toContain('BROWSERBASE_API_KEY="bb-api-secret"');
+    expect(envFile).toContain('BROWSERBASE_PROJECT_ID="bb-project-secret"');
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-api-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("bb-project-secret");
+    expect(JSON.stringify(result)).not.toContain("bb-api-secret");
+    expect(JSON.stringify(result)).not.toContain("bb-project-secret");
+  });
+
+  it("reuses existing Browserbase environment secrets without deferred writes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    process.env.BROWSERBASE_API_KEY = "env-browserbase-api";
+    process.env.BROWSERBASE_PROJECT_ID = "env-browserbase-project";
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: "should-not-be-read",
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const browserCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.browserbase-credentials"));
+
+    expect(result.completed).toBe(true);
+    expect(browserCredentialLine?.review.values.envVars).toEqual(["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"]);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("env-browserbase-api");
+    expect(JSON.stringify(result)).not.toContain("env-browserbase-project");
+    expect(JSON.stringify(result)).not.toContain("should-not-be-read");
+  });
+
+  it("blocks Browserbase setup when credentials are skipped without an existing source", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "browserbase", true],
+        secret: ["", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    const blockerText = JSON.stringify(result.reviewManifest?.blockers);
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toEqual([]);
+    expect(blockerText).toContain("BROWSERBASE_API_KEY");
+    expect(blockerText).toContain("BROWSERBASE_PROJECT_ID");
+    expect(applyCalled).toBe(false);
   });
 
   it("renders broken config as a repair-first diagnostic surface", async () => {
@@ -2745,10 +3005,11 @@ function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewMa
   };
 }
 
-function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
+function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string | readonly string[] } = {}): Prompt {
   const values = [...(options.values ?? [])];
+  const secretValues = Array.isArray(options.secret) ? [...options.secret] : undefined;
   const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) => {
-    if (promptOptions?.secret === true) return options.secret ?? "";
+    if (promptOptions?.secret === true) return secretValues?.shift() ?? (typeof options.secret === "string" ? options.secret : "");
     const next = values.shift();
     return next === undefined ? "" : String(next);
   }) as Prompt;

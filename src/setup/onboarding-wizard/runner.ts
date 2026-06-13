@@ -710,7 +710,10 @@ async function chooseOptionalCapabilities(
   const selected = new Set<OnboardingSupportedOptionalCapabilityId>();
   const draftMap = new Map<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>();
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
-  const channelSummaries: { whatsapp?: OnboardingOptionalCapabilitySummaryStatus } = {};
+  const capabilitySummaries: {
+    whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+    browser?: OnboardingOptionalCapabilitySummaryStatus;
+  } = {};
 
   if (!configureNow) {
     return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
@@ -730,7 +733,10 @@ async function chooseOptionalCapabilities(
       pendingCredentialWrites.push(...collected.pendingCredentialWrites);
     }
     if (collected.channelSummaries?.whatsapp !== undefined) {
-      channelSummaries.whatsapp = collected.channelSummaries.whatsapp;
+      capabilitySummaries.whatsapp = collected.channelSummaries.whatsapp;
+    }
+    if (collected.channelSummaries?.browser !== undefined) {
+      capabilitySummaries.browser = collected.channelSummaries.browser;
     }
 
     if (onboardingOptionalCapabilityActions(context).length === 0) {
@@ -761,7 +767,7 @@ async function chooseOptionalCapabilities(
     }
   }
 
-  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites, channelSummaries);
+  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites, capabilitySummaries);
 }
 
 async function promptOnboardingOptionalCapabilityAction(
@@ -852,12 +858,14 @@ async function collectOnboardingOptionalCapability(
       readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
       readonly channelSummaries?: {
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+        readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
       };
     }
   | {
-      readonly kind: "skip" | "unchanged";
+      readonly kind: "skip" | "unchanged" | "incomplete";
       readonly channelSummaries?: {
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+        readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
       };
     }
 > {
@@ -886,9 +894,7 @@ async function collectOnboardingOptionalCapability(
       kind: "configured",
       context: collected.context,
       drafts: module.toDrafts(collected.context, configuration),
-      pendingCredentialWrites: collected.pendingCredentialWrite === undefined
-        ? []
-        : [collected.pendingCredentialWrite],
+      pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
     };
   }
 
@@ -920,14 +926,32 @@ async function collectOnboardingOptionalCapability(
       }
     : collected.context;
   const configuration = module.configure(collectedContext);
+  const drafts = module.toDrafts(collectedContext, configuration);
+  if (action === "browser" && browserDraftsHaveBlockers(drafts)) {
+    return {
+      kind: "incomplete",
+      channelSummaries: { browser: "incomplete" },
+    };
+  }
+  if (action === "browser" && collectedContext.browser?.backend === "unconfigured") {
+    return {
+      kind: "configured",
+      context: collectedContext,
+      drafts,
+      pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
+      channelSummaries: { browser: "disabled" },
+    };
+  }
   return {
     kind: "configured",
     context: collectedContext,
-    drafts: module.toDrafts(collectedContext, configuration),
-    pendingCredentialWrites: collected.pendingCredentialWrite === undefined
-      ? []
-      : [collected.pendingCredentialWrite],
+    drafts,
+    pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
   };
+}
+
+function browserDraftsHaveBlockers(drafts: readonly SetupDraft[]): boolean {
+  return drafts.some((draft) => draft.blockers.length > 0);
 }
 
 async function collectOnboardingWhatsAppSetup(
@@ -1013,7 +1037,10 @@ function onboardingOptionalCapabilityResult(
   selected: ReadonlySet<OnboardingSupportedOptionalCapabilityId>,
   draftMap: ReadonlyMap<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>,
   pendingCredentialWrites: readonly PendingCredentialWrite[],
-  channelSummaries: { readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus } = {}
+  capabilitySummaries: {
+    readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+    readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
+  } = {}
 ): OnboardingOptionalCapabilityFlowResult {
   return {
     selected: [...selected],
@@ -1021,13 +1048,13 @@ function onboardingOptionalCapabilityResult(
       selected: [...selected],
       channels: {
         telegram: telegramSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
-        whatsapp: channelSummaries.whatsapp ?? (whatsappSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
+        whatsapp: capabilitySummaries.whatsapp ?? (whatsappSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
       },
       voice: {
         stt: context.voice?.sttProvider === undefined ? "not_set" : "configured",
         tts: context.voice?.ttsProvider === undefined ? "not_set" : "configured",
       },
-      browser: browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+      browser: capabilitySummaries.browser ?? (browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
     },
     drafts: [...draftMap.values()].flat(),
     pendingCredentialWrites,

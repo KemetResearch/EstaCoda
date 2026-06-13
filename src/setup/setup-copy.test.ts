@@ -9,6 +9,7 @@ import {
   setupCopy,
   type SetupCopyKey,
 } from "./setup-copy.js";
+import { formatSetupCopy, setupTechnicalToken } from "./setup-prompts.js";
 import { setupVerificationCopy } from "./setup-verification-copy.js";
 
 const FIRST_RUN_KEYS = [
@@ -72,6 +73,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.status.notSet",
   "onboarding.summary.status.skipped",
   "onboarding.summary.status.incomplete",
+  "onboarding.summary.status.disabled",
   "onboarding.summary.status.trusted",
   "onboarding.summary.status.untrusted",
   "onboarding.summary.status.configured",
@@ -295,13 +297,35 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.model",
   "setupEditor.prompt.vision.apiKeyEnv",
   "setupEditor.prompt.vision.useGateway",
-  "setupEditor.prompt.browser.summary",
-  "setupEditor.prompt.browser.backend",
+  "setupEditor.prompt.browser.mode.title",
+  "setupEditor.prompt.browser.mode.body",
+  "setupEditor.prompt.browser.mode.localSupervised",
+  "setupEditor.prompt.browser.mode.localSupervised.description",
+  "setupEditor.prompt.browser.mode.existingCdp",
+  "setupEditor.prompt.browser.mode.existingCdp.description",
+  "setupEditor.prompt.browser.mode.browserbase",
+  "setupEditor.prompt.browser.mode.browserbase.description",
+  "setupEditor.prompt.browser.mode.disable",
+  "setupEditor.prompt.browser.mode.disable.description",
+  "setupEditor.prompt.browser.local.title",
+  "setupEditor.prompt.browser.local.body",
+  "setupEditor.prompt.browser.autoLaunch",
+  "setupEditor.prompt.browser.autoLaunch.yes",
+  "setupEditor.prompt.browser.autoLaunch.no",
+  "setupEditor.prompt.browser.autoLaunch.description",
+  "setupEditor.prompt.browser.autoLaunch.no.description",
   "setupEditor.prompt.browser.cdpUrl",
+  "setupEditor.prompt.browser.cdpUrl.optional",
+  "setupEditor.prompt.browser.cdpUrl.required",
   "setupEditor.prompt.browser.launchExecutable",
   "setupEditor.prompt.browser.launchArgs",
   "setupEditor.prompt.browser.chromeFlags",
-  "setupEditor.prompt.browser.noAutoLaunch",
+  "setupEditor.prompt.browser.cloud.title",
+  "setupEditor.prompt.browser.cloud.body",
+  "setupEditor.prompt.browser.hybridRouting.description",
+  "setupEditor.prompt.browser.cloudFallback.description",
+  "setupEditor.prompt.browser.browserbaseCredential",
+  "setupEditor.actions.verifyBrowser.description",
 ] as const;
 
 const SETUP_MODULE_KEYS = [
@@ -433,6 +457,7 @@ const SETUP_VERIFICATION_KEYS = [
   "setupVerification.securityMode",
   "setupVerification.workflowLearning",
   "setupVerification.readOnlyToolCheck",
+  "setupVerification.browserBackend",
   "setupVerification.configSources",
   "setupVerification.status.writable",
   "setupVerification.status.blocked",
@@ -440,6 +465,17 @@ const SETUP_VERIFICATION_KEYS = [
   "setupVerification.status.presentMode",
   "setupVerification.status.skipped",
   "setupVerification.status.ready",
+  "setupVerification.browser.status.notConfigured",
+  "setupVerification.browser.status.disabled",
+  "setupVerification.browser.status.configuredConnectionNotTested",
+  "setupVerification.browser.status.configuredRuntimeBlocked",
+  "setupVerification.browser.status.invalid",
+  "setupVerification.browser.warning.existingCdpMissingUrl",
+  "setupVerification.browser.warning.existingCdpNonLocal",
+  "setupVerification.browser.warning.localSupervisedIncomplete",
+  "setupVerification.browser.warning.missingBrowserbaseCredential",
+  "setupVerification.browser.warning.browserbaseSpendPending",
+  "setupVerification.browser.warning.invalidConfig",
   "setupVerification.status.trusted",
   "setupVerification.status.notTrusted",
   "setupVerification.warning.workspaceNotTrusted",
@@ -499,6 +535,16 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).not.toContain("parse failure");
   });
 
+  it("does not keep obsolete browser setup copy tokens", () => {
+    for (const key of [
+      "setupEditor.prompt.browser.summary",
+      "setupEditor.prompt.browser.backend",
+      "setupEditor.prompt.browser.noAutoLaunch",
+    ]) {
+      expect(hasSetupCopyKey(key)).toBe(false);
+    }
+  });
+
   it("preserves placeholders exactly in English and Arabic source copy", () => {
     for (const entry of listSetupCopyEntries()) {
       for (const placeholder of entry.placeholders) {
@@ -518,7 +564,57 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupStateSummary.directProviderExample")).toContain(isolateLtr("estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.summary")).not.toContain("OAuth");
+    expect(resolveSetupCopy("ar", "setupModules.browser.review")).toContain("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.review")).not.toContain("واجهة المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.review")).not.toContain("واجهة متصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.draft")).toContain("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة متصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).toContain("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).not.toContain("نظام المتصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.verifyBrowser.description")).toContain("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.verifyBrowser.description")).not.toContain("واجهة المتصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.verifyBrowser.description")).not.toContain("واجهة متصفح");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.cloud.body")).toContain("قد تترتب عليها تكلفة");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.cloud.body")).not.toContain("قابلة للفوترة");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.cloud.body")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.localSupervised.description")).toContain(isolateLtr("Chrome/Chromium"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.local.body")).toContain(isolateLtr("Chrome"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch")).toContain(isolateLtr("Chrome"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch.description")).toContain(isolateLtr("Chrome/Chromium"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.existingCdp")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("security.allowPrivateUrls"));
+    expect(resolveSetupCopy("ar", "setupVerification.browserBackend")).toBe("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupVerification.browserBackend")).not.toContain("واجهة المتصفح");
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpMissingUrl")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("localhost"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("127.0.0.1"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("::1"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.localSupervisedIncomplete")).toContain("المحلي المُشرف عليه");
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.localSupervisedIncomplete")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.browserbaseSpendPending")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential")).toContain(isolateLtr("{envVar}"));
+    expect(formatSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_API_KEY"),
+    })).toContain(isolateLtr("BROWSERBASE_API_KEY"));
+    expect(formatSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_PROJECT_ID"),
+    })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{serviceName}"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_API_KEY"),
+      serviceName: setupTechnicalToken("ar", "Browserbase"),
+    })).toContain(isolateLtr("BROWSERBASE_API_KEY"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_PROJECT_ID"),
+      serviceName: setupTechnicalToken("ar", "Browserbase"),
+    })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toContain(isolateLtr("STT"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toContain(isolateLtr("TTS"));

@@ -66,6 +66,8 @@ export function optionalCapabilityStatusLabel(
       return summaryCopy(locale, "onboarding.summary.status.skipped");
     case "incomplete":
       return summaryCopy(locale, "onboarding.summary.status.incomplete");
+    case "disabled":
+      return summaryCopy(locale, "onboarding.summary.status.disabled");
     case "not_set":
     case undefined:
       return summaryCopy(locale, "onboarding.summary.status.notSet");

@@ -1,4 +1,4 @@
-import type { BrowserBackendKind } from "../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../config/runtime-config.js";
@@ -15,6 +15,8 @@ import type {
   SetupDraftSource,
   SetupDraftTarget,
 } from "./setup-drafts.js";
+import { browserSetupStaticBlockers } from "./browser-diagnostics.js";
+import { setupVerificationCopyEn } from "./setup-verification-copy.js";
 
 export type SetupModuleId =
   | "provider"
@@ -70,13 +72,26 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly allowedUsers?: readonly string[];
   };
   readonly browser?: {
+    readonly browserMode?: "local-supervised" | "existing-cdp" | "browserbase" | "disabled";
     readonly backend?: BrowserBackendKind;
+    readonly cloudProvider?: BrowserCloudProviderKind;
     readonly cdpUrl?: string;
     readonly launchCommand?: string;
     readonly launchExecutable?: string;
     readonly launchArgs?: readonly string[];
     readonly chromeFlags?: readonly string[];
     readonly autoLaunch?: boolean;
+    readonly supervised?: boolean;
+    readonly hybridRouting?: boolean;
+    readonly cloudFallback?: boolean;
+    readonly cloudSpendApproved?: boolean;
+    readonly summarizeSnapshots?: "auto" | boolean;
+    readonly snapshotSummarizeThreshold?: number;
+    readonly credentialSurface?: "browserbase";
+    readonly credentialEnvVars?: readonly string[];
+    readonly credentialReady?: boolean;
+    readonly credentialValuesIncluded?: boolean;
+    readonly credentialBlockers?: readonly string[];
   };
   readonly voice?: {
     readonly ttsProvider?: TtsProvider;
@@ -436,14 +451,48 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
   scope: ["browser"],
   value: (context) => ({
     backend: context.browser?.backend,
+    cloudProvider: context.browser?.cloudProvider,
     cdpUrl: context.browser?.cdpUrl,
     launchCommand: context.browser?.launchCommand,
     launchExecutable: context.browser?.launchExecutable,
     launchArgs: context.browser?.launchArgs,
     chromeFlags: context.browser?.chromeFlags,
+    supervised: context.browser?.supervised,
+    hybridRouting: context.browser?.hybridRouting,
+    cloudFallback: context.browser?.cloudFallback,
+    cloudSpendApproved: context.browser?.cloudSpendApproved,
+    summarizeSnapshots: context.browser?.summarizeSnapshots,
+    snapshotSummarizeThreshold: context.browser?.snapshotSummarizeThreshold,
+    credentialSurface: context.browser?.credentialSurface,
+    envVars: context.browser?.credentialEnvVars,
+    credentialReady: context.browser?.credentialReady,
+    credentialValuesIncluded: context.browser?.credentialValuesIncluded,
     autoLaunchRequested: context.browser?.autoLaunch === true,
     autoLaunchWillRunNow: false,
   }),
+  blockers: (context) => [
+    ...browserSetupStaticBlockers({
+      mode: context.browser?.browserMode,
+      backend: context.browser?.backend,
+      cdpUrl: context.browser?.cdpUrl,
+      autoLaunch: context.browser?.autoLaunch,
+      supervised: context.browser?.supervised,
+    }, setupVerificationCopyEn),
+    ...(context.browser?.credentialBlockers ?? []),
+  ],
+  extraDrafts: (context) => context.browser?.credentialSurface === "browserbase" &&
+    context.browser.credentialReady === true &&
+    (context.browser.credentialEnvVars?.length ?? 0) > 0
+    ? [
+        credentialDraft({
+          id: "setup-module.browser.browserbase-credentials",
+          moduleId: "browser",
+          envVars: context.browser.credentialEnvVars ?? [],
+          credentialSurface: "browserbase",
+          configPath: context.configPath,
+        }),
+      ]
+    : [],
 });
 
 function optionalStringReviewValue(key: string, value: string | undefined): Record<string, string> {
@@ -560,6 +609,10 @@ function optionalCapabilityModule(input: {
   readonly scope: readonly SetupEditorPatchField[];
   readonly value: (context: SetupModuleContext) => SetupDraftReviewMetadata["values"];
   readonly blockers?: (context: SetupModuleContext) => readonly string[];
+  readonly extraDrafts?: (
+    context: SetupModuleContext,
+    configuration: SetupModuleConfiguration
+  ) => readonly SetupDraft[];
 }): SetupModule {
   const module: SetupModule = {
     id: input.id,
@@ -609,6 +662,7 @@ function optionalCapabilityModule(input: {
           requiresReview: !configuration.skipped,
           readOnly: configuration.skipped,
         }),
+        ...(configuration.skipped ? [] : input.extraDrafts?.(context, configuration) ?? []),
       ];
     },
     verify: readOnlyVerification(input.id),
@@ -690,16 +744,20 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly configPath?: string;
   readonly blockers?: readonly string[];
+  readonly credentialSurface?: "browserbase";
 }): SetupDraft {
   return {
     id: input.id,
     kind: "credential-reference",
     source: moduleSource(input.moduleId, "configure-env-refs"),
     riskSurface: "credential-reference",
-    target: configTarget(["providers.*.apiKeyEnv"], input.configPath),
+    target: input.credentialSurface === "browserbase"
+      ? { kind: "diagnostic-only" }
+      : configTarget(["providers.*.apiKeyEnv"], input.configPath),
     review: review("setupModules.credentials.draft", {
       envVars: [...new Set(input.envVars)].sort(),
       credentialValuesIncluded: false,
+      credentialSurface: input.credentialSurface,
     }),
     applyIntent: intent("credential-reference"),
     preserveUnrelatedConfig: true,

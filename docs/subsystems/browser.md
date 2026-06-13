@@ -27,6 +27,34 @@ description: "Browser backend, CDP integration, and structured browser tools."
 
 Browserbase has a real backend path. Direct provider-registry `createSession()` calls are still blocked because Browserbase sessions must be created through the browser backend so `browser.cloudSpendApproved` is enforced. browser-use, Firecrawl, and Camofox remain deferred provider stubs. Legacy `browser.backend` values `firecrawl` and `camofox` remain config-valid and report unavailable status.
 
+## Setup Editor Modes
+
+The setup editor writes the existing flat `browser` config shape. It does not migrate browser settings into a nested mode object.
+
+The browser setup flow supports four modes:
+
+- Local supervised browser: writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, optional `cdpUrl`, and reviewed launch settings.
+- Existing CDP browser: writes `backend: "local-cdp"`, `supervised: true`, `autoLaunch: false`, and the reviewed `cdpUrl`.
+- Browserbase cloud browser: writes `backend: "browserbase"`, `cloudProvider: "browserbase"`, `hybridRouting: true`, `cloudFallback: true`, and `cloudSpendApproved: false`.
+- Disabled / unconfigured browser tools: writes `backend: "unconfigured"`.
+
+Setup validation is static. It does not open pages, connect to CDP, call Browserbase, or create cloud sessions. Existing CDP mode blocks missing CDP URLs and non-local CDP URLs; accepted CDP hosts are `localhost`, `127.0.0.1`, and `::1`. Local supervised mode requires either auto-launch or a local CDP URL.
+
+Browserbase setup collects references for `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`, but credentials do not approve spend. Pending or unapproved spend is written as `cloudSpendApproved: false` by setup. At runtime, Browserbase session creation is blocked unless `browser.cloudSpendApproved === true`.
+
+`backend: "unconfigured"` is a hard disable. Browser tools remain disabled even when stale `cloudProvider`, `cdpUrl`, launch settings, Browserbase settings, or Browserbase credentials are still present in old config or the environment.
+
+## Onboarding Behavior
+
+Browser setup is optional during first-run onboarding. Onboarding offers the same shared browser mode flow as the setup editor, but incomplete browser setup does not block core onboarding. If Browserbase credentials are skipped, an existing CDP URL is missing, or browser setup otherwise produces browser-specific blockers, onboarding marks the browser capability incomplete, drops the blocked browser draft, drops any partial Browserbase deferred secret writes, and lets the user finish onboarding.
+
+Users can proceed through onboarding and configure browser tools later in the setup editor. The split is intentional:
+
+- Setup editor remains strict: invalid browser configuration blocks the reviewed browser change.
+- Onboarding remains tolerant: incomplete browser configuration is visible in the onboarding summary but does not make first-run setup fail.
+
+Disabled browser tools are an intentional onboarding outcome. Selecting disabled writes `backend: "unconfigured"` and appears as disabled in the onboarding summary, not as a failed browser setup.
+
 Local CDP has two paths:
 
 - Unsupervised local CDP keeps the compatibility behavior: users provide `browser.cdpUrl`, and EstaCoda connects to an already-running browser.
@@ -160,13 +188,13 @@ Browserbase configuration:
   "browser": {
     "backend": "browserbase",
     "cloudProvider": "browserbase",
-    "cloudSpendApproved": "pending",
+    "cloudSpendApproved": false,
     "cloudFallback": true
   }
 }
 ```
 
-Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`. The default `"pending"` cloud spend approval blocks billable session creation. Operators must run `estacoda browser approve-cloud` before EstaCoda may create Browserbase sessions; `estacoda browser revoke-cloud` disables creation again. Configuration and status checks do not create cloud sessions. Session creation is lazy and happens only when a browser operation needs the cloud backend.
+Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`. Credentials alone do not approve spend. Setup writes pending/unapproved cloud spend as `cloudSpendApproved: false`; legacy configs with `cloudSpendApproved: "pending"` still load safely and remain blocked. Operators must run `estacoda browser approve-cloud` before EstaCoda may create Browserbase sessions; `estacoda browser revoke-cloud` disables creation again. Configuration and status checks do not create cloud sessions. Session creation is lazy and happens only when a browser operation needs the cloud backend.
 
 The Browserbase REST client uses the verified current API shape documented in `docs/browserbase-api-notes.md`: `POST https://api.browserbase.com/v1/sessions`, `X-BB-API-Key`, `connectUrl`, `GET /v1/sessions/{id}`, and `POST /v1/sessions/{id}` with `status: "REQUEST_RELEASE"` for release.
 

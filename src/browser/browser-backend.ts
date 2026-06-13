@@ -867,6 +867,10 @@ export function createBrowserBackendFromConfig(config: {
   resolveHostname?: ResolveHostnameFn;
   browserbase?: Pick<BrowserbaseBrowserBackendOptions, "apiKey" | "projectId" | "client" | "createClient" | "browserbaseFetch" | "createSupervisedBackend" | "log">;
 }): BrowserBackend {
+  if (config.backend === "unconfigured") {
+    return createUnconfiguredBrowserBackend();
+  }
+
   if ((config.cloudProvider === "browserbase" || config.backend === "browserbase") && config.hybridRouting === true) {
     const localBackendOptions = {
       cdpUrl: config.cdpUrl,
@@ -942,37 +946,6 @@ export function createBrowserBackendFromConfig(config: {
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory
       });
-    case "unconfigured":
-      if (config.cloudProvider === "browserbase") {
-        return createBrowserbaseBrowserBackend({
-          apiKey: config.browserbase?.apiKey,
-          projectId: config.browserbase?.projectId,
-          client: config.browserbase?.client,
-          createClient: config.browserbase?.createClient,
-          browserbaseFetch: config.browserbase?.browserbaseFetch,
-          createSupervisedBackend: config.browserbase?.createSupervisedBackend,
-          log: config.browserbase?.log,
-          cloudSpendApproved: config.cloudSpendApproved,
-          cloudFallback: config.cloudFallback,
-          cdpUrl: config.cdpUrl,
-          launchCommand: config.launchCommand,
-          launchExecutable: config.launchExecutable,
-          launchArgs: config.launchArgs,
-          chromeFlags: config.chromeFlags,
-          autoLaunch: config.autoLaunch,
-          fetch: config.fetch,
-          webSocketFactory: config.webSocketFactory,
-          securityConfig: config.securityConfig,
-          resolveHostname: config.resolveHostname
-        });
-      }
-      if (config.cloudProvider !== undefined) {
-        return createCloudProviderStatusBackend({
-          backend: "unconfigured",
-          cloudProvider: config.cloudProvider
-        });
-      }
-      return createUnconfiguredBrowserBackend();
     case "browserbase":
       return createBrowserbaseBrowserBackend({
         apiKey: config.browserbase?.apiKey,

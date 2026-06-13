@@ -1,4 +1,4 @@
-import type { BrowserBackendKind } from "../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type {
   EstaCodaConfig,
@@ -6,14 +6,16 @@ import type {
   SttProvider,
   TtsProvider,
 } from "../config/runtime-config.js";
+import { hasSavedEnvSecret } from "../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { Prompt } from "../cli/readline-prompt.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { SetupCopyLocale } from "./setup-copy.js";
-import { setupCopyText } from "./setup-prompts.js";
+import { formatSetupCopy, setupCopyText, setupOutputLine, setupTechnicalToken } from "./setup-prompts.js";
 import type { SetupDeferredSecretWrite } from "./setup-apply-plan.js";
 import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
+import { BROWSERBASE_CREDENTIAL_ENV_VARS } from "./browser-diagnostics.js";
 import {
   browserSetupModule,
   discordSetupModule,
@@ -26,6 +28,7 @@ import {
 import type { SetupRouteDecision } from "./setup-router.js";
 import {
   promptBrowserCapability,
+  promptedBrowserCapabilityMode,
   promptDiscordCapability,
   promptIncompleteChannelCapabilityAction,
   promptIncompleteTelegramCapabilityAction,
@@ -56,7 +59,7 @@ export type OptionalCapabilityCollectionResult =
   | {
       readonly kind: "configured";
       readonly context: SetupModuleContext;
-      readonly pendingCredentialWrite?: SetupDeferredSecretWrite;
+      readonly pendingCredentialWrites?: readonly SetupDeferredSecretWrite[];
     }
   | {
       readonly kind: "skip" | "unchanged";
@@ -132,12 +135,17 @@ export function setupModuleContextFromConfig(
       ? undefined
       : {
           backend: browserBackendValue(browser.backend),
+          cloudProvider: browserCloudProviderValue(browser.cloudProvider),
           cdpUrl: stringValue(browser.cdpUrl),
           launchCommand: stringValue(browser.launchCommand),
           launchExecutable: stringValue(browser.launchExecutable),
           launchArgs: stringArrayValue(browser.launchArgs),
           chromeFlags: stringArrayValue(browser.chromeFlags),
           autoLaunch: booleanValue(browser.autoLaunch),
+          supervised: booleanValue(browser.supervised),
+          hybridRouting: booleanValue(browser.hybridRouting),
+          cloudFallback: booleanValue(browser.cloudFallback),
+          cloudSpendApproved: booleanValue(browser.cloudSpendApproved),
         },
     voice,
     vision,
@@ -228,7 +236,7 @@ export async function collectOptionalCapabilityContext(
                 ...values,
               },
             },
-            pendingCredentialWrite,
+            pendingCredentialWrites: pendingCredentialWrite === undefined ? [] : [pendingCredentialWrite],
           };
         }
 
@@ -262,7 +270,7 @@ export async function collectOptionalCapabilityContext(
                 ...values,
               },
             },
-            pendingCredentialWrite,
+            pendingCredentialWrites: pendingCredentialWrite === undefined ? [] : [pendingCredentialWrite],
           };
         }
 
@@ -337,17 +345,93 @@ export async function collectOptionalCapabilityContext(
     }
     case "browser": {
       const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {}, options.locale);
+      const browserbaseCredentials = values.backend === "browserbase"
+        ? await collectBrowserbaseCredentials(options)
+        : undefined;
       return {
         kind: "configured",
         context: {
           ...baseContext,
-          browser: values,
+          browser: {
+            ...values,
+            browserMode: promptedBrowserCapabilityMode(values),
+            ...(browserbaseCredentials === undefined
+              ? {}
+              : {
+                  credentialSurface: "browserbase",
+                  credentialEnvVars: browserbaseCredentials.envVars,
+                  credentialReady: browserbaseCredentials.blockers.length === 0,
+                  credentialValuesIncluded: false,
+                  credentialBlockers: browserbaseCredentials.blockers,
+                }),
+          },
         },
+        pendingCredentialWrites: browserbaseCredentials?.pendingCredentialWrites ?? [],
       };
     }
     default:
       throw new Error(`Unsupported optional capability module: ${module.id}`);
   }
+}
+
+async function collectBrowserbaseCredentials(options: OptionalCapabilityContextOptions & {
+  readonly prompt: Prompt;
+  readonly locale: SetupCopyLocale;
+}): Promise<{
+  readonly envVars: readonly string[];
+  readonly pendingCredentialWrites: readonly SetupDeferredSecretWrite[];
+  readonly blockers: readonly string[];
+}> {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const pendingCredentialWrites: SetupDeferredSecretWrite[] = [];
+  const blockers: string[] = [];
+
+  for (const envVarName of BROWSERBASE_CREDENTIAL_ENV_VARS) {
+    if (await hasExistingBrowserbaseCredentialSource({
+      homeDir: options.homeDir,
+      profileId,
+      envVarName,
+    })) {
+      continue;
+    }
+
+    const entered = await options.prompt(browserbaseCredentialQuestion(options.locale, envVarName), { secret: true });
+    if (entered.trim().length > 0) {
+      pendingCredentialWrites.push({ envVarName, value: entered });
+      continue;
+    }
+
+    blockers.push(`Browserbase requires ${envVarName} from the environment, profile secret store, or reviewed setup entry.`);
+  }
+
+  return {
+    envVars: [...BROWSERBASE_CREDENTIAL_ENV_VARS],
+    pendingCredentialWrites,
+    blockers,
+  };
+}
+
+async function hasExistingBrowserbaseCredentialSource(input: {
+  readonly homeDir?: string;
+  readonly profileId: string;
+  readonly envVarName: string;
+}): Promise<boolean> {
+  if ((process.env[input.envVarName] ?? "").trim().length > 0) {
+    return true;
+  }
+  const saved = await hasSavedEnvSecret({
+    homeDir: input.homeDir,
+    profileId: input.profileId,
+    key: input.envVarName,
+  });
+  return saved.exists;
+}
+
+function browserbaseCredentialQuestion(locale: SetupCopyLocale, envVarName: string): string {
+  return setupOutputLine(locale, `${formatSetupCopy(locale, "setupEditor.prompt.browser.browserbaseCredential", {
+    envVar: setupTechnicalToken(locale, envVarName),
+    serviceName: setupTechnicalToken(locale, "Browserbase"),
+  })} `);
 }
 
 export function buildOptionalCapabilityDraftBundle(
@@ -537,4 +621,8 @@ function browserBackendValue(value: unknown): BrowserBackendKind | undefined {
     value === "unconfigured"
     ? value
     : undefined;
+}
+
+function browserCloudProviderValue(value: unknown): BrowserCloudProviderKind | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value as BrowserCloudProviderKind : undefined;
 }
