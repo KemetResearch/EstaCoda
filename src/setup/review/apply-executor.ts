@@ -39,6 +39,7 @@ import {
   type UiLanguage,
   type VoiceSetupInput,
   type BrowserSnapshotSummarizeMode,
+  type BrowserEngineKind,
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
@@ -696,6 +697,8 @@ async function applyBrowserCapability(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<void> {
   const target = configApplyTarget(operation, options);
+  const preserveEmptyLaunchArrays = operation.review.values.engine === "cdp" &&
+    operation.review.values.hybridRouting === false;
   await setupBrowserConfig({
     ...target,
     input: {
@@ -704,10 +707,15 @@ async function applyBrowserCapability(
       cdpUrl: stringValue(operation.review.values.cdpUrl),
       launchCommand: stringValue(operation.review.values.launchCommand),
       launchExecutable: stringValue(operation.review.values.launchExecutable),
-      launchArgs: optionalArrayValue(operation.review.values.launchArgs),
-      chromeFlags: optionalArrayValue(operation.review.values.chromeFlags),
+      launchArgs: preserveEmptyLaunchArrays
+        ? explicitOptionalArrayValue(operation.review.values.launchArgs)
+        : optionalArrayValue(operation.review.values.launchArgs),
+      chromeFlags: preserveEmptyLaunchArrays
+        ? explicitOptionalArrayValue(operation.review.values.chromeFlags)
+        : optionalArrayValue(operation.review.values.chromeFlags),
       autoLaunch: booleanValue(operation.review.values.autoLaunch ?? operation.review.values.autoLaunchRequested),
       supervised: booleanValue(operation.review.values.supervised),
+      engine: browserEngineValue(operation.review.values.engine),
       hybridRouting: booleanValue(operation.review.values.hybridRouting),
       cloudFallback: booleanValue(operation.review.values.cloudFallback),
       cloudSpendApproved: booleanValue(operation.review.values.cloudSpendApproved),
@@ -817,6 +825,10 @@ function optionalArrayValue(value: unknown): string[] | undefined {
   return values.length > 0 ? values : undefined;
 }
 
+function explicitOptionalArrayValue(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? arrayValue(value) : undefined;
+}
+
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
@@ -879,6 +891,10 @@ function browserBackendValue(value: unknown): BrowserBackendKind | undefined {
 
 function browserCloudProviderValue(value: unknown): BrowserCloudProviderKind | undefined {
   return stringValue(value) as BrowserCloudProviderKind | undefined;
+}
+
+function browserEngineValue(value: unknown): BrowserEngineKind | undefined {
+  return value === "cdp" || value === "agent-browser" || value === "auto" ? value : undefined;
 }
 
 function snapshotSummarizeModeValue(value: unknown): BrowserSnapshotSummarizeMode | undefined {

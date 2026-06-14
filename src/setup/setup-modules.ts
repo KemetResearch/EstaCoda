@@ -1,7 +1,7 @@
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
-import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../config/runtime-config.js";
+import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { SetupEditorPatchField } from "./setup-editor-actions.js";
 import type {
@@ -82,6 +82,7 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly chromeFlags?: readonly string[];
     readonly autoLaunch?: boolean;
     readonly supervised?: boolean;
+    readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
     readonly cloudFallback?: boolean;
     readonly cloudSpendApproved?: boolean;
@@ -458,6 +459,7 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     launchArgs: context.browser?.launchArgs,
     chromeFlags: context.browser?.chromeFlags,
     supervised: context.browser?.supervised,
+    engine: context.browser?.engine,
     hybridRouting: context.browser?.hybridRouting,
     cloudFallback: context.browser?.cloudFallback,
     cloudSpendApproved: context.browser?.cloudSpendApproved,

@@ -971,6 +971,7 @@ describe("reviewed setup apply executor", () => {
         chromeFlags: ["--no-first-run", "--disable-gpu"],
         autoLaunch: true,
         supervised: true,
+        engine: "cdp",
         hybridRouting: true,
         cloudFallback: true,
         cloudSpendApproved: false,
@@ -996,6 +997,7 @@ describe("reviewed setup apply executor", () => {
         chromeFlags?: string[];
         autoLaunch?: boolean;
         supervised?: boolean;
+        engine?: string;
         hybridRouting?: boolean;
         cloudFallback?: boolean;
         cloudSpendApproved?: boolean | string;
@@ -1013,6 +1015,7 @@ describe("reviewed setup apply executor", () => {
       chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: true,
       supervised: true,
+      engine: "cdp",
       hybridRouting: true,
       cloudFallback: true,
       cloudSpendApproved: false,

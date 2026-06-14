@@ -299,6 +299,8 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.useGateway",
   "setupEditor.prompt.browser.mode.title",
   "setupEditor.prompt.browser.mode.body",
+  "setupEditor.prompt.browser.mode.recommended",
+  "setupEditor.prompt.browser.mode.recommended.description",
   "setupEditor.prompt.browser.mode.localSupervised",
   "setupEditor.prompt.browser.mode.localSupervised.description",
   "setupEditor.prompt.browser.mode.existingCdp",

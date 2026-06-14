@@ -543,6 +543,8 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.vision.useGateway", "Use the configured image gateway setting", "استخدم إعداد image gateway المهيأ", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.title", "Browser mode", "وضع المتصفح", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.body", "Choose how EstaCoda should run browser tools. Setup records configuration only; it will not open a browser during review.", "اختر كيف تشغّل EstaCoda أدوات المتصفح. يسجّل الإعداد التكوين فقط؛ ولن يفتح متصفحًا أثناء المراجعة.", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.mode.recommended", "Recommended browser setup", "إعداد المتصفح الموصى به", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.mode.recommended.description", "Auto-launches a supervised local Chrome browser with safe defaults. Recommended for everyday users.", "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين.", ["Chrome"], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.localSupervised", "Local supervised browser", "متصفح محلي مُشرف عليه", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.localSupervised.description", "Use an isolated local Chrome/Chromium context. Recommended for local browser tools.", "استخدم سياقًا محليًا معزولًا لـ Chrome/Chromium تحت إشراف EstaCoda. الخيار الأنسب لأدوات المتصفح المحلية.", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.existingCdp", "Existing CDP browser", "متصفح CDP موجود", [], "optional-capability"),

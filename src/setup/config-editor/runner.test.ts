@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
-import { promptBrowserCapability, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import { promptBrowserCapability, promptedBrowserCapabilityMode, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
@@ -2565,7 +2565,7 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
-  it("browser mode picker includes the four browser modes", async () => {
+  it("browser mode picker includes recommended first and the existing browser modes", async () => {
     const seenOptions: string[] = [];
     const prompt = fakePrompt({ values: ["disabled"] });
     const baseSelect = prompt.select!;
@@ -2580,11 +2580,43 @@ describe("runConfigEditor", () => {
 
     expect(values.backend).toBe("unconfigured");
     expect(seenOptions).toEqual([
+      "Recommended browser setup",
       "Local supervised browser",
       "Existing CDP browser",
       "Browserbase cloud browser",
       "Disable browser tools",
     ]);
+  });
+
+  it("maps recommended browser setup to local supervised CDP without follow-up prompts", async () => {
+    const selectedTitles: string[] = [];
+    const textPrompts: string[] = [];
+    const basePrompt = fakePrompt({ values: ["recommended"] });
+    const prompt = (async (question: string, options?: { secret?: boolean }) => {
+      textPrompts.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = async (input) => {
+      selectedTitles.push(input.title);
+      return basePrompt.select!(input);
+    };
+    prompt.onboardingCard = basePrompt.onboardingCard;
+    prompt.close = basePrompt.close;
+
+    const values = await promptBrowserCapability(prompt, {});
+
+    expect(values).toEqual({
+      backend: "local-cdp",
+      autoLaunch: true,
+      supervised: true,
+      engine: "cdp",
+      launchArgs: [],
+      chromeFlags: [],
+      hybridRouting: false,
+    });
+    expect(promptedBrowserCapabilityMode(values)).toBe("local-supervised");
+    expect(selectedTitles).toEqual(["Browser mode"]);
+    expect(textPrompts).toEqual([]);
   });
 
   it("maps local supervised browser mode to flat browser config fields", async () => {
