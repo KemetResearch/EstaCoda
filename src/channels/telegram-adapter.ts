@@ -9,6 +9,9 @@ import type {
   ChannelAttachmentStatus,
   ChannelMessage,
   ChannelSessionKey,
+  ChannelStreamingTextHandle,
+  ChannelStreamingTextOptions,
+  ChannelStreamingTextResult,
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -16,6 +19,11 @@ import type { TelegramChannelConfig } from "../config/runtime-config.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
+import {
+  createTelegramStreamTextSanitizer,
+  escapeTelegramPartialHtml,
+  type TelegramStreamTextSanitizer
+} from "./telegram-stream-text.js";
 
 export type TelegramFetch = (url: string, init?: {
   method?: string;
@@ -170,6 +178,9 @@ type TelegramProgressState = {
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const TELEGRAM_MAX_TEXT_UTF16 = 4096;
 const TELEGRAM_HTML_BALANCE_RESERVE = 64;
+const DEFAULT_STREAM_EDIT_INTERVAL_MS = 750;
+const DEFAULT_STREAM_MIN_INITIAL_CHARS = 24;
+const DEFAULT_STREAM_CURSOR = "▌";
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly id = "telegram";
@@ -231,6 +242,9 @@ export class TelegramAdapter implements ChannelAdapter {
         }
       }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
+    },
+    startStreamingText: (sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions) => {
+      return this.#startStreamingText(sessionKey, options);
     }
   };
 
@@ -308,6 +322,26 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.#running;
   }
 
+  #startStreamingText(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle {
+    return new TelegramStreamingTextWorker({
+      chatId: sessionKey.chatId,
+      options,
+      sendMessage: async (text, textOptions) => this.#sendMessage(sessionKey.chatId, text, textOptions),
+      editMessageText: async (messageId, text, textOptions) => this.#editMessageText(sessionKey.chatId, messageId, text, textOptions),
+      deleteMessage: async (messageId) => this.#deleteMessage(sessionKey.chatId, messageId),
+      clearProgress: () => {
+        this.#progressByChat.delete(sessionKey.chatId);
+      },
+      formatFinalText: (text) => {
+        const formatted = formatTelegramReply(text);
+        return {
+          chunks: chunkTelegramText(formatted.text, formatted.format),
+          format: formatted.format
+        };
+      }
+    });
+  }
+
   async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("sendMessage", {
       chat_id: chatId,
@@ -351,12 +385,20 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #editMessageText(chatId: string, messageId: number, text: string): Promise<TelegramSentMessage> {
+  async #editMessageText(chatId: string, messageId: number, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
       text,
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      parse_mode: options?.format === "html" ? "HTML" : undefined
+    });
+  }
+
+  async #deleteMessage(chatId: string, messageId: number): Promise<void> {
+    await this.#call("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId
     });
   }
 
@@ -698,6 +740,307 @@ function telegramApiError<T>(
     description: payload.description,
     retryAfterSeconds: payload.parameters?.retry_after
   });
+}
+
+type TelegramStreamingTextWorkerInput = {
+  chatId: string;
+  options?: ChannelStreamingTextOptions;
+  sendMessage(text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
+  editMessageText(messageId: number, text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
+  deleteMessage(messageId: number): Promise<void>;
+  clearProgress(): void;
+  formatFinalText(text: string): { chunks: string[]; format: "plain" | "html" };
+};
+
+type TelegramStreamingTextSegment = {
+  sanitizer: TelegramStreamTextSanitizer;
+  messageId?: number;
+  lastSentHtml?: string;
+  timer?: ReturnType<typeof setTimeout>;
+  sealed: boolean;
+};
+
+class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
+  readonly #input: TelegramStreamingTextWorkerInput;
+  readonly #editIntervalMs: number;
+  readonly #minInitialChars: number;
+  readonly #cursorHtml: string;
+  #segment: TelegramStreamingTextSegment = createStreamingTextSegment();
+  #queue: Promise<void> = Promise.resolve();
+  #terminal: "active" | "finished" | "aborted" | "failed" = "active";
+  #fallbackRequired = false;
+  #finishPromise: Promise<ChannelStreamingTextResult> | undefined;
+  #abortPromise: Promise<void> | undefined;
+  readonly #errors: unknown[] = [];
+
+  constructor(input: TelegramStreamingTextWorkerInput) {
+    this.#input = input;
+    this.#editIntervalMs = input.options?.editIntervalMs ?? DEFAULT_STREAM_EDIT_INTERVAL_MS;
+    this.#minInitialChars = input.options?.minInitialChars ?? DEFAULT_STREAM_MIN_INITIAL_CHARS;
+    this.#cursorHtml = escapeTelegramPartialHtml(input.options?.cursor ?? DEFAULT_STREAM_CURSOR);
+
+    input.options?.signal?.addEventListener("abort", () => {
+      void this.abort("signal");
+    }, { once: true });
+  }
+
+  append(text: string): void {
+    if (this.#terminal !== "active" || this.#fallbackRequired || text.length === 0) {
+      return;
+    }
+
+    const segment = this.#segment;
+    segment.sanitizer.append(text);
+    const snapshot = segment.sanitizer.snapshot();
+
+    if (snapshot.visibleCharCount === 0) {
+      return;
+    }
+
+    this.#scheduleFlush(segment);
+  }
+
+  segmentBreak(_reason?: string): void {
+    if (this.#terminal !== "active") {
+      return;
+    }
+
+    const segment = this.#segment;
+    this.#clearSegmentTimer(segment);
+    this.#segment = createStreamingTextSegment();
+    this.#input.clearProgress();
+    this.#runSafely(async () => {
+      await this.#sealSegment(segment);
+    });
+  }
+
+  providerAttemptResult(result: {
+    ok: boolean;
+    willFallback: boolean;
+    provider: string;
+    model: string;
+  }): void {
+    if (this.#terminal !== "active" || (result.ok && !result.willFallback)) {
+      return;
+    }
+
+    this.#fallbackRequired = true;
+    this.#terminal = "failed";
+    const segment = this.#segment;
+    this.#clearSegmentTimer(segment);
+    this.#runSafely(async () => {
+      await this.#cleanupFailedAttempt(segment);
+    });
+  }
+
+  finish(finalText: string): Promise<ChannelStreamingTextResult> {
+    if (this.#finishPromise !== undefined) {
+      return this.#finishPromise;
+    }
+
+    this.#terminal = "finished";
+    const segment = this.#segment;
+    this.#clearSegmentTimer(segment);
+    this.#finishPromise = this.#enqueue(async () => {
+      if (this.#fallbackRequired || segment.messageId === undefined) {
+        return {
+          delivered: false,
+          fallbackRequired: true
+        };
+      }
+
+      try {
+        const formatted = this.#input.formatFinalText(finalText);
+        const [firstChunk, ...remainingChunks] = formatted.chunks;
+
+        if (firstChunk === undefined) {
+          return {
+            delivered: false,
+            fallbackRequired: true
+          };
+        }
+
+        await this.#input.editMessageText(segment.messageId, firstChunk, { format: formatted.format });
+
+        for (const chunk of remainingChunks) {
+          await this.#input.sendMessage(chunk, { format: formatted.format });
+        }
+
+        this.#clearTimers();
+        segment.lastSentHtml = firstChunk;
+        return {
+          delivered: true,
+          fallbackRequired: false,
+          deliveredText: finalText
+        };
+      } catch (error) {
+        this.#captureError(error);
+        return {
+          delivered: false,
+          fallbackRequired: true
+        };
+      }
+    });
+    return this.#finishPromise;
+  }
+
+  abort(_reason?: string): Promise<void> {
+    if (this.#abortPromise !== undefined) {
+      return this.#abortPromise;
+    }
+
+    this.#terminal = "aborted";
+    const segment = this.#segment;
+    this.#clearTimers();
+    this.#abortPromise = this.#enqueue(async () => {
+      if (segment.messageId === undefined) {
+        return;
+      }
+
+      try {
+        await this.#editSegmentWithoutCursor(segment);
+      } catch (error) {
+        this.#captureError(error);
+      }
+    }).then(() => undefined, (error) => {
+      this.#captureError(error);
+    });
+    return this.#abortPromise;
+  }
+
+  #scheduleFlush(segment: TelegramStreamingTextSegment): void {
+    if (segment !== this.#segment || segment.timer !== undefined || this.#terminal !== "active") {
+      return;
+    }
+
+    const delay = segment.messageId === undefined ? 0 : this.#editIntervalMs;
+    segment.timer = setTimeout(() => {
+      segment.timer = undefined;
+      this.#runSafely(async () => {
+        if (segment !== this.#segment || this.#terminal !== "active") {
+          return;
+        }
+        await this.#flushSegment(segment, true);
+      });
+    }, delay);
+  }
+
+  async #sealSegment(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.sealed) {
+      return;
+    }
+
+    try {
+      await this.#flushSegment(segment, false);
+      if (segment.messageId !== undefined) {
+        await this.#editSegmentWithoutCursor(segment);
+      }
+      segment.sealed = true;
+    } catch (error) {
+      this.#captureError(error);
+      this.#fallbackRequired = true;
+    }
+  }
+
+  async #flushSegment(segment: TelegramStreamingTextSegment, includeCursor: boolean): Promise<void> {
+    if (segment.sealed) {
+      return;
+    }
+
+    const snapshot = segment.sanitizer.snapshot();
+
+    if (snapshot.visibleCharCount === 0) {
+      return;
+    }
+
+    if (segment.messageId === undefined && snapshot.visibleCharCount < this.#minInitialChars) {
+      return;
+    }
+
+    const rendered = `${snapshot.escapedHtml}${includeCursor ? this.#cursorHtml : ""}`;
+
+    if (segment.messageId === undefined) {
+      const message = await this.#input.sendMessage(rendered, { format: "html" });
+      segment.messageId = message.message_id;
+      segment.lastSentHtml = rendered;
+      return;
+    }
+
+    if (segment.lastSentHtml === rendered) {
+      return;
+    }
+
+    await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
+    segment.lastSentHtml = rendered;
+  }
+
+  async #editSegmentWithoutCursor(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.messageId === undefined) {
+      return;
+    }
+
+    const rendered = segment.sanitizer.snapshot().escapedHtml;
+
+    if (rendered.length === 0 || segment.lastSentHtml === rendered) {
+      return;
+    }
+
+    await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
+    segment.lastSentHtml = rendered;
+  }
+
+  async #cleanupFailedAttempt(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.messageId === undefined) {
+      return;
+    }
+
+    try {
+      await this.#input.deleteMessage(segment.messageId);
+    } catch (deleteError) {
+      this.#captureError(deleteError);
+      try {
+        await this.#input.editMessageText(segment.messageId, "Response interrupted. A complete reply will follow.", { format: "html" });
+      } catch (editError) {
+        this.#captureError(editError);
+      }
+    }
+  }
+
+  #runSafely(operation: () => Promise<void>): void {
+    void this.#enqueue(operation).catch((error) => {
+      this.#captureError(error);
+    });
+  }
+
+  #enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(operation, operation);
+    this.#queue = result.then(() => undefined, (error) => {
+      this.#captureError(error);
+    });
+    return result;
+  }
+
+  #clearTimers(): void {
+    this.#clearSegmentTimer(this.#segment);
+  }
+
+  #clearSegmentTimer(segment: TelegramStreamingTextSegment): void {
+    if (segment.timer !== undefined) {
+      clearTimeout(segment.timer);
+      segment.timer = undefined;
+    }
+  }
+
+  #captureError(error: unknown): void {
+    this.#errors.push(error);
+  }
+}
+
+function createStreamingTextSegment(): TelegramStreamingTextSegment {
+  return {
+    sanitizer: createTelegramStreamTextSanitizer(),
+    sealed: false
+  };
 }
 
 export function updateToChannelMessage(update: TelegramUpdate, now: () => Date = () => new Date()): ChannelMessage | undefined {
