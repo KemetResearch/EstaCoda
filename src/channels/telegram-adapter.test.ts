@@ -53,8 +53,17 @@ type TelegramHarnessCall = {
   body: Record<string, unknown>;
 };
 
+type TelegramHarnessFailure = {
+  status?: number;
+  statusText?: string;
+  errorCode?: number;
+  description?: string;
+  retryAfterSeconds?: number;
+};
+
 function createTelegramStreamingHarness(options: {
   failMethods?: Partial<Record<string, number[]>>;
+  failResponses?: Partial<Record<string, Record<number, TelegramHarnessFailure>>>;
 } = {}): {
   adapter: TelegramAdapter;
   calls: TelegramHarnessCall[];
@@ -69,6 +78,23 @@ function createTelegramStreamingHarness(options: {
     methodCounts.set(method, count);
     const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
     calls.push({ method, body });
+
+    const failure = options.failResponses?.[method]?.[count];
+    if (failure !== undefined) {
+      return {
+        ok: false,
+        status: failure.status ?? 400,
+        statusText: failure.statusText ?? "Bad Request",
+        json: async () => ({
+          ok: false,
+          error_code: failure.errorCode,
+          description: failure.description ?? `${method} failed`,
+          parameters: failure.retryAfterSeconds === undefined
+            ? undefined
+            : { retry_after: failure.retryAfterSeconds }
+        })
+      };
+    }
 
     if (options.failMethods?.[method]?.includes(count)) {
       return {
@@ -715,6 +741,289 @@ describe("TelegramAdapter", () => {
 
     expect(callsFor(calls, "sendMessage")).toHaveLength(1);
     expect(result).toEqual({ delivered: false, fallbackRequired: true });
+  });
+
+  it("delivery.startStreamingText retries 429 partial sends using retry_after", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessage: {
+          1: {
+            status: 429,
+            statusText: "Too Many Requests",
+            errorCode: 429,
+            description: "Too Many Requests: retry after 2",
+            retryAfterSeconds: 2
+          }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      maxFloodStrikes: 2
+    });
+
+    handle.append("draft");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+    const result = await handle.finish("final");
+
+    expect(result.fallbackRequired).toBe(false);
+  });
+
+  it("delivery.startStreamingText exceeds max flood strikes and requires fallback", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessage: {
+          1: { status: 429, errorCode: 429, description: "retry after 1", retryAfterSeconds: 1 },
+          2: { status: 429, errorCode: 429, description: "retry after 1", retryAfterSeconds: 1 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      maxFloodStrikes: 1
+    });
+
+    handle.append("draft");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    handle.append(" ignored");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+    expect(result).toEqual({ delivered: false, fallbackRequired: true });
+  });
+
+  it("delivery.startStreamingText flood degradation stops future partial edits", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 1", retryAfterSeconds: 1 },
+          2: { status: 429, errorCode: 429, description: "retry after 1", retryAfterSeconds: 1 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" edit");
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(1_000);
+    handle.append(" ignored");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(2);
+    expect(result.fallbackRequired).toBe(true);
+  });
+
+  it("delivery.startStreamingText detects escaped partial HTML overflow safely", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1
+    });
+
+    handle.append("<>&".repeat(400));
+    await flushTelegramStreamingTimers();
+    handle.append("ignored");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ delivered: false, fallbackRequired: true });
+  });
+
+  it("delivery.startStreamingText failed provider attempt cleanup stops pending edits", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 50
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText fallback provider attempt cleanup stops pending edits", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 50
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    handle.providerAttemptResult({ ok: true, willFallback: true, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText repeated provider-result cleanup is idempotent", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    handle.providerAttemptResult({ ok: false, willFallback: true, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(1);
+  });
+
+  it("delivery.startStreamingText cleanupFailedAttempts false skips cleanup but forces fallback", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cleanupFailedAttempts: false
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(result.fallbackRequired).toBe(true);
+  });
+
+  it("delivery.startStreamingText finish and abort are idempotent under concurrent calls", async () => {
+    vi.useFakeTimers();
+    const finishing = createTelegramStreamingHarness();
+    const finishingHandle = finishing.adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1
+    });
+    finishingHandle.append("draft");
+    await flushTelegramStreamingTimers();
+
+    const [firstFinish, secondFinish] = await Promise.all([
+      finishingHandle.finish("final"),
+      finishingHandle.finish("final")
+    ]);
+
+    const aborting = createTelegramStreamingHarness();
+    const abortingHandle = aborting.adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1
+    });
+    abortingHandle.append("draft");
+    await flushTelegramStreamingTimers();
+    await Promise.all([
+      abortingHandle.abort("stop"),
+      abortingHandle.abort("stop")
+    ]);
+
+    expect(secondFinish).toBe(firstFinish);
+    expect(callsFor(finishing.calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(aborting.calls, "editMessageText")).toHaveLength(1);
+  });
+
+  it("delivery.startStreamingText abort during retry clears retry and removes cursor when possible", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 2,
+      cursor: "|"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    await vi.advanceTimersByTimeAsync(10);
+    await handle.abort("stop");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(2);
+    expect(callsFor(calls, "editMessageText").at(-1)?.body.text).toBe("draft pending");
+  });
+
+  it("delivery.startStreamingText options signal abort triggers stream abort", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|",
+      signal: controller.signal
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    controller.abort();
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "editMessageText").at(-1)?.body.text).toBe("draft");
+  });
+
+  it("delivery.startStreamingText segmentBreak during retry does not edit sealed segments again", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 2,
+      cursor: "|"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    await vi.advanceTimersByTimeAsync(10);
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    const editsAfterSeal = callsFor(calls, "editMessageText").length;
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(editsAfterSeal);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
   });
 
   it("turns callback query data into ChannelMessage text", () => {
