@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TelegramAdapter, updateToChannelMessage } from "./telegram-adapter.js";
+import { TelegramAdapter, TelegramApiError, updateToChannelMessage } from "./telegram-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -277,6 +277,38 @@ describe("TelegramAdapter", () => {
     )).rejects.toThrow("Telegram sendMessage failed: message is too long");
 
     expect(bodies).toHaveLength(2);
+  });
+
+  it("preserves structured Telegram API error metadata", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      json: async () => ({
+        ok: false,
+        error_code: 429,
+        description: "Too Many Requests: retry after 12",
+        parameters: { retry_after: 12 }
+      })
+    }));
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+
+    let caught: unknown;
+    try {
+      await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "rate limited");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(TelegramApiError);
+    expect(caught).toMatchObject({
+      method: "sendMessage",
+      httpStatus: 429,
+      telegramErrorCode: 429,
+      description: "Too Many Requests: retry after 12",
+      retryAfterSeconds: 12,
+      message: "Telegram sendMessage failed: Too Many Requests: retry after 12"
+    });
   });
 
   it("turns callback query data into ChannelMessage text", () => {

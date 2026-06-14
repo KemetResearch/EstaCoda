@@ -50,11 +50,42 @@ export type TelegramCommand = {
   description: string;
 };
 
+type TelegramApiErrorParameters = {
+  retry_after?: number;
+};
+
 type TelegramApiResponse<T> = {
   ok: boolean;
   result?: T;
+  error_code?: number;
   description?: string;
+  parameters?: TelegramApiErrorParameters;
 };
+
+export class TelegramApiError extends Error {
+  readonly method: string;
+  readonly httpStatus: number;
+  readonly telegramErrorCode: number | undefined;
+  readonly description: string | undefined;
+  readonly retryAfterSeconds: number | undefined;
+
+  constructor(input: {
+    method: string;
+    httpStatus: number;
+    statusText?: string;
+    telegramErrorCode?: number;
+    description?: string;
+    retryAfterSeconds?: number;
+  }) {
+    super(`Telegram ${input.method} failed: ${input.description ?? input.statusText ?? input.httpStatus}`);
+    this.name = "TelegramApiError";
+    this.method = input.method;
+    this.httpStatus = input.httpStatus;
+    this.telegramErrorCode = input.telegramErrorCode;
+    this.description = input.description;
+    this.retryAfterSeconds = input.retryAfterSeconds;
+  }
+}
 
 type TelegramFileInfo = {
   file_id: string;
@@ -633,7 +664,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const payload = await response.json() as TelegramApiResponse<T>;
 
     if (!response.ok || !payload.ok) {
-      throw new Error(`Telegram ${method} failed: ${payload.description ?? response.statusText ?? response.status}`);
+      throw telegramApiError(method, response, payload);
     }
 
     return payload.result as T;
@@ -647,11 +678,26 @@ export class TelegramAdapter implements ChannelAdapter {
     const payload = await response.json() as TelegramApiResponse<T>;
 
     if (!response.ok || !payload.ok) {
-      throw new Error(`Telegram ${method} failed: ${payload.description ?? response.statusText ?? response.status}`);
+      throw telegramApiError(method, response, payload);
     }
 
     return payload.result as T;
   }
+}
+
+function telegramApiError<T>(
+  method: string,
+  response: Pick<Awaited<ReturnType<TelegramFetch>>, "status" | "statusText">,
+  payload: TelegramApiResponse<T>
+): TelegramApiError {
+  return new TelegramApiError({
+    method,
+    httpStatus: response.status,
+    statusText: response.statusText,
+    telegramErrorCode: payload.error_code,
+    description: payload.description,
+    retryAfterSeconds: payload.parameters?.retry_after
+  });
 }
 
 export function updateToChannelMessage(update: TelegramUpdate, now: () => Date = () => new Date()): ChannelMessage | undefined {
