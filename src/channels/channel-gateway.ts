@@ -3,6 +3,9 @@ import type {
   ChannelAuthPolicies,
   ChannelGatewayResult,
   ChannelMessage,
+  ChannelStreamingTextHandle,
+  ChannelStreamingTextOptions,
+  ChannelStreamingTextResult,
   ChannelSessionKey
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
@@ -199,6 +202,7 @@ export type ChannelGatewayOptions = {
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
   whatsappTextDebounce?: WhatsAppTextDebounceConfig;
+  telegramStreaming?: ChannelStreamingTextOptions & { enabled?: boolean };
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -363,6 +367,7 @@ export class ChannelGateway {
   readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
   readonly #whatsappTextDebounce: WhatsAppTextDebounceConfig | undefined;
   readonly #whatsappTextDebounceBuffers = new Map<string, WhatsAppTextDebounceBuffer>();
+  readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -407,6 +412,7 @@ export class ChannelGateway {
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
     this.#whatsappTextDebounce = options.whatsappTextDebounce;
+    this.#telegramStreaming = options.telegramStreaming;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -458,6 +464,98 @@ export class ChannelGateway {
       await this.#deliveryRouter.deliverArtifact({ kind: "origin", originalSessionKey: sessionKey }, artifact);
     } else {
       await adapter.delivery?.sendArtifact?.(sessionKey, artifact);
+    }
+  }
+
+  #startStreamingTextIfEligible(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey,
+    signal: AbortSignal | undefined
+  ): ChannelStreamingTextHandle | undefined {
+    if (
+      adapter.kind !== "telegram" ||
+      sessionKey.platform !== "telegram" ||
+      this.#telegramStreaming?.enabled !== true ||
+      adapter.delivery?.startStreamingText === undefined ||
+      this.#deliveryRouter !== undefined ||
+      signal === undefined
+    ) {
+      return undefined;
+    }
+
+    return adapter.delivery.startStreamingText(sessionKey, {
+      signal,
+      editIntervalMs: this.#telegramStreaming.editIntervalMs,
+      minInitialChars: this.#telegramStreaming.minInitialChars,
+      cursor: this.#telegramStreaming.cursor,
+      maxFloodStrikes: this.#telegramStreaming.maxFloodStrikes,
+      cleanupFailedAttempts: this.#telegramStreaming.cleanupFailedAttempts
+    });
+  }
+
+  async #handleStreamingEvent(
+    streamHandle: ChannelStreamingTextHandle | undefined,
+    event: RuntimeEvent
+  ): Promise<boolean> {
+    if (streamHandle === undefined) {
+      return false;
+    }
+
+    if (event.kind === "provider-token") {
+      streamHandle.append(event.text);
+      return true;
+    }
+
+    if (event.kind === "provider-result") {
+      streamHandle.providerAttemptResult({
+        ok: event.ok,
+        willFallback: event.willFallback,
+        provider: event.provider,
+        model: event.model
+      });
+      return false;
+    }
+
+    if (event.kind === "provider-tool-call") {
+      streamHandle.segmentBreak("provider-tool-call");
+      return false;
+    }
+
+    if (event.kind === "agent-cancelled") {
+      await this.#abortStreamingText(streamHandle, event.reason);
+      return false;
+    }
+
+    return false;
+  }
+
+  async #finishStreamingText(
+    streamHandle: ChannelStreamingTextHandle | undefined,
+    finalText: string
+  ): Promise<ChannelStreamingTextResult | undefined> {
+    if (streamHandle === undefined) {
+      return undefined;
+    }
+
+    try {
+      return await streamHandle.finish(finalText);
+    } catch {
+      return {
+        delivered: false,
+        fallbackRequired: true
+      };
+    }
+  }
+
+  async #abortStreamingText(streamHandle: ChannelStreamingTextHandle | undefined, reason?: string): Promise<void> {
+    if (streamHandle === undefined) {
+      return;
+    }
+
+    try {
+      await streamHandle.abort(reason);
+    } catch {
+      // Streaming cleanup is secondary to the original turn outcome.
     }
   }
 
@@ -1022,6 +1120,7 @@ export class ChannelGateway {
     let sessionId = "";
     let progressCount = 0;
     let terminalEventEmitted = false;
+    let streamHandle: ChannelStreamingTextHandle | undefined;
     const turnStartTime = Date.now();
     try {
       // Session resolution
@@ -1076,6 +1175,7 @@ export class ChannelGateway {
         ? await this.#trustedWorkspace(message)
         : this.#trustedWorkspace;
       const debounceMetadata = readDebounceMetadata(message.metadata);
+      streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal);
 
       // Handle the turn
       const response = await runtime.handle({
@@ -1092,6 +1192,9 @@ export class ChannelGateway {
           ...(debounceMetadata === undefined ? {} : debounceMetadata)
         },
         onEvent: async (event) => {
+          if (await this.#handleStreamingEvent(streamHandle, event)) {
+            return;
+          }
           progressCount += 1;
           await this.#deliverProgress(adapter, normalizedSessionKey, event);
         }
@@ -1115,12 +1218,22 @@ export class ChannelGateway {
         this.#pendingApprovals.delete(activeTurnKey);
       }
 
-      await this.#deliverText(
-        adapter,
-        normalizedSessionKey,
-        response.text,
-        message.channel === "whatsapp" ? { replyTo: message.id } : undefined
-      );
+      const approvalBoundary = pendingApproval !== undefined;
+      const artifactBoundary = response.artifacts.length > 0;
+      const streamResult = await this.#finishStreamingText(streamHandle, response.text);
+      const streamingDeliveredFinalText = streamResult?.delivered === true &&
+        streamResult.fallbackRequired === false &&
+        !approvalBoundary &&
+        !artifactBoundary;
+
+      if (!streamingDeliveredFinalText) {
+        await this.#deliverText(
+          adapter,
+          normalizedSessionKey,
+          response.text,
+          message.channel === "whatsapp" ? { replyTo: message.id } : undefined
+        );
+      }
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
@@ -1188,6 +1301,7 @@ export class ChannelGateway {
     } catch (turnErr) {
       // Classify abort vs runtime error
       const isAbort = controller.signal.aborted || this.#isAbortError(turnErr);
+      await this.#abortStreamingText(streamHandle, isAbort ? "abort" : "error");
       sessionId = await this.#consumeRuntimeRotation({
         runtime,
         sessionKey: message.sessionKey,
