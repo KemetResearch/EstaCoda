@@ -541,7 +541,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.vision.model", "Image-generation model", "نموذج توليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.apiKeyEnv", "Image-generation API key environment variable", "متغير بيئة مفتاح API لتوليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.useGateway", "Use the configured image gateway setting", "استخدم إعداد image gateway المهيأ", [], "optional-capability"),
-  copy("setupEditor.prompt.browser.mode.title", "Browser mode", "وضع المتصفح", [], "optional-capability"),
+  copy("setupEditor.prompt.browser.mode.title", "Browser configuration", "إعداد المتصفح", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.body", "Choose how EstaCoda should run browser tools. Setup records configuration only; it will not open a browser during review.", "اختر كيف تشغّل EstaCoda أدوات المتصفح. يسجّل الإعداد التكوين فقط؛ ولن يفتح متصفحًا أثناء المراجعة.", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.recommended", "Recommended browser setup", "إعداد المتصفح الموصى به", [], "optional-capability"),
   copy("setupEditor.prompt.browser.mode.recommended.description", "Auto-launches a supervised local Chrome browser with safe defaults. Recommended for everyday users.", "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين.", ["Chrome"], "optional-capability"),

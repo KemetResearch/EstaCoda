@@ -704,6 +704,17 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.review.cancel.description")).toBe("Keep your existing configuration unchanged.");
   });
 
+  it("defines setup editor browser configuration prompt copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.browser.mode.title")).toBe("Browser configuration");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.title")).toBe("إعداد المتصفح");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended")).toBe("إعداد المتصفح الموصى به");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toBe(
+      "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين."
+    );
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("Chrome"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("EstaCoda"));
+  });
+
   it("describes managed local STT as the normal onboarding path", () => {
     const english = rawSetupCopy("en", "setupEditor.prompt.voice.summary");
     expect(english).toContain("Local STT uses managed faster-whisper by default");

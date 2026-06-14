@@ -2570,7 +2570,7 @@ describe("runConfigEditor", () => {
     const prompt = fakePrompt({ values: ["disabled"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Browser mode") {
+      if (input.title === "Browser configuration") {
         seenOptions.push(...input.options.map((option) => option.label));
       }
       return baseSelect(input);
@@ -2615,7 +2615,7 @@ describe("runConfigEditor", () => {
       hybridRouting: false,
     });
     expect(promptedBrowserCapabilityMode(values)).toBe("local-supervised");
-    expect(selectedTitles).toEqual(["Browser mode"]);
+    expect(selectedTitles).toEqual(["Browser configuration"]);
     expect(textPrompts).toEqual([]);
   });
 
