@@ -471,6 +471,8 @@ export type TelegramStreamingConfig = {
   cursor?: string;
   maxFloodStrikes?: number;
   cleanupFailedAttempts?: boolean;
+  freshFinalAfterSeconds?: number;
+  transport?: "auto" | "edit" | "draft";
 };
 
 export type DiscordChannelConfig = {
@@ -1373,8 +1375,14 @@ function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undef
     minInitialChars: normalizeOptionalPositiveInteger(value?.minInitialChars) ?? 24,
     cursor: normalizeOptionalNonEmptyString(value?.cursor, "channels.telegram.streaming.cursor") ?? "▌",
     maxFloodStrikes: normalizeOptionalPositiveInteger(value?.maxFloodStrikes) ?? 2,
-    cleanupFailedAttempts: value?.cleanupFailedAttempts ?? true
+    cleanupFailedAttempts: value?.cleanupFailedAttempts ?? true,
+    freshFinalAfterSeconds: normalizeOptionalNonNegativeInteger(value?.freshFinalAfterSeconds) ?? 0,
+    transport: normalizeTelegramStreamingTransport(value?.transport)
   };
+}
+
+function normalizeTelegramStreamingTransport(value: unknown): Required<TelegramStreamingConfig>["transport"] {
+  return value === "auto" || value === "edit" || value === "draft" ? value : "edit";
 }
 
 function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntimeConfig["browser"] {
@@ -1749,6 +1757,23 @@ function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
     return undefined;
   }
   return coercePositiveInteger(value, { default: 1 });
+}
+
+function normalizeOptionalNonNegativeInteger(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" && typeof value !== "string") {
+    return undefined;
+  }
+  if (typeof value === "string" && value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = typeof value === "string" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isInteger(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 export function normalizeOptionalPositiveIntegerStrict(value: unknown, path: string): number | undefined {

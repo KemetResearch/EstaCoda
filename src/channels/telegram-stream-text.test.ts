@@ -11,18 +11,52 @@ describe("Telegram stream text sanitizer", () => {
   it("strips full think blocks", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    const chunk = sanitizer.append("visible <think>hidden</think> text");
+    const chunk = sanitizer.append("visible\n<think>hidden</think> text");
 
-    expect(chunk.visibleText).toBe("visible  text");
-    expect(sanitizer.snapshot().visibleText).toBe("visible  text");
+    expect(chunk.visibleText).toBe("visible\n text");
+    expect(sanitizer.snapshot().visibleText).toBe("visible\n text");
+  });
+
+  it("strips lowercase thinking blocks", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    const chunk = sanitizer.append("<thinking>hidden</thinking>visible");
+
+    expect(chunk.visibleText).toBe("visible");
+    expect(sanitizer.snapshot().visibleText).toBe("visible");
+  });
+
+  it("strips uppercase thinking blocks", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    const chunk = sanitizer.append("<THINKING>hidden</THINKING>visible");
+
+    expect(chunk.visibleText).toBe("visible");
+    expect(sanitizer.snapshot().visibleText).toBe("visible");
   });
 
   it("strips split think opening tags", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    expect(sanitizer.append("hello <thi").visibleText).toBe("hello ");
+    expect(sanitizer.append("<thi").visibleText).toBe("");
     expect(sanitizer.append("nk>hidden</think> world").visibleText).toBe(" world");
-    expect(sanitizer.snapshot().visibleText).toBe("hello  world");
+    expect(sanitizer.snapshot().visibleText).toBe(" world");
+  });
+
+  it("strips split think opening tags after leading whitespace", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    expect(sanitizer.append("  <thi").visibleText).toBe("");
+    expect(sanitizer.append("nk>hidden</think> visible").visibleText).toBe(" visible");
+    expect(sanitizer.snapshot().visibleText).toBe(" visible");
+  });
+
+  it("strips split think opening tags after newline-leading whitespace", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    expect(sanitizer.append("before\n  <thi").visibleText).toBe("before\n");
+    expect(sanitizer.append("nk>hidden</think> visible").visibleText).toBe(" visible");
+    expect(sanitizer.snapshot().visibleText).toBe("before\n visible");
   });
 
   it("resumes visible text after split think closing tags", () => {
@@ -36,32 +70,50 @@ describe("Telegram stream text sanitizer", () => {
   it("does not leak partial think candidates", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    expect(sanitizer.append("before <think").visibleText).toBe("before ");
-    expect(sanitizer.snapshot().visibleText).toBe("before ");
+    expect(sanitizer.append("before\n<think").visibleText).toBe("before\n");
+    expect(sanitizer.snapshot().visibleText).toBe("before\n");
   });
 
   it("emits non-think angle bracket prose once proven normal", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    expect(sanitizer.append("a <thi").visibleText).toBe("a ");
-    expect(sanitizer.append("X value").visibleText).toBe("<thiX value");
+    expect(sanitizer.append("a <thi").visibleText).toBe("a <thi");
+    expect(sanitizer.append("X value").visibleText).toBe("X value");
     expect(sanitizer.snapshot().escapedHtml).toBe("a &lt;thiX value");
   });
 
   it("strips multiple think blocks", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    sanitizer.append("a <think>one</think>b<think>two</think> c");
+    sanitizer.append("<think>one</think>b\n<think>two</think> c");
 
-    expect(sanitizer.snapshot().visibleText).toBe("a b c");
+    expect(sanitizer.snapshot().visibleText).toBe("b\n c");
   });
 
   it("keeps unmatched open think blocks hidden", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    expect(sanitizer.append("a <think>hidden").visibleText).toBe("a ");
+    expect(sanitizer.append("<think>hidden").visibleText).toBe("");
     expect(sanitizer.append(" still hidden").visibleText).toBe("");
-    expect(sanitizer.snapshot().visibleText).toBe("a ");
+    expect(sanitizer.snapshot().visibleText).toBe("");
+  });
+
+  it("preserves prose mentions of think tags", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    const chunk = sanitizer.append("the <think> tag");
+
+    expect(chunk.visibleText).toBe("the <think> tag");
+    expect(sanitizer.snapshot().visibleText).toBe("the <think> tag");
+  });
+
+  it("preserves mid-sentence think blocks as prose", () => {
+    const sanitizer = createTelegramStreamTextSanitizer();
+
+    const chunk = sanitizer.append("hello <think>hidden</think> world");
+
+    expect(chunk.visibleText).toBe("hello <think>hidden</think> world");
+    expect(sanitizer.snapshot().visibleText).toBe("hello <think>hidden</think> world");
   });
 
   it("strips media directives without counting them as visible", () => {
@@ -103,10 +155,10 @@ describe("Telegram stream text sanitizer", () => {
   it("computes visible character count after filtering", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
 
-    const chunk = sanitizer.append("🙂<think>hidden</think>a");
+    const chunk = sanitizer.append("🙂\n<think>hidden</think>a");
 
-    expect(chunk.visibleText).toBe("🙂a");
-    expect(chunk.visibleCharCount).toBe(2);
+    expect(chunk.visibleText).toBe("🙂\na");
+    expect(chunk.visibleCharCount).toBe(3);
   });
 
   it("computes escaped UTF-16 length after escaping", () => {
@@ -125,7 +177,7 @@ describe("Telegram stream text sanitizer", () => {
 
   it("reset clears sanitizer state", () => {
     const sanitizer = createTelegramStreamTextSanitizer();
-    sanitizer.append("visible <think>hidden");
+    sanitizer.append("visible\n<think>hidden");
 
     sanitizer.reset();
     const chunk = sanitizer.append(" shown");

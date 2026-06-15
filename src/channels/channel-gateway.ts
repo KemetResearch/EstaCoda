@@ -489,7 +489,9 @@ export class ChannelGateway {
       minInitialChars: this.#telegramStreaming.minInitialChars,
       cursor: this.#telegramStreaming.cursor,
       maxFloodStrikes: this.#telegramStreaming.maxFloodStrikes,
-      cleanupFailedAttempts: this.#telegramStreaming.cleanupFailedAttempts
+      cleanupFailedAttempts: this.#telegramStreaming.cleanupFailedAttempts,
+      freshFinalAfterSeconds: this.#telegramStreaming.freshFinalAfterSeconds,
+      transport: this.#telegramStreaming.transport
     });
   }
 

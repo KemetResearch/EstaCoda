@@ -134,6 +134,8 @@ export type ChannelStreamingTextOptions = {
   cursor?: string;
   maxFloodStrikes?: number;
   cleanupFailedAttempts?: boolean;
+  freshFinalAfterSeconds?: number;
+  transport?: "auto" | "edit" | "draft";
 };
 
 export type ChannelDelivery = {

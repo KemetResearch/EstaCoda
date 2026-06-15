@@ -1247,7 +1247,9 @@ describe("loadRuntimeConfig channel readiness", () => {
       minInitialChars: 24,
       cursor: "▌",
       maxFloodStrikes: 2,
-      cleanupFailedAttempts: true
+      cleanupFailedAttempts: true,
+      freshFinalAfterSeconds: 0,
+      transport: "edit"
     });
     await rm(workspace, { recursive: true, force: true });
   });
@@ -1267,7 +1269,9 @@ describe("loadRuntimeConfig channel readiness", () => {
             minInitialChars: 10,
             cursor: "*",
             maxFloodStrikes: 4,
-            cleanupFailedAttempts: false
+            cleanupFailedAttempts: false,
+            freshFinalAfterSeconds: 12,
+            transport: "auto"
           }
         }
       }
@@ -1280,9 +1284,63 @@ describe("loadRuntimeConfig channel readiness", () => {
       minInitialChars: 10,
       cursor: "*",
       maxFloodStrikes: 4,
-      cleanupFailedAttempts: false
+      cleanupFailedAttempts: false,
+      freshFinalAfterSeconds: 12,
+      transport: "auto"
     });
     await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes Telegram streaming transport values", async () => {
+    for (const transport of ["auto", "edit", "draft"] as const) {
+      const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      const configPath = profileConfigPath(workspace);
+      await writeFile(configPath, JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        channels: { telegram: { enabled: false, streaming: { freshFinalAfterSeconds: 0, transport } } }
+      }));
+
+      const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+      const streaming = loaded.channels.telegram.streaming;
+      expect(streaming).toBeDefined();
+      if (streaming === undefined) {
+        throw new Error("Expected Telegram streaming config to be normalized");
+      }
+      expect(streaming.freshFinalAfterSeconds).toBe(0);
+      expect(streaming.transport).toBe(transport);
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back for invalid Telegram streaming transport and fresh-final values", async () => {
+    for (const freshFinalAfterSeconds of [-1, 1.5, "invalid"] as const) {
+      const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      const configPath = profileConfigPath(workspace);
+      await writeFile(configPath, JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        channels: {
+          telegram: {
+            enabled: false,
+            streaming: {
+              freshFinalAfterSeconds,
+              transport: "invalid"
+            }
+          }
+        }
+      }));
+
+      const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+      const streaming = loaded.channels.telegram.streaming;
+      expect(streaming).toBeDefined();
+      if (streaming === undefined) {
+        throw new Error("Expected Telegram streaming config to be normalized");
+      }
+      expect(streaming.freshFinalAfterSeconds).toBe(0);
+      expect(streaming.transport).toBe("edit");
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("discord ready = enabled && botTokenEnv plus allowlist present", async () => {

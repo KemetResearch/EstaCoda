@@ -20,10 +20,24 @@ export type TelegramStreamTextSanitizer = {
 
 type ThinkMode = "visible" | "hidden";
 
-const OPEN_THINK = "<think>";
-const CLOSE_THINK = "</think>";
-const THINK_PREFIXES = prefixes(OPEN_THINK);
-const CLOSE_THINK_PREFIXES = prefixes(CLOSE_THINK);
+const OPEN_THINK_TAGS = [
+  "<REASONING_SCRATCHPAD>",
+  "<think>",
+  "<reasoning>",
+  "<THINKING>",
+  "<thinking>",
+  "<thought>"
+];
+const CLOSE_THINK_TAGS = [
+  "</REASONING_SCRATCHPAD>",
+  "</think>",
+  "</reasoning>",
+  "</THINKING>",
+  "</thinking>",
+  "</thought>"
+];
+const THINK_PREFIXES = Array.from(new Set(OPEN_THINK_TAGS.flatMap((tag) => prefixes(tag))));
+const CLOSE_THINK_PREFIXES = Array.from(new Set(CLOSE_THINK_TAGS.flatMap((tag) => prefixes(tag))));
 const MEDIA_MARKER = "media:";
 const MEDIA_DIRECTIVE_LINE = /^[ \t]*MEDIA:[ \t]*\S+[^\r\n]*(?:\r?\n|$)/gimu;
 
@@ -58,6 +72,7 @@ export function createTelegramStreamTextSanitizer(): TelegramStreamTextSanitizer
   }
 
   function process(input: string): string {
+    const visibleBeforeInput = visibleText;
     let emitted = "";
     let cursor = 0;
 
@@ -65,9 +80,9 @@ export function createTelegramStreamTextSanitizer(): TelegramStreamTextSanitizer
       const remaining = input.slice(cursor);
 
       if (mode === "hidden") {
-        const closeIndex = remaining.toLowerCase().indexOf(CLOSE_THINK);
-        if (closeIndex >= 0) {
-          cursor += closeIndex + CLOSE_THINK.length;
+        const closeTag = findEarliestTag(remaining, CLOSE_THINK_TAGS);
+        if (closeTag !== undefined) {
+          cursor += closeTag.index + closeTag.tag.length;
           mode = "visible";
           continue;
         }
@@ -78,19 +93,19 @@ export function createTelegramStreamTextSanitizer(): TelegramStreamTextSanitizer
         break;
       }
 
-      const lowerRemaining = remaining.toLowerCase();
-      const openIndex = lowerRemaining.indexOf(OPEN_THINK);
-      const safeEnd = openIndex >= 0
-        ? cursor + openIndex
-        : input.length - longestSuffixPrefix(remaining, THINK_PREFIXES).length;
+      const openTag = findEarliestOpenTag(input, cursor, visibleBeforeInput);
+      const pendingOpenTail = openTag === undefined
+        ? longestBoundarySuffixPrefix(input, cursor, THINK_PREFIXES, visibleBeforeInput)
+        : "";
+      const safeEnd = openTag !== undefined ? openTag.index : input.length - pendingOpenTail.length;
 
       if (safeEnd > cursor) {
         emitted += applyVisible(input.slice(cursor, safeEnd));
         cursor = safeEnd;
       }
 
-      if (openIndex >= 0 && cursor === input.length - remaining.length + openIndex) {
-        cursor += OPEN_THINK.length;
+      if (openTag !== undefined && cursor === openTag.index) {
+        cursor = openTag.tagIndex + openTag.tag.length;
         mode = "hidden";
         pending = "";
         continue;
@@ -173,6 +188,93 @@ function prefixes(value: string): string[] {
     result.push(value.slice(0, index).toLowerCase());
   }
   return result;
+}
+
+function findEarliestTag(text: string, tags: readonly string[]): { index: number; tag: string } | undefined {
+  const lower = text.toLowerCase();
+  let earliest: { index: number; tag: string } | undefined;
+
+  for (const tag of tags) {
+    const index = lower.indexOf(tag.toLowerCase());
+    if (index >= 0 && (earliest === undefined || index < earliest.index)) {
+      earliest = { index, tag };
+    }
+  }
+
+  return earliest;
+}
+
+function findEarliestOpenTag(
+  text: string,
+  start: number,
+  precedingAccumulated: string
+): { index: number; tagIndex: number; tag: string } | undefined {
+  const lower = text.toLowerCase();
+  let earliest: { index: number; tagIndex: number; tag: string } | undefined;
+
+  for (const tag of OPEN_THINK_TAGS) {
+    let searchIndex = start;
+    const lowerTag = tag.toLowerCase();
+
+    while (searchIndex < text.length) {
+      const index = lower.indexOf(lowerTag, searchIndex);
+      if (index < 0) {
+        break;
+      }
+
+      const boundaryStart = getTagBoundaryStart(text, index, precedingAccumulated);
+      if (
+        (earliest === undefined || index < earliest.index)
+        && boundaryStart !== undefined
+      ) {
+        earliest = { index: boundaryStart, tagIndex: index, tag };
+        break;
+      }
+
+      searchIndex = index + 1;
+    }
+  }
+
+  return earliest;
+}
+
+function longestBoundarySuffixPrefix(
+  text: string,
+  start: number,
+  candidates: readonly string[],
+  precedingAccumulated: string
+): string {
+  const suffix = longestSuffixPrefix(text.slice(start), candidates);
+  if (suffix.length === 0) {
+    return "";
+  }
+
+  const tagIndex = text.length - suffix.length;
+  const boundaryStart = getTagBoundaryStart(text, tagIndex, precedingAccumulated);
+  return boundaryStart === undefined ? "" : text.slice(boundaryStart);
+}
+
+function getTagBoundaryStart(text: string, tagIndex: number, precedingAccumulated: string): number | undefined {
+  if (tagIndex === 0) {
+    return isAccumulatedLineBoundary(precedingAccumulated) ? 0 : undefined;
+  }
+
+  const before = text.slice(0, tagIndex);
+  const lastNewline = before.lastIndexOf("\n");
+  if (lastNewline === -1) {
+    return isAccumulatedLineBoundary(precedingAccumulated) && before.trim() === "" ? 0 : undefined;
+  }
+
+  return before.slice(lastNewline + 1).trim() === "" ? lastNewline + 1 : undefined;
+}
+
+function isAccumulatedLineBoundary(text: string): boolean {
+  if (text.length === 0 || text.endsWith("\n")) {
+    return true;
+  }
+
+  const lastNewline = text.lastIndexOf("\n");
+  return text.slice(lastNewline + 1).trim() === "";
 }
 
 function longestSuffixPrefix(text: string, candidates: readonly string[]): string {
