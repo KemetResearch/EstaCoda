@@ -64,6 +64,7 @@ type TelegramHarnessFailure = {
 function createTelegramStreamingHarness(options: {
   failMethods?: Partial<Record<string, number[]>>;
   failResponses?: Partial<Record<string, Record<number, TelegramHarnessFailure>>>;
+  nowMs?: () => number;
 } = {}): {
   adapter: TelegramAdapter;
   calls: TelegramHarnessCall[];
@@ -118,7 +119,7 @@ function createTelegramStreamingHarness(options: {
   });
 
   return {
-    adapter: new TelegramAdapter({ botToken: "test-token", fetch }),
+    adapter: new TelegramAdapter({ botToken: "test-token", fetch, streamingNowMs: options.nowMs }),
     calls,
     fetch
   };
@@ -579,6 +580,129 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  it("delivery.startStreamingText freshFinalAfterSeconds zero keeps edit-in-place finish", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({ nowMs: () => nowMs });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 0,
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    nowMs = 10_000;
+    const result = await handle.finish("final");
+
+    expect(result.fallbackRequired).toBe(false);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText").at(-1)?.body).toMatchObject({
+      message_id: 1,
+      text: "final"
+    });
+  });
+
+  it("delivery.startStreamingText fresh final sends a new final and deletes the old preview", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({ nowMs: () => nowMs });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 1,
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    nowMs = 1_001;
+    const result = await handle.finish("final <answer>");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final <answer>"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌", "final &lt;answer&gt;"]);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
+  });
+
+  it("delivery.startStreamingText fresh final ignores delete failures after final delivery", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { deleteMessage: [1] },
+      nowMs: () => nowMs
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 1,
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    nowMs = 1_001;
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌", "final"]);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
+  });
+
+  it("delivery.startStreamingText below fresh-final threshold keeps edit-in-place finish", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({ nowMs: () => nowMs });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 1,
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    nowMs = 999;
+    const result = await handle.finish("final");
+
+    expect(result.fallbackRequired).toBe(false);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText").at(-1)?.body).toMatchObject({
+      message_id: 1,
+      text: "final"
+    });
+  });
+
+  it("delivery.startStreamingText segmentBreak resets fresh-final age for the next segment", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({ nowMs: () => nowMs });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 1,
+      minInitialChars: 1
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    nowMs = 1_001;
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result.fallbackRequired).toBe(false);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first▌", "second▌"]);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText").at(-1)?.body).toMatchObject({
+      message_id: 2,
+      text: "final"
+    });
+  });
+
   it("delivery.startStreamingText finish returns fallback when there is no live final segment", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
@@ -936,6 +1060,32 @@ describe("TelegramAdapter", () => {
       call.body.text === "Response interrupted. A complete reply will follow."
     );
     expect(neutralized.map((call) => call.body.message_id)).toEqual([1, 2, 3]);
+  });
+
+  it("delivery.startStreamingText fresh final after overflow deletes every preview message", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const { adapter, calls } = createTelegramStreamingHarness({ nowMs: () => nowMs });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      freshFinalAfterSeconds: 1,
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    nowMs = 1_001;
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").at(-1)?.body.text).toBe("final");
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2, 3]);
   });
 
   it("delivery.startStreamingText retries mid-overflow 429 without losing committed preview IDs", async () => {
