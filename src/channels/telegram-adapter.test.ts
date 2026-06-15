@@ -111,9 +111,11 @@ function createTelegramStreamingHarness(options: {
       status: 200,
       json: async () => ({
         ok: true,
-        result: method === "sendMessage"
-          ? { message_id: nextMessageId++ }
-          : { message_id: Number(body.message_id ?? nextMessageId - 1) }
+        result: method === "sendMessageDraft"
+          ? { ok: true }
+          : method === "sendMessage"
+            ? { message_id: nextMessageId++ }
+            : { message_id: Number(body.message_id ?? nextMessageId - 1) }
       })
     };
   });
@@ -444,6 +446,265 @@ describe("TelegramAdapter", () => {
       text: "hello &lt;world&gt;|",
       parse_mode: "HTML"
     });
+  });
+
+  it("delivery.startStreamingText transport draft in DMs sends draft previews", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft",
+      cursor: "|"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")[0]?.body).toMatchObject({
+      chat_id: "123",
+      draft_id: expect.any(Number),
+      text: "hello|",
+      parse_mode: "HTML"
+    });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText transport auto in DMs uses draft previews", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "auto"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText transport auto in groups uses edit streaming", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "group" }, {
+      minInitialChars: 1,
+      transport: "auto"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
+  });
+
+  it("delivery.startStreamingText transport draft in groups does not use drafts", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "group" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
+  });
+
+  it("delivery.startStreamingText draft capability failure latches drafts off", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessageDraft: {
+          1: { status: 404, description: "no such method" }
+        }
+      }
+    });
+    const first = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    first.append("first");
+    await flushTelegramStreamingTimers();
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("first▌");
+
+    const second = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+    second.append("second");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[1]?.body.text).toBe("second▌");
+  });
+
+  it("delivery.startStreamingText draft capability failure recognizes Telegram error code 404", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendRichMessageDraft: {
+          1: { status: 404, description: "no such method" }
+        },
+        sendMessageDraft: {
+          1: { status: 400, errorCode: 404, description: "draft method unavailable" }
+        }
+      }
+    });
+    const first = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    first.append("first");
+    await flushTelegramStreamingTimers();
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("first▌");
+
+    const second = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+    second.append("second");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[1]?.body.text).toBe("second▌");
+  });
+
+  it("delivery.startStreamingText transient draft failure falls back to edit streaming for the run", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessageDraft: {
+          1: { status: 500, description: "temporary" }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
+  });
+
+  it("delivery.startStreamingText draft frames are capped at the Telegram text limit", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft",
+      cursor: "|"
+    });
+
+    handle.append("A".repeat(5_000));
+    await flushTelegramStreamingTimers();
+
+    expect(String(callsFor(calls, "sendMessageDraft")[0]?.body.text).length).toBeLessThanOrEqual(4096);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText finish with drafts sends real final chunks", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("<>&".repeat(1_500));
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "<>&".repeat(1_500)
+    });
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage").length).toBeGreaterThan(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText finish with drafts returns fallback when final send fails", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { sendMessage: [1] }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true
+    });
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText segmentBreak with drafts materializes the segment and rotates draft IDs", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft",
+      cursor: "|"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    const firstDraftId = callsFor(calls, "sendMessageDraft")[0]?.body.draft_id;
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const secondDraftId = callsFor(calls, "sendMessageDraft")[1]?.body.draft_id;
+
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first"]);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(firstDraftId).toEqual(expect.any(Number));
+    expect(secondDraftId).toEqual(expect.any(Number));
+    expect(secondDraftId).not.toBe(firstDraftId);
+  });
+
+  it("delivery.startStreamingText abort with drafts leaves existing draft previews untouched", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    await handle.abort("stop");
+    handle.append("ignored");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
   });
 
   it("delivery.startStreamingText edits with HTML parse mode on the configured cadence", async () => {
