@@ -327,6 +327,7 @@ export class TelegramAdapter implements ChannelAdapter {
   #startStreamingText(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle {
     return new TelegramStreamingTextWorker({
       chatId: sessionKey.chatId,
+      chatType: sessionKey.chatType,
       options,
       sendMessage: async (text, textOptions) => this.#sendMessage(sessionKey.chatId, text, textOptions),
       editMessageText: async (messageId, text, textOptions) => this.#editMessageText(sessionKey.chatId, messageId, text, textOptions),
@@ -340,7 +341,8 @@ export class TelegramAdapter implements ChannelAdapter {
           chunks: chunkTelegramText(formatted.text, formatted.format),
           format: formatted.format
         };
-      }
+      },
+      nowMs: () => performance.now()
     });
   }
 
@@ -746,12 +748,14 @@ function telegramApiError<T>(
 
 type TelegramStreamingTextWorkerInput = {
   chatId: string;
+  chatType?: "dm" | "group" | "channel" | "thread";
   options?: ChannelStreamingTextOptions;
   sendMessage(text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
   editMessageText(messageId: number, text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
   deleteMessage(messageId: number): Promise<void>;
   clearProgress(): void;
   formatFinalText(text: string): { chunks: string[]; format: "plain" | "html" };
+  nowMs?(): number;
 };
 
 type TelegramStreamingTextSegment = {
