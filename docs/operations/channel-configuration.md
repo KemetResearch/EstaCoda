@@ -86,7 +86,7 @@ Tool boundaries seal the current streamed Telegram message. Later provider token
 Operational constraints:
 
 - Streaming runs only for Telegram delivery.
-- `DeliveryRouter` disables Telegram streaming in v1.
+- Telegram streaming runs before normal final-text routing. If streaming cannot deliver the completed answer, `ChannelGateway` falls back to normal `DeliveryRouter` delivery.
 - Streaming requires the gateway turn's abort signal.
 - Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
 - Final delivery still uses normal authoritative Telegram formatting and chunking.

@@ -235,7 +235,7 @@ The stream is delivery-only. Final `response.text` remains authoritative, and se
 
 Operational constraints:
 
-- `DeliveryRouter` disables streaming in v1.
+- Telegram streaming runs before normal final-text routing. If streaming cannot deliver the completed answer, `ChannelGateway` falls back to normal `DeliveryRouter` delivery.
 - A turn abort signal is required.
 - Provider fallback/failure cleanup, Telegram flood-control degradation, oversized partial payloads, approval/artifact ambiguity, cancellation, or final edit failure can force normal final text fallback.
 - Active-turn degradation does not globally disable streaming for future turns.

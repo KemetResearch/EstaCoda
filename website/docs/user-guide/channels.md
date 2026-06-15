@@ -154,7 +154,7 @@ Delivery modes:
 Operational boundaries:
 
 - Streaming runs only for Telegram delivery.
-- `DeliveryRouter` disables streaming in v1.
+- Telegram streaming runs before normal final-text routing. If streaming cannot deliver the completed answer, `ChannelGateway` falls back to normal `DeliveryRouter` delivery.
 - Streaming requires the gateway turn's abort signal.
 - Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
 - Final delivery still uses normal Telegram formatting and chunking unless opportunistic rich delivery succeeds.
