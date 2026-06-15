@@ -6,122 +6,156 @@ sidebar_position: 1
 
 # Architecture
 
-EstaCoda is a TypeScript agent runtime for Node.js. It executes provider-backed sessions through a CLI and multiple remote channels. Every subsystem is inspectable, every state boundary is explicit, and every maturity label tells you what you can rely on.
+EstaCoda is a TypeScript agent runtime for Node.js. It executes provider-backed sessions through a CLI and multiple remote channels. This page explains how the system is structured, where state lives, and which surfaces are stable, experimental, or unsupported in v0.1.0.
 
-This page explains how the system is structured, where state lives, and which surfaces are stable, experimental, or unsupported in v0.1.0.
+The goal of this page is practical orientation: what owns what, where to inspect it, and which runtime paths are part of the current baseline.
 
 ---
 
-## What EstaCoda Is
+## What EstaCoda is
 
 At its core, EstaCoda is a turn-based agent loop that:
 
-1. Receives input from a surface (CLI, Telegram, Discord, Email, WhatsApp)
-2. Assembles a layered prompt from session history, memory, skills, and context
-3. Sends the prompt to a configured LLM provider
-4. Executes any tool calls the provider requests
-5. Returns the result to the surface
-6. Persists session state, memory, and trajectory
+1. Receives input from a surface such as CLI, Telegram, Discord, Email, or WhatsApp
+2. Assembles a layered prompt from session history, memory, skills, project context, and live input
+3. Sends the prompt to a configured provider route
+4. Executes tool calls under the active security policy
+5. Returns output to the active surface
+6. Persists session state, memory, approvals, artifacts, and trajectory data where applicable
 
-The loop is not magic. It is explicit construction, explicit delegation, and explicit persistence. Every boundary is visible.
+The loop is explicit construction, explicit delegation, and explicit persistence. Runtime behavior should be inspectable from code and local state.
 
 ---
 
-## Entrypoints and Surfaces
+## Entrypoints and surfaces
 
 | Entrypoint | Role | Maturity |
 |---|---|---|
 | `src/index.ts` | Boot flow, command dispatch, session restoration | `live-proven` |
 | `src/cli/cli.ts` | CLI command parsing and dispatch | `live-proven` |
 | `src/cli/session-loop.ts` | Interactive terminal session | `live-proven` |
-| `src/channels/gateway-runner.ts` | Telegram gateway runtime | `live-proven` |
+| `src/channels/gateway-runner.ts` | Channel gateway runtime | `live-proven` |
+| `src/channels/telegram-adapter.ts` | Telegram adapter | `live-proven` |
 | `src/channels/discord-adapter.ts` | Discord adapter | `present-not-live-proven` |
 | `src/channels/email-adapter.ts` | Email adapter | `present-not-live-proven` |
 | `src/channels/whatsapp-adapter.ts` | WhatsApp adapter | `experimental` |
 
-CLI and Telegram are the live-proven surfaces for v0.1.0. Discord and Email are present in code but not validated end-to-end. WhatsApp is gated behind `experimental: true`.
+CLI and Telegram are the live-proven surfaces for v0.1.0. Discord and Email adapter code exists, but live production use is not part of the v0.1.0 baseline. WhatsApp is gated as experimental.
 
 ---
 
-## Runtime Composition Root
+## Profile and state boundaries
 
-`createRuntime()` in `src/runtime/create-runtime.ts` is the composition root. It is a long function with many imports that manually constructs 30+ subsystem objects. There is no dependency injection container. Every subsystem is created with explicit constructor arguments in a fixed order.
+EstaCoda organizes operator-owned configuration around **profiles**. A profile is the active bundle of provider routes, credentials, memory files, installed skills, channel state, logs, and runtime caches for one operator context.
+
+### What lives under a profile
+
+A typical profile directory contains:
+
+`~/.estacoda/profiles/<id>/`
+
+| Path | Use |
+|---|---|
+| `config.json` | Provider routes, channel config, security mode, and feature settings |
+| `.env` | Profile-local secret values such as API keys and bot tokens. Not shown in setup review output. |
+| `auth.json` | OAuth token records, such as Codex OAuth |
+| `USER.md` | User preferences and stable user guidance |
+| `SOUL.md` | Protected identity and safety guidance |
+| `MEMORY.md` | Durable working memory and promoted facts |
+| `promotions.json` | Memory promotion metadata |
+| `skills/` | Profile-installed skills |
+| `cron/` | Profile-local scheduled jobs |
+| `gateway/` | Channel session state, gateway handoff state, and adapter state |
+| `logs/` | Runtime logs |
+| `channel-media/` | Downloaded channel media |
+| `audio-cache/` | Audio artifacts and voice cache |
+| `image-cache/` | Image generation and image input cache |
+| `temp/` | Profile-local temporary files |
+
+Not every file or directory exists before the related capability runs.
+
+### What is global
+
+| Path | Use |
+|---|---|
+| `~/.estacoda/active-profile.json` | Currently selected profile |
+| `~/.estacoda/sessions.sqlite` | Session database, with rows scoped by `profile_id` |
+| `~/.estacoda/memory/shared/` | Shared memory across profiles |
+| `~/.estacoda/trust.json` | Workspace trust grants keyed by directory |
+| `~/.estacoda/workspace-approvals.json` | Persistent workspace approval grants keyed by directory and action |
+| `~/.estacoda/packs/` | Installed pack state |
+| `~/.estacoda/bin/` | Managed helper binaries |
+
+### What is workspace-local
+
+| Path | Use |
+|---|---|
+| `AGENTS.md` | Project context and coding instructions |
+
+Trust is global state with directory-scoped entries. It is not stored inside the workspace. A profile selects configuration, credentials, memory, and channel identity. Workspace trust gates local tool behavior for a directory. They do not override each other.
+
+---
+
+## Runtime composition root
+
+`createRuntime()` in `src/runtime/create-runtime.ts` is the composition root. It explicitly creates stores, providers, tools, skills, prompt dependencies, runtime components, and the agent loop. There is no dependency injection container. Construction is visible in code and happens in a fixed order.
 
 Construction order:
 
-1. State stores (memory store, session DB, artifact store, cron store)
-2. Provider registry and auxiliary route resolver
-3. Tool registry
-4. Skill registries (official, profile, external)
-5. Prompt dependencies (prompt cache, context expander)
-6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`)
-7. `AgentLoop`
+1. Global and profile state paths
+2. State stores: memory, sessions, artifacts, cron, workflow, and gateway state
+3. Provider registry, provider executor, and auxiliary route resolver
+4. Tool registry and built-in tool providers
+5. Skill registries for official, profile, and external skills
+6. Prompt dependencies: prompt cache, project context, context expansion, and memory context
+7. Runtime execution components such as `ProviderTurnLoop`, `ToolPlanRunner`, `SkillPlaybookRunner`, and native tool execution
+8. `AgentLoopBuilder`, which assembles session-scoped loop dependencies
+9. `DefaultChildAgentLoopFactory`, which builds child loops for delegated subagent work
+10. `AgentLoop`, which coordinates turn boundaries, runtime events, continuation, cancellation, and persistence
 
 Key composition rules:
 
-- Official skills load first. Profile-installed and configured external skills load next.
+- Official skills load first. Profile-installed and configured external skills are layered after them.
 - Visible skill catalog is filtered per session using runtime conditions.
-- `vision.analyze` is registered as a real tool and uses the auxiliary `vision` provider route.
+- Tools are registered in phases so session-bound tools receive the correct runtime context.
+- Auxiliary model routes use the same provider registry and executor path as primary model routes.
 - Configured MCP servers are loaded during runtime creation and stopped during runtime disposal.
+- Child agent loops are built through the child loop factory, not by bypassing the runtime composition path.
 
 ---
 
-## Profile and State Boundaries
+## Core subsystems
 
-EstaCoda organizes all operator state around **profiles**. A profile is a complete configuration, credential, memory, skill, and gateway identity bundle.
+### Provider layer
 
-### What Lives Under a Profile
+The provider layer has three parts: model catalog, provider registry, and execution.
 
-`~/.estacoda/profiles/<id>/` contains:
+| Part | Role |
+|---|---|
+| Model catalog | Resolves known model profiles, capabilities, and fallback metadata |
+| `ProviderRegistry` | Registers provider adapters and exposes route lookup |
+| `ProviderExecutor` | Executes provider requests, collects streaming tokens, assembles tool calls, and handles fallback routes |
 
-- `config.json` — provider routes, channel config, security policy
-- `.env` — API keys, bot tokens, secrets
-- `auth.json` — OAuth tokens (e.g., Codex)
-- `skills/` — profile-installed skills
-- `memory/` — profile-local memory files
-- `cron/` — job definitions and execution state
-- `gateway/` — channel session pointers, handoff codes, approval state
-- `logs/` — runtime logs
-- `cache/` — prompt cache and runtime caches
-- `media/` — channel-downloaded media
+EstaCoda routes provider calls through configured provider adapters, including OpenAI-compatible chat completions and OpenAI Responses where configured. Provider selection depends on configured provider IDs, route preferences, model capability, and credential readiness.
 
-### What Is Global
+Auxiliary routes resolve through the same infrastructure as primary model routes. Supported route names include `vision`, `compression`, `assessor`, `profile_context`, `web_extract`, `session_search`, `skills_library`, `mcp`, `memory_flush`, and `delegation`. These are preference routes, not separate runtimes.
 
-- `~/.estacoda/sessions.sqlite` — session database, rows scoped by `profile_id`
-- `~/.estacoda/memory/shared/` — shared memory across profiles
-- `~/.estacoda/trust.json` — workspace trust per directory
-- `~/.estacoda/workspace-approvals.json` — workspace approval grants
+See [Provider Reference](../reference/provider-reference.md) for provider maturity labels.
 
-### What Is Workspace-Local
+### Tool layer
 
-- `AGENTS.md` — project context and conventions (not memory)
-- `trust.json` and `workspace-approvals.json` are directory-scoped
+`ToolRegistry` registers built-in tools at load time and MCP-discovered tools during runtime creation. `ToolExecutor` runs concrete tool actions under the active security policy. `ToolPlanRunner` converts provider tool calls into executable plans, manages safe-tool concurrency, and enforces failure caps.
 
-Trust is orthogonal to profiles. A profile selects configuration and credentials. Workspace trust gates local tool behavior for a directory. They do not override each other.
+Tool risk classes drive gating:
 
----
+| Risk class | Meaning |
+|---|---|
+| `safe` | Low-risk read or local computation |
+| `caution` | Needs care or may expose local state |
+| `external-side-effect` | Can affect external systems |
+| `irreversible` | Can make hard-to-reverse changes |
 
-## Core Subsystems
-
-### Provider Layer
-
-Two layers: registry/routing and execution.
-
-**Registry:** Offline-first model catalog, provider registry with route selection by capability, direct credential lookup from `apiKeyEnv` to `process.env`.
-
-**Execution:** `ProviderExecutor` handles streaming token collection, tool-call fragment assembly, and fallback handling. `OpenAICompatibleProvider` is the primary inference adapter.
-
-Auxiliary routes resolve through the same infrastructure: `vision`, `compression`, `assessor`, `profile_context`, `web_extract`, `session_search`, `skills_library`, `mcp`, `memory_flush`, `delegation`. These are preference constructs, not separate runtimes.
-
-See [Provider Reference](../reference/provider-reference.md) for the exact maturity label of every provider.
-
-### Tool Layer
-
-`ToolRegistry` registers built-in tools at load time and MCP-discovered tools at runtime creation. `ToolExecutor` runs concrete tool actions under the active security policy. `ToolPlanRunner` converts provider tool calls into executable plans, manages safe-tool concurrency, and enforces failure caps.
-
-Tool risk classes drive gating: `safe`, `caution`, `external-side-effect`, `irreversible`.
-
-### Skill Layer
+### Skill layer
 
 Skills load from three sources:
 
@@ -131,37 +165,143 @@ Skills load from three sources:
 | `profile` | `~/.estacoda/profiles/<id>/skills/` | Mutable |
 | `external` | Configured external roots | Read-only |
 
-Visibility is session-stable and refreshed on `/reset` or new session. Skill execution is provider-backed by default; a deterministic fallback exists for no-provider sessions.
+Visibility is session-stable and refreshed on `/reset` or a new session. Skill execution is provider-backed by default, with deterministic fallback behavior for no-provider sessions.
 
-### Memory Layer
+### Memory layer
 
-`MemoryStore` manages bounded memory files. `LocalMemoryProvider` reads and writes `USER.md`, `MEMORY.md`, and `SOUL.md` from the active profile. `MemoryRecallOrchestrator` prepares per-turn memory context for prompt assembly.
+`MemoryStore` manages bounded memory files. `LocalMemoryProvider` reads and writes profile-local memory files. `MemoryRecallOrchestrator` prepares per-turn memory context for prompt assembly.
 
 Recall, external recall, and compression summaries are reference-only context. They are not trusted as authoritative instructions.
 
-### Channel Layer
+### Channel layer
 
 `ChannelGateway` is the generic adapter bridge. It handles auth, allowlists, session mapping, progress delivery, approval prompts, and command routing. Adapters do not mutate approval state or runtime cache directly.
 
-`DeliveryRouter` is the normalized delivery path for all channels. It handles multi-target delivery, text truncation, error persistence, and artifact routing.
+`DeliveryRouter` is the normalized delivery path for channels. It handles multi-target delivery, text truncation, error persistence, and artifact routing.
 
-### Security Layer
+### Security layer
 
-Capability-first security boundary. Approval modes: `strict`, `adaptive`, `open`. `adaptive` is default. `/yolo` toggles `open` mode session-scoped but cannot bypass the hardline floor.
+EstaCoda uses a capability-first security boundary. Approval modes include `strict`, `adaptive`, and `open`. `adaptive` is the default. `/yolo` toggles `open` mode for the session, but it cannot bypass the hardline floor.
 
 Persistent approvals match on normalized `targetKey`. Display summaries are not the approval boundary.
 
-Hardline floor covers: broad recursive deletes, destructive disk operations, shutdown/reboot, fork-bomb/kill-all, secret reads, pipe-to-interpreter installs, git force-pushes.
+The hardline floor covers high-risk actions such as broad recursive deletes, destructive disk operations, shutdown or reboot commands, fork-bomb or kill-all patterns, secret reads, pipe-to-interpreter installs, and git force-pushes.
+
+### Setup and onboarding
+
+The setup subsystem owns reviewed first-run setup, repair flows, optional capability setup, config editing, and verification.
+
+| Area | Code |
+|---|---|
+| Onboarding Wizard | `src/setup/onboarding-wizard/` |
+| Setup Editor | `src/setup/config-editor/` |
+| Review and apply | `src/setup/review/` |
+| Verification | `src/setup/verification.ts` |
+| Optional capabilities | `src/setup/optional-capability-flow.ts` |
+| WhatsApp setup | `src/setup/whatsapp-setup-flow.ts` |
+
+Setup writes profile-local configuration and secrets. It shows a review before applying changes, and raw secrets are not displayed in review output.
+
+### Delegation and subagents
+
+Delegation lets a parent session spawn bounded child agent sessions. Child work is constrained by toolset policy, model route policy, timeout and budget settings, and file-state checks.
+
+| Component | Role |
+|---|---|
+| `DelegationManager` | Starts and tracks delegated child work |
+| `SubagentRegistry` | Tracks active subagents |
+| `ChildRunner` and `BatchRunner` | Execute one or more child sessions |
+| `ProgressRelay` | Relays safe child progress to the parent |
+| `file-state-guard` and `file-state-tracker` | Warn when parent file reads may be stale after child writes |
+| `toolset-security` | Enforces child tool boundaries |
+
+Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through the same runtime construction path as normal sessions.
+
+### Workflow engine
+
+The workflow subsystem runs durable multi-step work. It is separate from a single provider turn and can persist progress through SQLite-backed workflow state.
+
+| Component | Role |
+|---|---|
+| `workflow-engine.ts` | Executes workflow plans |
+| `sqlite-workflow-store.ts` | Persists workflow state |
+| `workflow-command-dispatcher.ts` | Handles workflow commands |
+| `workflow-lock-service.ts` | Coordinates workflow locks |
+| `workflow-restart-recovery.ts` | Recovers restartable workflow state |
+| `skill-playbook-to-workflow-plan.ts` | Converts skill playbooks into workflow plans |
+
+Workflows are implemented as a durable orchestration surface. They are not the default path for normal chat turns.
+
+### Packs and distribution
+
+Packs are installable bundles. The pack subsystem validates pack metadata, permissions, risk, and installation behavior before a pack is accepted.
+
+| Component | Role |
+|---|---|
+| `pack-installer.ts` | Installs packs |
+| `pack-registry.ts` | Tracks installed packs |
+| `pack-validator.ts` | Validates pack shape |
+| `pack-permission-validator.ts` | Checks declared permissions |
+| `pack-risk-classifier.ts` | Classifies pack risk |
+| `pack-force-audit-log.ts` | Records forced installs |
+
+Packs are reviewable runtime extensions. They do not bypass normal permission and trust boundaries.
+
+### Lifecycle management
+
+Lifecycle code handles installation state, updates, uninstall, version resolution, and state preservation.
+
+| Component | Role |
+|---|---|
+| `install-method.ts` | Detects how EstaCoda was installed |
+| `update-engine.ts` | Coordinates update checks and update actions |
+| `startup-update.ts` | Handles startup update behavior |
+| `uninstall.ts` | Removes managed install state |
+| `state-preservation.ts` | Preserves user-owned state during lifecycle operations |
+| `version-resolver.ts` | Resolves available and current versions |
+
+Lifecycle code is security-sensitive because it can mutate install files and preserve or remove local state.
+
+### Agent evolution
+
+The evolution subsystem supports reviewed improvement workflows. It handles candidate lifecycle, constraint gates, and export formats for evaluation or optimization data.
+
+| Component | Role |
+|---|---|
+| `candidate-lifecycle.ts` | Tracks candidate change lifecycle |
+| `constraint-gate-runner.ts` | Runs gate checks before promotion |
+| `export-format.ts` | Exports structured data for review or evaluation |
+
+Evolution is designed to remain reviewable. Learned or generated behavior must not silently mutate live policy.
+
+### ACP server
+
+`src/acp/` contains the ACP server integration. It exposes editor and protocol integration separately from the normal CLI and channel surfaces.
+
+### Supporting infrastructure
+
+These subsystems are smaller than the main runtime surfaces but still part of the architecture.
+
+| Subsystem | Role |
+|---|---|
+| `src/theme/` | Terminal token resolution, skins, and plain-mode overlays |
+| `src/knowledge/` | Code dependency graph and knowledge cache |
+| `src/python-env/` | Managed Python capability environments |
+| `src/capabilities/` | Optional capability setup and secret storage helpers |
+| `src/workers/` | Python worker process |
+| `src/search/` | Full-text query helpers |
+| `src/reports/` | Model report rendering |
+| `src/diagnostics/` | Provider and model diagnostic helpers |
 
 ---
 
-## Prompt Architecture
+## Prompt architecture
 
-Prompt assembly is layered. Key context groups:
+Prompt assembly is layered. Key context groups include:
 
 1. Identity and profile guidance
 2. Safety and learned memory
-3. Project context (including `AGENTS.md`)
+3. Project context, including `AGENTS.md`
 4. Session history
 5. Session recall and external recall
 6. Live user message and attachments
@@ -170,9 +310,9 @@ Prompt assembly is layered. Key context groups:
 9. Workflow plan
 10. Tool menu
 11. Explicit reference context
-12. Tool results / continuation feedback
+12. Tool results or continuation feedback
 
-Cacheable layers (identity, safety, project context, skill resources, compact skills index) are rebuilt only when underlying data changes. Non-cacheable layers (session history, recall, live message) are rebuilt every turn.
+Cacheable layers, such as identity, safety, project context, skill resources, and compact skills index, are rebuilt only when underlying data changes. Non-cacheable layers, such as session history, recall, and live messages, are rebuilt every turn.
 
 Semantic rules:
 
@@ -185,63 +325,86 @@ Semantic rules:
 
 ---
 
-## Data Flow
+## Data flow
 
-The primary end-to-end path:
+The primary direct-turn path:
 
 1. Input arrives from CLI or a channel
-2. Runtime normalizes message + attachments
+2. Runtime normalizes message and attachments
 3. Prompt assembly builds a layered provider request
 4. Provider responds with text and/or tool calls
-5. Tool planner + executor run concrete actions under policy
+5. Tool planner and executor run concrete actions under policy
 6. Continuation prompt feeds tool results back if needed
-7. Final output is formatted per surface
-8. Session, memory, approvals, and trajectory state are persisted
+7. Final output is formatted for the active surface
+8. Session, memory, approvals, trajectory, and related state are persisted
 
-`AgentLoop.handle()` coordinates this flow but delegates execution to specialized components. It does not execute provider iterations, tool plans, or skill playbooks directly.
+A turn can also attach to larger orchestration:
+
+| Path | When it applies |
+|---|---|
+| Direct provider/tool loop | Normal chat and tool use |
+| Delegation | Parent session spawns bounded child agent sessions |
+| Workflow | Durable multi-step execution is started or resumed |
+| Channel gateway | Remote surfaces route messages, progress, approvals, and final delivery |
+
+`AgentLoop.handle()` coordinates the turn boundary. Provider iteration, tool planning, skill playbooks, child loop construction, and workflow execution live in specialized components.
 
 ---
 
-## v0.1.0 Maturity Matrix
+## v0.1.0 maturity matrix
 
 | Area | Status | Notes |
 |---|---|---|
 | CLI | `live-proven` | Direct interaction surface. |
 | Telegram | `live-proven` | First-party remote channel. |
-| Discord | `present-not-live-proven` | Code exists, adapters initialize, not live-validated. |
-| Email | `present-not-live-proven` | Code exists, adapters initialize, not live-validated. |
-| WhatsApp | `experimental` | Gated behind `experimental: true`. |
-| AgentLoop | `live-proven` | Core orchestration decomposed from monolith. |
-| Provider execution | `live-proven` | OpenAI-compatible primary adapter. |
+| Discord | `present-not-live-proven` | Adapter code exists; live production use is not part of the v0.1.0 baseline. |
+| Email | `present-not-live-proven` | Adapter code exists; live production use is not part of the v0.1.0 baseline. |
+| WhatsApp | `experimental` | QR-linked bridge, diagnostics, and setup flow exist; still gated as experimental. |
+| AgentLoop | `live-proven` | Core turn orchestration. |
+| AgentLoopBuilder | `live-proven` | Session-scoped runtime assembly. |
+| Provider execution | `live-proven` | Provider registry, executor, fallback, and auxiliary routes. |
 | Tool execution | `live-proven` | Built-in tools and MCP tools. |
 | Skill system | `live-proven` | Official, profile, and external skills. |
-| Memory system | `live-proven` | Local memory provider with promotion. |
-| Security policy | `live-proven` | Adaptive mode with smart assessor fallback. |
-| Gateway | `live-proven` | Telegram gateway. |
+| Memory system | `live-proven` | Profile memory files and shared memory. |
+| Security policy | `live-proven` | Adaptive mode with hardline floor. |
+| Gateway | `live-proven` | Channel auth, routing, approvals, and delivery. |
+| Setup and verification | `live-proven` | Onboarding, setup editor, and readiness checks. |
+| Delegation | `implemented` | Bounded child sessions and subagent tracking. |
+| Workflow | `implemented` | Durable multi-step execution with SQLite-backed state. |
+| Packs | `implemented` | Pack validation, install, risk, and permission checks. |
+| Lifecycle | `implemented` | Install, update, uninstall support, and state preservation. |
+| Agent Evolution | `implemented` | Candidate lifecycle, gates, and export format. |
 | Cron | `implemented` | Job scheduling and execution. |
-| Workflow | `implemented` | Durable multi-step execution. Wired only with SQLite. |
-| Browser (local CDP) | `live-proven` | Local Chrome DevTools Protocol. |
-| Browser (cloud) | `unsupported` | Registered stubs only. |
-| Web search | `unsupported` | Registered stubs only. Guarded fetch fallback only. |
+| ACP | `implemented` | ACP server integration exists. |
+| Knowledge graph | `implemented` | Code dependency graph and cache. |
+| Browser, local CDP | `live-proven` | Local Chrome DevTools Protocol. |
+| Browser, cloud | `unsupported` | Registered stubs only. |
+| Web search | `unsupported` | No first-party search provider baseline. Guarded fetch paths may exist for limited extraction. |
 | Eval runner | `implemented` | Deterministic fixtures exist. |
 
 ---
 
-## Architectural Weak Spots
+## Architectural weak spots
 
-1. **`create-runtime.ts` god factory** — 900+ lines, 69 imports, no DI boundary. Accepted risk. Builder pattern deferred.
-2. **AgentLoop remaining coupling** — Prompt assembly, memory context injection, and cross-component coordination still live in `AgentLoop`. Provider loop, tool execution, skill playbooks, and native intents are already extracted.
-3. **Gateway readiness vs. liveness** — `estacoda gateway diagnose` reports readiness per adapter, not background-process liveness.
-4. **Trajectory/Artifact skeletons** — Trajectory persists to SQLite. `ArtifactStore` is thin (in-memory with limited persistence).
-5. **Native SQLite bindings** — `better-sqlite3` requires install-time compilation on some platforms.
+1. **`create-runtime.ts` remains the composition root** - construction is explicit and reviewable, but the file is still large. Changes here should be narrow and heavily tested.
+2. **AgentLoop is decomposed but still central** - `AgentLoopBuilder`, `ProviderTurnLoop`, `ToolPlanRunner`, `SkillPlaybookRunner`, and child loop factories handle much of the work. `AgentLoop` still coordinates turn boundaries, runtime events, continuation, cancellation, and persistence.
+3. **Gateway readiness vs. liveness** - `estacoda gateway diagnose` reports adapter readiness, not full background-process liveness.
+4. **Lifecycle and pack operations are high-impact** - update, uninstall, pack install, and state-preservation paths can mutate local install or runtime state. Treat changes there as security-sensitive.
+5. **Native SQLite bindings** - `better-sqlite3` requires install-time compilation on some platforms.
 
 ---
 
-## How to Inspect
+## How to inspect
 
 ```bash
 # Runtime readiness and config issues
 estacoda model diagnose
+
+# Full setup readiness
+estacoda verify
+
+# General diagnosis
+estacoda doctor
 
 # Gateway readiness per adapter
 estacoda gateway diagnose
@@ -257,13 +420,8 @@ estacoda sessions list
 
 # Channel status
 estacoda channels status
+
+# Code dependency graph
+estacoda knowledge code summary
+estacoda knowledge code refresh
 ```
-
----
-
-## Related
-
-- [Runtime](./runtime.md) — runtime creation, provider resolution, and tool boundaries
-- [Provider Reference](../reference/provider-reference.md) — provider maturity matrix
-- [Channels](../user-guide/channels.md) — channel configuration and maturity
-- [Security and Approvals](../user-guide/security-and-approvals.md) — approval behavior and security modes
